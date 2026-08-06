@@ -41,3 +41,39 @@ This feature strictly owns the following tables within the PostgreSQL relational
 * Refer to `.agents/rules/testing.md` for standards.
 * Write isolated unit tests for the JWT encoding/decoding utility functions.
 * Write integration tests for the FastAPI router endpoints using an injected test database.
+
+## 8. JWT Claim Baseline
+
+All JWTs issued by `POST /api/v1/auth/login` and `POST /api/v1/auth/refresh` must contain the following claims.
+
+### 8.1 Required Claims
+
+| Claim | Type | Description |
+|:--|:--|:--|
+| `sub` | UUID (string) | Subject: the authenticated `user_id`. Primary identity reference. |
+| `email` | string | User email address. Included for display and audit purposes; never used for authorization decisions. |
+| `roles` | string[] | Array of role names assigned to the user (e.g., `["Admin", "Operator"]`). RBAC middleware uses this array to evaluate route-level permissions. |
+| `permissions` | string[] | Array of granular permission strings (e.g., `["write:config", "execute:rollback"]`). Used for fine-grained capability checks within services. |
+| `iat` | Unix timestamp | Issued-at time. Set by the token issuer. |
+| `exp` | Unix timestamp | Expiry time. Access tokens: 15 minutes from `iat`. |
+| `jti` | UUID (string) | JWT ID: a unique identifier for this specific token instance. Used for token revocation lookup. |
+
+### 8.2 Optional Claims
+
+| Claim | Type | Condition | Description |
+|:--|:--|:--|:--|
+| `org_id` | UUID (string) | Present if user has an active organization context | The organization the token is scoped to. Absent for users not yet assigned to an organization. |
+| `workspace_id` | UUID (string) | Present only if the client explicitly selects a workspace at login | The active workspace context. Downstream services use this to scope resource visibility. |
+
+### 8.3 Tenant and Org/Workspace Scoping Behaviour
+
+- **Single-org per token:** A token may carry at most one `org_id`. A user who is a member of multiple organizations must obtain a new token (via `/api/v1/auth/login` with an explicit `org_id` parameter, or via a future `/api/v1/auth/switch-org` endpoint) to switch organization context. Multi-org membership is supported at the data layer; the token scope is always single-org.
+- **Workspace scoping:** `workspace_id` is optional in the token. If absent, the client must provide `workspace_id` as a query parameter where required (e.g., `GET /api/v1/networks?workspace_id=<uuid>`). If present, downstream services may use it to pre-filter results without requiring an explicit query parameter.
+- **RBAC evaluation order:** The RBAC middleware evaluates `roles` first (coarse-grained route access), then `permissions` (fine-grained capability access). Both arrays must be present in the token; an empty `permissions` array is valid for read-only roles.
+- **Token revocation:** The `jti` claim is used to implement token revocation. On logout, the `jti` of the access token is added to a Redis deny-list with a TTL equal to the remaining token lifetime.
+
+### 8.4 Claims That Must Never Appear in a JWT
+
+- `hashed_password` or any credential derivative.
+- Raw internal database row IDs other than `user_id`.
+- Any data classified as sensitive PII beyond `email`.

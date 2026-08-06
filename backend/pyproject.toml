@@ -1,0 +1,44 @@
+[tool.poetry]
+name = "nanfo-backend"
+version = "0.1.0"
+description = "NANFO — Network AI & Neural Fabric Orchestrator. Backend API service."
+authors = ["NANFO Team"]
+readme = "README.md"
+packages = [{include = "app"}]
+
+[tool.poetry.dependencies]
+python = "^3.12"
+fastapi = "^0.115.0"
+uvicorn = {extras = ["standard"], version = "^0.32.0"}
+pydantic = "^2.9.0"
+pydantic-settings = "^2.6.0"
+sqlalchemy = {extras = ["asyncio"], version = "^2.0.36"}
+asyncpg = "^0.30.0"
+alembic = "^1.14.0"
+neo4j = "^5.26.0"
+redis = {extras = ["asyncio"], version = "^5.2.0"}
+python-jose = {extras = ["cryptography"], version = "^3.3.0"}
+bcrypt = "^4.0.1"
+structlog = "^24.4.0"
+httpx = "^0.28.0"
+psycopg2-binary = "^2.9.10"
+email-validator = "^2.0.0"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.3.0"
+pytest-asyncio = "^0.24.0"
+pytest-cov = "^6.0.0"
+fakeredis = {extras = ["aioredis"], version = "^2.26.0"}
+anyio = {extras = ["trio"], version = "^4.6.0"}
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+addopts = "--cov=app --cov-report=term-missing"
+
+[tool.coverage.run]
+omit = ["tests/*", "alembic/*"]
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

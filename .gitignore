@@ -1,0 +1,42 @@
+# --- OS / Editor ---
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# --- Python bytecode / caches ---
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# --- Python virtual environments ---
+.venv/
+venv/
+env/
+ENV/
+
+# --- Build / packaging artifacts ---
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# --- Logs ---
+*.log
+
+# --- Local environment / secrets ---
+.env
+.env.*
+!.env.example
+
+# --- Jupyter ---
+.ipynb_checkpoints/
+
+# --- Node (if frontend added later) ---
+node_modules/
