@@ -107,6 +107,66 @@ class TopologyQueryService:
         ]
         return TopologyGraphResponse(nodes=nodes, edges=edges), next_cursor
 
+    async def get_node_with_neighbours(
+        self,
+        device_id: uuid.UUID,
+        depth: int = 1,
+    ) -> dict | None:
+        """Return one device node with deterministic direct neighbours.
+
+        VS2 scope is direct (1-hop) neighbours with edge metadata.
+        """
+        if depth != 1:
+            depth = 1
+
+        query = """
+        MATCH (d:Device {device_id: $device_id})
+        OPTIONAL MATCH (d)-[:CONNECTED_TO]->(n_out:Device)
+        WHERE n_out.device_id <> d.device_id
+        WITH d, collect(DISTINCT {
+            device_id: n_out.device_id,
+            hostname: n_out.hostname,
+            device_type: n_out.device_type,
+            status: n_out.status,
+            edge_type: 'connected_to',
+            direction: 'outbound'
+        }) AS outbound
+        OPTIONAL MATCH (n_in:Device)-[:CONNECTED_TO]->(d)
+        WHERE n_in.device_id <> d.device_id
+        WITH d, outbound + collect(DISTINCT {
+            device_id: n_in.device_id,
+            hostname: n_in.hostname,
+            device_type: n_in.device_type,
+            status: n_in.status,
+            edge_type: 'connected_to',
+            direction: 'inbound'
+        }) AS neighbours
+        RETURN {
+            device_id: d.device_id,
+            hostname: d.hostname,
+            device_type: d.device_type,
+            status: d.status
+        } AS node,
+        [n IN neighbours WHERE n.device_id IS NOT NULL] AS neighbours
+        """
+
+        async with self._driver.session() as session:
+            result = await session.run(query, device_id=str(device_id))
+            record = await result.single()
+
+        if record is None or record["node"] is None:
+            return None
+
+        raw_neighbours = record["neighbours"] or []
+        ordered_neighbours = sorted(
+            raw_neighbours,
+            key=lambda item: (item["device_id"], item["direction"], item["edge_type"]),
+        )
+        return {
+            "node": record["node"],
+            "neighbours": ordered_neighbours,
+        }
+
     async def create_device_node(
         self,
         device_id: str,

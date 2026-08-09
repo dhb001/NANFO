@@ -36,9 +36,14 @@ from app.db.postgres import AsyncSessionLocal
 from app.db.redis import close_redis, get_redis_client, init_redis
 from app.events.bus import STREAM_GROUPS, ensure_consumer_groups, run_consumer_loop
 from app.events.consumers.audit_consumer import AUDIT_HANDLERS
+from app.events.consumers.telemetry_consumer import TELEMETRY_HANDLERS
 from app.events.consumers.topology_consumer import TOPOLOGY_HANDLERS
 from app.events.consumers.ws_push_consumer import WS_PUSH_HANDLERS
 from app.modules.network.topology import TopologyQueryService
+from app.modules.telemetry.service import (
+    TelemetryCollectorRunner,
+    TelemetryIngestionService,
+)
 from app.websocket.topology import router as ws_router
 
 logger = get_logger(__name__)
@@ -72,6 +77,7 @@ async def lifespan(app: FastAPI):
     configure_logging(settings.LOG_LEVEL)
     startup_correlation_id = "startup-topology-workspace-backfill"
     consumer_tasks: list[asyncio.Task] = []
+    telemetry_collector: TelemetryCollectorRunner | None = None
 
     # Initialise external connections
     await init_redis()
@@ -79,6 +85,18 @@ async def lifespan(app: FastAPI):
 
     redis = get_redis_client()
     await ensure_consumer_groups(redis)
+
+    try:
+        telemetry_ingestion_service = TelemetryIngestionService(redis=redis)
+        telemetry_collector = TelemetryCollectorRunner(ingestion_service=telemetry_ingestion_service)
+        await telemetry_collector.start()
+    except (RuntimeError, ValueError) as exc:
+        telemetry_collector = None
+        logger.warning(
+            "telemetry_collector_startup_failed",
+            correlation_id=startup_correlation_id,
+            error=str(exc),
+        )
 
     try:
         updated_nodes = await _run_topology_workspace_backfill(correlation_id=startup_correlation_id)
@@ -95,7 +113,7 @@ async def lifespan(app: FastAPI):
         )
 
     # Merge all handlers — network events go to audit + topology + ws_push consumers
-    all_handlers = _merge_handlers(AUDIT_HANDLERS, TOPOLOGY_HANDLERS, WS_PUSH_HANDLERS)
+    all_handlers = _merge_handlers(AUDIT_HANDLERS, TOPOLOGY_HANDLERS, WS_PUSH_HANDLERS, TELEMETRY_HANDLERS)
 
     # Start one consumer loop per stream
     for stream_key, group in STREAM_GROUPS.items():
@@ -118,6 +136,8 @@ async def lifespan(app: FastAPI):
     for task in consumer_tasks:
         task.cancel()
     await asyncio.gather(*consumer_tasks, return_exceptions=True)
+    if telemetry_collector is not None:
+        await telemetry_collector.stop()
     await close_neo4j()
     await close_redis()
     logger.info("nanfo_shutdown_complete")

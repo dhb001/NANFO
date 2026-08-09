@@ -12,9 +12,10 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import Callable, Awaitable
+from collections.abc import Awaitable, Callable
 
 import redis.asyncio as aioredis
+from redis.exceptions import RedisError, ResponseError
 
 from app.core.logging import get_logger
 
@@ -25,6 +26,7 @@ STREAM_GROUPS: dict[str, str] = {
     "stream:auth": "nanfo-consumers",
     "stream:network": "nanfo-consumers",
     "stream:org": "nanfo-consumers",
+    "stream:telemetry": "nanfo-consumers",
 }
 
 
@@ -34,11 +36,12 @@ async def ensure_consumer_groups(redis: aioredis.Redis) -> None:
         try:
             await redis.xgroup_create(stream_key, group, id="0", mkstream=True)
             logger.info("consumer_group_created", stream=stream_key, group=group)
-        except Exception as exc:
+        except ResponseError as exc:
             if "BUSYGROUP" in str(exc):
-                pass  # Group already exists — expected on restart
-            else:
-                logger.warning("consumer_group_create_failed", stream=stream_key, error=str(exc))
+                continue
+            logger.warning("consumer_group_create_failed", stream=stream_key, error=str(exc))
+        except RedisError as exc:
+            logger.warning("consumer_group_create_failed", stream=stream_key, error=str(exc))
 
 
 EventHandler = Callable[[dict], Awaitable[None]]
@@ -98,7 +101,7 @@ async def run_consumer_loop(
                             await handler(event_data)
                             success = True
                             break
-                        except Exception as exc:
+                        except Exception as exc:  # noqa: BLE001
                             logger.warning(
                                 "event_handler_failed",
                                 event_type=event_type,
@@ -118,6 +121,6 @@ async def run_consumer_loop(
         except asyncio.CancelledError:
             logger.info("consumer_loop_cancelled", stream=stream_key)
             return
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             logger.error("consumer_loop_error", stream=stream_key, error=str(exc))
             await asyncio.sleep(1)

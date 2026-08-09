@@ -1,5 +1,18 @@
 # Development Journal
 
+## [2026-08-09] - Vertical Slice 2 Step 5 (Telemetry Ingestion Scaffold)
+
+- **Implemented:** Added internal telemetry ingestion scaffold with collector lifecycle wiring (`start`/`stop`), payload normalization, and internal publish path via Redis Streams event bus.
+- **Event contract:** Telemetry ingestion now emits `telemetry.metric.ingested` to `stream:telemetry`; consumer handling is intentionally parse/log-only (no persistence side effects in VS2 Step 5).
+- **Startup behavior:** Lifespan startup initializes and starts collector runner; failures are caught and logged so API startup remains healthy/no-op safe.
+- **Validation:** Ruff checks and targeted telemetry unit/integration tests passed, including startup lifecycle coverage and C6 deferred topology endpoint non-regression checks.
+
+## [2026-08-09] - Vertical Slice 2 Step 4 (Topology Node Neighbours)
+
+- **Implemented:** Added `GET /api/v1/topology/nodes/{device_id}` with default `depth=1`, canonical envelope, and deterministic neighbour ordering.
+- **Payload behavior:** Endpoint returns `node` plus `neighbours[]`, where each neighbour includes required relation metadata (`edge_type`, `direction`).
+- **Validation:** Ruff checks and targeted unit/integration tests passed; existing graph pagination remained intact and deferred C6 endpoints still return 404.
+
 ## [2026-08-09] - Vertical Slice 2 Step 3 (Topology Graph Pagination)
 
 - **Implemented:** Added paginated `GET /api/v1/topology/graph` with `limit` and `cursor` query parameters, deterministic `device_id` ascending ordering, and `meta.next_cursor` for continuation.

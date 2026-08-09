@@ -226,3 +226,101 @@ class TestTopologyGraphPagination:
         assert response.status_code == 200
         body = response.json()
         assert body["meta"]["next_cursor"] is None
+
+
+class TestTopologyNodeEndpoint:
+    def test_topology_nodes_endpoint_exists_and_returns_envelope(self, client, headers):
+        payload = {
+            "node": {
+                "device_id": "device-1",
+                "hostname": "core-1",
+                "device_type": "router",
+                "status": "active",
+            },
+            "neighbours": [
+                {
+                    "device_id": "device-2",
+                    "hostname": "edge-2",
+                    "device_type": "switch",
+                    "status": "active",
+                    "edge_type": "connected_to",
+                    "direction": "inbound",
+                },
+                {
+                    "device_id": "device-3",
+                    "hostname": "edge-3",
+                    "device_type": "switch",
+                    "status": "active",
+                    "edge_type": "connected_to",
+                    "direction": "outbound",
+                },
+            ],
+        }
+
+        with (
+            patch(
+                "app.modules.network.topology.TopologyQueryService.get_node_with_neighbours",
+                return_value=payload,
+            ) as mock_get_node,
+            patch("app.api.v1.topology.get_neo4j_driver") as mock_driver,
+        ):
+            mock_driver.return_value = AsyncMock()
+            response = client.get(
+                f"/api/v1/topology/nodes/{uuid.uuid4()}",
+                headers=headers,
+            )
+
+        assert response.status_code == 200
+        call_kwargs = mock_get_node.call_args.kwargs
+        assert call_kwargs["depth"] == 1
+
+        body = response.json()
+        assert body["success"] is True
+        assert "data" in body
+        assert "meta" in body
+        assert "errors" in body
+        assert body["data"]["neighbours"][0]["edge_type"] == "connected_to"
+        assert body["data"]["neighbours"][0]["direction"] == "inbound"
+
+    def test_topology_nodes_endpoint_accepts_depth_parameter(self, client, headers):
+        payload = {
+            "node": {
+                "device_id": "device-1",
+                "hostname": "core-1",
+                "device_type": "router",
+                "status": "active",
+            },
+            "neighbours": [],
+        }
+        with (
+            patch(
+                "app.modules.network.topology.TopologyQueryService.get_node_with_neighbours",
+                return_value=payload,
+            ) as mock_get_node,
+            patch("app.api.v1.topology.get_neo4j_driver") as mock_driver,
+        ):
+            mock_driver.return_value = AsyncMock()
+            response = client.get(
+                f"/api/v1/topology/nodes/{uuid.uuid4()}?depth=4",
+                headers=headers,
+            )
+
+        assert response.status_code == 200
+        call_kwargs = mock_get_node.call_args.kwargs
+        assert call_kwargs["depth"] == 4
+
+    def test_topology_nodes_endpoint_not_found_returns_404(self, client, headers):
+        with (
+            patch(
+                "app.modules.network.topology.TopologyQueryService.get_node_with_neighbours",
+                return_value=None,
+            ),
+            patch("app.api.v1.topology.get_neo4j_driver") as mock_driver,
+        ):
+            mock_driver.return_value = AsyncMock()
+            response = client.get(
+                f"/api/v1/topology/nodes/{uuid.uuid4()}",
+                headers=headers,
+            )
+
+        assert response.status_code == 404

@@ -24,6 +24,7 @@ _STREAM_KEYS: dict[str, str] = {
     "auth": "stream:auth",
     "network": "stream:network",
     "org": "stream:org",
+    "telemetry": "stream:telemetry",
 }
 
 

@@ -1,6 +1,7 @@
 """NANFO Backend — Topology API router (/api/v1/topology/*).
 
-Implements only GET /api/v1/topology/graph (Vertical Slice 1 scope).
+Implements GET /api/v1/topology/graph and GET /api/v1/topology/nodes/{device_id}
+for Vertical Slice 2 scope.
 C6: /neighbors, /impact, /reconcile are deferred to M4 full Topology pass.
 """
 
@@ -8,7 +9,7 @@ import time
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
 
 from app.core.dependencies import (
@@ -33,6 +34,27 @@ class TopologyGraphAPIResponse(BaseModel):
     success: bool
     data: TopologyGraphResponse | None
     meta: TopologyGraphMeta
+    errors: ErrorDetail | None
+
+
+class TopologyNeighbourNode(BaseModel):
+    device_id: str
+    hostname: str
+    device_type: str
+    status: str
+    edge_type: str
+    direction: str
+
+
+class TopologyNodeWithNeighbours(BaseModel):
+    node: dict
+    neighbours: list[TopologyNeighbourNode]
+
+
+class TopologyNodeAPIResponse(BaseModel):
+    success: bool
+    data: TopologyNodeWithNeighbours | None
+    meta: ResponseMeta
     errors: ErrorDetail | None
 
 
@@ -71,6 +93,33 @@ async def get_topology_graph(
             timestamp=meta.timestamp,
             execution_time_ms=elapsed_ms,
             next_cursor=next_cursor,
+        ),
+        errors=None,
+    )
+
+
+@router.get("/nodes/{device_id}", response_model=TopologyNodeAPIResponse, status_code=status.HTTP_200_OK)
+async def get_topology_node_with_neighbours(
+    device_id: uuid.UUID,
+    claims: Annotated[TokenClaims, Depends(get_current_user)],
+    meta: Annotated[RequestMeta, Depends(get_request_meta)],
+    depth: int = Query(default=1, ge=1),
+):
+    started = time.monotonic()
+    driver = get_neo4j_driver()
+    svc = TopologyQueryService(driver=driver)
+    result = await svc.get_node_with_neighbours(device_id=device_id, depth=depth)
+    if result is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Topology node not found.")
+
+    elapsed_ms = int((time.monotonic() - started) * 1000)
+    return TopologyNodeAPIResponse(
+        success=True,
+        data=TopologyNodeWithNeighbours.model_validate(result),
+        meta=ResponseMeta(
+            request_id=meta.request_id,
+            timestamp=meta.timestamp,
+            execution_time_ms=elapsed_ms,
         ),
         errors=None,
     )

@@ -3,6 +3,39 @@
 Lightweight chronological notes for decisions that do not require a full ADR.
 
 ## 2026-08-09
+### Telemetry Ingestion Event Contract (VS2 Step 5)
+Decision: Introduce internal-only telemetry ingestion contract emitting `telemetry.metric.ingested` events to Redis Stream `stream:telemetry` with normalized payload fields (`device_id`, `network_id`, `workspace_id`, `metric`, `value`, `unit`, `observed_at`, `source`, `tags`) and collector lifecycle wiring in app lifespan.
+Reason:
+- Satisfies VS2 Step 5 requirements for collector lifecycle + normalized event publish without introducing new public API routes.
+- Preserves modular-monolith boundaries by using ADR-006 event-bus communication instead of direct cross-module coupling.
+- Keeps rollout safe and reversible by constraining Step 5 consumer behavior to parse/log only (no database writes).
+Impact:
+- Telemetry producers and internal consumers now share a stable event name and payload contract for Step 5.
+- Startup remains resilient: collector startup failures are logged and do not fail service boot.
+- Enables future VS2+ increments (collector adapters, persistence, WS streaming) without contract churn.
+Related:
+- `backend/app/modules/telemetry/service.py`
+- `backend/app/events/publisher.py`
+- `backend/app/events/bus.py`
+- `backend/app/events/consumers/telemetry_consumer.py`
+- `backend/app/main.py`
+- `docs/features/Telemetry.md`
+
+## 2026-08-09
+### Topology Nodes Direction Semantics
+Decision: For `GET /api/v1/topology/nodes/{device_id}`, neighbour relation direction is reported relative to the requested node: `outbound` for edges `node -> neighbour`, `inbound` for edges `neighbour -> node`; relation type is normalized to `connected_to`.
+Reason:
+- Provides deterministic, client-friendly relation semantics without introducing deferred `/neighbors` behavior.
+- Satisfies VS2 requirement for explicit `edge_type` and `direction` metadata per neighbour.
+Impact:
+- Frontend/consumers can render directional adjacency from a single node view without additional inference.
+- Does not alter graph pagination contract or deferred endpoint routing.
+Related:
+- `backend/app/api/v1/topology.py`
+- `backend/app/modules/network/topology.py`
+- `docs/features/Topology.md`
+
+## 2026-08-09
 ### Topology Graph Pagination Cursor Contract
 Decision: Use node-based pagination on `GET /api/v1/topology/graph` with deterministic ordering by `device_id` ascending; `cursor` represents the last seen `device_id`, and `meta.next_cursor` returns the last `device_id` of the current page only when additional nodes exist.
 Reason:

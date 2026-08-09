@@ -276,3 +276,103 @@ async def test_get_graph_returns_empty_page_without_edge_query_when_no_nodes():
     assert result.edges == []
     assert next_cursor is None
     session.run.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_get_node_with_neighbours_returns_node_and_sorted_neighbours():
+    record = {
+        "node": {
+            "device_id": "device-1",
+            "hostname": "core-1",
+            "device_type": "router",
+            "status": "active",
+        },
+        "neighbours": [
+            {
+                "device_id": "device-3",
+                "hostname": "edge-3",
+                "device_type": "switch",
+                "status": "active",
+                "edge_type": "connected_to",
+                "direction": "outbound",
+            },
+            {
+                "device_id": "device-2",
+                "hostname": "edge-2",
+                "device_type": "switch",
+                "status": "active",
+                "edge_type": "connected_to",
+                "direction": "inbound",
+            },
+        ],
+    }
+    result_obj = MagicMock()
+    result_obj.single = AsyncMock(return_value=record)
+
+    session = AsyncMock()
+    session.run = AsyncMock(return_value=result_obj)
+    session_cm = AsyncMock()
+    session_cm.__aenter__.return_value = session
+    session_cm.__aexit__.return_value = None
+
+    driver = MagicMock()
+    driver.session.return_value = session_cm
+
+    svc = TopologyQueryService(driver=driver)
+    result = await svc.get_node_with_neighbours(device_id=uuid.uuid4(), depth=1)
+
+    assert result is not None
+    assert result["node"]["device_id"] == "device-1"
+    assert [n["device_id"] for n in result["neighbours"]] == ["device-2", "device-3"]
+    assert result["neighbours"][0]["edge_type"] == "connected_to"
+    assert result["neighbours"][0]["direction"] == "inbound"
+
+
+@pytest.mark.asyncio
+async def test_get_node_with_neighbours_returns_none_when_missing():
+    result_obj = MagicMock()
+    result_obj.single = AsyncMock(return_value=None)
+
+    session = AsyncMock()
+    session.run = AsyncMock(return_value=result_obj)
+    session_cm = AsyncMock()
+    session_cm.__aenter__.return_value = session
+    session_cm.__aexit__.return_value = None
+
+    driver = MagicMock()
+    driver.session.return_value = session_cm
+
+    svc = TopologyQueryService(driver=driver)
+    result = await svc.get_node_with_neighbours(device_id=uuid.uuid4(), depth=1)
+
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_get_node_with_neighbours_forces_depth_to_one():
+    record = {
+        "node": {
+            "device_id": "device-1",
+            "hostname": "core-1",
+            "device_type": "router",
+            "status": "active",
+        },
+        "neighbours": [],
+    }
+    result_obj = MagicMock()
+    result_obj.single = AsyncMock(return_value=record)
+
+    session = AsyncMock()
+    session.run = AsyncMock(return_value=result_obj)
+    session_cm = AsyncMock()
+    session_cm.__aenter__.return_value = session
+    session_cm.__aexit__.return_value = None
+
+    driver = MagicMock()
+    driver.session.return_value = session_cm
+
+    svc = TopologyQueryService(driver=driver)
+    await svc.get_node_with_neighbours(device_id=uuid.uuid4(), depth=3)
+
+    query = session.run.await_args.args[0]
+    assert "CONNECTED_TO" in query
