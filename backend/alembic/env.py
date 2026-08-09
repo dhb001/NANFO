@@ -6,15 +6,27 @@ All module models are imported here so Alembic can detect schema changes.
 
 from logging.config import fileConfig
 
-from alembic import context
 from sqlalchemy import engine_from_config, pool
 
-# Import all models to register metadata — must come before Base import
-from app.modules.identity.models import User, Role, Permission, UserRole, AuditLog  # noqa: F401
-from app.modules.organization.models import Organization, Workspace, OrgMember  # noqa: F401
-from app.modules.network.models import Network, Device  # noqa: F401
-from app.db.postgres import Base
+from alembic import context
 from app.core.config import get_settings
+from app.db.postgres import Base
+
+# Import all models to register metadata — must come before Base import
+from app.modules.identity.models import (  # noqa: F401
+    AuditLog,
+    Permission,
+    Role,
+    User,
+    UserRole,
+)
+from app.modules.network.models import Device, Network  # noqa: F401
+from app.modules.organization.models import (  # noqa: F401
+    Organization,
+    OrgMember,
+    Workspace,
+)
+from app.modules.telemetry.models import TelemetryRecord  # noqa: F401
 
 config = context.config
 settings = get_settings()

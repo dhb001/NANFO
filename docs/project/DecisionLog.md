@@ -3,6 +3,24 @@
 Lightweight chronological notes for decisions that do not require a full ADR.
 
 ## 2026-08-09
+### Telemetry Persistence Contract (VS2 Step 6)
+Decision: Persist `telemetry.metric.ingested` events to Telemetry-owned `telemetry_records` with event-level idempotency keyed by `event_id`; consumer commits only on new records, logs-and-skips validation/type failures, and re-raises SQL failures so retry/dead-letter semantics stay in the bus layer.
+Reason:
+- Completes VS2 Step 6 with minimal scope expansion from Step 5 (publish -> persist) while preserving event conventions and modular boundaries.
+- Keeps persistence deterministic and reversible by using a single append-oriented table with explicit Alembic upgrade/downgrade.
+- Preserves consumer isolation: persistence failures do not alter API/startup behavior and are handled within existing event bus failure semantics.
+Impact:
+- Internal telemetry ingestion now has a durable baseline write path without adding public API routes.
+- Duplicate deliveries of the same event envelope do not create duplicate telemetry rows.
+- Operational diagnosis improves through explicit telemetry persistence success/failure log branches.
+Related:
+- `backend/alembic/versions/0002_telemetry_records.py`
+- `backend/app/modules/telemetry/models.py`
+- `backend/app/modules/telemetry/repository.py`
+- `backend/app/modules/telemetry/service.py`
+- `backend/app/events/consumers/telemetry_consumer.py`
+
+## 2026-08-09
 ### Telemetry Ingestion Event Contract (VS2 Step 5)
 Decision: Introduce internal-only telemetry ingestion contract emitting `telemetry.metric.ingested` events to Redis Stream `stream:telemetry` with normalized payload fields (`device_id`, `network_id`, `workspace_id`, `metric`, `value`, `unit`, `observed_at`, `source`, `tags`) and collector lifecycle wiring in app lifespan.
 Reason:

@@ -7,7 +7,6 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from app.events.consumers.telemetry_consumer import handle_telemetry_event
 from app.modules.telemetry.service import (
     TelemetryCollectorRunner,
     TelemetryIngestionService,
@@ -60,26 +59,6 @@ async def test_telemetry_ingest_publishes_expected_event(fake_redis):
     assert kwargs["source"] == "telemetry"
     assert "metric" in kwargs["payload"]
     assert kwargs["payload"]["metric"] == "latency_ms"
-
-
-@pytest.mark.asyncio
-async def test_telemetry_consumer_stub_parses_without_side_effects():
-    event = {
-        "event_type": "telemetry.metric.ingested",
-        "correlation_id": str(uuid.uuid4()),
-        "payload": {
-            "device_id": str(uuid.uuid4()),
-            "network_id": str(uuid.uuid4()),
-            "workspace_id": str(uuid.uuid4()),
-            "metric": "packet_loss",
-            "value": 0.02,
-            "unit": "ratio",
-            "observed_at": "2026-08-09T00:00:00+00:00",
-            "source": "collector",
-            "tags": {},
-        },
-    }
-    await handle_telemetry_event(event)
 
 
 @pytest.mark.asyncio

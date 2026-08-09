@@ -1,5 +1,12 @@
 # Development Journal
 
+## [2026-08-09] - Vertical Slice 2 Step 6 (Telemetry Persistence Baseline)
+
+- **Implemented:** Added `telemetry_records` persistence baseline via Alembic `0002` migration and Telemetry module model/repository write path.
+- **Consumer behavior:** `telemetry.metric.ingested` now persists normalized payloads idempotently by `event_id`; malformed payloads are logged/skipped and SQL failures are logged/re-raised for bus retry/dead-letter handling.
+- **Schema/indexing:** Table includes event/correlation IDs, ownership IDs (`device_id`, `network_id`, `workspace_id`), metric/value/unit/source/tags, and timestamp fields with query indexes on device/network/workspace/metric/observed_at.
+- **Validation:** Step-6-scoped Ruff, unit tests, and integration tests passed; startup collector lifecycle tests remained green (no Step 5 regression).
+
 ## [2026-08-09] - Vertical Slice 2 Step 5 (Telemetry Ingestion Scaffold)
 
 - **Implemented:** Added internal telemetry ingestion scaffold with collector lifecycle wiring (`start`/`stop`), payload normalization, and internal publish path via Redis Streams event bus.
