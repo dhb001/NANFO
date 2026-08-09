@@ -45,6 +45,26 @@ class NetworkRepository:
         rows = (await self._db.execute(q.offset((page - 1) * page_size).limit(page_size))).scalars().all()
         return list(rows), total
 
+    async def get_workspace_ids_for_network_ids(self, network_ids: list[str]) -> dict[str, str]:
+        parsed_ids: list[uuid.UUID] = []
+        for raw_id in network_ids:
+            try:
+                parsed_ids.append(uuid.UUID(raw_id))
+            except (ValueError, TypeError, AttributeError):
+                continue
+
+        if not parsed_ids:
+            return {}
+
+        result = await self._db.execute(
+            select(Network.network_id, Network.workspace_id).where(
+                Network.network_id.in_(parsed_ids),
+                Network.deleted_at.is_(None),
+            )
+        )
+        rows = result.all()
+        return {str(network_id): str(workspace_id) for network_id, workspace_id in rows}
+
 
 class DeviceRepository:
 

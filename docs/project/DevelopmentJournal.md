@@ -1,5 +1,11 @@
 # Development Journal
 
+## [2026-08-09] - Vertical Slice 2 Step 3 (Topology Graph Pagination)
+
+- **Implemented:** Added paginated `GET /api/v1/topology/graph` with `limit` and `cursor` query parameters, deterministic `device_id` ascending ordering, and `meta.next_cursor` for continuation.
+- **Service behavior:** Pagination is node-based; `next_cursor` is returned only when more nodes exist. Edge output is constrained to edges whose endpoints are both present in the current node page.
+- **Validation:** Ruff checks and targeted unit/integration tests for topology pagination passed; deferred C6 endpoints remain non-routable (404).
+
 ## [2026-08-06] - Vertical Slice 1 Implementation Closure
 
 - **Implemented:** Backend modular monolith scaffolded — FastAPI, async SQLAlchemy 2.0 (lazy engine), Redis Streams event bus, Neo4j driver.

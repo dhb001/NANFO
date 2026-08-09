@@ -2,6 +2,21 @@
 
 Lightweight chronological notes for decisions that do not require a full ADR.
 
+## 2026-08-09
+### Topology Graph Pagination Cursor Contract
+Decision: Use node-based pagination on `GET /api/v1/topology/graph` with deterministic ordering by `device_id` ascending; `cursor` represents the last seen `device_id`, and `meta.next_cursor` returns the last `device_id` of the current page only when additional nodes exist.
+Reason:
+- Keeps pagination stable and idempotent without inventing new routes or event contracts.
+- Preserves canonical response envelope while exposing continuation state in metadata.
+- Ensures predictable client traversal and retry behavior.
+Impact:
+- Topology graph clients can iterate pages using `next_cursor`.
+- Page edges are limited to relationships where both nodes are in the current page, avoiding partial dangling references.
+Related:
+- `backend/app/api/v1/topology.py`
+- `backend/app/modules/network/topology.py`
+- `docs/features/Topology.md`
+
 ## 2026-08-05
 ### Added Architecture Review Gate
 Reason:

@@ -17,32 +17,31 @@ from __future__ import annotations
 import asyncio
 from contextlib import asynccontextmanager
 
-import structlog
 from fastapi import FastAPI, Request, status
+from fastapi.exceptions import HTTPException as StarletteHTTPException
 from fastapi.responses import JSONResponse
 from jose import JWTError
+from neo4j.exceptions import Neo4jError
+from sqlalchemy.exc import SQLAlchemyError
 
+from app.api.v1.audit import router as audit_router
+from app.api.v1.auth import router as auth_router
+from app.api.v1.networks import router as network_router
+from app.api.v1.organizations import router as org_router
+from app.api.v1.topology import router as topology_router
 from app.core.config import get_settings
 from app.core.logging import configure_logging, get_logger
-from app.db.neo4j import close_neo4j, init_neo4j
+from app.db.neo4j import close_neo4j, get_neo4j_driver, init_neo4j
+from app.db.postgres import AsyncSessionLocal
 from app.db.redis import close_redis, get_redis_client, init_redis
 from app.events.bus import STREAM_GROUPS, ensure_consumer_groups, run_consumer_loop
 from app.events.consumers.audit_consumer import AUDIT_HANDLERS
 from app.events.consumers.topology_consumer import TOPOLOGY_HANDLERS
 from app.events.consumers.ws_push_consumer import WS_PUSH_HANDLERS
-
-# Import routers
-from app.api.v1.auth import router as auth_router
-from app.api.v1.organizations import router as org_router
-from app.api.v1.networks import router as network_router
-from app.api.v1.topology import router as topology_router
-from app.api.v1.audit import router as audit_router
+from app.modules.network.topology import TopologyQueryService
 from app.websocket.topology import router as ws_router
 
 logger = get_logger(__name__)
-
-_consumer_tasks: list[asyncio.Task] = []
-
 
 def _merge_handlers(*handler_dicts: dict) -> dict:
     merged: dict = {}
@@ -60,10 +59,19 @@ def _merge_handlers(*handler_dicts: dict) -> dict:
     return merged
 
 
+async def _run_topology_workspace_backfill(correlation_id: str) -> int:
+    driver = get_neo4j_driver()
+    service = TopologyQueryService(driver=driver)
+    async with AsyncSessionLocal() as db:
+        return await service.backfill_missing_workspace_ids(db=db, correlation_id=correlation_id)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = get_settings()
     configure_logging(settings.LOG_LEVEL)
+    startup_correlation_id = "startup-topology-workspace-backfill"
+    consumer_tasks: list[asyncio.Task] = []
 
     # Initialise external connections
     await init_redis()
@@ -71,6 +79,20 @@ async def lifespan(app: FastAPI):
 
     redis = get_redis_client()
     await ensure_consumer_groups(redis)
+
+    try:
+        updated_nodes = await _run_topology_workspace_backfill(correlation_id=startup_correlation_id)
+        logger.info(
+            "topology_workspace_backfill_startup",
+            correlation_id=startup_correlation_id,
+            updated_nodes=updated_nodes,
+        )
+    except (RuntimeError, Neo4jError, SQLAlchemyError) as exc:
+        logger.warning(
+            "topology_workspace_backfill_startup_failed",
+            correlation_id=startup_correlation_id,
+            error=str(exc),
+        )
 
     # Merge all handlers — network events go to audit + topology + ws_push consumers
     all_handlers = _merge_handlers(AUDIT_HANDLERS, TOPOLOGY_HANDLERS, WS_PUSH_HANDLERS)
@@ -87,15 +109,15 @@ async def lifespan(app: FastAPI):
             ),
             name=f"consumer:{stream_key}",
         )
-        _consumer_tasks.append(task)
+        consumer_tasks.append(task)
 
     logger.info("nanfo_startup_complete", env=settings.APP_ENV)
     yield
 
     # Graceful shutdown
-    for task in _consumer_tasks:
+    for task in consumer_tasks:
         task.cancel()
-    await asyncio.gather(*_consumer_tasks, return_exceptions=True)
+    await asyncio.gather(*consumer_tasks, return_exceptions=True)
     await close_neo4j()
     await close_redis()
     logger.info("nanfo_shutdown_complete")
@@ -141,9 +163,6 @@ def _http_error_code(status_code: int) -> str:
         500: "INTERNAL_ERROR",
         503: "SERVICE_UNAVAILABLE",
     }.get(status_code, f"HTTP_{status_code}")
-
-
-from fastapi.exceptions import HTTPException as StarletteHTTPException  # noqa: E402
 
 
 @app.exception_handler(StarletteHTTPException)

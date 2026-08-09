@@ -139,6 +139,7 @@ class DeviceService:
             payload={
                 "device_id": str(device.device_id),
                 "network_id": str(network_id),
+                "workspace_id": str(network.workspace_id),
                 "hostname": device.hostname,
                 "ip_address": device.ip_address,
                 "device_type": device.device_type,

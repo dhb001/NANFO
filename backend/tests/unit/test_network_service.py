@@ -85,17 +85,19 @@ class TestNetworkService:
     async def test_create_network_invalid_workspace_raises_404(self, net_svc):
         """C5: 404 from WorkspaceService propagates to the caller."""
         ws_id = uuid.uuid4()
-        with patch.object(
-            net_svc._workspace_svc,
-            "get_active_workspace",
-            side_effect=HTTPException(status_code=404, detail="Workspace not found or has been deleted."),
+        with (
+            patch.object(
+                net_svc._workspace_svc,
+                "get_active_workspace",
+                side_effect=HTTPException(status_code=404, detail="Workspace not found or has been deleted."),
+            ),
+            pytest.raises(HTTPException) as exc_info,
         ):
-            with pytest.raises(HTTPException) as exc_info:
-                await net_svc.create_network(
-                    req=CreateNetworkRequest(workspace_id=ws_id, name="Bad"),
-                    actor_id="u1",
-                    correlation_id=str(uuid.uuid4()),
-                )
+            await net_svc.create_network(
+                req=CreateNetworkRequest(workspace_id=ws_id, name="Bad"),
+                actor_id="u1",
+                correlation_id=str(uuid.uuid4()),
+            )
         assert exc_info.value.status_code == 404
 
     def test_c5_no_workspace_repository_direct_call(self, net_svc):
@@ -137,18 +139,21 @@ class TestDeviceService:
         mock_pub.assert_called_once()
         call_kwargs = mock_pub.call_args.kwargs
         assert call_kwargs["event_type"] == "network.device.added"
+        assert call_kwargs["payload"]["workspace_id"] == str(network.workspace_id)
         assert result.device_id == device.device_id
 
     @pytest.mark.asyncio
     async def test_add_device_to_unknown_network_raises_404(self, dev_svc):
-        with patch.object(dev_svc._network_repo, "get_by_id", return_value=None):
-            with pytest.raises(HTTPException) as exc_info:
-                await dev_svc.add_device(
-                    network_id=uuid.uuid4(),
-                    req=CreateDeviceRequest(hostname="h", device_type="switch"),
-                    actor_id="u1",
-                    correlation_id=str(uuid.uuid4()),
-                )
+        with (
+            patch.object(dev_svc._network_repo, "get_by_id", return_value=None),
+            pytest.raises(HTTPException) as exc_info,
+        ):
+            await dev_svc.add_device(
+                network_id=uuid.uuid4(),
+                req=CreateDeviceRequest(hostname="h", device_type="switch"),
+                actor_id="u1",
+                correlation_id=str(uuid.uuid4()),
+            )
         assert exc_info.value.status_code == 404
 
     @pytest.mark.asyncio

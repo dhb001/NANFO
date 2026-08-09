@@ -10,9 +10,10 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from app.main import app
 from app.core.dependencies import get_db, get_redis
 from app.core.security import create_access_token
+from app.main import app
+from app.modules.network.schemas import TopologyGraphResponse
 
 
 def _make_token():
@@ -147,32 +148,81 @@ class TestC6DeferredEndpointsAbsent:
 
     def test_neighbors_endpoint_does_not_exist(self, client, headers):
         network_id = uuid.uuid4()
-        response = client.get(f"/api/v1/topology/neighbors", params={"network_id": str(network_id)}, headers=headers)
+        response = client.get("/api/v1/topology/neighbors", params={"network_id": str(network_id)}, headers=headers)
         assert response.status_code == 404
 
     def test_impact_endpoint_does_not_exist(self, client, headers):
         network_id = uuid.uuid4()
-        response = client.get(f"/api/v1/topology/impact", params={"network_id": str(network_id)}, headers=headers)
+        response = client.get("/api/v1/topology/impact", params={"network_id": str(network_id)}, headers=headers)
         assert response.status_code == 404
 
     def test_reconcile_endpoint_does_not_exist(self, client, headers):
-        network_id = uuid.uuid4()
-        response = client.post(f"/api/v1/topology/reconcile", headers=headers)
+        response = client.post("/api/v1/topology/reconcile", headers=headers)
         assert response.status_code == 404
 
     def test_topology_graph_endpoint_exists(self, client, headers):
         """Confirm GET /topology/graph IS registered (not blocked by C6)."""
         # Will fail with 500 if Neo4j isn't running — that's expected without infrastructure
         # The key check is that it's NOT a 404
-        from unittest.mock import patch as p
-        from app.modules.network.schemas import TopologyGraphResponse
-        with p("app.modules.network.topology.TopologyQueryService.get_graph",
-               return_value=TopologyGraphResponse(nodes=[], edges=[])):
-            with p("app.db.neo4j.get_neo4j_driver") as mock_driver:
-                mock_driver.return_value = AsyncMock()
-                response = client.get(
-                    "/api/v1/topology/graph",
-                    params={"network_id": str(uuid.uuid4())},
-                    headers=headers,
-                )
+        with (
+            patch(
+                "app.modules.network.topology.TopologyQueryService.get_graph",
+                return_value=(TopologyGraphResponse(nodes=[], edges=[]), None),
+            ),
+            patch("app.api.v1.topology.get_neo4j_driver") as mock_driver,
+        ):
+            mock_driver.return_value = AsyncMock()
+            response = client.get(
+                "/api/v1/topology/graph",
+                params={"network_id": str(uuid.uuid4())},
+                headers=headers,
+            )
         assert response.status_code != 404
+
+
+class TestTopologyGraphPagination:
+    def test_topology_graph_accepts_limit_and_cursor(self, client, headers):
+        with (
+            patch(
+                "app.modules.network.topology.TopologyQueryService.get_graph",
+                return_value=(TopologyGraphResponse(nodes=[], edges=[]), "node-2"),
+            ) as mock_get_graph,
+            patch("app.api.v1.topology.get_neo4j_driver") as mock_driver,
+        ):
+            mock_driver.return_value = AsyncMock()
+            response = client.get(
+                "/api/v1/topology/graph",
+                params={
+                    "network_id": str(uuid.uuid4()),
+                    "limit": 2,
+                    "cursor": "node-1",
+                },
+                headers=headers,
+            )
+
+        assert response.status_code == 200
+        call_kwargs = mock_get_graph.call_args.kwargs
+        assert call_kwargs["limit"] == 2
+        assert call_kwargs["cursor"] == "node-1"
+
+        body = response.json()
+        assert body["meta"]["next_cursor"] == "node-2"
+
+    def test_topology_graph_omits_next_cursor_when_last_page(self, client, headers):
+        with (
+            patch(
+                "app.modules.network.topology.TopologyQueryService.get_graph",
+                return_value=(TopologyGraphResponse(nodes=[], edges=[]), None),
+            ),
+            patch("app.api.v1.topology.get_neo4j_driver") as mock_driver,
+        ):
+            mock_driver.return_value = AsyncMock()
+            response = client.get(
+                "/api/v1/topology/graph",
+                params={"network_id": str(uuid.uuid4()), "limit": 2},
+                headers=headers,
+            )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["meta"]["next_cursor"] is None

@@ -25,6 +25,7 @@ async def handle_topology_event(event: dict) -> None:
         await svc.create_device_node(
             device_id=payload["device_id"],
             network_id=payload["network_id"],
+            workspace_id=payload["workspace_id"],
             hostname=payload["hostname"],
             device_type=payload["device_type"],
             status="active",
