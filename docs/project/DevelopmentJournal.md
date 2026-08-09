@@ -1,5 +1,12 @@
 # Development Journal
 
+## [2026-08-09] - Vertical Slice 2 Step 7 (Telemetry Read APIs)
+
+- **Implemented:** Added telemetry read endpoints `GET /api/v1/telemetry/history`, `GET /api/v1/telemetry/device/{id}`, and `GET /api/v1/telemetry/health` with canonical `{success, data, meta, errors}` envelope.
+- **Read model behavior:** Queries are served from `telemetry_records` with deterministic ordering (`observed_at` desc, `record_id` desc), pagination (`page`, `page_size`), and optional metric/network/workspace filters where applicable.
+- **Health contract:** `telemetry/health` returns baseline ingest telemetry (`status`, `ingest_lag_ms`, `dropped_events`, `latest_observed_at`, `total_records`) without changing ingestion pipeline behavior.
+- **Validation:** Step-7-scoped Ruff checks, telemetry unit tests, and integration endpoint tests passed; startup collector lifecycle remained green and deferred topology paths remained non-routable.
+
 ## [2026-08-09] - Vertical Slice 2 Step 6 (Telemetry Persistence Baseline)
 
 - **Implemented:** Added `telemetry_records` persistence baseline via Alembic `0002` migration and Telemetry module model/repository write path.

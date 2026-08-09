@@ -8,7 +8,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.telemetry.models import TelemetryRecord
@@ -55,3 +55,60 @@ class TelemetryRecordRepository:
         self._db.add(record)
         await self._db.flush()
         return record
+
+    async def list_history(
+        self,
+        *,
+        network_id: uuid.UUID | None = None,
+        workspace_id: uuid.UUID | None = None,
+        metric: str | None = None,
+        page: int = 1,
+        page_size: int = 50,
+    ) -> tuple[list[TelemetryRecord], int]:
+        query = select(TelemetryRecord)
+        if network_id is not None:
+            query = query.where(TelemetryRecord.network_id == network_id)
+        if workspace_id is not None:
+            query = query.where(TelemetryRecord.workspace_id == workspace_id)
+        if metric:
+            query = query.where(TelemetryRecord.metric == metric)
+
+        query = query.order_by(TelemetryRecord.observed_at.desc(), TelemetryRecord.record_id.desc())
+        count_query = select(func.count()).select_from(query.subquery())
+        total = (await self._db.execute(count_query)).scalar_one()
+        rows = (
+            await self._db.execute(
+                query.offset((page - 1) * page_size).limit(page_size)
+            )
+        ).scalars().all()
+        return list(rows), total
+
+    async def list_for_device(
+        self,
+        *,
+        device_id: uuid.UUID,
+        metric: str | None = None,
+        page: int = 1,
+        page_size: int = 50,
+    ) -> tuple[list[TelemetryRecord], int]:
+        query = select(TelemetryRecord).where(TelemetryRecord.device_id == device_id)
+        if metric:
+            query = query.where(TelemetryRecord.metric == metric)
+
+        query = query.order_by(TelemetryRecord.observed_at.desc(), TelemetryRecord.record_id.desc())
+        count_query = select(func.count()).select_from(query.subquery())
+        total = (await self._db.execute(count_query)).scalar_one()
+        rows = (
+            await self._db.execute(
+                query.offset((page - 1) * page_size).limit(page_size)
+            )
+        ).scalars().all()
+        return list(rows), total
+
+    async def get_latest_observed_at(self) -> datetime | None:
+        result = await self._db.execute(select(func.max(TelemetryRecord.observed_at)))
+        return result.scalar_one_or_none()
+
+    async def count_all(self) -> int:
+        result = await self._db.execute(select(func.count()).select_from(TelemetryRecord))
+        return result.scalar_one()

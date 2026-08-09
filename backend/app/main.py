@@ -28,6 +28,7 @@ from app.api.v1.audit import router as audit_router
 from app.api.v1.auth import router as auth_router
 from app.api.v1.networks import router as network_router
 from app.api.v1.organizations import router as org_router
+from app.api.v1.telemetry import router as telemetry_router
 from app.api.v1.topology import router as topology_router
 from app.core.config import get_settings
 from app.core.logging import configure_logging, get_logger
@@ -234,6 +235,7 @@ app.include_router(auth_router)
 app.include_router(org_router)
 app.include_router(network_router)
 app.include_router(topology_router)
+app.include_router(telemetry_router)
 app.include_router(audit_router)
 app.include_router(ws_router)
 

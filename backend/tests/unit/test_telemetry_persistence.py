@@ -67,3 +67,15 @@ async def test_persist_event_raises_value_error_for_invalid_payload(mock_db):
 
     with pytest.raises(ValueError):
         await svc.persist_event(event)
+
+
+@pytest.mark.asyncio
+async def test_persist_event_raises_type_error_for_non_dict_payload(mock_db):
+    svc = TelemetryPersistenceService(db=mock_db)
+    event = _valid_event()
+    event["payload"] = "invalid"
+
+    svc._repo.get_by_event_id = AsyncMock(return_value=None)
+
+    with pytest.raises(TypeError):
+        await svc.persist_event(event)

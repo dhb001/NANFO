@@ -19,6 +19,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.logging import get_logger
 from app.events.publisher import publish_event
 from app.modules.telemetry.repository import TelemetryRecordRepository
+from app.modules.telemetry.schemas import (
+    TelemetryDeviceHistoryResponse,
+    TelemetryHealthResponse,
+    TelemetryHistoryResponse,
+    TelemetryRecordResponse,
+)
 
 logger = get_logger(__name__)
 
@@ -208,3 +214,78 @@ class TelemetryPersistenceService:
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=UTC)
         return dt
+
+
+class TelemetryQueryService:
+    """Read-side service for telemetry history, device metrics, and health."""
+
+    def __init__(self, db: AsyncSession):
+        self._repo = TelemetryRecordRepository(db)
+
+    async def get_history(
+        self,
+        *,
+        network_id: uuid.UUID | None,
+        workspace_id: uuid.UUID | None,
+        metric: str | None,
+        page: int,
+        page_size: int,
+    ) -> TelemetryHistoryResponse:
+        rows, total = await self._repo.list_history(
+            network_id=network_id,
+            workspace_id=workspace_id,
+            metric=metric,
+            page=page,
+            page_size=page_size,
+        )
+        return TelemetryHistoryResponse(
+            items=[TelemetryRecordResponse.model_validate(row) for row in rows],
+            total=total,
+            page=page,
+            page_size=page_size,
+        )
+
+    async def get_device_history(
+        self,
+        *,
+        device_id: uuid.UUID,
+        metric: str | None,
+        page: int,
+        page_size: int,
+    ) -> TelemetryDeviceHistoryResponse:
+        rows, total = await self._repo.list_for_device(
+            device_id=device_id,
+            metric=metric,
+            page=page,
+            page_size=page_size,
+        )
+        return TelemetryDeviceHistoryResponse(
+            device_id=device_id,
+            items=[TelemetryRecordResponse.model_validate(row) for row in rows],
+            total=total,
+            page=page,
+            page_size=page_size,
+        )
+
+    async def get_health(self) -> TelemetryHealthResponse:
+        latest_observed_at = await self._repo.get_latest_observed_at()
+        total_records = await self._repo.count_all()
+
+        if latest_observed_at is None:
+            return TelemetryHealthResponse(
+                status="ok",
+                ingest_lag_ms=0,
+                dropped_events=0,
+                latest_observed_at=None,
+                total_records=0,
+            )
+
+        now_utc = datetime.now(UTC)
+        lag_ms = int(max((now_utc - latest_observed_at).total_seconds() * 1000, 0))
+        return TelemetryHealthResponse(
+            status="ok",
+            ingest_lag_ms=lag_ms,
+            dropped_events=0,
+            latest_observed_at=latest_observed_at,
+            total_records=total_records,
+        )

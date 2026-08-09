@@ -3,6 +3,23 @@
 Lightweight chronological notes for decisions that do not require a full ADR.
 
 ## 2026-08-09
+### Telemetry Read API Contract (VS2 Step 7)
+Decision: Expose telemetry read APIs on `/api/v1/telemetry/history`, `/api/v1/telemetry/device/{id}`, and `/api/v1/telemetry/health` backed exclusively by `telemetry_records`, using canonical envelope responses and deterministic descending ordering by `observed_at` then `record_id`.
+Reason:
+- Delivers Step 7 with minimal scope by adding read-side APIs only, without changing ingestion/event bus write behavior.
+- Provides stable pagination/query semantics for clients while preserving existing module boundaries.
+- Adds baseline health visibility from persisted telemetry (`ingest_lag_ms`, `latest_observed_at`, `total_records`) without introducing new storage/migration complexity.
+Impact:
+- Clients can query global telemetry history, per-device history, and ingestion health through consistent API contracts.
+- Read paths remain decoupled from telemetry collection lifecycle; Step 5 startup resilience is unchanged.
+- Deferred topology endpoints remain untouched and continue returning 404.
+Related:
+- `backend/app/api/v1/telemetry.py`
+- `backend/app/modules/telemetry/service.py`
+- `backend/app/modules/telemetry/repository.py`
+- `backend/app/modules/telemetry/schemas.py`
+
+## 2026-08-09
 ### Telemetry Persistence Contract (VS2 Step 6)
 Decision: Persist `telemetry.metric.ingested` events to Telemetry-owned `telemetry_records` with event-level idempotency keyed by `event_id`; consumer commits only on new records, logs-and-skips validation/type failures, and re-raises SQL failures so retry/dead-letter semantics stay in the bus layer.
 Reason:
