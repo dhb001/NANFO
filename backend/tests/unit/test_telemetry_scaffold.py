@@ -59,6 +59,30 @@ async def test_telemetry_ingest_publishes_expected_event(fake_redis):
     assert kwargs["source"] == "telemetry"
     assert "metric" in kwargs["payload"]
     assert kwargs["payload"]["metric"] == "latency_ms"
+    assert await fake_redis.get("telemetry:health:ingested_events") == "1"
+
+
+@pytest.mark.asyncio
+async def test_telemetry_ingest_ignores_counter_failures(fake_redis):
+    svc = TelemetryIngestionService(redis=fake_redis)
+    with (
+        patch("app.modules.telemetry.service.publish_event", new_callable=AsyncMock) as mock_publish,
+        patch.object(svc._counter_service, "increment_ingested", new_callable=AsyncMock) as mock_increment,
+    ):
+        mock_publish.return_value = "1712425-0"
+        mock_increment.side_effect = RuntimeError("redis unavailable")
+        entry_id = await svc.ingest(
+            raw={
+                "device_id": str(uuid.uuid4()),
+                "network_id": str(uuid.uuid4()),
+                "workspace_id": str(uuid.uuid4()),
+                "metric": "latency_ms",
+                "value": 12,
+            },
+            correlation_id=str(uuid.uuid4()),
+        )
+
+    assert entry_id == "1712425-0"
 
 
 @pytest.mark.asyncio

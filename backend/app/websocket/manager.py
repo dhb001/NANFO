@@ -1,4 +1,4 @@
-"""NANFO Backend — WebSocket connection manager for /ws/topology.
+"""NANFO Backend — WebSocket connection managers for realtime channels.
 
 Manages per-network_id subscriber sets and delta push.
 Per WebSocket.md §4: delta payloads only — never full state snapshots.
@@ -12,6 +12,7 @@ import json
 from collections import defaultdict
 
 from fastapi import WebSocket
+
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -61,7 +62,7 @@ class TopologyWSManager:
         for ws in targets:
             try:
                 await ws.send_text(message)
-            except Exception:
+            except Exception:  # noqa: BLE001
                 dead_connections.append((network_id, ws))
 
         # Clean up disconnected clients
@@ -69,5 +70,58 @@ class TopologyWSManager:
             await self.unsubscribe(nid, ws)
 
 
-# Singleton manager — shared across the application
+class TelemetryWSManager:
+    """Manages active WebSocket connections subscribed to telemetry deltas."""
+
+    def __init__(self):
+        self._subscriptions: dict[str, set[WebSocket]] = defaultdict(set)
+        self._lock = asyncio.Lock()
+
+    async def subscribe(self, network_id: str, websocket: WebSocket) -> None:
+        async with self._lock:
+            self._subscriptions[network_id].add(websocket)
+        logger.info("ws_telemetry_subscribed", network_id=network_id)
+
+    async def unsubscribe(self, network_id: str, websocket: WebSocket) -> None:
+        async with self._lock:
+            self._subscriptions[network_id].discard(websocket)
+            if not self._subscriptions[network_id]:
+                del self._subscriptions[network_id]
+        logger.info("ws_telemetry_unsubscribed", network_id=network_id)
+
+    async def push_delta(
+        self,
+        network_id: str,
+        event_type: str,
+        metric: dict,
+        correlation_id: str,
+        timestamp: str,
+    ) -> None:
+        """Push a telemetry metric delta to all subscribers of a network_id."""
+        message = json.dumps({
+            "event": event_type,
+            "correlation_id": correlation_id,
+            "timestamp": timestamp,
+            "data": {
+                "delta_type": "metric",
+                "metric": metric,
+            },
+        })
+
+        dead_connections: list[tuple[str, WebSocket]] = []
+        async with self._lock:
+            targets = set(self._subscriptions.get(network_id, set()))
+
+        for ws in targets:
+            try:
+                await ws.send_text(message)
+            except Exception:  # noqa: BLE001
+                dead_connections.append((network_id, ws))
+
+        for nid, ws in dead_connections:
+            await self.unsubscribe(nid, ws)
+
+
+# Singleton managers — shared across the application
 topology_ws_manager = TopologyWSManager()
+telemetry_ws_manager = TelemetryWSManager()

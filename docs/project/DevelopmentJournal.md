@@ -1,5 +1,13 @@
 # Development Journal
 
+## [2026-08-10] - Vertical Slice 2 Step 8 (Telemetry Health Counters + WS Fanout)
+
+- **Implemented:** Added Redis-backed telemetry operational counter service (`ingested_events`, `persisted_events`, `fanout_events`, `dropped_events`) and wired counter updates into ingestion/persistence/fanout branches.
+- **Health behavior:** `GET /api/v1/telemetry/health` now reads real dropped-event counter state from Redis-backed snapshot (with safe fallback behavior if counter reads fail), preserving canonical API envelope.
+- **Streaming behavior:** Added `/ws/telemetry` endpoint and telemetry WebSocket manager path; telemetry deltas are pushed only after successful persistence of `telemetry.metric.ingested` events.
+- **Failure isolation:** WebSocket fanout/counter failures are logged and counted as dropped events without breaking telemetry persistence commits or event bus retry semantics for SQL failures.
+- **Validation:** Full backend test suite passed (`121 passed`), Step-8-scoped Ruff checks passed for all changed files, and telemetry/startup/deferred-endpoint regressions remained green. Repository-wide Ruff still reports pre-existing lint debt outside VS2 Step 8 scope.
+
 ## [2026-08-09] - Vertical Slice 2 Step 7 (Telemetry Read APIs)
 
 - **Implemented:** Added telemetry read endpoints `GET /api/v1/telemetry/history`, `GET /api/v1/telemetry/device/{id}`, and `GET /api/v1/telemetry/health` with canonical `{success, data, meta, errors}` envelope.

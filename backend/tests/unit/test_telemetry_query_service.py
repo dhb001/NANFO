@@ -79,7 +79,16 @@ async def test_get_device_history_returns_device_scoped_records(mock_db):
 
 @pytest.mark.asyncio
 async def test_get_health_returns_zero_when_no_records(mock_db):
-    svc = TelemetryQueryService(db=mock_db)
+    counter_service = AsyncMock()
+    counter_service.get_snapshot = AsyncMock(
+        return_value={
+            "ingested_events": 0,
+            "persisted_events": 0,
+            "fanout_events": 0,
+            "dropped_events": 2,
+        }
+    )
+    svc = TelemetryQueryService(db=mock_db, counter_service=counter_service)
     svc._repo.get_latest_observed_at = AsyncMock(return_value=None)
     svc._repo.count_all = AsyncMock(return_value=0)
 
@@ -87,14 +96,23 @@ async def test_get_health_returns_zero_when_no_records(mock_db):
 
     assert result.status == "ok"
     assert result.ingest_lag_ms == 0
-    assert result.dropped_events == 0
+    assert result.dropped_events == 2
     assert result.latest_observed_at is None
     assert result.total_records == 0
 
 
 @pytest.mark.asyncio
 async def test_get_health_returns_positive_lag(mock_db):
-    svc = TelemetryQueryService(db=mock_db)
+    counter_service = AsyncMock()
+    counter_service.get_snapshot = AsyncMock(
+        return_value={
+            "ingested_events": 4,
+            "persisted_events": 4,
+            "fanout_events": 4,
+            "dropped_events": 1,
+        }
+    )
+    svc = TelemetryQueryService(db=mock_db, counter_service=counter_service)
     observed_at = datetime.now(UTC) - timedelta(seconds=3)
     svc._repo.get_latest_observed_at = AsyncMock(return_value=observed_at)
     svc._repo.count_all = AsyncMock(return_value=15)
@@ -103,5 +121,21 @@ async def test_get_health_returns_positive_lag(mock_db):
 
     assert result.status == "ok"
     assert result.ingest_lag_ms >= 0
+    assert result.dropped_events == 1
     assert result.total_records == 15
     assert result.latest_observed_at == observed_at
+
+
+@pytest.mark.asyncio
+async def test_get_health_falls_back_to_zero_counters_on_counter_failure(mock_db):
+    counter_service = AsyncMock()
+    counter_service.get_snapshot = AsyncMock(side_effect=RuntimeError("redis unavailable"))
+    svc = TelemetryQueryService(db=mock_db, counter_service=counter_service)
+    observed_at = datetime.now(UTC)
+    svc._repo.get_latest_observed_at = AsyncMock(return_value=observed_at)
+    svc._repo.count_all = AsyncMock(return_value=1)
+
+    result = await svc.get_health()
+
+    assert result.status == "ok"
+    assert result.dropped_events == 0

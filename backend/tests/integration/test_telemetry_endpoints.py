@@ -116,7 +116,7 @@ def test_get_telemetry_health_returns_envelope_and_payload(client, headers):
     payload = TelemetryHealthResponse(
         status="ok",
         ingest_lag_ms=150,
-        dropped_events=0,
+        dropped_events=2,
         latest_observed_at=datetime.now(UTC),
         total_records=12,
     )
@@ -131,6 +131,37 @@ def test_get_telemetry_health_returns_envelope_and_payload(client, headers):
     assert body["success"] is True
     assert body["data"]["status"] == "ok"
     assert body["data"]["ingest_lag_ms"] == 150
+    assert body["data"]["dropped_events"] == 2
+
+
+def test_get_telemetry_health_reads_dropped_counter_snapshot(client, headers):
+    with (
+        patch(
+            "app.modules.telemetry.repository.TelemetryRecordRepository.get_latest_observed_at",
+            new=AsyncMock(return_value=None),
+        ),
+        patch(
+            "app.modules.telemetry.repository.TelemetryRecordRepository.count_all",
+            new=AsyncMock(return_value=0),
+        ),
+        patch(
+            "app.modules.telemetry.counters.TelemetryHealthCounterService.get_snapshot",
+            new=AsyncMock(
+                return_value={
+                    "ingested_events": 6,
+                    "persisted_events": 5,
+                    "fanout_events": 5,
+                    "dropped_events": 3,
+                }
+            ),
+        ),
+    ):
+        response = client.get("/api/v1/telemetry/health", headers=headers)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["success"] is True
+    assert body["data"]["dropped_events"] == 3
 
 
 def test_telemetry_endpoints_require_auth(client):

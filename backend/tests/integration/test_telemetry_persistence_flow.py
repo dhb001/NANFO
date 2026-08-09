@@ -35,7 +35,14 @@ def _telemetry_event() -> dict:
 
 @pytest.mark.asyncio
 async def test_ingested_telemetry_event_persists_via_stream_payload(integration_fake_redis):
-    await integration_fake_redis.delete("stream:telemetry", "stream:dead_letter")
+    await integration_fake_redis.delete(
+        "stream:telemetry",
+        "stream:dead_letter",
+        "telemetry:health:ingested_events",
+        "telemetry:health:persisted_events",
+        "telemetry:health:fanout_events",
+        "telemetry:health:dropped_events",
+    )
 
     db = AsyncMock()
     db.add = MagicMock()
@@ -62,16 +69,31 @@ async def test_ingested_telemetry_event_persists_via_stream_payload(integration_
 
     event_data = {**fields, "payload": json.loads(fields["payload"])}
 
-    with patch("app.events.consumers.telemetry_consumer.AsyncSessionLocal", return_value=session_cm):
+    with (
+        patch("app.events.consumers.telemetry_consumer.AsyncSessionLocal", return_value=session_cm),
+        patch("app.events.consumers.telemetry_consumer.get_redis_client", return_value=integration_fake_redis),
+        patch("app.events.consumers.telemetry_consumer.telemetry_ws_manager") as mock_ws_manager,
+    ):
+        mock_ws_manager.push_delta = AsyncMock()
         await handle_telemetry_event(event_data)
 
     db.commit.assert_awaited_once()
     db.add.assert_called_once()
+    assert await integration_fake_redis.get("telemetry:health:ingested_events") == "1"
+    assert await integration_fake_redis.get("telemetry:health:persisted_events") == "1"
+    assert await integration_fake_redis.get("telemetry:health:fanout_events") == "1"
+    assert await integration_fake_redis.get("telemetry:health:dropped_events") is None
 
 
 @pytest.mark.asyncio
 async def test_telemetry_persist_failure_then_successful_event_still_commits(integration_fake_redis):
-    await integration_fake_redis.delete("stream:telemetry")
+    await integration_fake_redis.delete(
+        "stream:telemetry",
+        "telemetry:health:ingested_events",
+        "telemetry:health:persisted_events",
+        "telemetry:health:fanout_events",
+        "telemetry:health:dropped_events",
+    )
 
     db = AsyncMock()
     db.commit = AsyncMock()
@@ -94,6 +116,7 @@ async def test_telemetry_persist_failure_then_successful_event_still_commits(int
 
     with (
         patch("app.events.consumers.telemetry_consumer.AsyncSessionLocal", return_value=session_cm),
+        patch("app.events.consumers.telemetry_consumer.get_redis_client", return_value=integration_fake_redis),
         patch(
             "app.events.consumers.telemetry_consumer.TelemetryPersistenceService.persist_event",
             new=AsyncMock(side_effect=SQLAlchemyError("db down")),
@@ -104,11 +127,59 @@ async def test_telemetry_persist_failure_then_successful_event_still_commits(int
 
     with (
         patch("app.events.consumers.telemetry_consumer.AsyncSessionLocal", return_value=session_cm),
+        patch("app.events.consumers.telemetry_consumer.get_redis_client", return_value=integration_fake_redis),
+        patch("app.events.consumers.telemetry_consumer.telemetry_ws_manager") as mock_ws_manager,
         patch(
             "app.events.consumers.telemetry_consumer.TelemetryPersistenceService.persist_event",
             new=AsyncMock(return_value=True),
         ),
     ):
+        mock_ws_manager.push_delta = AsyncMock()
         await handle_telemetry_event(second_event_data)
 
     db.commit.assert_awaited_once()
+    assert await integration_fake_redis.get("telemetry:health:ingested_events") == "2"
+    assert await integration_fake_redis.get("telemetry:health:persisted_events") == "1"
+
+
+@pytest.mark.asyncio
+async def test_telemetry_fanout_failure_increments_dropped_counter(integration_fake_redis):
+    await integration_fake_redis.delete(
+        "stream:telemetry",
+        "telemetry:health:ingested_events",
+        "telemetry:health:persisted_events",
+        "telemetry:health:fanout_events",
+        "telemetry:health:dropped_events",
+    )
+
+    db = AsyncMock()
+    db.add = MagicMock()
+    db.flush = AsyncMock()
+    db.commit = AsyncMock()
+
+    query_result = MagicMock()
+    query_result.scalar_one_or_none.return_value = None
+    db.execute = AsyncMock(return_value=query_result)
+
+    session_cm = AsyncMock()
+    session_cm.__aenter__.return_value = db
+    session_cm.__aexit__.return_value = None
+
+    ingestion = TelemetryIngestionService(redis=integration_fake_redis)
+    event = _telemetry_event()
+    await ingestion.ingest(raw=event["payload"], correlation_id=event["correlation_id"])
+    entries = await integration_fake_redis.xrange("stream:telemetry")
+    event_data = {**entries[0][1], "payload": json.loads(entries[0][1]["payload"])}
+
+    with (
+        patch("app.events.consumers.telemetry_consumer.AsyncSessionLocal", return_value=session_cm),
+        patch("app.events.consumers.telemetry_consumer.get_redis_client", return_value=integration_fake_redis),
+        patch("app.events.consumers.telemetry_consumer.telemetry_ws_manager") as mock_ws_manager,
+    ):
+        mock_ws_manager.push_delta = AsyncMock(side_effect=RuntimeError("ws unavailable"))
+        await handle_telemetry_event(event_data)
+
+    db.commit.assert_awaited_once()
+    assert await integration_fake_redis.get("telemetry:health:persisted_events") == "1"
+    assert await integration_fake_redis.get("telemetry:health:fanout_events") is None
+    assert await integration_fake_redis.get("telemetry:health:dropped_events") == "1"

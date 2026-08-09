@@ -2,6 +2,26 @@
 
 Lightweight chronological notes for decisions that do not require a full ADR.
 
+## 2026-08-10
+### Telemetry Health Counters and WS Fanout (VS2 Step 8)
+Decision: Add Redis-backed telemetry operational counters (`ingested_events`, `persisted_events`, `fanout_events`, `dropped_events`) and wire `telemetry.metric.ingested` persistence success to `/ws/telemetry` delta fanout; expose counter-backed `dropped_events` in `GET /api/v1/telemetry/health` without changing the canonical envelope or existing route contracts.
+Reason:
+- Completes VS2 Step 8 by adding observable pipeline health and real-time telemetry push from persisted events while preserving ADR-006 event-bus flow.
+- Keeps failure isolation explicit: telemetry fanout/counter failures are logged and counted, but do not break persistence commit or unrelated consumers.
+- Uses already-approved channel/event contracts (`/ws/telemetry`, `telemetry.*`) from Telemetry PRD and EventAPI routing.
+Impact:
+- Health endpoint now reports real dropped-event counters instead of fixed baseline values.
+- Telemetry WebSocket subscribers receive metric deltas only after successful persistence, preventing fanout of non-durable records.
+- Startup and deferred topology constraints remain unchanged.
+- Full backend pytest regression completed green post-implementation (`121 passed`); repository-wide Ruff debt remains pre-existing and out of VS2 Step 8 scope.
+Related:
+- `backend/app/modules/telemetry/counters.py`
+- `backend/app/modules/telemetry/service.py`
+- `backend/app/events/consumers/telemetry_consumer.py`
+- `backend/app/websocket/manager.py`
+- `backend/app/websocket/telemetry.py`
+- `backend/app/api/v1/telemetry.py`
+
 ## 2026-08-09
 ### Telemetry Read API Contract (VS2 Step 7)
 Decision: Expose telemetry read APIs on `/api/v1/telemetry/history`, `/api/v1/telemetry/device/{id}`, and `/api/v1/telemetry/health` backed exclusively by `telemetry_records`, using canonical envelope responses and deterministic descending ordering by `observed_at` then `record_id`.

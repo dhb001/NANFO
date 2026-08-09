@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
 from app.events.publisher import publish_event
+from app.modules.telemetry.counters import TelemetryHealthCounterService
 from app.modules.telemetry.repository import TelemetryRecordRepository
 from app.modules.telemetry.schemas import (
     TelemetryDeviceHistoryResponse,
@@ -44,8 +45,13 @@ class TelemetryCollector(ABC):
 class TelemetryIngestionService:
     """Normalize and publish telemetry ingestion events to internal bus."""
 
-    def __init__(self, redis: aioredis.Redis):
+    def __init__(
+        self,
+        redis: aioredis.Redis,
+        counter_service: TelemetryHealthCounterService | None = None,
+    ):
         self._redis = redis
+        self._counter_service = counter_service or TelemetryHealthCounterService(redis)
 
     def normalize_payload(self, raw: dict[str, Any]) -> dict[str, Any]:
         """Normalize vendor-specific telemetry into canonical internal shape."""
@@ -83,6 +89,7 @@ class TelemetryIngestionService:
             payload=payload,
             correlation_id=correlation_id,
         )
+        await self._increment_ingested_counter(correlation_id=correlation_id)
         logger.info(
             "telemetry_event_published",
             correlation_id=correlation_id,
@@ -92,6 +99,16 @@ class TelemetryIngestionService:
             stream_entry_id=entry_id,
         )
         return entry_id
+
+    async def _increment_ingested_counter(self, correlation_id: str) -> None:
+        try:
+            await self._counter_service.increment_ingested()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "telemetry_ingested_counter_increment_failed",
+                correlation_id=correlation_id,
+                error=str(exc),
+            )
 
 
 class TelemetryCollectorRunner(TelemetryCollector):
@@ -219,8 +236,13 @@ class TelemetryPersistenceService:
 class TelemetryQueryService:
     """Read-side service for telemetry history, device metrics, and health."""
 
-    def __init__(self, db: AsyncSession):
+    def __init__(
+        self,
+        db: AsyncSession,
+        counter_service: TelemetryHealthCounterService | None = None,
+    ):
         self._repo = TelemetryRecordRepository(db)
+        self._counter_service = counter_service
 
     async def get_history(
         self,
@@ -270,12 +292,14 @@ class TelemetryQueryService:
     async def get_health(self) -> TelemetryHealthResponse:
         latest_observed_at = await self._repo.get_latest_observed_at()
         total_records = await self._repo.count_all()
+        counters = await self._get_counter_snapshot()
+        dropped_events = counters["dropped_events"]
 
         if latest_observed_at is None:
             return TelemetryHealthResponse(
                 status="ok",
                 ingest_lag_ms=0,
-                dropped_events=0,
+                dropped_events=dropped_events,
                 latest_observed_at=None,
                 total_records=0,
             )
@@ -285,7 +309,26 @@ class TelemetryQueryService:
         return TelemetryHealthResponse(
             status="ok",
             ingest_lag_ms=lag_ms,
-            dropped_events=0,
+            dropped_events=dropped_events,
             latest_observed_at=latest_observed_at,
             total_records=total_records,
         )
+
+    async def _get_counter_snapshot(self) -> dict[str, int]:
+        if self._counter_service is None:
+            return {
+                "ingested_events": 0,
+                "persisted_events": 0,
+                "fanout_events": 0,
+                "dropped_events": 0,
+            }
+        try:
+            return await self._counter_service.get_snapshot()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("telemetry_health_counter_snapshot_failed", error=str(exc))
+            return {
+                "ingested_events": 0,
+                "persisted_events": 0,
+                "fanout_events": 0,
+                "dropped_events": 0,
+            }

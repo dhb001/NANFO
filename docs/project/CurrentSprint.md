@@ -2,7 +2,15 @@
 
 ## Active Goals
 - Vertical Slice 1 Implementation: **COMPLETE** — all modules implemented, tested, and migrated.
-- Next: Begin Vertical Slice 2 scoping (Telemetry ingestion, real-time topology deltas, digital twin baseline).
+- Vertical Slice 2 Implementation: **COMPLETE** — telemetry ingestion/persistence/read APIs and telemetry health counters + `/ws/telemetry` fanout delivered through Step 8.
+- Next active milestone: Vertical Slice 3 kickoff planning (no implementation started).
+
+## Subsystem Progress — Vertical Slice 2
+
+- [x] Step 5: Telemetry ingestion scaffold + collector lifecycle wiring
+- [x] Step 6: `telemetry_records` persistence baseline
+- [x] Step 7: Telemetry read APIs (`history`, `device`, `health`)
+- [x] Step 8: Telemetry operational health counters + persisted-event telemetry WS delta fanout
 
 ## Subsystem Progress — Vertical Slice 1
 
@@ -32,12 +40,12 @@
 - [x] Docker infrastructure: PostgreSQL 16, Neo4j 5.25, Redis 7 — all healthy
 
 ## Blocked / Deferred
-- Topology read queries (GET /topology/graph, /topology/nodes) — stubs only; Neo4j query layer deferred to VS2
 - Digital Twin spatial references — deferred to M6
 - Performance load testing — deferred to post-VS2
+- Repo-wide Ruff debt outside VS2 Step 8 scope remains and is tracked for later cleanup.
 
 ## Next Sprint Candidates
-- VS2: Real-time telemetry ingestion pipeline (SNMP/gRPC collector → Redis Streams → Neo4j)
-- VS2: Topology delta events (node_added, node_updated, edge_added) via WebSocket push
-- VS2: GET /topology/graph implemented against Neo4j
-- VS2: Alembic migration for telemetry_records table
+- VS3: Production collector adapters (SNMP/gRPC) with retry/backoff and health alerting integration.
+- VS3: Telemetry stream/backpressure hardening and operational SLO baselines.
+- VS3: Planning/design for deferred topology analysis endpoints (`/neighbors`, `/impact`, `/reconcile`) under C6 governance.
+- VS3: Digital Twin baseline integration and scenario validation planning.

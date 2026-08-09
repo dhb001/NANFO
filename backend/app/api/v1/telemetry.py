@@ -6,6 +6,7 @@ import time
 import uuid
 from typing import Annotated
 
+import redis.asyncio as aioredis
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,9 +15,11 @@ from app.core.dependencies import (
     TokenClaims,
     get_current_user,
     get_db,
+    get_redis,
     get_request_meta,
 )
 from app.core.responses import APIResponse, success_response
+from app.modules.telemetry.counters import TelemetryHealthCounterService
 from app.modules.telemetry.schemas import (
     TelemetryDeviceHistoryResponse,
     TelemetryHealthResponse,
@@ -76,8 +79,10 @@ async def get_telemetry_health(
     claims: Annotated[TokenClaims, Depends(get_current_user)],
     meta: Annotated[RequestMeta, Depends(get_request_meta)],
     db: Annotated[AsyncSession, Depends(get_db)],
+    redis: Annotated[aioredis.Redis, Depends(get_redis)],
 ):
     started = time.monotonic()
-    svc = TelemetryQueryService(db=db)
+    counter_service = TelemetryHealthCounterService(redis)
+    svc = TelemetryQueryService(db=db, counter_service=counter_service)
     result = await svc.get_health()
     return success_response(result, meta.request_id, started, meta.timestamp)
