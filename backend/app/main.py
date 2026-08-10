@@ -45,6 +45,7 @@ from app.modules.telemetry.service import (
     TelemetryCollectorRunner,
     TelemetryIngestionService,
 )
+from app.websocket.alerts import router as alerts_ws_router
 from app.websocket.telemetry import router as telemetry_ws_router
 from app.websocket.topology import router as ws_router
 
@@ -279,6 +280,7 @@ app.include_router(telemetry_router)
 app.include_router(audit_router)
 app.include_router(ws_router)
 app.include_router(telemetry_ws_router)
+app.include_router(alerts_ws_router)
 
 
 @app.get("/health", tags=["Health"])

@@ -1,6 +1,6 @@
 """NANFO Backend — WebSocket connection managers for realtime channels.
 
-Manages per-network_id subscriber sets and delta push.
+Manages channel subscriptions and delta push semantics.
 Per WebSocket.md §4: delta payloads only — never full state snapshots.
 Per WebSocket.md §2: JWT re-validated before every push.
 """
@@ -122,6 +122,58 @@ class TelemetryWSManager:
             await self.unsubscribe(nid, ws)
 
 
+class AlertsWSManager:
+    """Manages active WebSocket connections subscribed to alert deltas."""
+
+    def __init__(self):
+        self._subscribers: set[WebSocket] = set()
+        self._lock = asyncio.Lock()
+
+    async def subscribe(self, websocket: WebSocket) -> None:
+        async with self._lock:
+            self._subscribers.add(websocket)
+        logger.info("ws_alerts_subscribed")
+
+    async def unsubscribe(self, websocket: WebSocket) -> None:
+        async with self._lock:
+            self._subscribers.discard(websocket)
+        logger.info("ws_alerts_unsubscribed")
+
+    async def push_delta(
+        self,
+        *,
+        event_type: str,
+        delta_type: str,
+        alert: dict,
+        correlation_id: str,
+        timestamp: str,
+    ) -> None:
+        """Push an alert lifecycle delta to all alert subscribers."""
+        message = json.dumps({
+            "event": event_type,
+            "correlation_id": correlation_id,
+            "timestamp": timestamp,
+            "data": {
+                "delta_type": delta_type,
+                "alert": alert,
+            },
+        })
+
+        dead_connections: list[WebSocket] = []
+        async with self._lock:
+            targets = set(self._subscribers)
+
+        for ws in targets:
+            try:
+                await ws.send_text(message)
+            except Exception:  # noqa: BLE001
+                dead_connections.append(ws)
+
+        for ws in dead_connections:
+            await self.unsubscribe(ws)
+
+
 # Singleton managers — shared across the application
 topology_ws_manager = TopologyWSManager()
 telemetry_ws_manager = TelemetryWSManager()
+alerts_ws_manager = AlertsWSManager()
