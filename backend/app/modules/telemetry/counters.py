@@ -12,6 +12,10 @@ COUNTER_RUNTIME_EXHAUSTED_CYCLES = "telemetry:health:runtime_exhausted_cycles"
 COUNTER_RUNTIME_EXHAUSTED_STREAK = "telemetry:health:runtime_exhausted_streak"
 COUNTER_RUNTIME_SUSTAINED_FAILURE_WINDOWS = "telemetry:health:runtime_sustained_failure_windows"
 COUNTER_RUNTIME_SUSTAINED_FAILURE_ACTIVE = "telemetry:health:runtime_sustained_failure_active"
+COUNTER_RUNTIME_ADAPTER_LAST_BATCH_SIZE = "telemetry:health:runtime_adapter_last_batch_size"
+COUNTER_RUNTIME_ADAPTER_INVALID_SAMPLES = "telemetry:health:runtime_adapter_invalid_samples"
+COUNTER_RUNTIME_ADAPTER_INGEST_ATTEMPTS = "telemetry:health:runtime_adapter_ingest_attempts"
+COUNTER_RUNTIME_ADAPTER_INGEST_FAILURES = "telemetry:health:runtime_adapter_ingest_failures"
 
 
 class TelemetryHealthCounterService:
@@ -48,6 +52,20 @@ class TelemetryHealthCounterService:
         await self._redis.set(COUNTER_RUNTIME_SUSTAINED_FAILURE_ACTIVE, value)
         return value
 
+    async def set_runtime_adapter_last_batch_size(self, batch_size: int) -> int:
+        value = max(0, int(batch_size))
+        await self._redis.set(COUNTER_RUNTIME_ADAPTER_LAST_BATCH_SIZE, value)
+        return value
+
+    async def increment_runtime_adapter_invalid_sample(self) -> int:
+        return int(await self._redis.incr(COUNTER_RUNTIME_ADAPTER_INVALID_SAMPLES))
+
+    async def increment_runtime_adapter_ingest_attempt(self) -> int:
+        return int(await self._redis.incr(COUNTER_RUNTIME_ADAPTER_INGEST_ATTEMPTS))
+
+    async def increment_runtime_adapter_ingest_failure(self) -> int:
+        return int(await self._redis.incr(COUNTER_RUNTIME_ADAPTER_INGEST_FAILURES))
+
     async def get_snapshot(self) -> dict[str, int]:
         (
             ingested,
@@ -58,6 +76,10 @@ class TelemetryHealthCounterService:
             runtime_exhausted_streak,
             runtime_sustained_failure_windows,
             runtime_sustained_failure_active,
+            runtime_adapter_last_batch_size,
+            runtime_adapter_invalid_samples,
+            runtime_adapter_ingest_attempts,
+            runtime_adapter_ingest_failures,
         ) = await self._redis.mget(
             COUNTER_INGESTED_EVENTS,
             COUNTER_PERSISTED_EVENTS,
@@ -67,6 +89,10 @@ class TelemetryHealthCounterService:
             COUNTER_RUNTIME_EXHAUSTED_STREAK,
             COUNTER_RUNTIME_SUSTAINED_FAILURE_WINDOWS,
             COUNTER_RUNTIME_SUSTAINED_FAILURE_ACTIVE,
+            COUNTER_RUNTIME_ADAPTER_LAST_BATCH_SIZE,
+            COUNTER_RUNTIME_ADAPTER_INVALID_SAMPLES,
+            COUNTER_RUNTIME_ADAPTER_INGEST_ATTEMPTS,
+            COUNTER_RUNTIME_ADAPTER_INGEST_FAILURES,
         )
         return {
             "ingested_events": self._to_int(ingested),
@@ -77,6 +103,10 @@ class TelemetryHealthCounterService:
             "runtime_exhausted_streak": self._to_int(runtime_exhausted_streak),
             "runtime_sustained_failure_windows": self._to_int(runtime_sustained_failure_windows),
             "runtime_sustained_failure_active": self._to_int(runtime_sustained_failure_active),
+            "runtime_adapter_last_batch_size": self._to_int(runtime_adapter_last_batch_size),
+            "runtime_adapter_invalid_samples": self._to_int(runtime_adapter_invalid_samples),
+            "runtime_adapter_ingest_attempts": self._to_int(runtime_adapter_ingest_attempts),
+            "runtime_adapter_ingest_failures": self._to_int(runtime_adapter_ingest_failures),
         }
 
     @staticmethod

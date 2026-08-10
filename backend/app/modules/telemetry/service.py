@@ -92,6 +92,23 @@ def _is_runtime_sample_minimally_valid(raw: dict[str, Any]) -> bool:
     return raw.get("value") is not None
 
 
+async def _safe_runtime_adapter_counter_update(
+    update: Callable[[], Awaitable[int]],
+    *,
+    adapter_name: str,
+    counter_name: str,
+) -> None:
+    try:
+        await update()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "telemetry_runtime_adapter_counter_update_failed",
+            adapter=adapter_name,
+            counter_name=counter_name,
+            error=str(exc),
+        )
+
+
 def build_runtime_poll_action(
     *,
     collector_runner: TelemetryCollectorRunner,
@@ -100,12 +117,13 @@ def build_runtime_poll_action(
     """Build the runtime poll action that uses a production-shaped adapter."""
 
     async def _poll_action() -> None:
+        adapter_name = adapter.__class__.__name__
         try:
             samples = await adapter.poll()
         except Exception as exc:
             logger.warning(
                 "telemetry_runtime_adapter_poll_failed",
-                adapter=adapter.__class__.__name__,
+                adapter=adapter_name,
                 error=str(exc),
             )
             raise
@@ -113,36 +131,63 @@ def build_runtime_poll_action(
         if not isinstance(samples, list):
             logger.warning(
                 "telemetry_runtime_adapter_batch_invalid",
-                adapter=adapter.__class__.__name__,
+                adapter=adapter_name,
                 batch_type=type(samples).__name__,
             )
             return
 
+        batch_size = len(samples)
+        await _safe_runtime_adapter_counter_update(
+            lambda: collector_runner.counter_service.set_runtime_adapter_last_batch_size(batch_size),
+            adapter_name=adapter_name,
+            counter_name="runtime_adapter_last_batch_size",
+        )
+
         for sample in samples:
             if not isinstance(sample, dict):
+                await _safe_runtime_adapter_counter_update(
+                    collector_runner.counter_service.increment_runtime_adapter_invalid_sample,
+                    adapter_name=adapter_name,
+                    counter_name="runtime_adapter_invalid_samples",
+                )
                 logger.warning(
                     "telemetry_runtime_adapter_sample_invalid",
-                    adapter=adapter.__class__.__name__,
+                    adapter=adapter_name,
                     reason="sample_not_object",
                     sample_type=type(sample).__name__,
                 )
                 continue
 
             if not _is_runtime_sample_minimally_valid(sample):
+                await _safe_runtime_adapter_counter_update(
+                    collector_runner.counter_service.increment_runtime_adapter_invalid_sample,
+                    adapter_name=adapter_name,
+                    counter_name="runtime_adapter_invalid_samples",
+                )
                 logger.warning(
                     "telemetry_runtime_adapter_sample_invalid",
-                    adapter=adapter.__class__.__name__,
+                    adapter=adapter_name,
                     reason="missing_required_fields",
                 )
                 continue
 
             correlation_id = str(uuid.uuid4())
+            await _safe_runtime_adapter_counter_update(
+                collector_runner.counter_service.increment_runtime_adapter_ingest_attempt,
+                adapter_name=adapter_name,
+                counter_name="runtime_adapter_ingest_attempts",
+            )
             try:
                 await collector_runner.ingest_once(raw=sample, correlation_id=correlation_id)
             except Exception as exc:
+                await _safe_runtime_adapter_counter_update(
+                    collector_runner.counter_service.increment_runtime_adapter_ingest_failure,
+                    adapter_name=adapter_name,
+                    counter_name="runtime_adapter_ingest_failures",
+                )
                 logger.warning(
                     "telemetry_runtime_adapter_ingest_failed",
-                    adapter=adapter.__class__.__name__,
+                    adapter=adapter_name,
                     correlation_id=correlation_id,
                     error=str(exc),
                 )
@@ -252,6 +297,10 @@ class TelemetryCollectorRunner(TelemetryCollector):
     @property
     def running(self) -> bool:
         return self._running
+
+    @property
+    def counter_service(self) -> TelemetryHealthCounterService:
+        return self._counter_service
 
     async def start(self) -> None:
         self._running = True
@@ -768,6 +817,10 @@ class TelemetryQueryService:
                 "runtime_exhausted_streak": 0,
                 "runtime_sustained_failure_windows": 0,
                 "runtime_sustained_failure_active": 0,
+                "runtime_adapter_last_batch_size": 0,
+                "runtime_adapter_invalid_samples": 0,
+                "runtime_adapter_ingest_attempts": 0,
+                "runtime_adapter_ingest_failures": 0,
             }
         try:
             return await self._counter_service.get_snapshot()
@@ -782,4 +835,8 @@ class TelemetryQueryService:
                 "runtime_exhausted_streak": 0,
                 "runtime_sustained_failure_windows": 0,
                 "runtime_sustained_failure_active": 0,
+                "runtime_adapter_last_batch_size": 0,
+                "runtime_adapter_invalid_samples": 0,
+                "runtime_adapter_ingest_attempts": 0,
+                "runtime_adapter_ingest_failures": 0,
             }

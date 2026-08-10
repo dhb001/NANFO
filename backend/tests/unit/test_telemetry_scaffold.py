@@ -123,6 +123,11 @@ async def test_runtime_poll_action_ingests_valid_samples(fake_redis):
     ingest_kwargs = mock_ingest_once.await_args.kwargs
     assert ingest_kwargs["raw"] == valid_sample
     assert isinstance(uuid.UUID(ingest_kwargs["correlation_id"]), uuid.UUID)
+    snapshot = await svc.counter_service.get_snapshot()
+    assert snapshot["runtime_adapter_last_batch_size"] == 1
+    assert snapshot["runtime_adapter_invalid_samples"] == 0
+    assert snapshot["runtime_adapter_ingest_attempts"] == 1
+    assert snapshot["runtime_adapter_ingest_failures"] == 0
 
 
 @pytest.mark.asyncio
@@ -138,6 +143,11 @@ async def test_runtime_poll_action_ignores_invalid_batch_type_fail_open(fake_red
         await poll_action()
 
     mock_ingest_once.assert_not_awaited()
+    snapshot = await svc.counter_service.get_snapshot()
+    assert snapshot["runtime_adapter_last_batch_size"] == 0
+    assert snapshot["runtime_adapter_invalid_samples"] == 0
+    assert snapshot["runtime_adapter_ingest_attempts"] == 0
+    assert snapshot["runtime_adapter_ingest_failures"] == 0
 
 
 @pytest.mark.asyncio
@@ -167,6 +177,11 @@ async def test_runtime_poll_action_skips_invalid_samples_and_keeps_valid_ones(fa
 
     mock_ingest_once.assert_awaited_once()
     assert mock_ingest_once.await_args.kwargs["raw"] == valid_sample
+    snapshot = await svc.counter_service.get_snapshot()
+    assert snapshot["runtime_adapter_last_batch_size"] == 3
+    assert snapshot["runtime_adapter_invalid_samples"] == 2
+    assert snapshot["runtime_adapter_ingest_attempts"] == 1
+    assert snapshot["runtime_adapter_ingest_failures"] == 0
 
 
 @pytest.mark.asyncio
@@ -201,6 +216,46 @@ async def test_runtime_poll_action_ingest_failure_raises_for_retry(fake_redis):
         poll_action = build_runtime_poll_action(collector_runner=runner, adapter=adapter)
         with pytest.raises(RuntimeError):
             await poll_action()
+
+    snapshot = await svc.counter_service.get_snapshot()
+    assert snapshot["runtime_adapter_last_batch_size"] == 1
+    assert snapshot["runtime_adapter_invalid_samples"] == 0
+    assert snapshot["runtime_adapter_ingest_attempts"] == 1
+    assert snapshot["runtime_adapter_ingest_failures"] == 1
+
+
+@pytest.mark.asyncio
+async def test_runtime_poll_action_counter_update_failures_are_fail_open(fake_redis):
+    svc = TelemetryIngestionService(redis=fake_redis)
+    runner = TelemetryCollectorRunner(ingestion_service=svc)
+
+    valid_sample = {
+        "device_id": str(uuid.uuid4()),
+        "network_id": str(uuid.uuid4()),
+        "workspace_id": str(uuid.uuid4()),
+        "metric": "cpu_usage",
+        "value": 42.0,
+    }
+    adapter = AsyncMock()
+    adapter.poll = AsyncMock(return_value=[valid_sample])
+
+    with (
+        patch.object(
+            runner.counter_service,
+            "set_runtime_adapter_last_batch_size",
+            new=AsyncMock(side_effect=RuntimeError("counter set failed")),
+        ),
+        patch.object(
+            runner.counter_service,
+            "increment_runtime_adapter_ingest_attempt",
+            new=AsyncMock(side_effect=RuntimeError("counter increment failed")),
+        ),
+        patch.object(runner, "ingest_once", new=AsyncMock(return_value="1-0")) as mock_ingest_once,
+    ):
+        poll_action = build_runtime_poll_action(collector_runner=runner, adapter=adapter)
+        await poll_action()
+
+    mock_ingest_once.assert_awaited_once()
 
 
 @pytest.mark.asyncio
