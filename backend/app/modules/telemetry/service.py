@@ -64,6 +64,93 @@ class TelemetryCollector(ABC):
         pass
 
 
+class RuntimeTelemetryAdapter(ABC):
+    """Runtime adapter interface for production telemetry poll actions."""
+
+    @abstractmethod
+    async def poll(self) -> list[dict[str, Any]]:
+        """Collect a batch of raw telemetry samples from the runtime adapter."""
+
+
+class ProductionTelemetryAdapterStub(RuntimeTelemetryAdapter):
+    """Minimal production adapter stub for runtime poll-action wiring.
+
+    Returns an empty batch by default so startup/runtime wiring is production-shaped
+    without introducing vendor-specific SNMP/gRPC implementation yet.
+    """
+
+    async def poll(self) -> list[dict[str, Any]]:
+        return []
+
+
+def _is_runtime_sample_minimally_valid(raw: dict[str, Any]) -> bool:
+    required_ids = ("device_id", "network_id", "workspace_id")
+    if any(not str(raw.get(field, "")).strip() for field in required_ids):
+        return False
+    if not str(raw.get("metric", "")).strip():
+        return False
+    return raw.get("value") is not None
+
+
+def build_runtime_poll_action(
+    *,
+    collector_runner: TelemetryCollectorRunner,
+    adapter: RuntimeTelemetryAdapter,
+) -> Callable[[], Awaitable[None]]:
+    """Build the runtime poll action that uses a production-shaped adapter."""
+
+    async def _poll_action() -> None:
+        try:
+            samples = await adapter.poll()
+        except Exception as exc:
+            logger.warning(
+                "telemetry_runtime_adapter_poll_failed",
+                adapter=adapter.__class__.__name__,
+                error=str(exc),
+            )
+            raise
+
+        if not isinstance(samples, list):
+            logger.warning(
+                "telemetry_runtime_adapter_batch_invalid",
+                adapter=adapter.__class__.__name__,
+                batch_type=type(samples).__name__,
+            )
+            return
+
+        for sample in samples:
+            if not isinstance(sample, dict):
+                logger.warning(
+                    "telemetry_runtime_adapter_sample_invalid",
+                    adapter=adapter.__class__.__name__,
+                    reason="sample_not_object",
+                    sample_type=type(sample).__name__,
+                )
+                continue
+
+            if not _is_runtime_sample_minimally_valid(sample):
+                logger.warning(
+                    "telemetry_runtime_adapter_sample_invalid",
+                    adapter=adapter.__class__.__name__,
+                    reason="missing_required_fields",
+                )
+                continue
+
+            correlation_id = str(uuid.uuid4())
+            try:
+                await collector_runner.ingest_once(raw=sample, correlation_id=correlation_id)
+            except Exception as exc:
+                logger.warning(
+                    "telemetry_runtime_adapter_ingest_failed",
+                    adapter=adapter.__class__.__name__,
+                    correlation_id=correlation_id,
+                    error=str(exc),
+                )
+                raise
+
+    return _poll_action
+
+
 class TelemetryIngestionService:
     """Normalize and publish telemetry ingestion events to internal bus."""
 

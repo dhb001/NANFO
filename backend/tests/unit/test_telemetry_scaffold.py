@@ -9,8 +9,10 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from app.modules.telemetry.service import (
+    ProductionTelemetryAdapterStub,
     TelemetryCollectorRunner,
     TelemetryIngestionService,
+    build_runtime_poll_action,
     compute_bounded_backoff_seconds,
 )
 
@@ -85,6 +87,120 @@ async def test_telemetry_ingest_ignores_counter_failures(fake_redis):
         )
 
     assert entry_id == "1712425-0"
+
+
+@pytest.mark.asyncio
+async def test_production_adapter_stub_returns_empty_batch(fake_redis):
+    _ = TelemetryIngestionService(redis=fake_redis)
+    adapter = ProductionTelemetryAdapterStub()
+
+    samples = await adapter.poll()
+
+    assert samples == []
+
+
+@pytest.mark.asyncio
+async def test_runtime_poll_action_ingests_valid_samples(fake_redis):
+    svc = TelemetryIngestionService(redis=fake_redis)
+    runner = TelemetryCollectorRunner(ingestion_service=svc)
+
+    valid_sample = {
+        "device_id": str(uuid.uuid4()),
+        "network_id": str(uuid.uuid4()),
+        "workspace_id": str(uuid.uuid4()),
+        "metric": "cpu_usage",
+        "value": 42.0,
+    }
+
+    adapter = AsyncMock()
+    adapter.poll = AsyncMock(return_value=[valid_sample])
+
+    with patch.object(runner, "ingest_once", new=AsyncMock(return_value="1-0")) as mock_ingest_once:
+        poll_action = build_runtime_poll_action(collector_runner=runner, adapter=adapter)
+        await poll_action()
+
+    mock_ingest_once.assert_awaited_once()
+    ingest_kwargs = mock_ingest_once.await_args.kwargs
+    assert ingest_kwargs["raw"] == valid_sample
+    assert isinstance(uuid.UUID(ingest_kwargs["correlation_id"]), uuid.UUID)
+
+
+@pytest.mark.asyncio
+async def test_runtime_poll_action_ignores_invalid_batch_type_fail_open(fake_redis):
+    svc = TelemetryIngestionService(redis=fake_redis)
+    runner = TelemetryCollectorRunner(ingestion_service=svc)
+
+    adapter = AsyncMock()
+    adapter.poll = AsyncMock(return_value={"not": "a-list"})
+
+    with patch.object(runner, "ingest_once", new=AsyncMock()) as mock_ingest_once:
+        poll_action = build_runtime_poll_action(collector_runner=runner, adapter=adapter)
+        await poll_action()
+
+    mock_ingest_once.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_runtime_poll_action_skips_invalid_samples_and_keeps_valid_ones(fake_redis):
+    svc = TelemetryIngestionService(redis=fake_redis)
+    runner = TelemetryCollectorRunner(ingestion_service=svc)
+
+    valid_sample = {
+        "device_id": str(uuid.uuid4()),
+        "network_id": str(uuid.uuid4()),
+        "workspace_id": str(uuid.uuid4()),
+        "metric": "latency_ms",
+        "value": 10,
+    }
+    adapter = AsyncMock()
+    adapter.poll = AsyncMock(
+        return_value=[
+            "not-an-object",
+            {"device_id": "", "metric": "cpu", "value": 1},
+            valid_sample,
+        ]
+    )
+
+    with patch.object(runner, "ingest_once", new=AsyncMock(return_value="1-0")) as mock_ingest_once:
+        poll_action = build_runtime_poll_action(collector_runner=runner, adapter=adapter)
+        await poll_action()
+
+    mock_ingest_once.assert_awaited_once()
+    assert mock_ingest_once.await_args.kwargs["raw"] == valid_sample
+
+
+@pytest.mark.asyncio
+async def test_runtime_poll_action_adapter_failure_raises_for_retry(fake_redis):
+    svc = TelemetryIngestionService(redis=fake_redis)
+    runner = TelemetryCollectorRunner(ingestion_service=svc)
+
+    adapter = AsyncMock()
+    adapter.poll = AsyncMock(side_effect=RuntimeError("adapter failure"))
+
+    poll_action = build_runtime_poll_action(collector_runner=runner, adapter=adapter)
+    with pytest.raises(RuntimeError):
+        await poll_action()
+
+
+@pytest.mark.asyncio
+async def test_runtime_poll_action_ingest_failure_raises_for_retry(fake_redis):
+    svc = TelemetryIngestionService(redis=fake_redis)
+    runner = TelemetryCollectorRunner(ingestion_service=svc)
+
+    valid_sample = {
+        "device_id": str(uuid.uuid4()),
+        "network_id": str(uuid.uuid4()),
+        "workspace_id": str(uuid.uuid4()),
+        "metric": "packet_loss",
+        "value": 0.1,
+    }
+    adapter = AsyncMock()
+    adapter.poll = AsyncMock(return_value=[valid_sample])
+
+    with patch.object(runner, "ingest_once", new=AsyncMock(side_effect=RuntimeError("ingest failed"))):
+        poll_action = build_runtime_poll_action(collector_runner=runner, adapter=adapter)
+        with pytest.raises(RuntimeError):
+            await poll_action()
 
 
 @pytest.mark.asyncio
