@@ -27,6 +27,7 @@ STREAM_GROUPS: dict[str, str] = {
     "stream:network": "nanfo-consumers",
     "stream:org": "nanfo-consumers",
     "stream:telemetry": "nanfo-consumers",
+    "stream:alert": "nanfo-consumers",
 }
 
 

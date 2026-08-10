@@ -5,6 +5,7 @@ VS2 Step 6 scope: persist normalized telemetry ingestion events.
 
 from __future__ import annotations
 
+import uuid
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 
@@ -13,11 +14,17 @@ from sqlalchemy.exc import SQLAlchemyError
 from app.core.logging import get_logger
 from app.db.postgres import AsyncSessionLocal
 from app.db.redis import get_redis_client
+from app.events.publisher import publish_event
 from app.modules.telemetry.counters import TelemetryHealthCounterService
 from app.modules.telemetry.service import TelemetryPersistenceService
 from app.websocket.manager import telemetry_ws_manager
 
 logger = get_logger(__name__)
+
+_RUNTIME_TRANSITION_ALERT_EVENT_MAP: dict[str, str] = {
+    "telemetry.collector.sustained_failure_activated": "alert.generated",
+    "telemetry.collector.sustained_failure_recovered": "alert.resolved",
+}
 
 
 def _get_counter_service() -> TelemetryHealthCounterService | None:
@@ -160,6 +167,67 @@ async def handle_telemetry_event(event: dict) -> None:
         raise
 
 
+def _coerce_correlation_id(value: object) -> str:
+    try:
+        return str(uuid.UUID(str(value)))
+    except (ValueError, TypeError, AttributeError):
+        return str(uuid.uuid4())
+
+
+async def handle_telemetry_runtime_transition_event(event: dict) -> None:
+    """Publish alert lifecycle events for telemetry sustained-failure transitions."""
+    source_event_type = str(event.get("event_type", ""))
+    alert_event_type = _RUNTIME_TRANSITION_ALERT_EVENT_MAP.get(source_event_type)
+    if alert_event_type is None:
+        return
+
+    payload_raw = event.get("payload")
+    payload = payload_raw if isinstance(payload_raw, dict) else {}
+    event_id = str(event.get("event_id", ""))
+    correlation_id = _coerce_correlation_id(event.get("correlation_id"))
+
+    try:
+        redis = get_redis_client()
+    except RuntimeError as exc:
+        logger.warning(
+            "telemetry_runtime_transition_alert_client_unavailable",
+            source_event_type=source_event_type,
+            alert_event_type=alert_event_type,
+            event_id=event_id,
+            correlation_id=correlation_id,
+            error=str(exc),
+        )
+        return
+
+    try:
+        stream_entry_id = await publish_event(
+            redis=redis,
+            event_type=alert_event_type,
+            source="telemetry",
+            payload=payload,
+            correlation_id=correlation_id,
+        )
+        logger.info(
+            "telemetry_runtime_transition_alert_published",
+            source_event_type=source_event_type,
+            alert_event_type=alert_event_type,
+            event_id=event_id,
+            correlation_id=correlation_id,
+            stream_entry_id=stream_entry_id,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "telemetry_runtime_transition_alert_publish_failed",
+            source_event_type=source_event_type,
+            alert_event_type=alert_event_type,
+            event_id=event_id,
+            correlation_id=correlation_id,
+            error=str(exc),
+        )
+
+
 TELEMETRY_HANDLERS: dict[str, object] = {
     "telemetry.metric.ingested": handle_telemetry_event,
+    "telemetry.collector.sustained_failure_activated": handle_telemetry_runtime_transition_event,
+    "telemetry.collector.sustained_failure_recovered": handle_telemetry_runtime_transition_event,
 }

@@ -10,7 +10,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from sqlalchemy.exc import SQLAlchemyError
 
-from app.events.consumers.telemetry_consumer import handle_telemetry_event
+from app.events.consumers.telemetry_consumer import (
+    handle_telemetry_event,
+    handle_telemetry_runtime_transition_event,
+)
 from app.modules.telemetry.service import TelemetryIngestionService
 
 
@@ -183,3 +186,43 @@ async def test_telemetry_fanout_failure_increments_dropped_counter(integration_f
     assert await integration_fake_redis.get("telemetry:health:persisted_events") == "1"
     assert await integration_fake_redis.get("telemetry:health:fanout_events") is None
     assert await integration_fake_redis.get("telemetry:health:dropped_events") == "1"
+
+
+@pytest.mark.asyncio
+async def test_runtime_transition_events_emit_alert_lifecycle_events(integration_fake_redis):
+    await integration_fake_redis.delete("stream:alert")
+
+    activated_event = {
+        "event_id": str(uuid.uuid4()),
+        "event_type": "telemetry.collector.sustained_failure_activated",
+        "correlation_id": str(uuid.uuid4()),
+        "payload": {
+            "exhausted_streak": 3,
+            "sustained_failure_threshold": 3,
+            "observed_at": datetime.now(UTC).isoformat(),
+        },
+    }
+    recovered_event = {
+        "event_id": str(uuid.uuid4()),
+        "event_type": "telemetry.collector.sustained_failure_recovered",
+        "correlation_id": str(uuid.uuid4()),
+        "payload": {
+            "exhausted_streak": 3,
+            "sustained_failure_threshold": 3,
+            "observed_at": datetime.now(UTC).isoformat(),
+        },
+    }
+
+    with patch("app.events.consumers.telemetry_consumer.get_redis_client", return_value=integration_fake_redis):
+        await handle_telemetry_runtime_transition_event(activated_event)
+        await handle_telemetry_runtime_transition_event(recovered_event)
+
+    entries = await integration_fake_redis.xrange("stream:alert")
+    assert len(entries) == 2
+    first_fields = entries[0][1]
+    second_fields = entries[1][1]
+
+    assert first_fields["event_type"] == "alert.generated"
+    assert second_fields["event_type"] == "alert.resolved"
+    assert json.loads(first_fields["payload"]) == activated_event["payload"]
+    assert json.loads(second_fields["payload"]) == recovered_event["payload"]

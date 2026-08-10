@@ -9,7 +9,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from sqlalchemy.exc import SQLAlchemyError
 
-from app.events.consumers.telemetry_consumer import handle_telemetry_event
+from app.events.consumers.telemetry_consumer import (
+    TELEMETRY_HANDLERS,
+    handle_telemetry_event,
+    handle_telemetry_runtime_transition_event,
+)
 
 
 def _telemetry_event() -> dict:
@@ -27,6 +31,19 @@ def _telemetry_event() -> dict:
             "observed_at": datetime.now(UTC).isoformat(),
             "source": "collector",
             "tags": {},
+        },
+    }
+
+
+def _runtime_transition_event(event_type: str = "telemetry.collector.sustained_failure_activated") -> dict:
+    return {
+        "event_id": str(uuid.uuid4()),
+        "event_type": event_type,
+        "correlation_id": str(uuid.uuid4()),
+        "payload": {
+            "exhausted_streak": 3,
+            "sustained_failure_threshold": 3,
+            "observed_at": datetime.now(UTC).isoformat(),
         },
     }
 
@@ -176,3 +193,132 @@ async def test_telemetry_consumer_fanout_failure_increments_dropped_and_does_not
 
     db.commit.assert_awaited_once()
     assert fake_redis.incr.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_runtime_transition_activation_publishes_alert_generated():
+    event = _runtime_transition_event("telemetry.collector.sustained_failure_activated")
+    payload = event["payload"]
+
+    with (
+        patch("app.events.consumers.telemetry_consumer.get_redis_client") as mock_get_redis,
+        patch("app.events.consumers.telemetry_consumer.publish_event", new_callable=AsyncMock) as mock_publish,
+    ):
+        fake_redis = AsyncMock()
+        mock_get_redis.return_value = fake_redis
+        mock_publish.return_value = "501-0"
+
+        await handle_telemetry_runtime_transition_event(event)
+
+    mock_publish.assert_awaited_once()
+    publish_kwargs = mock_publish.await_args.kwargs
+    assert publish_kwargs["redis"] is fake_redis
+    assert publish_kwargs["event_type"] == "alert.generated"
+    assert publish_kwargs["source"] == "telemetry"
+    assert publish_kwargs["payload"] == payload
+    assert publish_kwargs["correlation_id"] == event["correlation_id"]
+
+
+@pytest.mark.asyncio
+async def test_runtime_transition_recovery_publishes_alert_resolved():
+    event = _runtime_transition_event("telemetry.collector.sustained_failure_recovered")
+
+    with (
+        patch("app.events.consumers.telemetry_consumer.get_redis_client") as mock_get_redis,
+        patch("app.events.consumers.telemetry_consumer.publish_event", new_callable=AsyncMock) as mock_publish,
+    ):
+        mock_get_redis.return_value = AsyncMock()
+        mock_publish.return_value = "502-0"
+
+        await handle_telemetry_runtime_transition_event(event)
+
+    mock_publish.assert_awaited_once()
+    assert mock_publish.await_args.kwargs["event_type"] == "alert.resolved"
+
+
+@pytest.mark.asyncio
+async def test_runtime_transition_publish_failure_is_fail_open():
+    event = _runtime_transition_event("telemetry.collector.sustained_failure_activated")
+
+    with (
+        patch("app.events.consumers.telemetry_consumer.get_redis_client") as mock_get_redis,
+        patch("app.events.consumers.telemetry_consumer.publish_event", new_callable=AsyncMock) as mock_publish,
+    ):
+        mock_get_redis.return_value = AsyncMock()
+        mock_publish.side_effect = RuntimeError("redis publish failed")
+
+        await handle_telemetry_runtime_transition_event(event)
+
+    mock_publish.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_runtime_transition_client_unavailable_is_fail_open():
+    event = _runtime_transition_event("telemetry.collector.sustained_failure_activated")
+
+    with (
+        patch(
+            "app.events.consumers.telemetry_consumer.get_redis_client",
+            side_effect=RuntimeError("redis unavailable"),
+        ),
+        patch("app.events.consumers.telemetry_consumer.publish_event", new_callable=AsyncMock) as mock_publish,
+    ):
+        await handle_telemetry_runtime_transition_event(event)
+
+    mock_publish.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_runtime_transition_invalid_correlation_id_falls_back_to_generated_uuid():
+    event = _runtime_transition_event("telemetry.collector.sustained_failure_activated")
+    event["correlation_id"] = "invalid-correlation-id"
+
+    with (
+        patch("app.events.consumers.telemetry_consumer.get_redis_client") as mock_get_redis,
+        patch("app.events.consumers.telemetry_consumer.publish_event", new_callable=AsyncMock) as mock_publish,
+    ):
+        mock_get_redis.return_value = AsyncMock()
+        mock_publish.return_value = "503-0"
+
+        await handle_telemetry_runtime_transition_event(event)
+
+    correlation_id = mock_publish.await_args.kwargs["correlation_id"]
+    assert isinstance(uuid.UUID(correlation_id), uuid.UUID)
+
+
+@pytest.mark.asyncio
+async def test_runtime_transition_non_dict_payload_falls_back_to_empty_object():
+    event = _runtime_transition_event("telemetry.collector.sustained_failure_activated")
+    event["payload"] = "not-an-object"
+
+    with (
+        patch("app.events.consumers.telemetry_consumer.get_redis_client") as mock_get_redis,
+        patch("app.events.consumers.telemetry_consumer.publish_event", new_callable=AsyncMock) as mock_publish,
+    ):
+        mock_get_redis.return_value = AsyncMock()
+        mock_publish.return_value = "504-0"
+
+        await handle_telemetry_runtime_transition_event(event)
+
+    assert mock_publish.await_args.kwargs["payload"] == {}
+
+
+@pytest.mark.asyncio
+async def test_runtime_transition_unmapped_event_is_noop():
+    with (
+        patch("app.events.consumers.telemetry_consumer.get_redis_client") as mock_get_redis,
+        patch("app.events.consumers.telemetry_consumer.publish_event", new_callable=AsyncMock) as mock_publish,
+    ):
+        await handle_telemetry_runtime_transition_event(
+            _runtime_transition_event("telemetry.collector.unknown_transition")
+        )
+
+    mock_get_redis.assert_not_called()
+    mock_publish.assert_not_awaited()
+
+
+def test_telemetry_handlers_include_runtime_transition_events():
+    assert "telemetry.collector.sustained_failure_activated" in TELEMETRY_HANDLERS
+    assert "telemetry.collector.sustained_failure_recovered" in TELEMETRY_HANDLERS
+    assert TELEMETRY_HANDLERS["telemetry.collector.sustained_failure_activated"] is handle_telemetry_runtime_transition_event
+    assert TELEMETRY_HANDLERS["telemetry.collector.sustained_failure_recovered"] is handle_telemetry_runtime_transition_event
