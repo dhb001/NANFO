@@ -86,6 +86,10 @@ async def test_get_health_returns_zero_when_no_records(mock_db):
             "persisted_events": 0,
             "fanout_events": 0,
             "dropped_events": 2,
+            "runtime_exhausted_cycles": 0,
+            "runtime_exhausted_streak": 0,
+            "runtime_sustained_failure_windows": 0,
+            "runtime_sustained_failure_active": 0,
         }
     )
     svc = TelemetryQueryService(db=mock_db, counter_service=counter_service)
@@ -110,6 +114,10 @@ async def test_get_health_returns_positive_lag(mock_db):
             "persisted_events": 4,
             "fanout_events": 4,
             "dropped_events": 1,
+            "runtime_exhausted_cycles": 5,
+            "runtime_exhausted_streak": 0,
+            "runtime_sustained_failure_windows": 1,
+            "runtime_sustained_failure_active": 0,
         }
     )
     svc = TelemetryQueryService(db=mock_db, counter_service=counter_service)
@@ -139,3 +147,27 @@ async def test_get_health_falls_back_to_zero_counters_on_counter_failure(mock_db
 
     assert result.status == "ok"
     assert result.dropped_events == 0
+
+
+@pytest.mark.asyncio
+async def test_get_health_status_degraded_when_runtime_sustained_failure_active(mock_db):
+    counter_service = AsyncMock()
+    counter_service.get_snapshot = AsyncMock(
+        return_value={
+            "ingested_events": 10,
+            "persisted_events": 9,
+            "fanout_events": 9,
+            "dropped_events": 1,
+            "runtime_exhausted_cycles": 8,
+            "runtime_exhausted_streak": 4,
+            "runtime_sustained_failure_windows": 2,
+            "runtime_sustained_failure_active": 1,
+        }
+    )
+    svc = TelemetryQueryService(db=mock_db, counter_service=counter_service)
+    svc._repo.get_latest_observed_at = AsyncMock(return_value=None)
+    svc._repo.count_all = AsyncMock(return_value=0)
+
+    result = await svc.get_health()
+
+    assert result.status == "degraded"

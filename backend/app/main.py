@@ -53,6 +53,17 @@ logger = get_logger(__name__)
 _TELEMETRY_COLLECTOR_START_MAX_ATTEMPTS = 3
 _TELEMETRY_COLLECTOR_BACKOFF_BASE_SECONDS = 0.5
 _TELEMETRY_COLLECTOR_BACKOFF_MAX_SECONDS = 2.0
+_TELEMETRY_COLLECTOR_RUNTIME_INTERVAL_SECONDS = 5.0
+_TELEMETRY_COLLECTOR_RUNTIME_POLL_MAX_ATTEMPTS = 3
+_TELEMETRY_COLLECTOR_RUNTIME_POLL_BACKOFF_BASE_SECONDS = 0.5
+_TELEMETRY_COLLECTOR_RUNTIME_POLL_BACKOFF_MAX_SECONDS = 2.0
+_TELEMETRY_COLLECTOR_RUNTIME_SUSTAINED_FAILURE_THRESHOLD = 3
+
+
+async def _telemetry_collector_noop_poll_action() -> None:
+    """Default safe runtime poll action until adapter polling is wired."""
+    return
+
 
 def _merge_handlers(*handler_dicts: dict) -> dict:
     merged: dict = {}
@@ -100,9 +111,27 @@ async def lifespan(app: FastAPI):
             base_backoff_seconds=_TELEMETRY_COLLECTOR_BACKOFF_BASE_SECONDS,
             max_backoff_seconds=_TELEMETRY_COLLECTOR_BACKOFF_MAX_SECONDS,
         )
-        if not started:
+        if started:
+            await telemetry_collector.start_runtime_loop(
+                poll_action=_telemetry_collector_noop_poll_action,
+                interval_seconds=_TELEMETRY_COLLECTOR_RUNTIME_INTERVAL_SECONDS,
+                poll_max_attempts=_TELEMETRY_COLLECTOR_RUNTIME_POLL_MAX_ATTEMPTS,
+                poll_base_backoff_seconds=_TELEMETRY_COLLECTOR_RUNTIME_POLL_BACKOFF_BASE_SECONDS,
+                poll_max_backoff_seconds=_TELEMETRY_COLLECTOR_RUNTIME_POLL_BACKOFF_MAX_SECONDS,
+                runtime_sustained_failure_threshold=_TELEMETRY_COLLECTOR_RUNTIME_SUSTAINED_FAILURE_THRESHOLD,
+            )
+        else:
             telemetry_collector = None
     except (RuntimeError, ValueError) as exc:
+        if telemetry_collector is not None:
+            try:
+                await telemetry_collector.stop()
+            except Exception as stop_exc:  # noqa: BLE001
+                logger.warning(
+                    "telemetry_collector_shutdown_after_startup_failure_failed",
+                    correlation_id=startup_correlation_id,
+                    error=str(stop_exc),
+                )
         telemetry_collector = None
         logger.warning(
             "telemetry_collector_startup_failed",

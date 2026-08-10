@@ -152,6 +152,10 @@ def test_get_telemetry_health_reads_dropped_counter_snapshot(client, headers):
                     "persisted_events": 5,
                     "fanout_events": 5,
                     "dropped_events": 3,
+                    "runtime_exhausted_cycles": 7,
+                    "runtime_exhausted_streak": 3,
+                    "runtime_sustained_failure_windows": 2,
+                    "runtime_sustained_failure_active": 1,
                 }
             ),
         ),
@@ -161,6 +165,7 @@ def test_get_telemetry_health_reads_dropped_counter_snapshot(client, headers):
     assert response.status_code == 200
     body = response.json()
     assert body["success"] is True
+    assert body["data"]["status"] == "degraded"
     assert body["data"]["dropped_events"] == 3
 
 

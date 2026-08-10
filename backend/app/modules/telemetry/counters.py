@@ -8,6 +8,10 @@ COUNTER_INGESTED_EVENTS = "telemetry:health:ingested_events"
 COUNTER_PERSISTED_EVENTS = "telemetry:health:persisted_events"
 COUNTER_FANOUT_EVENTS = "telemetry:health:fanout_events"
 COUNTER_DROPPED_EVENTS = "telemetry:health:dropped_events"
+COUNTER_RUNTIME_EXHAUSTED_CYCLES = "telemetry:health:runtime_exhausted_cycles"
+COUNTER_RUNTIME_EXHAUSTED_STREAK = "telemetry:health:runtime_exhausted_streak"
+COUNTER_RUNTIME_SUSTAINED_FAILURE_WINDOWS = "telemetry:health:runtime_sustained_failure_windows"
+COUNTER_RUNTIME_SUSTAINED_FAILURE_ACTIVE = "telemetry:health:runtime_sustained_failure_active"
 
 
 class TelemetryHealthCounterService:
@@ -28,18 +32,51 @@ class TelemetryHealthCounterService:
     async def increment_dropped(self) -> int:
         return int(await self._redis.incr(COUNTER_DROPPED_EVENTS))
 
+    async def increment_runtime_exhausted_cycle(self) -> int:
+        return int(await self._redis.incr(COUNTER_RUNTIME_EXHAUSTED_CYCLES))
+
+    async def set_runtime_exhausted_streak(self, streak: int) -> int:
+        value = max(0, int(streak))
+        await self._redis.set(COUNTER_RUNTIME_EXHAUSTED_STREAK, value)
+        return value
+
+    async def increment_runtime_sustained_failure_window(self) -> int:
+        return int(await self._redis.incr(COUNTER_RUNTIME_SUSTAINED_FAILURE_WINDOWS))
+
+    async def set_runtime_sustained_failure_active(self, active: bool) -> int:
+        value = 1 if active else 0
+        await self._redis.set(COUNTER_RUNTIME_SUSTAINED_FAILURE_ACTIVE, value)
+        return value
+
     async def get_snapshot(self) -> dict[str, int]:
-        ingested, persisted, fanout, dropped = await self._redis.mget(
+        (
+            ingested,
+            persisted,
+            fanout,
+            dropped,
+            runtime_exhausted_cycles,
+            runtime_exhausted_streak,
+            runtime_sustained_failure_windows,
+            runtime_sustained_failure_active,
+        ) = await self._redis.mget(
             COUNTER_INGESTED_EVENTS,
             COUNTER_PERSISTED_EVENTS,
             COUNTER_FANOUT_EVENTS,
             COUNTER_DROPPED_EVENTS,
+            COUNTER_RUNTIME_EXHAUSTED_CYCLES,
+            COUNTER_RUNTIME_EXHAUSTED_STREAK,
+            COUNTER_RUNTIME_SUSTAINED_FAILURE_WINDOWS,
+            COUNTER_RUNTIME_SUSTAINED_FAILURE_ACTIVE,
         )
         return {
             "ingested_events": self._to_int(ingested),
             "persisted_events": self._to_int(persisted),
             "fanout_events": self._to_int(fanout),
             "dropped_events": self._to_int(dropped),
+            "runtime_exhausted_cycles": self._to_int(runtime_exhausted_cycles),
+            "runtime_exhausted_streak": self._to_int(runtime_exhausted_streak),
+            "runtime_sustained_failure_windows": self._to_int(runtime_sustained_failure_windows),
+            "runtime_sustained_failure_active": self._to_int(runtime_sustained_failure_active),
         }
 
     @staticmethod

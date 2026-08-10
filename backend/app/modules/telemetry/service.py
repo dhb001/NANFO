@@ -31,6 +31,8 @@ from app.modules.telemetry.schemas import (
 
 logger = get_logger(__name__)
 
+_RUNTIME_SUSTAINED_FAILURE_DEFAULT_THRESHOLD = 3
+
 
 def compute_bounded_backoff_seconds(
     attempt: int,
@@ -70,6 +72,10 @@ class TelemetryIngestionService:
     ):
         self._redis = redis
         self._counter_service = counter_service or TelemetryHealthCounterService(redis)
+
+    @property
+    def counter_service(self) -> TelemetryHealthCounterService:
+        return self._counter_service
 
     def normalize_payload(self, raw: dict[str, Any]) -> dict[str, Any]:
         """Normalize vendor-specific telemetry into canonical internal shape."""
@@ -136,9 +142,18 @@ class TelemetryCollectorRunner(TelemetryCollector):
     lifecycle hooks and a callable ingestion path for tests and future wiring.
     """
 
-    def __init__(self, ingestion_service: TelemetryIngestionService):
+    def __init__(
+        self,
+        ingestion_service: TelemetryIngestionService,
+        counter_service: TelemetryHealthCounterService | None = None,
+    ):
         self._ingestion_service = ingestion_service
+        self._counter_service = counter_service or ingestion_service.counter_service
         self._running = False
+        self._runtime_loop_task: asyncio.Task | None = None
+        self._runtime_stop_event = asyncio.Event()
+        self._runtime_exhausted_streak = 0
+        self._runtime_sustained_failure_active = False
 
     @property
     def running(self) -> bool:
@@ -150,7 +165,177 @@ class TelemetryCollectorRunner(TelemetryCollector):
 
     async def stop(self) -> None:
         self._running = False
+        await self.stop_runtime_loop()
         logger.info("telemetry_collector_stopped")
+
+    async def start_runtime_loop(
+        self,
+        *,
+        poll_action: Callable[[], Awaitable[None]],
+        interval_seconds: float,
+        poll_max_attempts: int,
+        poll_base_backoff_seconds: float,
+        poll_max_backoff_seconds: float,
+        runtime_sustained_failure_threshold: int = _RUNTIME_SUSTAINED_FAILURE_DEFAULT_THRESHOLD,
+        sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+    ) -> None:
+        """Start a deterministic runtime loop that executes one poll cycle per interval."""
+        if self._runtime_loop_task is not None and not self._runtime_loop_task.done():
+            logger.info("telemetry_collector_runtime_loop_already_running")
+            return
+
+        self._runtime_stop_event = asyncio.Event()
+        self._runtime_exhausted_streak = 0
+        self._runtime_sustained_failure_active = False
+        await self._safe_runtime_counter_update(
+            lambda: self._counter_service.set_runtime_exhausted_streak(0),
+            counter_name="runtime_exhausted_streak",
+        )
+        await self._safe_runtime_counter_update(
+            lambda: self._counter_service.set_runtime_sustained_failure_active(False),
+            counter_name="runtime_sustained_failure_active",
+        )
+        interval = max(interval_seconds, 0.0)
+        threshold = max(1, runtime_sustained_failure_threshold)
+        self._runtime_loop_task = asyncio.create_task(
+            self._run_runtime_loop(
+                poll_action=poll_action,
+                interval_seconds=interval,
+                poll_max_attempts=poll_max_attempts,
+                poll_base_backoff_seconds=poll_base_backoff_seconds,
+                poll_max_backoff_seconds=poll_max_backoff_seconds,
+                runtime_sustained_failure_threshold=threshold,
+                sleep=sleep,
+            ),
+            name="telemetry-runtime-loop",
+        )
+        logger.info(
+            "telemetry_collector_runtime_loop_started",
+            interval_seconds=interval,
+            poll_max_attempts=max(1, poll_max_attempts),
+            runtime_sustained_failure_threshold=threshold,
+        )
+
+    async def stop_runtime_loop(self) -> None:
+        """Stop runtime loop deterministically and await task completion."""
+        task = self._runtime_loop_task
+        if task is None:
+            return
+
+        self._runtime_stop_event.set()
+        await task
+        self._runtime_loop_task = None
+        logger.info("telemetry_collector_runtime_loop_stopped")
+
+    async def _run_runtime_loop(
+        self,
+        *,
+        poll_action: Callable[[], Awaitable[None]],
+        interval_seconds: float,
+        poll_max_attempts: int,
+        poll_base_backoff_seconds: float,
+        poll_max_backoff_seconds: float,
+        runtime_sustained_failure_threshold: int,
+        sleep: Callable[[float], Awaitable[None]],
+    ) -> None:
+        while not self._runtime_stop_event.is_set():
+            succeeded = await self.run_single_poll_with_retry(
+                poll_action=poll_action,
+                max_attempts=poll_max_attempts,
+                base_backoff_seconds=poll_base_backoff_seconds,
+                max_backoff_seconds=poll_max_backoff_seconds,
+                sleep=sleep,
+            )
+
+            if not succeeded:
+                await self._record_runtime_cycle_exhausted(
+                    sustained_failure_threshold=runtime_sustained_failure_threshold
+                )
+            else:
+                await self._record_runtime_cycle_success()
+
+            if self._runtime_stop_event.is_set():
+                break
+
+            await sleep(interval_seconds)
+
+    async def _record_runtime_cycle_exhausted(self, *, sustained_failure_threshold: int) -> None:
+        self._runtime_exhausted_streak += 1
+        await self._safe_runtime_counter_update(
+            lambda: self._counter_service.increment_runtime_exhausted_cycle(),
+            counter_name="runtime_exhausted_cycles",
+        )
+        await self._safe_runtime_counter_update(
+            lambda: self._counter_service.set_runtime_exhausted_streak(self._runtime_exhausted_streak),
+            counter_name="runtime_exhausted_streak",
+        )
+
+        logger.warning(
+            "telemetry_collector_runtime_cycle_exhausted",
+            exhausted_streak=self._runtime_exhausted_streak,
+            sustained_failure_threshold=sustained_failure_threshold,
+        )
+
+        if (
+            self._runtime_exhausted_streak >= sustained_failure_threshold
+            and not self._runtime_sustained_failure_active
+        ):
+            self._runtime_sustained_failure_active = True
+            await self._safe_runtime_counter_update(
+                lambda: self._counter_service.increment_runtime_sustained_failure_window(),
+                counter_name="runtime_sustained_failure_windows",
+            )
+            await self._safe_runtime_counter_update(
+                lambda: self._counter_service.set_runtime_sustained_failure_active(True),
+                counter_name="runtime_sustained_failure_active",
+            )
+            logger.warning(
+                "telemetry_collector_runtime_sustained_failure_active",
+                exhausted_streak=self._runtime_exhausted_streak,
+                sustained_failure_threshold=sustained_failure_threshold,
+            )
+
+    async def _record_runtime_cycle_success(self) -> None:
+        if self._runtime_exhausted_streak == 0 and not self._runtime_sustained_failure_active:
+            return
+
+        previous_streak = self._runtime_exhausted_streak
+        self._runtime_exhausted_streak = 0
+        await self._safe_runtime_counter_update(
+            lambda: self._counter_service.set_runtime_exhausted_streak(0),
+            counter_name="runtime_exhausted_streak",
+        )
+
+        if self._runtime_sustained_failure_active:
+            self._runtime_sustained_failure_active = False
+            await self._safe_runtime_counter_update(
+                lambda: self._counter_service.set_runtime_sustained_failure_active(False),
+                counter_name="runtime_sustained_failure_active",
+            )
+            logger.info(
+                "telemetry_collector_runtime_sustained_failure_recovered",
+                previous_exhausted_streak=previous_streak,
+            )
+        else:
+            logger.info(
+                "telemetry_collector_runtime_exhausted_streak_recovered",
+                previous_exhausted_streak=previous_streak,
+            )
+
+    async def _safe_runtime_counter_update(
+        self,
+        updater: Callable[[], Awaitable[int]],
+        *,
+        counter_name: str,
+    ) -> None:
+        try:
+            await updater()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "telemetry_collector_runtime_counter_update_failed",
+                counter_name=counter_name,
+                error=str(exc),
+            )
 
     async def start_with_retry(
         self,
@@ -190,6 +375,54 @@ class TelemetryCollectorRunner(TelemetryCollector):
                 )
                 logger.warning(
                     "telemetry_collector_start_retry_scheduled",
+                    attempt=attempt,
+                    max_attempts=attempts,
+                    retry_in_seconds=delay,
+                    error=str(exc),
+                )
+                await sleep(delay)
+
+        return False
+
+    async def run_single_poll_with_retry(
+        self,
+        *,
+        poll_action: Callable[[], Awaitable[None]],
+        max_attempts: int,
+        base_backoff_seconds: float,
+        max_backoff_seconds: float,
+        sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+    ) -> bool:
+        """Run one collector poll action with deterministic bounded retry/backoff."""
+        attempts = max(1, max_attempts)
+
+        for attempt in range(1, attempts + 1):
+            try:
+                await poll_action()
+                if attempt > 1:
+                    logger.info(
+                        "telemetry_collector_poll_recovered",
+                        attempt=attempt,
+                        max_attempts=attempts,
+                    )
+                return True
+            except Exception as exc:  # noqa: BLE001
+                if attempt >= attempts:
+                    logger.warning(
+                        "telemetry_collector_poll_retries_exhausted",
+                        attempt=attempt,
+                        max_attempts=attempts,
+                        error=str(exc),
+                    )
+                    return False
+
+                delay = compute_bounded_backoff_seconds(
+                    attempt,
+                    base_backoff_seconds=base_backoff_seconds,
+                    max_backoff_seconds=max_backoff_seconds,
+                )
+                logger.warning(
+                    "telemetry_collector_poll_retry_scheduled",
                     attempt=attempt,
                     max_attempts=attempts,
                     retry_in_seconds=delay,
@@ -359,10 +592,12 @@ class TelemetryQueryService:
         total_records = await self._repo.count_all()
         counters = await self._get_counter_snapshot()
         dropped_events = counters["dropped_events"]
+        runtime_sustained_failure_active = counters.get("runtime_sustained_failure_active", 0) > 0
+        status = "degraded" if runtime_sustained_failure_active else "ok"
 
         if latest_observed_at is None:
             return TelemetryHealthResponse(
-                status="ok",
+                status=status,
                 ingest_lag_ms=0,
                 dropped_events=dropped_events,
                 latest_observed_at=None,
@@ -372,7 +607,7 @@ class TelemetryQueryService:
         now_utc = datetime.now(UTC)
         lag_ms = int(max((now_utc - latest_observed_at).total_seconds() * 1000, 0))
         return TelemetryHealthResponse(
-            status="ok",
+            status=status,
             ingest_lag_ms=lag_ms,
             dropped_events=dropped_events,
             latest_observed_at=latest_observed_at,
@@ -386,6 +621,10 @@ class TelemetryQueryService:
                 "persisted_events": 0,
                 "fanout_events": 0,
                 "dropped_events": 0,
+                "runtime_exhausted_cycles": 0,
+                "runtime_exhausted_streak": 0,
+                "runtime_sustained_failure_windows": 0,
+                "runtime_sustained_failure_active": 0,
             }
         try:
             return await self._counter_service.get_snapshot()
@@ -396,4 +635,8 @@ class TelemetryQueryService:
                 "persisted_events": 0,
                 "fanout_events": 0,
                 "dropped_events": 0,
+                "runtime_exhausted_cycles": 0,
+                "runtime_exhausted_streak": 0,
+                "runtime_sustained_failure_windows": 0,
+                "runtime_sustained_failure_active": 0,
             }

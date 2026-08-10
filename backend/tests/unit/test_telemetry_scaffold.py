@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from unittest.mock import AsyncMock, patch
 
@@ -193,3 +194,319 @@ async def test_collector_runner_start_with_retry_immediate_success_avoids_sleep(
     assert started is True
     assert runner.running is True
     sleep.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_run_single_poll_with_retry_recovers_after_transient_failures(fake_redis):
+    svc = TelemetryIngestionService(redis=fake_redis)
+    runner = TelemetryCollectorRunner(ingestion_service=svc)
+
+    poll_action = AsyncMock(side_effect=[RuntimeError("first"), RuntimeError("second"), None])
+    sleep = AsyncMock()
+
+    succeeded = await runner.run_single_poll_with_retry(
+        poll_action=poll_action,
+        max_attempts=3,
+        base_backoff_seconds=0.5,
+        max_backoff_seconds=2.0,
+        sleep=sleep,
+    )
+
+    assert succeeded is True
+    assert poll_action.await_count == 3
+    assert sleep.await_count == 2
+    assert sleep.await_args_list[0].args[0] == 0.5
+    assert sleep.await_args_list[1].args[0] == 1.0
+
+
+@pytest.mark.asyncio
+async def test_run_single_poll_with_retry_exhausts_and_returns_false(fake_redis):
+    svc = TelemetryIngestionService(redis=fake_redis)
+    runner = TelemetryCollectorRunner(ingestion_service=svc)
+
+    poll_action = AsyncMock(side_effect=[RuntimeError("first"), RuntimeError("second"), RuntimeError("third")])
+    sleep = AsyncMock()
+
+    succeeded = await runner.run_single_poll_with_retry(
+        poll_action=poll_action,
+        max_attempts=3,
+        base_backoff_seconds=0.5,
+        max_backoff_seconds=2.0,
+        sleep=sleep,
+    )
+
+    assert succeeded is False
+    assert poll_action.await_count == 3
+    assert sleep.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_run_single_poll_with_retry_immediate_success_without_sleep(fake_redis):
+    svc = TelemetryIngestionService(redis=fake_redis)
+    runner = TelemetryCollectorRunner(ingestion_service=svc)
+
+    poll_action = AsyncMock(return_value=None)
+    sleep = AsyncMock()
+
+    succeeded = await runner.run_single_poll_with_retry(
+        poll_action=poll_action,
+        max_attempts=3,
+        base_backoff_seconds=0.5,
+        max_backoff_seconds=2.0,
+        sleep=sleep,
+    )
+
+    assert succeeded is True
+    poll_action.assert_awaited_once()
+    sleep.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_runtime_loop_runs_poll_cycles_on_interval_until_stopped(fake_redis):
+    svc = TelemetryIngestionService(redis=fake_redis)
+    runner = TelemetryCollectorRunner(ingestion_service=svc)
+
+    poll_action = AsyncMock()
+
+    async def controlled_sleep(_: float) -> None:
+        if poll_action.await_count >= 2:
+            runner._runtime_stop_event.set()
+
+    sleep = AsyncMock(side_effect=controlled_sleep)
+
+    await runner.start_runtime_loop(
+        poll_action=poll_action,
+        interval_seconds=0.1,
+        poll_max_attempts=2,
+        poll_base_backoff_seconds=0.5,
+        poll_max_backoff_seconds=2.0,
+        sleep=sleep,
+    )
+
+    assert runner._runtime_loop_task is not None
+    await runner._runtime_loop_task
+
+    assert poll_action.await_count == 2
+    assert sleep.await_count >= 1
+    runner._runtime_loop_task = None
+
+
+@pytest.mark.asyncio
+async def test_runtime_loop_continues_after_exhausted_cycle(fake_redis):
+    svc = TelemetryIngestionService(redis=fake_redis)
+    runner = TelemetryCollectorRunner(ingestion_service=svc)
+
+    poll_action = AsyncMock(return_value=None)
+    sleep = AsyncMock()
+
+    side_effects = [False, True]
+
+    async def fake_run_single_poll_with_retry(**_: object) -> bool:
+        result = side_effects.pop(0)
+        if result and not side_effects:
+            runner._runtime_stop_event.set()
+        return result
+
+    with patch.object(
+        runner,
+        "run_single_poll_with_retry",
+        new=AsyncMock(side_effect=fake_run_single_poll_with_retry),
+    ) as mock_retry:
+        await runner.start_runtime_loop(
+            poll_action=poll_action,
+            interval_seconds=0.1,
+            poll_max_attempts=2,
+            poll_base_backoff_seconds=0.5,
+            poll_max_backoff_seconds=2.0,
+            sleep=sleep,
+        )
+        assert runner._runtime_loop_task is not None
+        await runner._runtime_loop_task
+
+    assert mock_retry.await_count == 2
+    assert sleep.await_count >= 1
+    runner._runtime_loop_task = None
+
+
+@pytest.mark.asyncio
+async def test_stop_runtime_loop_awaits_task_and_clears_reference(fake_redis):
+    svc = TelemetryIngestionService(redis=fake_redis)
+    runner = TelemetryCollectorRunner(ingestion_service=svc)
+
+    poll_action = AsyncMock(return_value=None)
+
+    async def controlled_sleep(_: float) -> None:
+        await asyncio.sleep(0)
+
+    sleep = AsyncMock(side_effect=controlled_sleep)
+
+    await runner.start_runtime_loop(
+        poll_action=poll_action,
+        interval_seconds=1.0,
+        poll_max_attempts=2,
+        poll_base_backoff_seconds=0.5,
+        poll_max_backoff_seconds=2.0,
+        sleep=sleep,
+    )
+
+    assert runner._runtime_loop_task is not None
+    task = runner._runtime_loop_task
+
+    await runner.stop_runtime_loop()
+
+    assert runner._runtime_loop_task is None
+    assert task.done()
+
+
+@pytest.mark.asyncio
+async def test_collector_stop_stops_runtime_loop_when_running(fake_redis):
+    svc = TelemetryIngestionService(redis=fake_redis)
+    runner = TelemetryCollectorRunner(ingestion_service=svc)
+    await runner.start()
+
+    poll_action = AsyncMock(return_value=None)
+
+    async def controlled_sleep(_: float) -> None:
+        await asyncio.sleep(0)
+        while not runner._runtime_stop_event.is_set():
+            await asyncio.sleep(0)
+
+    sleep = AsyncMock(side_effect=controlled_sleep)
+
+    await runner.start_runtime_loop(
+        poll_action=poll_action,
+        interval_seconds=1.0,
+        poll_max_attempts=2,
+        poll_base_backoff_seconds=0.5,
+        poll_max_backoff_seconds=2.0,
+        sleep=sleep,
+    )
+
+    assert runner._runtime_loop_task is not None
+    task = runner._runtime_loop_task
+
+    await runner.stop()
+
+    assert runner.running is False
+    assert runner._runtime_loop_task is None
+    assert task.done()
+
+
+@pytest.mark.asyncio
+async def test_runtime_loop_sets_sustained_failure_active_after_threshold(fake_redis):
+    svc = TelemetryIngestionService(redis=fake_redis)
+    runner = TelemetryCollectorRunner(ingestion_service=svc)
+
+    poll_action = AsyncMock(return_value=None)
+    sleep = AsyncMock()
+    cycle_results = [False, False, False]
+
+    async def fake_run_single_poll_with_retry(**_: object) -> bool:
+        result = cycle_results.pop(0)
+        if not cycle_results:
+            runner._runtime_stop_event.set()
+        return result
+
+    with patch.object(
+        runner,
+        "run_single_poll_with_retry",
+        new=AsyncMock(side_effect=fake_run_single_poll_with_retry),
+    ):
+        await runner.start_runtime_loop(
+            poll_action=poll_action,
+            interval_seconds=0.1,
+            poll_max_attempts=2,
+            poll_base_backoff_seconds=0.5,
+            poll_max_backoff_seconds=2.0,
+            runtime_sustained_failure_threshold=3,
+            sleep=sleep,
+        )
+        assert runner._runtime_loop_task is not None
+        await runner._runtime_loop_task
+
+    snapshot = await svc.counter_service.get_snapshot()
+    assert snapshot["runtime_exhausted_cycles"] == 3
+    assert snapshot["runtime_exhausted_streak"] == 3
+    assert snapshot["runtime_sustained_failure_windows"] == 1
+    assert snapshot["runtime_sustained_failure_active"] == 1
+    runner._runtime_loop_task = None
+
+
+@pytest.mark.asyncio
+async def test_runtime_loop_success_resets_sustained_failure_state(fake_redis):
+    svc = TelemetryIngestionService(redis=fake_redis)
+    runner = TelemetryCollectorRunner(ingestion_service=svc)
+
+    poll_action = AsyncMock(return_value=None)
+    sleep = AsyncMock()
+    cycle_results = [False, False, False, True]
+
+    async def fake_run_single_poll_with_retry(**_: object) -> bool:
+        result = cycle_results.pop(0)
+        if not cycle_results:
+            runner._runtime_stop_event.set()
+        return result
+
+    with patch.object(
+        runner,
+        "run_single_poll_with_retry",
+        new=AsyncMock(side_effect=fake_run_single_poll_with_retry),
+    ):
+        await runner.start_runtime_loop(
+            poll_action=poll_action,
+            interval_seconds=0.1,
+            poll_max_attempts=2,
+            poll_base_backoff_seconds=0.5,
+            poll_max_backoff_seconds=2.0,
+            runtime_sustained_failure_threshold=3,
+            sleep=sleep,
+        )
+        assert runner._runtime_loop_task is not None
+        await runner._runtime_loop_task
+
+    snapshot = await svc.counter_service.get_snapshot()
+    assert snapshot["runtime_exhausted_cycles"] == 3
+    assert snapshot["runtime_exhausted_streak"] == 0
+    assert snapshot["runtime_sustained_failure_windows"] == 1
+    assert snapshot["runtime_sustained_failure_active"] == 0
+    runner._runtime_loop_task = None
+
+
+@pytest.mark.asyncio
+async def test_runtime_loop_transient_exhaustion_does_not_activate_sustained_failure(fake_redis):
+    svc = TelemetryIngestionService(redis=fake_redis)
+    runner = TelemetryCollectorRunner(ingestion_service=svc)
+
+    poll_action = AsyncMock(return_value=None)
+    sleep = AsyncMock()
+    cycle_results = [False, False, True]
+
+    async def fake_run_single_poll_with_retry(**_: object) -> bool:
+        result = cycle_results.pop(0)
+        if not cycle_results:
+            runner._runtime_stop_event.set()
+        return result
+
+    with patch.object(
+        runner,
+        "run_single_poll_with_retry",
+        new=AsyncMock(side_effect=fake_run_single_poll_with_retry),
+    ):
+        await runner.start_runtime_loop(
+            poll_action=poll_action,
+            interval_seconds=0.1,
+            poll_max_attempts=2,
+            poll_base_backoff_seconds=0.5,
+            poll_max_backoff_seconds=2.0,
+            runtime_sustained_failure_threshold=3,
+            sleep=sleep,
+        )
+        assert runner._runtime_loop_task is not None
+        await runner._runtime_loop_task
+
+    snapshot = await svc.counter_service.get_snapshot()
+    assert snapshot["runtime_exhausted_cycles"] == 2
+    assert snapshot["runtime_exhausted_streak"] == 0
+    assert snapshot["runtime_sustained_failure_windows"] == 0
+    assert snapshot["runtime_sustained_failure_active"] == 0
+    runner._runtime_loop_task = None

@@ -18,6 +18,10 @@ async def test_telemetry_health_counter_snapshot_defaults_to_zero(fake_redis):
         "persisted_events": 0,
         "fanout_events": 0,
         "dropped_events": 0,
+        "runtime_exhausted_cycles": 0,
+        "runtime_exhausted_streak": 0,
+        "runtime_sustained_failure_windows": 0,
+        "runtime_sustained_failure_active": 0,
     }
 
 
@@ -30,6 +34,10 @@ async def test_telemetry_health_counter_increments_are_reflected_in_snapshot(fak
     await svc.increment_persisted()
     await svc.increment_fanout()
     await svc.increment_dropped()
+    await svc.increment_runtime_exhausted_cycle()
+    await svc.set_runtime_exhausted_streak(2)
+    await svc.increment_runtime_sustained_failure_window()
+    await svc.set_runtime_sustained_failure_active(True)
 
     snapshot = await svc.get_snapshot()
 
@@ -38,4 +46,8 @@ async def test_telemetry_health_counter_increments_are_reflected_in_snapshot(fak
         "persisted_events": 1,
         "fanout_events": 1,
         "dropped_events": 1,
+        "runtime_exhausted_cycles": 1,
+        "runtime_exhausted_streak": 2,
+        "runtime_sustained_failure_windows": 1,
+        "runtime_sustained_failure_active": 1,
     }
