@@ -1,5 +1,13 @@
 # Development Journal
 
+## [2026-08-10] - Vertical Slice 3 Step 1 (Telemetry Collector Reliability Baseline)
+
+- **Implemented:** Added bounded exponential retry/backoff startup path for telemetry collector via `TelemetryCollectorRunner.start_with_retry()` and wired lifespan startup to use it.
+- **Determinism:** Retry math is isolated in `compute_bounded_backoff_seconds()` with explicit cap behavior and unit coverage for retry intervals and exhaustion/success branches.
+- **Failure visibility:** Startup retry scheduling and retry exhaustion are logged, while exhausted retries remain startup-safe (API continues boot without collector runner).
+- **Scope safety:** No REST/WebSocket contract changes, no migration/schema changes, and no C5/C6 routing changes.
+- **Validation:** Scoped Ruff and targeted telemetry unit/integration tests for startup/retry behavior passed.
+
 ## [2026-08-10] - Vertical Slice 2 Step 8 (Telemetry Health Counters + WS Fanout)
 
 - **Implemented:** Added Redis-backed telemetry operational counter service (`ingested_events`, `persisted_events`, `fanout_events`, `dropped_events`) and wired counter updates into ingestion/persistence/fanout branches.

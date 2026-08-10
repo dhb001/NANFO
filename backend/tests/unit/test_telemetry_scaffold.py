@@ -10,6 +10,7 @@ import pytest
 from app.modules.telemetry.service import (
     TelemetryCollectorRunner,
     TelemetryIngestionService,
+    compute_bounded_backoff_seconds,
 )
 
 
@@ -103,3 +104,92 @@ async def test_collector_runner_start_stop_and_ingest_once(fake_redis):
 
     await runner.stop()
     assert runner.running is False
+
+
+@pytest.mark.asyncio
+async def test_compute_bounded_backoff_seconds_is_bounded_and_exponential():
+    assert compute_bounded_backoff_seconds(
+        1,
+        base_backoff_seconds=0.5,
+        max_backoff_seconds=2.0,
+    ) == 0.5
+    assert compute_bounded_backoff_seconds(
+        2,
+        base_backoff_seconds=0.5,
+        max_backoff_seconds=2.0,
+    ) == 1.0
+    assert compute_bounded_backoff_seconds(
+        3,
+        base_backoff_seconds=0.5,
+        max_backoff_seconds=2.0,
+    ) == 2.0
+    assert compute_bounded_backoff_seconds(
+        4,
+        base_backoff_seconds=0.5,
+        max_backoff_seconds=2.0,
+    ) == 2.0
+
+
+@pytest.mark.asyncio
+async def test_collector_runner_start_with_retry_succeeds_after_transient_failures(fake_redis):
+    svc = TelemetryIngestionService(redis=fake_redis)
+    runner = TelemetryCollectorRunner(ingestion_service=svc)
+
+    sleep = AsyncMock()
+    with patch.object(
+        runner,
+        "start",
+        new=AsyncMock(side_effect=[RuntimeError("first"), RuntimeError("second"), None]),
+    ):
+        started = await runner.start_with_retry(
+            max_attempts=3,
+            base_backoff_seconds=0.5,
+            max_backoff_seconds=2.0,
+            sleep=sleep,
+        )
+
+    assert started is True
+    assert sleep.await_count == 2
+    assert sleep.await_args_list[0].args[0] == 0.5
+    assert sleep.await_args_list[1].args[0] == 1.0
+
+
+@pytest.mark.asyncio
+async def test_collector_runner_start_with_retry_exhausts_attempts(fake_redis):
+    svc = TelemetryIngestionService(redis=fake_redis)
+    runner = TelemetryCollectorRunner(ingestion_service=svc)
+
+    sleep = AsyncMock()
+    with patch.object(
+        runner,
+        "start",
+        new=AsyncMock(side_effect=[RuntimeError("first"), RuntimeError("second"), RuntimeError("third")]),
+    ):
+        started = await runner.start_with_retry(
+            max_attempts=3,
+            base_backoff_seconds=0.5,
+            max_backoff_seconds=2.0,
+            sleep=sleep,
+        )
+
+    assert started is False
+    assert runner.running is False
+    assert sleep.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_collector_runner_start_with_retry_immediate_success_avoids_sleep(fake_redis):
+    svc = TelemetryIngestionService(redis=fake_redis)
+    runner = TelemetryCollectorRunner(ingestion_service=svc)
+
+    sleep = AsyncMock()
+    started = await runner.start_with_retry(
+        max_attempts=3,
+        base_backoff_seconds=0.5,
+        max_backoff_seconds=2.0,
+        sleep=sleep,
+    )
+
+    assert started is True
+    assert runner.running is True
+    sleep.assert_not_awaited()

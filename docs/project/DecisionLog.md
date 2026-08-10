@@ -3,6 +3,23 @@
 Lightweight chronological notes for decisions that do not require a full ADR.
 
 ## 2026-08-10
+### Telemetry Collector Startup Retry Baseline (VS3 Step 1)
+Decision: Add deterministic collector startup reliability controls via bounded exponential retry/backoff in `TelemetryCollectorRunner.start_with_retry()` and use that path from app lifespan startup with conservative defaults (3 attempts, 0.5s base, 2.0s max).
+Reason:
+- Delivers the smallest production-safe VS3 increment directly aligned with Telemetry PRD AC for collector retry/backoff, without introducing new APIs, schema changes, or cross-module coupling.
+- Keeps startup resilient: exhausted retries are observable via logs and do not fail API startup or affect unrelated consumers.
+- Maintains reversible scope by constraining change to collector startup behavior only.
+Impact:
+- Transient collector start failures now retry deterministically before giving up.
+- Retry scheduling and exhaustion outcomes are explicitly logged for operational visibility.
+- Existing API contracts, event envelopes, and C5/C6 constraints remain unchanged.
+Related:
+- `backend/app/modules/telemetry/service.py`
+- `backend/app/main.py`
+- `backend/tests/unit/test_telemetry_scaffold.py`
+- `backend/tests/integration/test_startup_telemetry.py`
+
+## 2026-08-10
 ### Telemetry Health Counters and WS Fanout (VS2 Step 8)
 Decision: Add Redis-backed telemetry operational counters (`ingested_events`, `persisted_events`, `fanout_events`, `dropped_events`) and wire `telemetry.metric.ingested` persistence success to `/ws/telemetry` delta fanout; expose counter-backed `dropped_events` in `GET /api/v1/telemetry/health` without changing the canonical envelope or existing route contracts.
 Reason:

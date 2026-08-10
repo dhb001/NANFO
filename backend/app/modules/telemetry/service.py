@@ -8,8 +8,10 @@ VS2 Step 5 scope:
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from abc import ABC, abstractmethod
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from typing import Any
 
@@ -28,6 +30,22 @@ from app.modules.telemetry.schemas import (
 )
 
 logger = get_logger(__name__)
+
+
+def compute_bounded_backoff_seconds(
+    attempt: int,
+    *,
+    base_backoff_seconds: float,
+    max_backoff_seconds: float,
+) -> float:
+    """Return a bounded exponential backoff delay for a 1-based attempt index."""
+    if attempt < 1:
+        return 0.0
+
+    base = max(base_backoff_seconds, 0.0)
+    cap = max(max_backoff_seconds, base)
+    delay = base * (2 ** (attempt - 1))
+    return min(delay, cap)
 
 
 class TelemetryCollector(ABC):
@@ -133,6 +151,53 @@ class TelemetryCollectorRunner(TelemetryCollector):
     async def stop(self) -> None:
         self._running = False
         logger.info("telemetry_collector_stopped")
+
+    async def start_with_retry(
+        self,
+        *,
+        max_attempts: int,
+        base_backoff_seconds: float,
+        max_backoff_seconds: float,
+        sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+    ) -> bool:
+        """Start collector with bounded retry/backoff and explicit failure visibility."""
+        attempts = max(1, max_attempts)
+
+        for attempt in range(1, attempts + 1):
+            try:
+                await self.start()
+                logger.info(
+                    "telemetry_collector_started_with_retry",
+                    attempt=attempt,
+                    max_attempts=attempts,
+                )
+                return True
+            except Exception as exc:  # noqa: BLE001
+                self._running = False
+                if attempt >= attempts:
+                    logger.warning(
+                        "telemetry_collector_start_retries_exhausted",
+                        attempt=attempt,
+                        max_attempts=attempts,
+                        error=str(exc),
+                    )
+                    return False
+
+                delay = compute_bounded_backoff_seconds(
+                    attempt,
+                    base_backoff_seconds=base_backoff_seconds,
+                    max_backoff_seconds=max_backoff_seconds,
+                )
+                logger.warning(
+                    "telemetry_collector_start_retry_scheduled",
+                    attempt=attempt,
+                    max_attempts=attempts,
+                    retry_in_seconds=delay,
+                    error=str(exc),
+                )
+                await sleep(delay)
+
+        return False
 
     async def ingest_once(self, raw: dict[str, Any], correlation_id: str) -> str:
         return await self._ingestion_service.ingest(raw=raw, correlation_id=correlation_id)

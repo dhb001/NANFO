@@ -50,6 +50,10 @@ from app.websocket.topology import router as ws_router
 
 logger = get_logger(__name__)
 
+_TELEMETRY_COLLECTOR_START_MAX_ATTEMPTS = 3
+_TELEMETRY_COLLECTOR_BACKOFF_BASE_SECONDS = 0.5
+_TELEMETRY_COLLECTOR_BACKOFF_MAX_SECONDS = 2.0
+
 def _merge_handlers(*handler_dicts: dict) -> dict:
     merged: dict = {}
     for d in handler_dicts:
@@ -91,7 +95,13 @@ async def lifespan(app: FastAPI):
     try:
         telemetry_ingestion_service = TelemetryIngestionService(redis=redis)
         telemetry_collector = TelemetryCollectorRunner(ingestion_service=telemetry_ingestion_service)
-        await telemetry_collector.start()
+        started = await telemetry_collector.start_with_retry(
+            max_attempts=_TELEMETRY_COLLECTOR_START_MAX_ATTEMPTS,
+            base_backoff_seconds=_TELEMETRY_COLLECTOR_BACKOFF_BASE_SECONDS,
+            max_backoff_seconds=_TELEMETRY_COLLECTOR_BACKOFF_MAX_SECONDS,
+        )
+        if not started:
+            telemetry_collector = None
     except (RuntimeError, ValueError) as exc:
         telemetry_collector = None
         logger.warning(

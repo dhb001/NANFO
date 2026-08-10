@@ -10,6 +10,7 @@ from app.main import app
 def test_startup_starts_and_stops_telemetry_collector():
     collector = AsyncMock()
     collector.start = AsyncMock()
+    collector.start_with_retry = AsyncMock(return_value=True)
     collector.stop = AsyncMock()
 
     with (
@@ -20,13 +21,15 @@ def test_startup_starts_and_stops_telemetry_collector():
         response = client.get("/health")
 
     assert response.status_code == 200
-    collector.start.assert_awaited_once()
+    collector.start_with_retry.assert_awaited_once()
+    collector.start.assert_not_awaited()
     collector.stop.assert_awaited_once()
 
 
 def test_startup_continues_if_telemetry_collector_start_fails():
     collector = AsyncMock()
-    collector.start = AsyncMock(side_effect=RuntimeError("telemetry init failed"))
+    collector.start = AsyncMock()
+    collector.start_with_retry = AsyncMock(return_value=False)
     collector.stop = AsyncMock()
 
     with (
@@ -37,5 +40,6 @@ def test_startup_continues_if_telemetry_collector_start_fails():
         response = client.get("/health")
 
     assert response.status_code == 200
-    collector.start.assert_awaited_once()
+    collector.start_with_retry.assert_awaited_once()
+    collector.start.assert_not_awaited()
     collector.stop.assert_not_awaited()
