@@ -29,7 +29,13 @@ def _alert_event(event_type: str = "alert.generated", payload: object | None = N
 async def test_ws_alert_consumer_pushes_generated_event_to_alerts_channel():
     event = _alert_event("alert.generated", payload={"severity": "critical", "message": "degraded"})
 
-    with patch("app.events.consumers.ws_push_consumer.alerts_ws_manager") as mock_alerts_ws_manager:
+    with (
+        patch("app.events.consumers.ws_push_consumer.alerts_ws_manager") as mock_alerts_ws_manager,
+        patch("app.events.consumers.ws_push_consumer.get_redis_client") as mock_get_redis,
+    ):
+        fake_redis = AsyncMock()
+        fake_redis.incr = AsyncMock(return_value=1)
+        mock_get_redis.return_value = fake_redis
         mock_alerts_ws_manager.push_delta = AsyncMock()
         await handle_ws_alert_event(event)
 
@@ -41,26 +47,40 @@ async def test_ws_alert_consumer_pushes_generated_event_to_alerts_channel():
     assert kwargs["alert"]["event_id"] == event["event_id"]
     assert kwargs["alert"]["source"] == "telemetry"
     assert kwargs["alert"]["payload"] == event["payload"]
+    fake_redis.incr.assert_awaited_once_with("alerts:ws:fanout:generated:success")
 
 
 @pytest.mark.asyncio
 async def test_ws_alert_consumer_pushes_resolved_event_to_alerts_channel():
     event = _alert_event("alert.resolved", payload={"severity": "critical", "message": "recovered"})
 
-    with patch("app.events.consumers.ws_push_consumer.alerts_ws_manager") as mock_alerts_ws_manager:
+    with (
+        patch("app.events.consumers.ws_push_consumer.alerts_ws_manager") as mock_alerts_ws_manager,
+        patch("app.events.consumers.ws_push_consumer.get_redis_client") as mock_get_redis,
+    ):
+        fake_redis = AsyncMock()
+        fake_redis.incr = AsyncMock(return_value=1)
+        mock_get_redis.return_value = fake_redis
         mock_alerts_ws_manager.push_delta = AsyncMock()
         await handle_ws_alert_event(event)
 
     kwargs = mock_alerts_ws_manager.push_delta.await_args.kwargs
     assert kwargs["event_type"] == "alert.resolved"
     assert kwargs["delta_type"] == "resolve"
+    fake_redis.incr.assert_awaited_once_with("alerts:ws:fanout:resolved:success")
 
 
 @pytest.mark.asyncio
 async def test_ws_alert_consumer_falls_back_to_empty_payload_for_malformed_event_payload():
     event = _alert_event("alert.generated", payload="not-an-object")
 
-    with patch("app.events.consumers.ws_push_consumer.alerts_ws_manager") as mock_alerts_ws_manager:
+    with (
+        patch("app.events.consumers.ws_push_consumer.alerts_ws_manager") as mock_alerts_ws_manager,
+        patch("app.events.consumers.ws_push_consumer.get_redis_client") as mock_get_redis,
+    ):
+        fake_redis = AsyncMock()
+        fake_redis.incr = AsyncMock(return_value=1)
+        mock_get_redis.return_value = fake_redis
         mock_alerts_ws_manager.push_delta = AsyncMock()
         await handle_ws_alert_event(event)
 
@@ -83,11 +103,53 @@ async def test_ws_alert_consumer_unmapped_event_is_noop():
 async def test_ws_alert_consumer_push_failure_is_fail_open():
     event = _alert_event("alert.generated")
 
-    with patch("app.events.consumers.ws_push_consumer.alerts_ws_manager") as mock_alerts_ws_manager:
+    with (
+        patch("app.events.consumers.ws_push_consumer.alerts_ws_manager") as mock_alerts_ws_manager,
+        patch("app.events.consumers.ws_push_consumer.get_redis_client") as mock_get_redis,
+    ):
+        fake_redis = AsyncMock()
+        fake_redis.incr = AsyncMock(return_value=1)
+        mock_get_redis.return_value = fake_redis
         mock_alerts_ws_manager.push_delta = AsyncMock(side_effect=RuntimeError("ws down"))
         await handle_ws_alert_event(event)
 
     mock_alerts_ws_manager.push_delta.assert_awaited_once()
+    fake_redis.incr.assert_awaited_once_with("alerts:ws:fanout:generated:failure")
+
+
+@pytest.mark.asyncio
+async def test_ws_alert_consumer_counter_client_unavailable_is_fail_open():
+    event = _alert_event("alert.generated")
+
+    with (
+        patch("app.events.consumers.ws_push_consumer.alerts_ws_manager") as mock_alerts_ws_manager,
+        patch(
+            "app.events.consumers.ws_push_consumer.get_redis_client",
+            side_effect=RuntimeError("redis unavailable"),
+        ),
+    ):
+        mock_alerts_ws_manager.push_delta = AsyncMock()
+        await handle_ws_alert_event(event)
+
+    mock_alerts_ws_manager.push_delta.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_ws_alert_consumer_counter_increment_failure_is_fail_open():
+    event = _alert_event("alert.generated")
+
+    with (
+        patch("app.events.consumers.ws_push_consumer.alerts_ws_manager") as mock_alerts_ws_manager,
+        patch("app.events.consumers.ws_push_consumer.get_redis_client") as mock_get_redis,
+    ):
+        fake_redis = AsyncMock()
+        fake_redis.incr = AsyncMock(side_effect=RuntimeError("redis write failed"))
+        mock_get_redis.return_value = fake_redis
+        mock_alerts_ws_manager.push_delta = AsyncMock()
+        await handle_ws_alert_event(event)
+
+    mock_alerts_ws_manager.push_delta.assert_awaited_once()
+    fake_redis.incr.assert_awaited_once_with("alerts:ws:fanout:generated:success")
 
 
 def test_ws_push_handlers_include_alert_lifecycle_events():

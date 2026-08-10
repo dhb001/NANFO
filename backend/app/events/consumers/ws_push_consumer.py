@@ -10,6 +10,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from app.core.logging import get_logger
+from app.db.redis import get_redis_client
 from app.websocket.manager import alerts_ws_manager, topology_ws_manager
 
 logger = get_logger(__name__)
@@ -24,6 +25,44 @@ _ALERT_EVENT_TO_DELTA: dict[str, str] = {
     "alert.generated": "add",
     "alert.resolved": "resolve",
 }
+
+_ALERT_EVENT_TO_COUNTER_LABEL: dict[str, str] = {
+    "alert.generated": "generated",
+    "alert.resolved": "resolved",
+}
+
+_ALERT_WS_COUNTER_PREFIX = "alerts:ws:fanout"
+
+
+def _get_alert_counter_client():
+    try:
+        return get_redis_client()
+    except RuntimeError as exc:
+        logger.warning("ws_alert_counter_client_unavailable", error=str(exc))
+        return None
+
+
+async def _safe_increment_alert_counter(
+    redis,
+    *,
+    counter_name: str,
+    event_type: str,
+    event_id: str,
+    correlation_id: str,
+) -> None:
+    if redis is None:
+        return
+    try:
+        await redis.incr(counter_name)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "ws_alert_counter_increment_failed",
+            counter_name=counter_name,
+            event_type=event_type,
+            event_id=event_id,
+            correlation_id=correlation_id,
+            error=str(exc),
+        )
 
 
 async def handle_ws_push_event(event: dict) -> None:
@@ -71,10 +110,15 @@ async def handle_ws_alert_event(event: dict) -> None:
     if delta_type is None:
         return
 
+    counter_label = _ALERT_EVENT_TO_COUNTER_LABEL[event_type]
+    event_id = str(event.get("event_id", ""))
+    correlation_id = str(event.get("correlation_id", ""))
+    counter_client = _get_alert_counter_client()
+
     payload_raw = event.get("payload")
     payload = payload_raw if isinstance(payload_raw, dict) else {}
     alert = {
-        "event_id": str(event.get("event_id", "")),
+        "event_id": event_id,
         "event_type": event_type,
         "source": str(event.get("source", "")),
         "payload": payload,
@@ -85,15 +129,33 @@ async def handle_ws_alert_event(event: dict) -> None:
             event_type=event_type,
             delta_type=delta_type,
             alert=alert,
-            correlation_id=str(event.get("correlation_id", "")),
+            correlation_id=correlation_id,
             timestamp=str(event.get("timestamp", datetime.now(UTC).isoformat())),
+        )
+        success_counter = f"{_ALERT_WS_COUNTER_PREFIX}:{counter_label}:success"
+        await _safe_increment_alert_counter(
+            counter_client,
+            counter_name=success_counter,
+            event_type=event_type,
+            event_id=event_id,
+            correlation_id=correlation_id,
         )
         logger.info("ws_alert_delta_pushed", event_type=event_type, delta_type=delta_type)
     except Exception as exc:  # noqa: BLE001
+        failure_counter = f"{_ALERT_WS_COUNTER_PREFIX}:{counter_label}:failure"
+        await _safe_increment_alert_counter(
+            counter_client,
+            counter_name=failure_counter,
+            event_type=event_type,
+            event_id=event_id,
+            correlation_id=correlation_id,
+        )
         logger.warning(
             "ws_alert_delta_push_failed",
             event_type=event_type,
             delta_type=delta_type,
+            event_id=event_id,
+            correlation_id=correlation_id,
             error=str(exc),
         )
 
