@@ -1,6 +1,7 @@
 """NANFO Backend — Audit Log event consumer.
 
-Consumes auth.* and network.* events and writes to the audit_logs table.
+Consumes auth.*, network.*, org.*, and selected telemetry collector
+runtime transition events, then writes to the audit_logs table.
 Owned by Identity module (audit_logs is an Identity module table).
 Idempotency is handled by the event bus consumer loop via event_id dedup.
 """
@@ -29,6 +30,8 @@ _AUDIT_MAP: dict[str, dict] = {
     "org.workspace.created":    {"resource_type": "workspace"},
     "org.member.added":         {"resource_type": "org_member"},
     "org.member.removed":       {"resource_type": "org_member"},
+    "telemetry.collector.sustained_failure_activated": {"resource_type": "telemetry_collector"},
+    "telemetry.collector.sustained_failure_recovered": {"resource_type": "telemetry_collector"},
 }
 
 
@@ -39,15 +42,19 @@ async def handle_audit_event(event: dict) -> None:
     if config is None:
         return
 
-    payload = event.get("payload", {})
+    payload_raw = event.get("payload")
+    payload = payload_raw if isinstance(payload_raw, dict) else {}
     correlation_id_raw = event.get("correlation_id", str(uuid.uuid4()))
     try:
-        correlation_id = uuid.UUID(correlation_id_raw)
-    except ValueError:
+        correlation_id = uuid.UUID(str(correlation_id_raw))
+    except (ValueError, TypeError, AttributeError):
         correlation_id = uuid.uuid4()
 
     actor_id_raw = payload.get("user_id") or payload.get("actor_id")
-    actor_id = uuid.UUID(actor_id_raw) if actor_id_raw else None
+    try:
+        actor_id = uuid.UUID(str(actor_id_raw)) if actor_id_raw else None
+    except (ValueError, TypeError, AttributeError):
+        actor_id = None
 
     resource_id_raw = (
         payload.get("device_id")
@@ -56,14 +63,14 @@ async def handle_audit_event(event: dict) -> None:
         or payload.get("workspace_id")
     )
     try:
-        resource_id = uuid.UUID(resource_id_raw) if resource_id_raw else None
-    except ValueError:
+        resource_id = uuid.UUID(str(resource_id_raw)) if resource_id_raw else None
+    except (ValueError, TypeError, AttributeError):
         resource_id = None
 
     org_id_raw = payload.get("org_id")
     try:
-        org_id = uuid.UUID(org_id_raw) if org_id_raw else None
-    except ValueError:
+        org_id = uuid.UUID(str(org_id_raw)) if org_id_raw else None
+    except (ValueError, TypeError, AttributeError):
         org_id = None
 
     async with AsyncSessionLocal() as db:
