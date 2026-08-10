@@ -44,3 +44,15 @@ Use this at the start of every new OpenCode session when using GPT-5.3-Codex.
     3) Tests and outcomes
     4) Remaining tasks
     5) Exact next step for next session
+
+## Mandatory Post-Step Checklist (Before Commit)
+
+For every completed step, do all items below in the same run before creating a commit:
+
+1) Update docs/project/CurrentSprint.md with current slice/step status.
+2) Add a concise implementation + validation entry to docs/project/DevelopmentJournal.md.
+3) Add or update decision/contract notes in docs/project/DecisionLog.md when behavior contracts, reliability semantics, or event flow changed.
+4) Run scoped Ruff + targeted tests + full backend pytest.
+5) Stage only step-related files (including required docs updates) and create one atomic commit.
+
+If any of the three project docs are not updated when required, do not commit yet.

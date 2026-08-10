@@ -3,6 +3,169 @@
 Lightweight chronological notes for decisions that do not require a full ADR.
 
 ## 2026-08-10
+### Runtime Adapter Observability Counters Baseline (VS3 Step 12)
+Decision: Add minimal runtime adapter observability counters on telemetry runtime poll path: `runtime_adapter_last_batch_size`, `runtime_adapter_invalid_samples`, `runtime_adapter_ingest_attempts`, and `runtime_adapter_ingest_failures`.
+Reason:
+- Provide concrete backpressure and ingest-quality visibility for runtime adapter behavior without introducing schema or API changes.
+- Keep instrumentation aligned with existing telemetry counter architecture and fail-open reliability goals.
+Impact:
+- Runtime adapter poll cycles now expose measurable health signals for operations and future SLO tuning.
+- Counter update failures remain warning-only and non-fatal to collector runtime.
+Related:
+- `backend/app/modules/telemetry/counters.py`
+- `backend/app/modules/telemetry/service.py`
+- `backend/tests/unit/test_telemetry_counters.py`
+- `backend/tests/unit/test_telemetry_scaffold.py`
+
+## 2026-08-10
+### Production Collector Adapter Stub Wiring (VS3 Step 11)
+Decision: Wire a first minimal production adapter stub into runtime `poll_action` path using existing runtime loop and retry/backoff primitives.
+Reason:
+- Move from no-op runtime poll action to a production-shaped execution seam without introducing full adapter complexity.
+- Preserve Step 1-4 reliability semantics while opening the path for SNMP/gRPC adapter expansion.
+Impact:
+- Runtime loop now executes through adapter-stub path under existing retry/exhaust/recovery behavior.
+- No REST/API/schema drift introduced.
+Related:
+- `backend/app/modules/telemetry/service.py`
+- `backend/app/main.py`
+- `backend/tests/unit/test_telemetry_scaffold.py`
+- `backend/tests/integration/test_startup_telemetry.py`
+
+## 2026-08-10
+### Alerts WS Fanout Outcome Observability (VS3 Step 10)
+Decision: Record structured success/failure observability branches for `alert.generated` and `alert.resolved` websocket fanout outcomes in ws push consumer flow.
+Reason:
+- Close visibility gap on alert lifecycle fanout reliability without altering delivery semantics.
+- Support operational debugging while preserving fail-open behavior.
+Impact:
+- Alert websocket fanout now emits explicit outcome signals for troubleshooting and SLO tracking.
+- No endpoint, envelope, or schema changes.
+Related:
+- `backend/app/events/consumers/ws_push_consumer.py`
+- `backend/tests/unit/test_ws_push_consumer.py`
+
+## 2026-08-10
+### Alerts WebSocket Delivery Baseline (VS3 Step 9)
+Decision: Add minimal `/ws/alerts` websocket delivery path for alert lifecycle events through ws push consumer translation.
+Reason:
+- Deliver live alert lifecycle updates with minimal scope and no REST/API contract expansion.
+- Reuse existing websocket manager and push-consumer architecture for consistency.
+Impact:
+- `alert.generated` and `alert.resolved` now reach alert websocket subscribers in real time.
+- Deferred topology governance and schema boundaries remain unchanged.
+Related:
+- `backend/app/events/consumers/ws_push_consumer.py`
+- `backend/app/websocket/alerts.py`
+- `backend/app/websocket/manager.py`
+- `backend/tests/integration/test_alerts_ws_endpoint.py`
+
+## 2026-08-10
+### Telemetry Sustained-Failure -> Alert Event Routing (VS3 Step 8)
+Decision: Route telemetry sustained-failure transition events to alert event flow using `alert.generated` on activation and `alert.resolved` on recovery.
+Reason:
+- Integrate collector reliability state with alert lifecycle using existing internal event conventions.
+- Preserve fail-open behavior for malformed payloads and publish failures.
+Impact:
+- Alerting pipeline receives runtime reliability transitions without changing public API/schema contracts.
+- Event bus/publisher now include alert stream mapping support.
+Related:
+- `backend/app/events/consumers/telemetry_consumer.py`
+- `backend/app/events/publisher.py`
+- `backend/app/events/bus.py`
+- `backend/tests/unit/test_telemetry_consumer.py`
+
+## 2026-08-10
+### Audit Coverage for Sustained-Failure Transitions (VS3 Step 7)
+Decision: Consume telemetry sustained-failure transition events in audit consumer map with `resource_type=telemetry_collector`.
+Reason:
+- Ensure reliability state transitions are audit-visible without adding a new persistence mechanism.
+- Maintain consumer hardening for malformed payloads and UUID parsing.
+Impact:
+- Audit trail now captures collector sustained-failure activation/recovery transitions.
+- Fail-open behavior in audit handling remains intact.
+Related:
+- `backend/app/events/consumers/audit_consumer.py`
+- `backend/tests/unit/test_audit_consumer.py`
+
+## 2026-08-10
+### Runtime Sustained-Failure Transition Events (VS3 Step 6)
+Decision: Emit internal transition events for runtime sustained-failure state changes: `telemetry.collector.sustained_failure_activated` and `telemetry.collector.sustained_failure_recovered`.
+Reason:
+- Provide a reliable transition signal for downstream audit/alert consumers without polling health endpoint state.
+- Avoid noisy repeated emissions by firing only on state transitions.
+Impact:
+- Downstream consumers can react to activation/recovery transitions deterministically.
+- Event emission failures remain non-fatal and logged.
+Related:
+- `backend/app/modules/telemetry/service.py`
+- `backend/tests/unit/test_telemetry_scaffold.py`
+
+## 2026-08-10
+### Sustained Runtime Failure Health State (VS3 Step 5)
+Decision: Track sustained runtime exhaustion windows and surface collector health degradation via existing telemetry health path and counters.
+Reason:
+- Distinguish transient poll failures from sustained runtime failures with deterministic thresholding.
+- Improve operational health visibility without changing public response envelope or schema.
+Impact:
+- Telemetry health status now degrades based on sustained runtime failure-active state and recovers on success.
+- Runtime failure counters support window/streak analysis for operations.
+Related:
+- `backend/app/modules/telemetry/counters.py`
+- `backend/app/modules/telemetry/service.py`
+- `backend/app/api/v1/telemetry.py`
+- `backend/tests/unit/test_telemetry_query_service.py`
+
+## 2026-08-10
+### Runtime Loop Lifecycle Wiring in App Startup/Shutdown (VS3 Step 4)
+Decision: Wire `TelemetryCollectorRunner.start_runtime_loop()` into app lifespan after successful `start_with_retry()`, using a safe default no-op poll action, and keep shutdown deterministic via collector `stop()`.
+Reason:
+- Completes Step 4 by integrating Step 3 harness into real lifecycle orchestration without introducing adapter-specific poll implementations.
+- Preserves startup resilience from Step 1: collector/runtime-loop startup failures remain observable and fail-open for API boot.
+- Maintains deterministic runtime task cleanup by preserving explicit stop/await semantics already implemented in collector runner.
+Impact:
+- Runtime loop lifecycle is now active in production startup/shutdown flow behind existing collector lifecycle controls.
+- Runtime loop startup parameters are centralized as constants in `main.py` and exercised via startup integration tests.
+- API contracts, schema, and deferred C5/C6 constraints remain unchanged.
+Related:
+- `backend/app/main.py`
+- `backend/app/modules/telemetry/service.py`
+- `backend/tests/integration/test_startup_telemetry.py`
+- `backend/tests/unit/test_telemetry_scaffold.py`
+
+## 2026-08-10
+### Runtime Collector Loop Harness Baseline (VS3 Step 3)
+Decision: Add a minimal runtime loop harness to `TelemetryCollectorRunner` that schedules one poll cycle per deterministic interval, routes each cycle through `run_single_poll_with_retry()`, and provides explicit start/stop task lifecycle handling.
+Reason:
+- Completes the smallest safe Step 3 increment by composing Step 2 retry primitive into a continuous runtime harness without introducing adapter-specific complexity.
+- Preserves reliability isolation: exhausted cycles are observable and do not terminate unrelated components.
+- Ensures deterministic shutdown by signaling stop and awaiting loop-task completion.
+Impact:
+- Runtime polling now has a reusable scheduled loop primitive with bounded retry behavior per cycle.
+- Structured runtime loop lifecycle logs are available (`started`, `stopped`, `already_running`, per-cycle exhaustion).
+- Startup behavior and API/schema contracts remain unchanged.
+Related:
+- `backend/app/modules/telemetry/service.py`
+- `backend/tests/unit/test_telemetry_scaffold.py`
+- `backend/tests/integration/test_startup_telemetry.py`
+
+## 2026-08-10
+### Runtime Poll Retry Wrapper Baseline (VS3 Step 2)
+Decision: Introduce a minimal runtime collector wrapper `run_single_poll_with_retry()` in `TelemetryCollectorRunner` that executes one poll action with deterministic bounded retry/backoff and structured retry/exhaust visibility.
+Reason:
+- Extends VS3 reliability controls from startup-only (Step 1) to runtime single-action polling without introducing adapter loops, new APIs, or schema changes.
+- Keeps behavior testable and deterministic by reusing bounded backoff math and injectable sleep.
+- Maintains isolation by returning success/failure status instead of crashing unrelated components on retry exhaustion.
+Impact:
+- Runtime poll actions now have a production-safe, bounded retry primitive for future collector loop wiring.
+- Exhaustion and retry schedule are observable via logs; transient recovery is explicitly supported.
+- Startup behavior and existing contracts remain unchanged.
+Related:
+- `backend/app/modules/telemetry/service.py`
+- `backend/tests/unit/test_telemetry_scaffold.py`
+- `backend/tests/integration/test_startup_telemetry.py`
+
+## 2026-08-10
 ### Telemetry Collector Startup Retry Baseline (VS3 Step 1)
 Decision: Add deterministic collector startup reliability controls via bounded exponential retry/backoff in `TelemetryCollectorRunner.start_with_retry()` and use that path from app lifespan startup with conservative defaults (3 attempts, 0.5s base, 2.0s max).
 Reason:

@@ -3,7 +3,22 @@
 ## Active Goals
 - Vertical Slice 1 Implementation: **COMPLETE** — all modules implemented, tested, and migrated.
 - Vertical Slice 2 Implementation: **COMPLETE** — telemetry ingestion/persistence/read APIs and telemetry health counters + `/ws/telemetry` fanout delivered through Step 8.
-- Next active milestone: Vertical Slice 3 kickoff planning (no implementation started).
+- Vertical Slice 3 Implementation: **IN PROGRESS** — runtime collector reliability and alerting/event visibility baseline delivered through Step 12.
+
+## Subsystem Progress — Vertical Slice 3
+
+- [x] Step 1: Collector startup retry/backoff baseline
+- [x] Step 2: Single-poll runtime retry wrapper
+- [x] Step 3: Runtime collector loop harness
+- [x] Step 4: Runtime loop lifecycle wiring in app startup/shutdown
+- [x] Step 5: Sustained runtime exhaustion visibility in telemetry health
+- [x] Step 6: Sustained runtime-failure transition internal events
+- [x] Step 7: Audit consumption for sustained-failure transitions
+- [x] Step 8: Alert event flow routing for sustained-failure transitions
+- [x] Step 9: `/ws/alerts` fanout for alert lifecycle events
+- [x] Step 10: Alert websocket fanout observability counters/log branches
+- [x] Step 11: Minimal production collector adapter stub wired to runtime poll path
+- [x] Step 12: Runtime adapter health/backpressure observability counters
 
 ## Subsystem Progress — Vertical Slice 2
 
@@ -45,7 +60,7 @@
 - Repo-wide Ruff debt outside VS2 Step 8 scope remains and is tracked for later cleanup.
 
 ## Next Sprint Candidates
-- VS3: Production collector adapters (SNMP/gRPC) with retry/backoff and health alerting integration.
+- VS3: Expand production collector adapters (SNMP/gRPC) beyond stub implementation.
 - VS3: Telemetry stream/backpressure hardening and operational SLO baselines.
 - VS3: Planning/design for deferred topology analysis endpoints (`/neighbors`, `/impact`, `/reconcile`) under C6 governance.
 - VS3: Digital Twin baseline integration and scenario validation planning.

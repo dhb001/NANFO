@@ -1,5 +1,85 @@
 # Development Journal
 
+## [2026-08-10] - Vertical Slice 3 Step 12 (Runtime Adapter Observability Counters)
+
+- **Implemented:** Added runtime adapter observability counters for backpressure and ingest quality (`runtime_adapter_last_batch_size`, `runtime_adapter_invalid_samples`, `runtime_adapter_ingest_attempts`, `runtime_adapter_ingest_failures`).
+- **Poll-path instrumentation:** Runtime poll action now records batch-size, invalid-sample increments, ingest-attempt increments, and ingest-failure increments while preserving retry behavior.
+- **Fail-open safety:** Counter update failures in runtime path are isolated and logged (`telemetry_runtime_adapter_counter_update_failed`) without crashing startup/runtime/shutdown.
+- **Validation:** Scoped Ruff, targeted telemetry counter/scaffold tests, and full backend regression passed.
+
+## [2026-08-10] - Vertical Slice 3 Step 11 (Production Adapter Stub Wiring)
+
+- **Implemented:** Wired first minimal production collector adapter stub behind runtime poll action path under existing retry/runtime loop scaffolding.
+- **Reliability alignment:** Reused established retry/backoff/runtime loop controls rather than introducing a parallel execution path.
+- **Scope safety:** No API route/envelope changes and no schema migrations.
+- **Validation:** Scoped Ruff, targeted telemetry startup/scaffold tests, and full backend regression passed.
+
+## [2026-08-10] - Vertical Slice 3 Step 10 (Alerts WS Fanout Observability)
+
+- **Implemented:** Added observability branches for alerts websocket lifecycle fanout outcomes (success/failure) in push-consumer flow.
+- **Operational behavior:** Fanout outcome recording preserves fail-open behavior and does not change event delivery semantics.
+- **Validation:** Scoped Ruff, targeted websocket push/alerts tests, and full backend regression passed.
+
+## [2026-08-10] - Vertical Slice 3 Step 9 (Alerts WebSocket Fanout)
+
+- **Implemented:** Added minimal `/ws/alerts` delivery path for `alert.generated` and `alert.resolved` via ws push consumer translation.
+- **Routing behavior:** Alert lifecycle events are translated to websocket push path without introducing REST/API contract changes.
+- **Validation:** Scoped Ruff, targeted websocket-alert tests, and full backend regression passed.
+
+## [2026-08-10] - Vertical Slice 3 Step 8 (Telemetry -> Alert Event Flow)
+
+- **Implemented:** Routed sustained-failure transition events from telemetry consumer to alerting event flow (`alert.generated`, `alert.resolved`).
+- **Bus integration:** Added alert stream producer/consumer registration support in event publisher/bus mappings.
+- **Fail-open safety:** Malformed payloads, correlation parsing issues, or publish failures are warning-only and non-crashing.
+- **Validation:** Scoped Ruff, targeted telemetry consumer/event-contract tests, and full backend regression passed.
+
+## [2026-08-10] - Vertical Slice 3 Step 7 (Audit Transition Event Coverage)
+
+- **Implemented:** Extended audit consumer mapping to capture sustained-failure transition events with `resource_type=telemetry_collector`.
+- **Hardening:** UUID parsing and payload shape handling in audit path remain fail-open for malformed events.
+- **Validation:** Scoped Ruff, targeted audit/telemetry startup tests, and full backend regression passed.
+
+## [2026-08-10] - Vertical Slice 3 Step 6 (Runtime Transition Internal Events)
+
+- **Implemented:** Added internal transition event emission for runtime sustained failure activation and recovery (`telemetry.collector.sustained_failure_activated`, `telemetry.collector.sustained_failure_recovered`).
+- **Emission semantics:** Transition events are emitted only on state change (activation/recovery), not on every failed cycle.
+- **Fail-open safety:** Internal event publish failures are warning-only and do not crash collector loop/startup.
+- **Validation:** Scoped Ruff, targeted telemetry scaffold tests, and full backend regression passed.
+
+## [2026-08-10] - Vertical Slice 3 Step 5 (Sustained Runtime Failure Health Visibility)
+
+- **Implemented:** Added deterministic sustained runtime failure tracking and health surfacing (`runtime_exhausted_cycles`, `runtime_exhausted_streak`, `runtime_sustained_failure_windows`, `runtime_sustained_failure_active`).
+- **Health behavior:** Telemetry health status now reports `degraded` when sustained-failure-active flag is set and returns to `ok` on recovery.
+- **Scope safety:** No route/envelope or schema changes; startup/runtime remain fail-open.
+- **Validation:** Scoped Ruff and targeted telemetry runtime/health tests passed.
+
+## [2026-08-10] - Vertical Slice 3 Step 4 (Runtime Loop Lifecycle Wiring)
+
+- **Implemented:** Wired collector runtime loop harness into app lifespan orchestration: startup now starts `TelemetryCollectorRunner` with bounded retry and then starts runtime loop when startup succeeds.
+- **Safe default poll action:** Added `_telemetry_collector_noop_poll_action()` as the default runtime poll action so loop lifecycle is wired without introducing adapter-specific polling logic.
+- **Failure isolation:** Runtime loop start failures are treated as collector startup failures, logged, and collector shutdown is attempted immediately; API startup remains fail-open.
+- **Shutdown determinism:** Existing shutdown path now deterministically stops runtime loop through collector stop lifecycle with no dangling loop-task behavior.
+- **Scope safety:** No API route/envelope changes, no schema migrations, and no C5/C6 routing changes.
+- **Validation:** Scoped Ruff and targeted telemetry startup/lifecycle unit+integration tests passed, including repeated startup/shutdown non-regression coverage.
+
+## [2026-08-10] - Vertical Slice 3 Step 3 (Runtime Collector Loop Harness)
+
+- **Implemented:** Added a minimal runtime loop harness in `TelemetryCollectorRunner` that schedules one poll cycle at a deterministic interval and executes each cycle through `run_single_poll_with_retry()`.
+- **Continuation safety:** Exhausted poll cycles log `telemetry_collector_runtime_cycle_exhausted` and loop safely continues to next interval instead of crashing unrelated components.
+- **Stop determinism:** Added explicit runtime loop start/stop controls with internal stop-event signaling and task awaiting to avoid dangling runtime tasks during shutdown.
+- **Observability:** Structured logs now cover runtime loop started/stopped and already-running guard paths, while retry/recovery/exhaust logs remain emitted by Step 2 retry wrapper.
+- **Scope safety:** No API route/envelope changes, no schema migrations, and startup reliability behavior from VS3 Step 1 remains unchanged.
+- **Validation:** Scoped Ruff, targeted loop/retry unit tests, and startup non-regression integration tests passed.
+
+## [2026-08-10] - Vertical Slice 3 Step 2 (Runtime Poll Retry Wrapper)
+
+- **Implemented:** Added `TelemetryCollectorRunner.run_single_poll_with_retry()` to wrap one runtime collector poll action with deterministic retry and bounded exponential backoff.
+- **Determinism:** Runtime retries reuse `compute_bounded_backoff_seconds()` and accept injected `sleep` for deterministic unit testing of retry timing.
+- **Failure visibility:** Retry scheduling and retry exhaustion are logged with structured fields; exhaustion returns `False` and does not raise by default, preserving isolation from unrelated components.
+- **Recovery behavior:** Poll success after transient failures is explicitly covered and logged via recovery branch behavior.
+- **Scope safety:** No API route/envelope changes, no schema migrations, and no startup lifecycle drift from VS3 Step 1.
+- **Validation:** Scoped Ruff checks, targeted unit tests for retry/exhaust/recovery, and startup non-regression integration tests passed.
+
 ## [2026-08-10] - Vertical Slice 3 Step 1 (Telemetry Collector Reliability Baseline)
 
 - **Implemented:** Added bounded exponential retry/backoff startup path for telemetry collector via `TelemetryCollectorRunner.start_with_retry()` and wired lifespan startup to use it.
