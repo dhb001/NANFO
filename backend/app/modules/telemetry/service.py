@@ -32,6 +32,8 @@ from app.modules.telemetry.schemas import (
 logger = get_logger(__name__)
 
 _RUNTIME_SUSTAINED_FAILURE_DEFAULT_THRESHOLD = 3
+_RUNTIME_SUSTAINED_FAILURE_ACTIVATED_EVENT_TYPE = "telemetry.collector.sustained_failure_activated"
+_RUNTIME_SUSTAINED_FAILURE_RECOVERED_EVENT_TYPE = "telemetry.collector.sustained_failure_recovered"
 
 
 def compute_bounded_backoff_seconds(
@@ -76,6 +78,10 @@ class TelemetryIngestionService:
     @property
     def counter_service(self) -> TelemetryHealthCounterService:
         return self._counter_service
+
+    @property
+    def redis(self) -> aioredis.Redis:
+        return self._redis
 
     def normalize_payload(self, raw: dict[str, Any]) -> dict[str, Any]:
         """Normalize vendor-specific telemetry into canonical internal shape."""
@@ -149,6 +155,7 @@ class TelemetryCollectorRunner(TelemetryCollector):
     ):
         self._ingestion_service = ingestion_service
         self._counter_service = counter_service or ingestion_service.counter_service
+        self._event_redis = ingestion_service.redis
         self._running = False
         self._runtime_loop_task: asyncio.Task | None = None
         self._runtime_stop_event = asyncio.Event()
@@ -252,7 +259,9 @@ class TelemetryCollectorRunner(TelemetryCollector):
                     sustained_failure_threshold=runtime_sustained_failure_threshold
                 )
             else:
-                await self._record_runtime_cycle_success()
+                await self._record_runtime_cycle_success(
+                    sustained_failure_threshold=runtime_sustained_failure_threshold
+                )
 
             if self._runtime_stop_event.is_set():
                 break
@@ -294,8 +303,13 @@ class TelemetryCollectorRunner(TelemetryCollector):
                 exhausted_streak=self._runtime_exhausted_streak,
                 sustained_failure_threshold=sustained_failure_threshold,
             )
+            await self._emit_runtime_transition_event(
+                event_type=_RUNTIME_SUSTAINED_FAILURE_ACTIVATED_EVENT_TYPE,
+                exhausted_streak=self._runtime_exhausted_streak,
+                sustained_failure_threshold=sustained_failure_threshold,
+            )
 
-    async def _record_runtime_cycle_success(self) -> None:
+    async def _record_runtime_cycle_success(self, *, sustained_failure_threshold: int) -> None:
         if self._runtime_exhausted_streak == 0 and not self._runtime_sustained_failure_active:
             return
 
@@ -316,10 +330,52 @@ class TelemetryCollectorRunner(TelemetryCollector):
                 "telemetry_collector_runtime_sustained_failure_recovered",
                 previous_exhausted_streak=previous_streak,
             )
+            await self._emit_runtime_transition_event(
+                event_type=_RUNTIME_SUSTAINED_FAILURE_RECOVERED_EVENT_TYPE,
+                exhausted_streak=previous_streak,
+                sustained_failure_threshold=sustained_failure_threshold,
+            )
         else:
             logger.info(
                 "telemetry_collector_runtime_exhausted_streak_recovered",
                 previous_exhausted_streak=previous_streak,
+            )
+
+    async def _emit_runtime_transition_event(
+        self,
+        *,
+        event_type: str,
+        exhausted_streak: int,
+        sustained_failure_threshold: int,
+    ) -> None:
+        correlation_id = str(uuid.uuid4())
+        payload = {
+            "exhausted_streak": exhausted_streak,
+            "sustained_failure_threshold": sustained_failure_threshold,
+            "observed_at": datetime.now(UTC).isoformat(),
+        }
+        try:
+            stream_entry_id = await publish_event(
+                redis=self._event_redis,
+                event_type=event_type,
+                source="telemetry",
+                payload=payload,
+                correlation_id=correlation_id,
+            )
+            logger.info(
+                "telemetry_collector_runtime_transition_event_published",
+                event_type=event_type,
+                stream_entry_id=stream_entry_id,
+                correlation_id=correlation_id,
+                exhausted_streak=exhausted_streak,
+                sustained_failure_threshold=sustained_failure_threshold,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "telemetry_collector_runtime_transition_event_publish_failed",
+                event_type=event_type,
+                correlation_id=correlation_id,
+                error=str(exc),
             )
 
     async def _safe_runtime_counter_update(

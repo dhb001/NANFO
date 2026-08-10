@@ -510,3 +510,134 @@ async def test_runtime_loop_transient_exhaustion_does_not_activate_sustained_fai
     assert snapshot["runtime_sustained_failure_windows"] == 0
     assert snapshot["runtime_sustained_failure_active"] == 0
     runner._runtime_loop_task = None
+
+
+@pytest.mark.asyncio
+async def test_runtime_loop_emits_transition_events_on_sustained_failure_and_recovery(fake_redis):
+    svc = TelemetryIngestionService(redis=fake_redis)
+    runner = TelemetryCollectorRunner(ingestion_service=svc)
+
+    poll_action = AsyncMock(return_value=None)
+    sleep = AsyncMock()
+    cycle_results = [False, False, False, True]
+
+    async def fake_run_single_poll_with_retry(**_: object) -> bool:
+        result = cycle_results.pop(0)
+        if not cycle_results:
+            runner._runtime_stop_event.set()
+        return result
+
+    with (
+        patch.object(
+            runner,
+            "run_single_poll_with_retry",
+            new=AsyncMock(side_effect=fake_run_single_poll_with_retry),
+        ),
+        patch("app.modules.telemetry.service.publish_event", new_callable=AsyncMock) as mock_publish,
+    ):
+        mock_publish.side_effect = ["111-0", "112-0"]
+        await runner.start_runtime_loop(
+            poll_action=poll_action,
+            interval_seconds=0.1,
+            poll_max_attempts=2,
+            poll_base_backoff_seconds=0.5,
+            poll_max_backoff_seconds=2.0,
+            runtime_sustained_failure_threshold=3,
+            sleep=sleep,
+        )
+        assert runner._runtime_loop_task is not None
+        await runner._runtime_loop_task
+
+    assert mock_publish.await_count == 2
+    first_kwargs = mock_publish.await_args_list[0].kwargs
+    second_kwargs = mock_publish.await_args_list[1].kwargs
+    assert first_kwargs["event_type"] == "telemetry.collector.sustained_failure_activated"
+    assert second_kwargs["event_type"] == "telemetry.collector.sustained_failure_recovered"
+    assert first_kwargs["payload"]["exhausted_streak"] == 3
+    assert second_kwargs["payload"]["exhausted_streak"] == 3
+    runner._runtime_loop_task = None
+
+
+@pytest.mark.asyncio
+async def test_runtime_loop_publish_failure_is_fail_open(fake_redis):
+    svc = TelemetryIngestionService(redis=fake_redis)
+    runner = TelemetryCollectorRunner(ingestion_service=svc)
+
+    poll_action = AsyncMock(return_value=None)
+    sleep = AsyncMock()
+    cycle_results = [False, False, False, True]
+
+    async def fake_run_single_poll_with_retry(**_: object) -> bool:
+        result = cycle_results.pop(0)
+        if not cycle_results:
+            runner._runtime_stop_event.set()
+        return result
+
+    with (
+        patch.object(
+            runner,
+            "run_single_poll_with_retry",
+            new=AsyncMock(side_effect=fake_run_single_poll_with_retry),
+        ),
+        patch(
+            "app.modules.telemetry.service.publish_event",
+            new=AsyncMock(side_effect=RuntimeError("redis publish failed")),
+        ),
+    ):
+        await runner.start_runtime_loop(
+            poll_action=poll_action,
+            interval_seconds=0.1,
+            poll_max_attempts=2,
+            poll_base_backoff_seconds=0.5,
+            poll_max_backoff_seconds=2.0,
+            runtime_sustained_failure_threshold=3,
+            sleep=sleep,
+        )
+        assert runner._runtime_loop_task is not None
+        await runner._runtime_loop_task
+
+    snapshot = await svc.counter_service.get_snapshot()
+    assert snapshot["runtime_sustained_failure_windows"] == 1
+    assert snapshot["runtime_sustained_failure_active"] == 0
+    runner._runtime_loop_task = None
+
+
+@pytest.mark.asyncio
+async def test_runtime_loop_does_not_reemit_activation_while_already_active(fake_redis):
+    svc = TelemetryIngestionService(redis=fake_redis)
+    runner = TelemetryCollectorRunner(ingestion_service=svc)
+
+    poll_action = AsyncMock(return_value=None)
+    sleep = AsyncMock()
+    cycle_results = [False, False, False, False]
+
+    async def fake_run_single_poll_with_retry(**_: object) -> bool:
+        result = cycle_results.pop(0)
+        if not cycle_results:
+            runner._runtime_stop_event.set()
+        return result
+
+    with (
+        patch.object(
+            runner,
+            "run_single_poll_with_retry",
+            new=AsyncMock(side_effect=fake_run_single_poll_with_retry),
+        ),
+        patch("app.modules.telemetry.service.publish_event", new_callable=AsyncMock) as mock_publish,
+    ):
+        mock_publish.return_value = "111-0"
+        await runner.start_runtime_loop(
+            poll_action=poll_action,
+            interval_seconds=0.1,
+            poll_max_attempts=2,
+            poll_base_backoff_seconds=0.5,
+            poll_max_backoff_seconds=2.0,
+            runtime_sustained_failure_threshold=3,
+            sleep=sleep,
+        )
+        assert runner._runtime_loop_task is not None
+        await runner._runtime_loop_task
+
+    assert mock_publish.await_count == 1
+    assert mock_publish.await_args.kwargs["event_type"] == "telemetry.collector.sustained_failure_activated"
+    runner._runtime_loop_task = None
