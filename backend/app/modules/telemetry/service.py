@@ -786,6 +786,12 @@ class TelemetryQueryService:
         dropped_events = counters["dropped_events"]
         runtime_sustained_failure_active = counters.get("runtime_sustained_failure_active", 0) > 0
         status = "degraded" if runtime_sustained_failure_active else "ok"
+        runtime_adapter_slo_snapshot = self._build_runtime_adapter_slo_snapshot(counters)
+        self._safe_log_runtime_adapter_slo_snapshot(
+            runtime_adapter_slo_snapshot=runtime_adapter_slo_snapshot,
+            status=status,
+            dropped_events=dropped_events,
+        )
 
         if latest_observed_at is None:
             return TelemetryHealthResponse(
@@ -805,6 +811,73 @@ class TelemetryQueryService:
             latest_observed_at=latest_observed_at,
             total_records=total_records,
         )
+
+    def _build_runtime_adapter_slo_snapshot(self, counters: dict[str, Any]) -> dict[str, int]:
+        return {
+            "last_batch_size": self._coerce_non_negative_counter(
+                counters.get("runtime_adapter_last_batch_size", 0),
+                counter_name="runtime_adapter_last_batch_size",
+            ),
+            "invalid_samples": self._coerce_non_negative_counter(
+                counters.get("runtime_adapter_invalid_samples", 0),
+                counter_name="runtime_adapter_invalid_samples",
+            ),
+            "ingest_attempts": self._coerce_non_negative_counter(
+                counters.get("runtime_adapter_ingest_attempts", 0),
+                counter_name="runtime_adapter_ingest_attempts",
+            ),
+            "ingest_failures": self._coerce_non_negative_counter(
+                counters.get("runtime_adapter_ingest_failures", 0),
+                counter_name="runtime_adapter_ingest_failures",
+            ),
+        }
+
+    @staticmethod
+    def _coerce_non_negative_counter(value: Any, *, counter_name: str) -> int:
+        try:
+            numeric = int(value)
+        except (TypeError, ValueError):
+            logger.warning(
+                "telemetry_health_runtime_adapter_counter_invalid",
+                counter_name=counter_name,
+                raw_value=str(value),
+            )
+            return 0
+
+        if numeric < 0:
+            logger.warning(
+                "telemetry_health_runtime_adapter_counter_invalid",
+                counter_name=counter_name,
+                raw_value=str(value),
+            )
+            return 0
+
+        return numeric
+
+    def _safe_log_runtime_adapter_slo_snapshot(
+        self,
+        *,
+        runtime_adapter_slo_snapshot: dict[str, int],
+        status: str,
+        dropped_events: int,
+    ) -> None:
+        try:
+            logger.info(
+                "telemetry_health_runtime_adapter_slo_snapshot",
+                status=status,
+                dropped_events=dropped_events,
+                last_batch_size=runtime_adapter_slo_snapshot["last_batch_size"],
+                invalid_samples=runtime_adapter_slo_snapshot["invalid_samples"],
+                ingest_attempts=runtime_adapter_slo_snapshot["ingest_attempts"],
+                ingest_failures=runtime_adapter_slo_snapshot["ingest_failures"],
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "telemetry_health_runtime_adapter_slo_snapshot_log_failed",
+                status=status,
+                dropped_events=dropped_events,
+                error=str(exc),
+            )
 
     async def _get_counter_snapshot(self) -> dict[str, int]:
         if self._counter_service is None:

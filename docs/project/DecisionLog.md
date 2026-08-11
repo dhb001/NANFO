@@ -2,6 +2,21 @@
 
 Lightweight chronological notes for decisions that do not require a full ADR.
 
+## 2026-08-11
+### Runtime Adapter SLO Snapshot Visibility in Health Read Path (VS3 Step 13)
+Decision: Extend telemetry health internal read path to derive and emit runtime adapter SLO snapshot visibility from existing counters (`last_batch_size`, `invalid_samples`, `ingest_attempts`, `ingest_failures`) through structured logging only.
+Reason:
+- Add operational SLO visibility for runtime adapter behavior without changing public telemetry health API contracts.
+- Reuse Step 12 counters and preserve fail-open reliability semantics via sanitization + warning-only logging failures.
+Impact:
+- Health read path now exposes runtime adapter SLO state internally for diagnostics and future SLO tuning.
+- API routes, response envelope, schema/migrations, and runtime poll-action semantics remain unchanged.
+Related:
+- `backend/app/modules/telemetry/service.py`
+- `backend/tests/unit/test_telemetry_query_service.py`
+- `backend/tests/unit/test_telemetry_scaffold.py`
+- `backend/tests/integration/test_telemetry_endpoints.py`
+
 ## 2026-08-10
 ### Runtime Adapter Observability Counters Baseline (VS3 Step 12)
 Decision: Add minimal runtime adapter observability counters on telemetry runtime poll path: `runtime_adapter_last_batch_size`, `runtime_adapter_invalid_samples`, `runtime_adapter_ingest_attempts`, and `runtime_adapter_ingest_failures`.

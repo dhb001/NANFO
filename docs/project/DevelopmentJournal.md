@@ -1,5 +1,12 @@
 # Development Journal
 
+## [2026-08-11] - Vertical Slice 3 Step 13 (Runtime Adapter SLO Snapshot Visibility)
+
+- **Implemented:** Extended telemetry health read-path internals to build and log runtime adapter SLO snapshot fields (`last_batch_size`, `invalid_samples`, `ingest_attempts`, `ingest_failures`) from existing runtime adapter counters.
+- **Scope guardrails:** No REST route changes, no API envelope changes, and no schema migration changes; runtime poll-action semantics are unchanged.
+- **Fail-open safety:** Invalid/malformed runtime adapter counter values are sanitized to zero with structured warnings, and SLO snapshot logging failures are warning-only and non-fatal.
+- **Validation:** Scoped Ruff passed; targeted telemetry query/scaffold/endpoints tests passed; full backend `pytest` regression passed (`178 passed`).
+
 ## [2026-08-10] - Vertical Slice 3 Step 12 (VS3 Step 12 Runtime Adapter Observability Counters)
 
 - **Implemented:** Added runtime adapter observability counters for backpressure and ingest quality (`runtime_adapter_last_batch_size`, `runtime_adapter_invalid_samples`, `runtime_adapter_ingest_attempts`, `runtime_adapter_ingest_failures`).

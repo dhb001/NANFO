@@ -3,7 +3,7 @@
 ## Active Goals
 - Vertical Slice 1 Implementation: **COMPLETE** — all modules implemented, tested, and migrated.
 - Vertical Slice 2 Implementation: **COMPLETE** — telemetry ingestion/persistence/read APIs and telemetry health counters + `/ws/telemetry` fanout delivered through Step 8.
-- Vertical Slice 3 Implementation: **IN PROGRESS** — runtime collector reliability and alerting/event visibility baseline delivered through **VS3 Step 12** (runtime adapter health/backpressure observability counters, commit `7ed0821`).
+- Vertical Slice 3 Implementation: **IN PROGRESS** — runtime collector reliability and alerting/event visibility baseline delivered through **VS3 Step 13** (runtime adapter SLO snapshot visibility in telemetry health read-path internals).
 
 ## Subsystem Progress — Vertical Slice 3
 
@@ -19,6 +19,7 @@
 - [x] Step 10: Alert websocket fanout observability counters/log branches
 - [x] Step 11: Minimal production collector adapter stub wired to runtime poll path
 - [x] Step 12: Runtime adapter health/backpressure observability counters
+- [x] Step 13: Runtime adapter SLO snapshot visibility in telemetry health internals
 
 ## Subsystem Progress — Vertical Slice 2
 
