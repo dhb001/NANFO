@@ -128,7 +128,10 @@ async def test_get_health_logs_runtime_adapter_slo_snapshot(mock_db):
     svc._repo.get_latest_observed_at = AsyncMock(return_value=None)
     svc._repo.count_all = AsyncMock(return_value=0)
 
-    with patch("app.modules.telemetry.service.logger.info") as mock_info:
+    with (
+        patch("app.modules.telemetry.service.logger.info") as mock_info,
+        patch("app.modules.telemetry.service.logger.warning") as mock_warning,
+    ):
         result = await svc.get_health()
 
     assert result.status == "ok"
@@ -142,6 +145,10 @@ async def test_get_health_logs_runtime_adapter_slo_snapshot(mock_db):
     assert info_kwargs["ingest_failures"] == 1
     assert info_kwargs["status"] == "ok"
     assert info_kwargs["dropped_events"] == 1
+    assert any(
+        call.args and call.args[0] == "telemetry_health_runtime_adapter_ingest_failures_detected"
+        for call in mock_warning.call_args_list
+    )
 
 
 @pytest.mark.asyncio
@@ -182,7 +189,10 @@ async def test_get_health_falls_back_to_zero_counters_on_counter_failure(mock_db
     svc._repo.get_latest_observed_at = AsyncMock(return_value=observed_at)
     svc._repo.count_all = AsyncMock(return_value=1)
 
-    with patch("app.modules.telemetry.service.logger.info") as mock_info:
+    with (
+        patch("app.modules.telemetry.service.logger.info") as mock_info,
+        patch("app.modules.telemetry.service.logger.warning") as mock_warning,
+    ):
         result = await svc.get_health()
 
     assert result.status == "ok"
@@ -194,6 +204,10 @@ async def test_get_health_falls_back_to_zero_counters_on_counter_failure(mock_db
     assert info_kwargs["invalid_samples"] == 0
     assert info_kwargs["ingest_attempts"] == 0
     assert info_kwargs["ingest_failures"] == 0
+    assert any(
+        call.args and call.args[0] == "telemetry_health_counter_snapshot_failed"
+        for call in mock_warning.call_args_list
+    )
 
 
 @pytest.mark.asyncio
@@ -270,6 +284,10 @@ async def test_get_health_runtime_adapter_slo_snapshot_invalid_values_are_fail_o
         "runtime_adapter_invalid_samples",
         "runtime_adapter_ingest_attempts",
     }
+    assert any(
+        call.args and call.args[0] == "telemetry_health_runtime_adapter_ingest_failures_detected"
+        for call in mock_warning.call_args_list
+    )
 
 
 @pytest.mark.asyncio
@@ -306,3 +324,116 @@ async def test_get_health_runtime_adapter_slo_snapshot_log_failure_is_fail_open(
         call.args and call.args[0] == "telemetry_health_runtime_adapter_slo_snapshot_log_failed"
         for call in mock_warning.call_args_list
     )
+
+
+@pytest.mark.asyncio
+async def test_get_health_warns_when_invalid_sample_ratio_exceeds_threshold(mock_db):
+    counter_service = AsyncMock()
+    counter_service.get_snapshot = AsyncMock(
+        return_value={
+            "ingested_events": 0,
+            "persisted_events": 0,
+            "fanout_events": 0,
+            "dropped_events": 0,
+            "runtime_exhausted_cycles": 0,
+            "runtime_exhausted_streak": 0,
+            "runtime_sustained_failure_windows": 0,
+            "runtime_sustained_failure_active": 0,
+            "runtime_adapter_last_batch_size": 8,
+            "runtime_adapter_invalid_samples": 3,
+            "runtime_adapter_ingest_attempts": 5,
+            "runtime_adapter_ingest_failures": 0,
+        }
+    )
+    svc = TelemetryQueryService(db=mock_db, counter_service=counter_service)
+    svc._repo.get_latest_observed_at = AsyncMock(return_value=None)
+    svc._repo.count_all = AsyncMock(return_value=0)
+
+    with patch("app.modules.telemetry.service.logger.warning") as mock_warning:
+        result = await svc.get_health()
+
+    assert result.status == "ok"
+    ratio_warnings = [
+        call
+        for call in mock_warning.call_args_list
+        if call.args and call.args[0] == "telemetry_health_runtime_adapter_invalid_sample_ratio_exceeded"
+    ]
+    assert len(ratio_warnings) == 1
+    ratio_warning = ratio_warnings[0]
+    assert ratio_warning.kwargs["invalid_samples"] == 3
+    assert ratio_warning.kwargs["ingest_attempts"] == 5
+    assert ratio_warning.kwargs["invalid_sample_ratio"] == pytest.approx(0.375)
+    assert ratio_warning.kwargs["invalid_sample_ratio_threshold"] == pytest.approx(0.25)
+
+
+@pytest.mark.asyncio
+async def test_get_health_does_not_warn_when_invalid_sample_ratio_within_threshold(mock_db):
+    counter_service = AsyncMock()
+    counter_service.get_snapshot = AsyncMock(
+        return_value={
+            "ingested_events": 0,
+            "persisted_events": 0,
+            "fanout_events": 0,
+            "dropped_events": 0,
+            "runtime_exhausted_cycles": 0,
+            "runtime_exhausted_streak": 0,
+            "runtime_sustained_failure_windows": 0,
+            "runtime_sustained_failure_active": 0,
+            "runtime_adapter_last_batch_size": 10,
+            "runtime_adapter_invalid_samples": 2,
+            "runtime_adapter_ingest_attempts": 8,
+            "runtime_adapter_ingest_failures": 0,
+        }
+    )
+    svc = TelemetryQueryService(db=mock_db, counter_service=counter_service)
+    svc._repo.get_latest_observed_at = AsyncMock(return_value=None)
+    svc._repo.count_all = AsyncMock(return_value=0)
+
+    with patch("app.modules.telemetry.service.logger.warning") as mock_warning:
+        result = await svc.get_health()
+
+    assert result.status == "ok"
+    assert not any(
+        call.args and call.args[0] == "telemetry_health_runtime_adapter_invalid_sample_ratio_exceeded"
+        for call in mock_warning.call_args_list
+    )
+
+
+@pytest.mark.asyncio
+async def test_get_health_warns_ingest_failures_with_zero_attempt_guard(mock_db):
+    counter_service = AsyncMock()
+    counter_service.get_snapshot = AsyncMock(
+        return_value={
+            "ingested_events": 0,
+            "persisted_events": 0,
+            "fanout_events": 0,
+            "dropped_events": 0,
+            "runtime_exhausted_cycles": 0,
+            "runtime_exhausted_streak": 0,
+            "runtime_sustained_failure_windows": 0,
+            "runtime_sustained_failure_active": 0,
+            "runtime_adapter_last_batch_size": 0,
+            "runtime_adapter_invalid_samples": 0,
+            "runtime_adapter_ingest_attempts": 0,
+            "runtime_adapter_ingest_failures": 2,
+        }
+    )
+    svc = TelemetryQueryService(db=mock_db, counter_service=counter_service)
+    svc._repo.get_latest_observed_at = AsyncMock(return_value=None)
+    svc._repo.count_all = AsyncMock(return_value=0)
+
+    with patch("app.modules.telemetry.service.logger.warning") as mock_warning:
+        result = await svc.get_health()
+
+    assert result.status == "ok"
+    ingest_failure_warnings = [
+        call
+        for call in mock_warning.call_args_list
+        if call.args and call.args[0] == "telemetry_health_runtime_adapter_ingest_failures_detected"
+    ]
+    assert len(ingest_failure_warnings) == 1
+    warning = ingest_failure_warnings[0]
+    assert warning.kwargs["ingest_failures"] == 2
+    assert warning.kwargs["ingest_attempts"] == 0
+    assert warning.kwargs["zero_attempt_guard_applied"] is True
+    assert warning.kwargs["failure_ratio"] == pytest.approx(2.0)

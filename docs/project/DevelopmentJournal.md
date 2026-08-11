@@ -1,5 +1,13 @@
 # Development Journal
 
+## [2026-08-11] - Vertical Slice 3 Step 14 (Runtime Adapter Backpressure Anomaly Logging Thresholds)
+
+- **Implemented:** Added internal-only anomaly warning thresholds in telemetry health runtime adapter SLO logging.
+- **Threshold behavior:** Warns when `ingest_failures > 0` with explicit zero-attempt guard and warns when `invalid_samples` ratio exceeds threshold (`> 0.25`).
+- **Scope guardrails:** No REST route changes, no API envelope changes, no schema migrations, and no runtime poll-action semantic changes.
+- **Fail-open safety:** Threshold/anomaly checks are contained in existing safe logging path; logging failures remain warning-only and non-fatal.
+- **Validation:** Scoped Ruff passed; targeted telemetry query/scaffold/endpoints tests passed; full backend `pytest` regression passed (`181 passed`).
+
 ## [2026-08-11] - Vertical Slice 3 Step 13 (Runtime Adapter SLO Snapshot Visibility)
 
 - **Implemented:** Extended telemetry health read-path internals to build and log runtime adapter SLO snapshot fields (`last_batch_size`, `invalid_samples`, `ingest_attempts`, `ingest_failures`) from existing runtime adapter counters.

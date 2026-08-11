@@ -34,6 +34,7 @@ logger = get_logger(__name__)
 _RUNTIME_SUSTAINED_FAILURE_DEFAULT_THRESHOLD = 3
 _RUNTIME_SUSTAINED_FAILURE_ACTIVATED_EVENT_TYPE = "telemetry.collector.sustained_failure_activated"
 _RUNTIME_SUSTAINED_FAILURE_RECOVERED_EVENT_TYPE = "telemetry.collector.sustained_failure_recovered"
+_RUNTIME_ADAPTER_INVALID_SAMPLE_RATIO_WARN_THRESHOLD = 0.25
 
 
 def compute_bounded_backoff_seconds(
@@ -871,12 +872,47 @@ class TelemetryQueryService:
                 ingest_attempts=runtime_adapter_slo_snapshot["ingest_attempts"],
                 ingest_failures=runtime_adapter_slo_snapshot["ingest_failures"],
             )
+            self._log_runtime_adapter_backpressure_anomalies(
+                runtime_adapter_slo_snapshot=runtime_adapter_slo_snapshot
+            )
         except Exception as exc:  # noqa: BLE001
             logger.warning(
                 "telemetry_health_runtime_adapter_slo_snapshot_log_failed",
                 status=status,
                 dropped_events=dropped_events,
                 error=str(exc),
+            )
+
+    def _log_runtime_adapter_backpressure_anomalies(
+        self,
+        *,
+        runtime_adapter_slo_snapshot: dict[str, int],
+    ) -> None:
+        ingest_attempts = runtime_adapter_slo_snapshot["ingest_attempts"]
+        ingest_failures = runtime_adapter_slo_snapshot["ingest_failures"]
+        invalid_samples = runtime_adapter_slo_snapshot["invalid_samples"]
+
+        if ingest_failures > 0:
+            zero_attempt_guard_applied = ingest_attempts == 0
+            denominator = ingest_attempts if ingest_attempts > 0 else 1
+            failure_ratio = ingest_failures / denominator
+            logger.warning(
+                "telemetry_health_runtime_adapter_ingest_failures_detected",
+                ingest_failures=ingest_failures,
+                ingest_attempts=ingest_attempts,
+                failure_ratio=failure_ratio,
+                zero_attempt_guard_applied=zero_attempt_guard_applied,
+            )
+
+        total_samples = invalid_samples + ingest_attempts
+        invalid_sample_ratio = (invalid_samples / total_samples) if total_samples > 0 else 0.0
+        if invalid_sample_ratio > _RUNTIME_ADAPTER_INVALID_SAMPLE_RATIO_WARN_THRESHOLD:
+            logger.warning(
+                "telemetry_health_runtime_adapter_invalid_sample_ratio_exceeded",
+                invalid_samples=invalid_samples,
+                ingest_attempts=ingest_attempts,
+                invalid_sample_ratio=invalid_sample_ratio,
+                invalid_sample_ratio_threshold=_RUNTIME_ADAPTER_INVALID_SAMPLE_RATIO_WARN_THRESHOLD,
             )
 
     async def _get_counter_snapshot(self) -> dict[str, int]:

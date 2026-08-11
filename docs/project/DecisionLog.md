@@ -3,6 +3,21 @@
 Lightweight chronological notes for decisions that do not require a full ADR.
 
 ## 2026-08-11
+### Runtime Adapter Backpressure Anomaly Threshold Warnings (VS3 Step 14)
+Decision: Add internal-only warning thresholds to telemetry health runtime adapter SLO logging: warn on `ingest_failures > 0` with a safe zero-attempt denominator guard, and warn when invalid sample ratio exceeds configured threshold (`> 0.25`).
+Reason:
+- Provide minimal anomaly visibility for backpressure/quality drift without changing public API contracts.
+- Preserve fail-open reliability by keeping anomaly checks inside existing non-fatal logging path.
+Impact:
+- Health read path now emits targeted anomaly warnings for runtime adapter ingest failures and excessive invalid sample ratios.
+- REST routes, API envelope, schema/migrations, C5/C6 behavior, and runtime poll-action semantics remain unchanged.
+Related:
+- `backend/app/modules/telemetry/service.py`
+- `backend/tests/unit/test_telemetry_query_service.py`
+- `backend/tests/unit/test_telemetry_scaffold.py`
+- `backend/tests/integration/test_telemetry_endpoints.py`
+
+## 2026-08-11
 ### Runtime Adapter SLO Snapshot Visibility in Health Read Path (VS3 Step 13)
 Decision: Extend telemetry health internal read path to derive and emit runtime adapter SLO snapshot visibility from existing counters (`last_batch_size`, `invalid_samples`, `ingest_attempts`, `ingest_failures`) through structured logging only.
 Reason:
