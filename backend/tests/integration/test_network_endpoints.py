@@ -8,12 +8,11 @@ import uuid
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from fastapi.testclient import TestClient
-
 from app.core.dependencies import get_db, get_redis
 from app.core.security import create_access_token
 from app.main import app
 from app.modules.network.schemas import TopologyGraphResponse
+from fastapi.testclient import TestClient
 
 
 def _make_token():
@@ -162,6 +161,14 @@ class TestC6DeferredEndpointsAbsent:
 
     def test_neighbors_path_pattern_still_not_routable(self, client, headers):
         response = client.get(f"/api/v1/topology/device/{uuid.uuid4()}/neighbors", headers=headers)
+        assert response.status_code == 404
+
+    def test_impact_path_pattern_still_not_routable(self, client, headers):
+        response = client.get(f"/api/v1/topology/impact/{uuid.uuid4()}", headers=headers)
+        assert response.status_code == 404
+
+    def test_reconcile_subpath_pattern_still_not_routable(self, client, headers):
+        response = client.post("/api/v1/topology/reconcile/full", headers=headers)
         assert response.status_code == 404
 
     def test_topology_graph_endpoint_exists(self, client, headers):

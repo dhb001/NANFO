@@ -3,6 +3,21 @@
 Lightweight chronological notes for decisions that do not require a full ADR.
 
 ## 2026-08-12
+### C6 Deferred Topology Planning/Governance Closure (VS3 Step 27)
+Decision: Finalize VS3 deferred topology planning governance by extending integration-level non-routability coverage for deferred topology endpoint path variants under C6.
+Reason:
+- Ensure deferred topology analysis endpoints remain explicitly out of runtime routing scope while VS3 closes reliability/backpressure goals.
+- Prevent accidental route activation through path-shape variants not covered by prior base-path-only checks.
+Impact:
+- Integration suite now asserts `404` for additional deferred-path variants (`/api/v1/topology/impact/{id}`, `/api/v1/topology/reconcile/full`) alongside existing deferred checks.
+- Confirms C6 contract remains enforced and documented before transitioning to next vertical slice.
+- No API envelope, schema, event contract, or runtime telemetry behavior changes.
+Related:
+- `backend/tests/integration/test_network_endpoints.py`
+- `docs/project/CurrentSprint.md`
+- `docs/project/DevelopmentJournal.md`
+
+## 2026-08-12
 ### Runtime Adapter Dropped-Sample Backpressure Hardening (VS3 Step 26)
 Decision: Add runtime adapter dropped-sample counter semantics and include dropped-sample anomaly visibility in telemetry health SLO internals.
 Reason:

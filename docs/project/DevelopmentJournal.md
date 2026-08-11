@@ -1,5 +1,13 @@
 # Development Journal
 
+## [2026-08-12] - Vertical Slice 3 Step 27 (C6 Deferred Topology Planning/Governance Closure)
+
+- **Implemented:** Completed VS3 deferred topology planning/governance closure under C6 by hardening explicit non-routability coverage for deferred endpoint path variants.
+- **Regression hardening:** Added integration coverage for deferred path-pattern routes (`/api/v1/topology/impact/{id}`, `/api/v1/topology/reconcile/full`) to ensure C6 deferred endpoints remain non-routable beyond base-path checks.
+- **Governance outcome:** Confirms deferred topology analysis endpoints remain intentionally absent from router registration while preserving existing graph/node endpoint availability.
+- **Scope guardrails:** Test + planning closure only; no REST/API envelope changes, no schema migrations, no C5/C6 contract drift (C6 remains enforced).
+- **Validation:** Scoped Ruff passed; targeted deferred-topology integration tests passed; full backend `pytest` regression passed (`220 passed`).
+
 ## [2026-08-12] - Vertical Slice 3 Step 26 (Runtime Adapter Dropped-Sample Backpressure Hardening)
 
 - **Implemented:** Added dropped-sample runtime adapter counter and observability wiring to harden backpressure/SLO diagnostics.
