@@ -3,6 +3,22 @@
 Lightweight chronological notes for decisions that do not require a full ADR.
 
 ## 2026-08-11
+### Runtime Adapter SLO Health Rollup Severity Visibility (VS3 Step 18)
+Decision: Add a single internal-only telemetry health rollup log branch for runtime adapter SLO visibility, with explicit severity mapping (`ok`, `degraded`, `critical`) and structured rollup payload fields.
+Reason:
+- Provide concise operations-focused health posture visibility without changing API contracts.
+- Preserve Step 16/17 streak persistence and transition semantics while adding a minimal rollup summary.
+Impact:
+- Health read path now emits `telemetry_health_runtime_adapter_slo_rollup` including streak, sustained-failure state, ingest attempts/failures, invalid sample ratio, last batch size, and anomaly reason flags.
+- Severity mapping is explicit and deterministic (`runtime_adapter_healthy`, `runtime_adapter_anomaly_detected`, `anomaly_streak_threshold_exceeded`, `runtime_sustained_failure_active`) while remaining internal-only.
+- REST/WebSocket contracts, canonical envelope, schema/migrations, and runtime poll-action behavior remain unchanged.
+Related:
+- `backend/app/modules/telemetry/service.py`
+- `backend/tests/unit/test_telemetry_query_service.py`
+- `backend/tests/unit/test_telemetry_scaffold.py`
+- `backend/tests/integration/test_telemetry_endpoints.py`
+
+## 2026-08-11
 ### Runtime Adapter Anomaly Streak Transition Metadata Visibility (VS3 Step 17)
 Decision: Extend telemetry health runtime adapter streak observability with explicit transition metadata (`previous_streak`, `current_streak`, `anomaly_reason_flags`) emitted by an internal transition event log branch.
 Reason:

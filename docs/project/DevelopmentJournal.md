@@ -1,5 +1,14 @@
 # Development Journal
 
+## [2026-08-11] - Vertical Slice 3 Step 18 (Runtime Adapter SLO Health Rollup Severity Visibility)
+
+- **Implemented:** Added a single internal-only runtime adapter SLO health rollup log branch in telemetry health read-path internals (`telemetry_health_runtime_adapter_slo_rollup`).
+- **Rollup payload:** Emits `runtime_adapter_anomaly_streak`, `runtime_sustained_failure_active`, `ingest_attempts`, `ingest_failures`, `invalid_samples`, computed `invalid_sample_ratio`, `last_batch_size`, and `anomaly_reason_flags`.
+- **Severity mapping:** Added explicit operations-only severity mapping (`ok`, `degraded`, `critical`) with deterministic reason tags (`runtime_adapter_healthy`, `runtime_adapter_anomaly_detected`, `anomaly_streak_threshold_exceeded`, `runtime_sustained_failure_active`).
+- **Compatibility guardrails:** Step 16 persisted streak continuity and Step 17 transition metadata semantics remain unchanged; no REST route/envelope changes, no schema migrations, and runtime poll-action behavior unchanged.
+- **Fail-open safety:** Rollup emission remains inside existing safe logging branch; counter snapshot fallback and logging failure handling remain non-fatal.
+- **Validation:** Scoped Ruff passed; targeted telemetry query/scaffold/endpoints tests passed; full backend `pytest` regression passed (`191 passed`).
+
 ## [2026-08-11] - Vertical Slice 3 Step 17 (Runtime Adapter Anomaly Streak Transition Metadata)
 
 - **Implemented:** Added runtime adapter anomaly streak transition metadata visibility in telemetry health read-path internals (`previous_streak`, `current_streak`, `anomaly_reason_flags`).

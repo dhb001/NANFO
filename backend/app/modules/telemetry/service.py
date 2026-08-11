@@ -35,6 +35,7 @@ _RUNTIME_SUSTAINED_FAILURE_DEFAULT_THRESHOLD = 3
 _RUNTIME_SUSTAINED_FAILURE_ACTIVATED_EVENT_TYPE = "telemetry.collector.sustained_failure_activated"
 _RUNTIME_SUSTAINED_FAILURE_RECOVERED_EVENT_TYPE = "telemetry.collector.sustained_failure_recovered"
 _RUNTIME_ADAPTER_INVALID_SAMPLE_RATIO_WARN_THRESHOLD = 0.25
+_RUNTIME_ADAPTER_ANOMALY_STREAK_CRITICAL_THRESHOLD = 3
 
 
 def compute_bounded_backoff_seconds(
@@ -795,6 +796,7 @@ class TelemetryQueryService:
         await self._safe_log_runtime_adapter_slo_snapshot(
             runtime_adapter_slo_snapshot=runtime_adapter_slo_snapshot,
             runtime_adapter_anomaly_streak=runtime_adapter_anomaly_streak,
+            runtime_sustained_failure_active=runtime_sustained_failure_active,
             status=status,
             dropped_events=dropped_events,
         )
@@ -865,6 +867,7 @@ class TelemetryQueryService:
         *,
         runtime_adapter_slo_snapshot: dict[str, int],
         runtime_adapter_anomaly_streak: int,
+        runtime_sustained_failure_active: bool,
         status: str,
         dropped_events: int,
     ) -> None:
@@ -881,9 +884,15 @@ class TelemetryQueryService:
             anomaly_reason_flags = self._log_runtime_adapter_backpressure_anomalies(
                 runtime_adapter_slo_snapshot=runtime_adapter_slo_snapshot
             )
-            await self._update_runtime_adapter_anomaly_streak(
+            current_anomaly_streak = await self._update_runtime_adapter_anomaly_streak(
                 anomaly_reason_flags=anomaly_reason_flags,
                 runtime_adapter_anomaly_streak=runtime_adapter_anomaly_streak,
+            )
+            self._log_runtime_adapter_slo_health_rollup(
+                runtime_adapter_slo_snapshot=runtime_adapter_slo_snapshot,
+                runtime_adapter_anomaly_streak=current_anomaly_streak,
+                runtime_sustained_failure_active=runtime_sustained_failure_active,
+                anomaly_reason_flags=anomaly_reason_flags,
             )
         except Exception as exc:  # noqa: BLE001
             logger.warning(
@@ -892,6 +901,71 @@ class TelemetryQueryService:
                 dropped_events=dropped_events,
                 error=str(exc),
             )
+
+    def _log_runtime_adapter_slo_health_rollup(
+        self,
+        *,
+        runtime_adapter_slo_snapshot: dict[str, int],
+        runtime_adapter_anomaly_streak: int,
+        runtime_sustained_failure_active: bool,
+        anomaly_reason_flags: list[str],
+    ) -> None:
+        ingest_attempts = runtime_adapter_slo_snapshot["ingest_attempts"]
+        ingest_failures = runtime_adapter_slo_snapshot["ingest_failures"]
+        invalid_samples = runtime_adapter_slo_snapshot["invalid_samples"]
+        invalid_sample_ratio = self._compute_invalid_sample_ratio(
+            invalid_samples=invalid_samples,
+            ingest_attempts=ingest_attempts,
+        )
+        severity, severity_reason = self._resolve_runtime_adapter_slo_rollup_severity(
+            runtime_adapter_anomaly_streak=runtime_adapter_anomaly_streak,
+            runtime_sustained_failure_active=runtime_sustained_failure_active,
+            anomaly_reason_flags=anomaly_reason_flags,
+        )
+        if severity == "ok":
+            log_fn = logger.info
+        elif severity == "degraded":
+            log_fn = logger.warning
+        else:
+            log_fn = logger.error
+
+        log_fn(
+            "telemetry_health_runtime_adapter_slo_rollup",
+            severity=severity,
+            severity_reason=severity_reason,
+            runtime_adapter_anomaly_streak=runtime_adapter_anomaly_streak,
+            runtime_sustained_failure_active=runtime_sustained_failure_active,
+            ingest_attempts=ingest_attempts,
+            ingest_failures=ingest_failures,
+            invalid_samples=invalid_samples,
+            invalid_sample_ratio=invalid_sample_ratio,
+            last_batch_size=runtime_adapter_slo_snapshot["last_batch_size"],
+            anomaly_reason_flags=anomaly_reason_flags,
+            anomaly_streak_critical_threshold=_RUNTIME_ADAPTER_ANOMALY_STREAK_CRITICAL_THRESHOLD,
+        )
+
+    @staticmethod
+    def _resolve_runtime_adapter_slo_rollup_severity(
+        *,
+        runtime_adapter_anomaly_streak: int,
+        runtime_sustained_failure_active: bool,
+        anomaly_reason_flags: list[str],
+    ) -> tuple[str, str]:
+        if runtime_sustained_failure_active:
+            return "critical", "runtime_sustained_failure_active"
+
+        if runtime_adapter_anomaly_streak >= _RUNTIME_ADAPTER_ANOMALY_STREAK_CRITICAL_THRESHOLD:
+            return "critical", "anomaly_streak_threshold_exceeded"
+
+        if anomaly_reason_flags or runtime_adapter_anomaly_streak > 0:
+            return "degraded", "runtime_adapter_anomaly_detected"
+
+        return "ok", "runtime_adapter_healthy"
+
+    @staticmethod
+    def _compute_invalid_sample_ratio(*, invalid_samples: int, ingest_attempts: int) -> float:
+        total_samples = invalid_samples + ingest_attempts
+        return (invalid_samples / total_samples) if total_samples > 0 else 0.0
 
     def _log_runtime_adapter_backpressure_anomalies(
         self,
@@ -916,8 +990,10 @@ class TelemetryQueryService:
                 zero_attempt_guard_applied=zero_attempt_guard_applied,
             )
 
-        total_samples = invalid_samples + ingest_attempts
-        invalid_sample_ratio = (invalid_samples / total_samples) if total_samples > 0 else 0.0
+        invalid_sample_ratio = self._compute_invalid_sample_ratio(
+            invalid_samples=invalid_samples,
+            ingest_attempts=ingest_attempts,
+        )
         if invalid_sample_ratio > _RUNTIME_ADAPTER_INVALID_SAMPLE_RATIO_WARN_THRESHOLD:
             anomaly_reason_flags.append("invalid_sample_ratio_exceeded")
             logger.warning(
@@ -935,7 +1011,7 @@ class TelemetryQueryService:
         *,
         anomaly_reason_flags: list[str],
         runtime_adapter_anomaly_streak: int,
-    ) -> None:
+    ) -> int:
         previous_streak = runtime_adapter_anomaly_streak
 
         if anomaly_reason_flags:
@@ -950,7 +1026,7 @@ class TelemetryQueryService:
                 current_streak=updated_streak,
                 anomaly_reason_flags=anomaly_reason_flags,
             )
-            return
+            return updated_streak
 
         if runtime_adapter_anomaly_streak > 0:
             logger.info(
@@ -963,13 +1039,14 @@ class TelemetryQueryService:
                 current_streak=0,
                 anomaly_reason_flags=anomaly_reason_flags,
             )
-            return
+            return 0
 
         self._log_runtime_adapter_anomaly_streak_transition(
             previous_streak=previous_streak,
             current_streak=previous_streak,
             anomaly_reason_flags=anomaly_reason_flags,
         )
+        return previous_streak
 
     def _log_runtime_adapter_anomaly_streak_transition(
         self,

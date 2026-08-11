@@ -162,6 +162,19 @@ async def test_get_health_logs_runtime_adapter_slo_snapshot(mock_db):
     assert transition_log.kwargs["previous_streak"] == 0
     assert transition_log.kwargs["current_streak"] == 1
     assert transition_log.kwargs["anomaly_reason_flags"] == ["ingest_failures_detected"]
+    rollup_logs = _event_calls(mock_warning, "telemetry_health_runtime_adapter_slo_rollup")
+    assert len(rollup_logs) == 1
+    rollup_log = rollup_logs[0]
+    assert rollup_log.kwargs["severity"] == "degraded"
+    assert rollup_log.kwargs["severity_reason"] == "runtime_adapter_anomaly_detected"
+    assert rollup_log.kwargs["runtime_adapter_anomaly_streak"] == 1
+    assert rollup_log.kwargs["runtime_sustained_failure_active"] is False
+    assert rollup_log.kwargs["ingest_attempts"] == 10
+    assert rollup_log.kwargs["ingest_failures"] == 1
+    assert rollup_log.kwargs["invalid_samples"] == 2
+    assert rollup_log.kwargs["invalid_sample_ratio"] == pytest.approx(2 / 12)
+    assert rollup_log.kwargs["last_batch_size"] == 12
+    assert rollup_log.kwargs["anomaly_reason_flags"] == ["ingest_failures_detected"]
 
 
 @pytest.mark.asyncio
@@ -227,6 +240,19 @@ async def test_get_health_falls_back_to_zero_counters_on_counter_failure(mock_db
     assert transition_log.kwargs["previous_streak"] == 0
     assert transition_log.kwargs["current_streak"] == 0
     assert transition_log.kwargs["anomaly_reason_flags"] == []
+    rollup_logs = _event_calls(mock_info, "telemetry_health_runtime_adapter_slo_rollup")
+    assert len(rollup_logs) == 1
+    rollup_log = rollup_logs[0]
+    assert rollup_log.kwargs["severity"] == "ok"
+    assert rollup_log.kwargs["severity_reason"] == "runtime_adapter_healthy"
+    assert rollup_log.kwargs["runtime_adapter_anomaly_streak"] == 0
+    assert rollup_log.kwargs["runtime_sustained_failure_active"] is False
+    assert rollup_log.kwargs["ingest_attempts"] == 0
+    assert rollup_log.kwargs["ingest_failures"] == 0
+    assert rollup_log.kwargs["invalid_samples"] == 0
+    assert rollup_log.kwargs["invalid_sample_ratio"] == pytest.approx(0.0)
+    assert rollup_log.kwargs["last_batch_size"] == 0
+    assert rollup_log.kwargs["anomaly_reason_flags"] == []
 
 
 @pytest.mark.asyncio
@@ -251,6 +277,138 @@ async def test_get_health_status_degraded_when_runtime_sustained_failure_active(
     result = await svc.get_health()
 
     assert result.status == "degraded"
+
+
+@pytest.mark.asyncio
+async def test_get_health_rollup_logs_ok_severity_for_healthy_runtime_adapter(mock_db):
+    counter_service = AsyncMock()
+    counter_service.get_snapshot = AsyncMock(
+        return_value={
+            "ingested_events": 0,
+            "persisted_events": 0,
+            "fanout_events": 0,
+            "dropped_events": 0,
+            "runtime_exhausted_cycles": 0,
+            "runtime_exhausted_streak": 0,
+            "runtime_sustained_failure_windows": 0,
+            "runtime_sustained_failure_active": 0,
+            "runtime_adapter_last_batch_size": 5,
+            "runtime_adapter_invalid_samples": 1,
+            "runtime_adapter_ingest_attempts": 9,
+            "runtime_adapter_ingest_failures": 0,
+            "runtime_adapter_anomaly_streak": 0,
+        }
+    )
+    svc = TelemetryQueryService(db=mock_db, counter_service=counter_service)
+    svc._repo.get_latest_observed_at = AsyncMock(return_value=None)
+    svc._repo.count_all = AsyncMock(return_value=0)
+
+    with patch("app.modules.telemetry.service.logger.info") as mock_info:
+        result = await svc.get_health()
+
+    assert result.status == "ok"
+    rollup_logs = _event_calls(mock_info, "telemetry_health_runtime_adapter_slo_rollup")
+    assert len(rollup_logs) == 1
+    rollup_log = rollup_logs[0]
+    assert rollup_log.kwargs["severity"] == "ok"
+    assert rollup_log.kwargs["severity_reason"] == "runtime_adapter_healthy"
+    assert rollup_log.kwargs["runtime_adapter_anomaly_streak"] == 0
+    assert rollup_log.kwargs["runtime_sustained_failure_active"] is False
+    assert rollup_log.kwargs["ingest_attempts"] == 9
+    assert rollup_log.kwargs["ingest_failures"] == 0
+    assert rollup_log.kwargs["invalid_samples"] == 1
+    assert rollup_log.kwargs["invalid_sample_ratio"] == pytest.approx(0.1)
+    assert rollup_log.kwargs["last_batch_size"] == 5
+    assert rollup_log.kwargs["anomaly_reason_flags"] == []
+
+
+@pytest.mark.asyncio
+async def test_get_health_rollup_logs_critical_severity_when_runtime_failure_active(mock_db):
+    counter_service = AsyncMock()
+    counter_service.get_snapshot = AsyncMock(
+        return_value={
+            "ingested_events": 0,
+            "persisted_events": 0,
+            "fanout_events": 0,
+            "dropped_events": 0,
+            "runtime_exhausted_cycles": 7,
+            "runtime_exhausted_streak": 3,
+            "runtime_sustained_failure_windows": 2,
+            "runtime_sustained_failure_active": 1,
+            "runtime_adapter_last_batch_size": 7,
+            "runtime_adapter_invalid_samples": 2,
+            "runtime_adapter_ingest_attempts": 8,
+            "runtime_adapter_ingest_failures": 0,
+            "runtime_adapter_anomaly_streak": 0,
+        }
+    )
+    svc = TelemetryQueryService(db=mock_db, counter_service=counter_service)
+    svc._repo.get_latest_observed_at = AsyncMock(return_value=None)
+    svc._repo.count_all = AsyncMock(return_value=0)
+
+    with patch("app.modules.telemetry.service.logger.error") as mock_error:
+        result = await svc.get_health()
+
+    assert result.status == "degraded"
+    rollup_logs = _event_calls(mock_error, "telemetry_health_runtime_adapter_slo_rollup")
+    assert len(rollup_logs) == 1
+    rollup_log = rollup_logs[0]
+    assert rollup_log.kwargs["severity"] == "critical"
+    assert rollup_log.kwargs["severity_reason"] == "runtime_sustained_failure_active"
+    assert rollup_log.kwargs["runtime_adapter_anomaly_streak"] == 0
+    assert rollup_log.kwargs["runtime_sustained_failure_active"] is True
+    assert rollup_log.kwargs["ingest_attempts"] == 8
+    assert rollup_log.kwargs["ingest_failures"] == 0
+    assert rollup_log.kwargs["invalid_samples"] == 2
+    assert rollup_log.kwargs["invalid_sample_ratio"] == pytest.approx(0.2)
+    assert rollup_log.kwargs["last_batch_size"] == 7
+    assert rollup_log.kwargs["anomaly_reason_flags"] == []
+
+
+@pytest.mark.asyncio
+async def test_get_health_rollup_logs_critical_severity_when_anomaly_streak_reaches_threshold(
+    mock_db,
+):
+    counter_service = AsyncMock()
+    counter_service.get_snapshot = AsyncMock(
+        return_value={
+            "ingested_events": 0,
+            "persisted_events": 0,
+            "fanout_events": 0,
+            "dropped_events": 0,
+            "runtime_exhausted_cycles": 0,
+            "runtime_exhausted_streak": 0,
+            "runtime_sustained_failure_windows": 0,
+            "runtime_sustained_failure_active": 0,
+            "runtime_adapter_last_batch_size": 6,
+            "runtime_adapter_invalid_samples": 0,
+            "runtime_adapter_ingest_attempts": 4,
+            "runtime_adapter_ingest_failures": 1,
+            "runtime_adapter_anomaly_streak": 2,
+        }
+    )
+    counter_service.set_runtime_adapter_anomaly_streak = AsyncMock(return_value=3)
+    svc = TelemetryQueryService(db=mock_db, counter_service=counter_service)
+    svc._repo.get_latest_observed_at = AsyncMock(return_value=None)
+    svc._repo.count_all = AsyncMock(return_value=0)
+
+    with patch("app.modules.telemetry.service.logger.error") as mock_error:
+        result = await svc.get_health()
+
+    assert result.status == "ok"
+    rollup_logs = _event_calls(mock_error, "telemetry_health_runtime_adapter_slo_rollup")
+    assert len(rollup_logs) == 1
+    rollup_log = rollup_logs[0]
+    assert rollup_log.kwargs["severity"] == "critical"
+    assert rollup_log.kwargs["severity_reason"] == "anomaly_streak_threshold_exceeded"
+    assert rollup_log.kwargs["runtime_adapter_anomaly_streak"] == 3
+    assert rollup_log.kwargs["runtime_sustained_failure_active"] is False
+    assert rollup_log.kwargs["ingest_attempts"] == 4
+    assert rollup_log.kwargs["ingest_failures"] == 1
+    assert rollup_log.kwargs["invalid_samples"] == 0
+    assert rollup_log.kwargs["invalid_sample_ratio"] == pytest.approx(0.0)
+    assert rollup_log.kwargs["last_batch_size"] == 6
+    assert rollup_log.kwargs["anomaly_reason_flags"] == ["ingest_failures_detected"]
 
 
 @pytest.mark.asyncio
