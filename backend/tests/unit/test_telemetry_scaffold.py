@@ -7,11 +7,12 @@ import uuid
 from unittest.mock import AsyncMock, patch
 
 import pytest
-
 from app.modules.telemetry.service import (
     ProductionTelemetryAdapterStub,
+    SeededRuntimeTelemetryAdapter,
     TelemetryCollectorRunner,
     TelemetryIngestionService,
+    build_production_runtime_adapter,
     build_runtime_poll_action,
     compute_bounded_backoff_seconds,
 )
@@ -97,6 +98,72 @@ async def test_production_adapter_stub_returns_empty_batch(fake_redis):
     samples = await adapter.poll()
 
     assert samples == []
+
+
+@pytest.mark.asyncio
+async def test_seeded_runtime_adapter_returns_deterministic_canonical_sample(fake_redis):
+    _ = TelemetryIngestionService(redis=fake_redis)
+    adapter = SeededRuntimeTelemetryAdapter(
+        sample_key="campus-a",
+        metric="cpu_usage",
+        value=42.5,
+        unit="percent",
+        source="runtime_seeded",
+    )
+
+    first = await adapter.poll()
+    second = await adapter.poll()
+
+    assert len(first) == 1
+    assert len(second) == 1
+    first_sample = first[0]
+    second_sample = second[0]
+
+    assert first_sample["device_id"] == second_sample["device_id"]
+    assert first_sample["network_id"] == second_sample["network_id"]
+    assert first_sample["workspace_id"] == second_sample["workspace_id"]
+    assert first_sample["metric"] == "cpu_usage"
+    assert first_sample["value"] == 42.5
+    assert first_sample["unit"] == "percent"
+    assert first_sample["source"] == "runtime_seeded"
+    assert first_sample["tags"] == {
+        "adapter_mode": "seeded",
+        "sample_key": "campus-a",
+    }
+    assert first_sample["observed_at"]
+
+
+def test_build_production_runtime_adapter_returns_seeded_mode_adapter():
+    adapter = build_production_runtime_adapter(
+        mode="seeded",
+        seeded_sample_key="site-1",
+        seeded_metric="latency_ms",
+        seeded_value=12.0,
+        seeded_unit="ms",
+        seeded_source="runtime_seeded",
+    )
+
+    assert isinstance(adapter, SeededRuntimeTelemetryAdapter)
+
+
+def test_build_production_runtime_adapter_falls_back_to_stub_for_invalid_mode():
+    with patch("app.modules.telemetry.service.logger.warning") as mock_warning:
+        adapter = build_production_runtime_adapter(
+            mode="unknown",
+            seeded_sample_key="site-1",
+            seeded_metric="latency_ms",
+            seeded_value=12.0,
+            seeded_unit="ms",
+            seeded_source="runtime_seeded",
+        )
+
+    assert isinstance(adapter, ProductionTelemetryAdapterStub)
+    invalid_mode_logs = [
+        call
+        for call in mock_warning.call_args_list
+        if call.args and call.args[0] == "telemetry_runtime_adapter_mode_invalid"
+    ]
+    assert len(invalid_mode_logs) == 1
 
 
 @pytest.mark.asyncio

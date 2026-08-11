@@ -3,7 +3,7 @@
 ## Active Goals
 - Vertical Slice 1 Implementation: **COMPLETE** — all modules implemented, tested, and migrated.
 - Vertical Slice 2 Implementation: **COMPLETE** — telemetry ingestion/persistence/read APIs and telemetry health counters + `/ws/telemetry` fanout delivered through Step 8.
-- Vertical Slice 3 Implementation: **IN PROGRESS** — runtime collector reliability and alerting/event visibility baseline delivered through **VS3 Step 24** (runtime adapter cooldown-correlation snapshot aggregation and coverage in telemetry health internals).
+- Vertical Slice 3 Implementation: **IN PROGRESS** — runtime collector reliability and alerting/event visibility baseline delivered through **VS3 Step 25** (configurable production runtime adapter mode expanded beyond stub in runtime poll path).
 
 ## Subsystem Progress — Vertical Slice 3
 
@@ -31,6 +31,7 @@
 - [x] Step 22: Runtime adapter trend-threshold cooldown-state observability summary
 - [x] Step 23: Runtime adapter cooldown-transition event visibility and coverage
 - [x] Step 24: Runtime adapter cooldown-correlation snapshot aggregation and coverage
+- [x] Step 25: Runtime adapter mode factory and deterministic seeded production adapter path
 
 ## Subsystem Progress — Vertical Slice 2
 

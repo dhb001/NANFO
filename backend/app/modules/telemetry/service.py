@@ -115,6 +115,74 @@ class ProductionTelemetryAdapterStub(RuntimeTelemetryAdapter):
         return []
 
 
+class SeededRuntimeTelemetryAdapter(RuntimeTelemetryAdapter):
+    """Deterministic production-shaped adapter that emits one canonical sample per poll."""
+
+    def __init__(
+        self,
+        *,
+        sample_key: str,
+        metric: str,
+        value: float,
+        unit: str,
+        source: str,
+    ):
+        self._sample_key = str(sample_key).strip() or "default"
+        self._metric = str(metric).strip() or "runtime_adapter_heartbeat"
+        try:
+            self._value = float(value)
+        except (TypeError, ValueError):
+            self._value = 0.0
+        self._unit = str(unit).strip()
+        self._source = str(source).strip() or "runtime_seeded"
+
+    async def poll(self) -> list[dict[str, Any]]:
+        sample = {
+            "device_id": str(uuid.uuid5(uuid.NAMESPACE_URL, f"{self._sample_key}:device")),
+            "network_id": str(uuid.uuid5(uuid.NAMESPACE_URL, f"{self._sample_key}:network")),
+            "workspace_id": str(uuid.uuid5(uuid.NAMESPACE_URL, f"{self._sample_key}:workspace")),
+            "metric": self._metric,
+            "value": self._value,
+            "unit": self._unit,
+            "source": self._source,
+            "observed_at": datetime.now(UTC).isoformat(),
+            "tags": {
+                "adapter_mode": "seeded",
+                "sample_key": self._sample_key,
+            },
+        }
+        return [sample]
+
+
+def build_production_runtime_adapter(
+    *,
+    mode: str,
+    seeded_sample_key: str,
+    seeded_metric: str,
+    seeded_value: float,
+    seeded_unit: str,
+    seeded_source: str,
+) -> RuntimeTelemetryAdapter:
+    normalized_mode = str(mode).strip().lower()
+    if normalized_mode == "seeded":
+        return SeededRuntimeTelemetryAdapter(
+            sample_key=seeded_sample_key,
+            metric=seeded_metric,
+            value=seeded_value,
+            unit=seeded_unit,
+            source=seeded_source,
+        )
+
+    if normalized_mode != "stub":
+        logger.warning(
+            "telemetry_runtime_adapter_mode_invalid",
+            runtime_adapter_mode=normalized_mode,
+            fallback_mode="stub",
+        )
+
+    return ProductionTelemetryAdapterStub()
+
+
 def _is_runtime_sample_minimally_valid(raw: dict[str, Any]) -> bool:
     required_ids = ("device_id", "network_id", "workspace_id")
     if any(not str(raw.get(field, "")).strip() for field in required_ids):

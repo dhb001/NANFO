@@ -42,9 +42,9 @@ from app.events.consumers.topology_consumer import TOPOLOGY_HANDLERS
 from app.events.consumers.ws_push_consumer import WS_PUSH_HANDLERS
 from app.modules.network.topology import TopologyQueryService
 from app.modules.telemetry.service import (
-    ProductionTelemetryAdapterStub,
     TelemetryCollectorRunner,
     TelemetryIngestionService,
+    build_production_runtime_adapter,
     build_runtime_poll_action,
 )
 from app.websocket.alerts import router as alerts_ws_router
@@ -115,7 +115,14 @@ async def lifespan(app: FastAPI):
             max_backoff_seconds=_TELEMETRY_COLLECTOR_BACKOFF_MAX_SECONDS,
         )
         if started:
-            runtime_adapter = ProductionTelemetryAdapterStub()
+            runtime_adapter = build_production_runtime_adapter(
+                mode=settings.TELEMETRY_RUNTIME_ADAPTER_MODE,
+                seeded_sample_key=settings.TELEMETRY_RUNTIME_ADAPTER_SEEDED_SAMPLE_KEY,
+                seeded_metric=settings.TELEMETRY_RUNTIME_ADAPTER_SEEDED_METRIC,
+                seeded_value=settings.TELEMETRY_RUNTIME_ADAPTER_SEEDED_VALUE,
+                seeded_unit=settings.TELEMETRY_RUNTIME_ADAPTER_SEEDED_UNIT,
+                seeded_source=settings.TELEMETRY_RUNTIME_ADAPTER_SEEDED_SOURCE,
+            )
             runtime_poll_action = build_runtime_poll_action(
                 collector_runner=telemetry_collector,
                 adapter=runtime_adapter,

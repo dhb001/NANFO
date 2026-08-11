@@ -3,6 +3,25 @@
 Lightweight chronological notes for decisions that do not require a full ADR.
 
 ## 2026-08-12
+### Runtime Adapter Mode Factory and Seeded Adapter Expansion (VS3 Step 25)
+Decision: Expand runtime adapter path beyond stub by introducing a mode-driven production adapter factory and adding a deterministic seeded runtime adapter mode.
+Reason:
+- Progress VS3 objective to move beyond a hardcoded stub while preserving minimal/reversible scope and existing runtime reliability contracts.
+- Provide a deterministic production-shaped adapter mode usable for non-invasive runtime path validation without introducing vendor-specific SNMP/gRPC dependencies yet.
+Impact:
+- Startup runtime wiring now resolves adapter implementation via `build_production_runtime_adapter(...)` using environment-configurable mode and seeded adapter parameters.
+- Added `SeededRuntimeTelemetryAdapter` that emits canonical single-sample telemetry payloads with stable ownership UUIDs and deterministic metadata tags.
+- Invalid runtime adapter mode values fail open to stub with warning-only logging (`telemetry_runtime_adapter_mode_invalid`).
+- REST/WebSocket contracts, canonical envelope, schema/migrations, C5/C6 constraints, and retry/backoff fail-open behavior remain unchanged.
+Related:
+- `backend/app/modules/telemetry/service.py`
+- `backend/app/main.py`
+- `backend/app/core/config.py`
+- `backend/.env.example`
+- `backend/tests/unit/test_telemetry_scaffold.py`
+- `backend/tests/integration/test_startup_telemetry.py`
+
+## 2026-08-12
 ### Runtime Adapter Cooldown-Correlation Snapshot Aggregation (VS3 Step 24)
 Decision: Add an internal-only cooldown-correlation snapshot aggregation branch that captures deterministic per-dimension threshold trigger state, cooldown transition phase counts, and cooldown-summary window aggregates over a bounded in-process window.
 Reason:

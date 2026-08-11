@@ -1,5 +1,14 @@
 # Development Journal
 
+## [2026-08-12] - Vertical Slice 3 Step 25 (Runtime Adapter Mode Factory Beyond Stub)
+
+- **Implemented:** Advanced runtime adapter path beyond stub by adding configurable production adapter mode selection in startup wiring (`stub` / `seeded`).
+- **Adapter expansion:** Added `SeededRuntimeTelemetryAdapter` with deterministic canonical telemetry sample generation (stable UUID ownership keys by sample key) and runtime mode factory `build_production_runtime_adapter(...)`.
+- **Startup wiring:** Replaced direct stub instantiation with mode-driven adapter factory in lifespan startup and added runtime adapter environment settings (`TELEMETRY_RUNTIME_ADAPTER_*`) to `Settings` + `.env.example`.
+- **Fail-open safety:** Invalid adapter mode values fall back to stub with warning-only diagnostics (`telemetry_runtime_adapter_mode_invalid`); no startup/runtime crash semantics changed.
+- **Scope guardrails:** No REST/API envelope changes, no schema migrations, no C5/C6 drift; runtime poll retry/backoff and observability contracts remain intact.
+- **Validation:** Scoped Ruff passed; targeted telemetry scaffold + startup integration tests passed; full backend `pytest` regression passed (`219 passed`).
+
 ## [2026-08-12] - Vertical Slice 3 Step 24 (Runtime Adapter Cooldown-Correlation Snapshot Aggregation)
 
 - **Implemented:** Added internal-only deterministic cooldown-correlation snapshot aggregation for runtime adapter trend-threshold dimensions in telemetry health internals.

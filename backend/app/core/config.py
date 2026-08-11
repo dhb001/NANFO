@@ -6,7 +6,7 @@ No secrets or operational values are hardcoded (security.md guardrail).
 
 from functools import lru_cache
 
-from pydantic import PostgresDsn, computed_field
+from pydantic import computed_field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -48,6 +48,14 @@ class Settings(BaseSettings):
     # Rate limiting — per Authentication.md §5
     RATE_LIMIT_LOGIN_MAX_ATTEMPTS: int = 5
     RATE_LIMIT_LOGIN_WINDOW_SECONDS: int = 60
+
+    # Runtime telemetry adapter
+    TELEMETRY_RUNTIME_ADAPTER_MODE: str = "stub"
+    TELEMETRY_RUNTIME_ADAPTER_SEEDED_SAMPLE_KEY: str = "nanfo-runtime"
+    TELEMETRY_RUNTIME_ADAPTER_SEEDED_METRIC: str = "runtime_adapter_heartbeat"
+    TELEMETRY_RUNTIME_ADAPTER_SEEDED_VALUE: float = 1.0
+    TELEMETRY_RUNTIME_ADAPTER_SEEDED_UNIT: str = "count"
+    TELEMETRY_RUNTIME_ADAPTER_SEEDED_SOURCE: str = "runtime_seeded"
 
     @computed_field  # type: ignore[misc]
     @property
