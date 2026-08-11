@@ -11,6 +11,7 @@ Reason:
 Impact:
 - Runtime adapter poll cycles now expose measurable health signals for operations and future SLO tuning.
 - Counter update failures remain warning-only and non-fatal to collector runtime.
+- Reference implementation commit: `7ed0821`.
 Related:
 - `backend/app/modules/telemetry/counters.py`
 - `backend/app/modules/telemetry/service.py`

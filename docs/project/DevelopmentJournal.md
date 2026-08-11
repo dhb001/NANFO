@@ -1,11 +1,12 @@
 # Development Journal
 
-## [2026-08-10] - Vertical Slice 3 Step 12 (Runtime Adapter Observability Counters)
+## [2026-08-10] - Vertical Slice 3 Step 12 (VS3 Step 12 Runtime Adapter Observability Counters)
 
 - **Implemented:** Added runtime adapter observability counters for backpressure and ingest quality (`runtime_adapter_last_batch_size`, `runtime_adapter_invalid_samples`, `runtime_adapter_ingest_attempts`, `runtime_adapter_ingest_failures`).
 - **Poll-path instrumentation:** Runtime poll action now records batch-size, invalid-sample increments, ingest-attempt increments, and ingest-failure increments while preserving retry behavior.
 - **Fail-open safety:** Counter update failures in runtime path are isolated and logged (`telemetry_runtime_adapter_counter_update_failed`) without crashing startup/runtime/shutdown.
 - **Validation:** Scoped Ruff, targeted telemetry counter/scaffold tests, and full backend regression passed.
+- **Commit:** `7ed0821`.
 
 ## [2026-08-10] - Vertical Slice 3 Step 11 (Production Adapter Stub Wiring)
 
