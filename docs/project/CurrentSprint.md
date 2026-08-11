@@ -3,7 +3,7 @@
 ## Active Goals
 - Vertical Slice 1 Implementation: **COMPLETE** — all modules implemented, tested, and migrated.
 - Vertical Slice 2 Implementation: **COMPLETE** — telemetry ingestion/persistence/read APIs and telemetry health counters + `/ws/telemetry` fanout delivered through Step 8.
-- Vertical Slice 3 Implementation: **IN PROGRESS** — runtime collector reliability and alerting/event visibility baseline delivered through **VS3 Step 27** (C6 deferred topology endpoint planning/governance closure and routability guard hardening).
+- Vertical Slice 3 Implementation: **COMPLETE** — runtime collector reliability, adapter-path advancement beyond stub, backpressure/SLO hardening, and VS3 planning-governance closure delivered through **VS3 Step 28**.
 
 ## Subsystem Progress — Vertical Slice 3
 
@@ -34,6 +34,7 @@
 - [x] Step 25: Runtime adapter mode factory and deterministic seeded production adapter path
 - [x] Step 26: Runtime adapter dropped-sample backpressure hardening and SLO visibility
 - [x] Step 27: C6 deferred topology planning/governance closure and non-routability hardening
+- [x] Step 28: Digital Twin baseline integration/scenario planning closure and VS3 completion gate
 
 ## Subsystem Progress — Vertical Slice 2
 
@@ -75,7 +76,7 @@
 - Repo-wide Ruff debt outside VS2 Step 8 scope remains and is tracked for later cleanup.
 
 ## Next Sprint Candidates
-- VS3: Expand production collector adapters (SNMP/gRPC) beyond stub implementation.
-- VS3: Telemetry stream/backpressure hardening and operational SLO baselines.
-- VS3: Planning/design for deferred topology analysis endpoints (`/neighbors`, `/impact`, `/reconcile`) under C6 governance.
-- VS3: Digital Twin baseline integration and scenario validation planning.
+- VS4: Implement first vendor-facing runtime adapter increment (SNMP/gRPC) behind existing runtime adapter factory mode controls.
+- VS4: Operationalize runtime adapter SLOs into alerting thresholds and runbook-backed response playbooks.
+- VS4: Begin governed implementation design for deferred topology analysis endpoints (`/neighbors`, `/impact`, `/reconcile`) under C6.
+- VS4: Start executable Digital Twin baseline integration with scenario validation pipeline handoff.

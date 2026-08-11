@@ -3,6 +3,21 @@
 Lightweight chronological notes for decisions that do not require a full ADR.
 
 ## 2026-08-12
+### VS3 Completion Gate and VS4 Handoff Baseline (VS3 Step 28)
+Decision: Mark VS3 complete after closing remaining planning/governance tasks and carry unresolved execution scope into explicit VS4 candidates.
+Reason:
+- Enforce finite VS3 closure criteria with explicit documentation of completed adapter-path expansion, backpressure/SLO hardening, C6 governance checks, and Digital Twin planning handoff.
+- Avoid scope creep by separating completed VS3 governance/planning outcomes from executable VS4 implementation work.
+Impact:
+- `CurrentSprint` now marks Vertical Slice 3 as complete through Step 28 and moves remaining execution tracks to VS4 candidates.
+- Digital Twin baseline work is explicitly handed off as next-slice implementation planning without introducing runtime/API/schema drift in VS3 closure.
+- C6 deferred topology constraints remain active and test-validated as part of completion gate.
+Related:
+- `docs/project/CurrentSprint.md`
+- `docs/project/DevelopmentJournal.md`
+- `docs/project/DecisionLog.md`
+
+## 2026-08-12
 ### C6 Deferred Topology Planning/Governance Closure (VS3 Step 27)
 Decision: Finalize VS3 deferred topology planning governance by extending integration-level non-routability coverage for deferred topology endpoint path variants under C6.
 Reason:

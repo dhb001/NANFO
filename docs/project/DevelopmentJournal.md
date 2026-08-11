@@ -1,5 +1,13 @@
 # Development Journal
 
+## [2026-08-12] - Vertical Slice 3 Step 28 (Digital Twin Planning Closure + VS3 Completion)
+
+- **Implemented:** Closed remaining VS3 planning work by finalizing Digital Twin baseline integration/scenario planning handoff for next slice and marking VS3 complete in sprint tracking.
+- **Planning closure outcome:** VS3 completion now includes adapter-path expansion beyond stub, runtime backpressure/SLO hardening completion, C6 deferred topology governance closure, and explicit VS4-ready execution candidates.
+- **Governance check:** C6 deferred topology endpoint non-routability remains enforced and covered; Digital Twin work remains in planning handoff scope (no premature API/schema/runtime contract drift).
+- **Scope guardrails:** Documentation/sprint-state closure only; no REST route/envelope changes, no schema migrations, no runtime behavior changes.
+- **Validation:** Scoped Ruff passed (touched test/docs scope), targeted deferred-topology integration tests passed, full backend `pytest` regression passed (`222 passed`).
+
 ## [2026-08-12] - Vertical Slice 3 Step 27 (C6 Deferred Topology Planning/Governance Closure)
 
 - **Implemented:** Completed VS3 deferred topology planning/governance closure under C6 by hardening explicit non-routability coverage for deferred endpoint path variants.
