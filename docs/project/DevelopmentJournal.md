@@ -1,5 +1,13 @@
 # Development Journal
 
+## [2026-08-11] - Vertical Slice 3 Step 22 (Runtime Adapter Trend-Threshold Cooldown-State Observability Summary)
+
+- **Implemented:** Added internal-only cooldown-state observability summary logging for runtime adapter SLO trend-threshold internals (`telemetry_health_runtime_adapter_slo_trend_threshold_cooldown_summary`).
+- **Summary metadata:** Emits deterministic per-dimension cooldown state (`transition_frequency_cooldown`, `reason_frequency_cooldown`) including `initialized`, `threshold_crossed`, `reads_since_last_crossed_emit`, `next_crossed_emit_in_reads`, `cooldown_active`, plus window and cooldown constants.
+- **Fail-open safety:** Added isolated warning-only cooldown-summary fallback branches (`...trend_threshold_cooldown_summary_state_read_failed`, `...trend_threshold_cooldown_summary_log_failed`) while preserving existing Step 21 threshold cooldown/recovery and Step 20 evaluation fail-open behavior.
+- **Scope guardrails:** Internal logging-only increment; no REST route/envelope changes, no schema migrations, no C5/C6 drift, and runtime poll-action semantics unchanged.
+- **Validation:** Scoped Ruff passed; targeted telemetry query/scaffold/endpoints tests passed; full backend `pytest` regression passed (`205 passed`).
+
 ## [2026-08-11] - Vertical Slice 3 Step 21 (Runtime Adapter SLO Trend-Threshold Cooldown and Recovery Visibility)
 
 - **Implemented:** Added internal threshold cooldown/hysteresis state for runtime adapter SLO trend-threshold evaluation in telemetry health read-path internals.

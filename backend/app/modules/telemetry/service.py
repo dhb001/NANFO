@@ -1081,6 +1081,103 @@ class TelemetryQueryService:
                 error=str(exc),
             )
 
+        self._safe_log_runtime_adapter_slo_trend_threshold_cooldown_summary(
+            trend_window_summary=trend_window_summary,
+            cooldown_state=updated_cooldown_state,
+        )
+
+    def _safe_log_runtime_adapter_slo_trend_threshold_cooldown_summary(
+        self,
+        *,
+        trend_window_summary: dict[str, Any],
+        cooldown_state: dict[str, dict[str, int | bool]],
+    ) -> None:
+        try:
+            cooldown_summary = self._build_runtime_adapter_slo_trend_threshold_cooldown_summary(
+                trend_window_summary=trend_window_summary,
+                cooldown_state=cooldown_state,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "telemetry_health_runtime_adapter_slo_trend_threshold_cooldown_summary_state_read_failed",
+                error=str(exc),
+            )
+            return
+
+        try:
+            logger.info(
+                "telemetry_health_runtime_adapter_slo_trend_threshold_cooldown_summary",
+                window_size=cooldown_summary["window_size"],
+                max_window_size=cooldown_summary["max_window_size"],
+                cooldown_reads=cooldown_summary["cooldown_reads"],
+                transition_frequency_cooldown=cooldown_summary["transition_frequency"],
+                reason_frequency_cooldown=cooldown_summary["reason_frequency"],
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "telemetry_health_runtime_adapter_slo_trend_threshold_cooldown_summary_log_failed",
+                error=str(exc),
+            )
+
+    def _build_runtime_adapter_slo_trend_threshold_cooldown_summary(
+        self,
+        *,
+        trend_window_summary: dict[str, Any],
+        cooldown_state: dict[str, dict[str, int | bool]],
+    ) -> dict[str, Any]:
+        normalized_cooldown_state = self._normalize_runtime_adapter_slo_threshold_cooldown_state(
+            cooldown_state=cooldown_state
+        )
+
+        window_size_raw = trend_window_summary.get("window_size", 0)
+        max_window_size_raw = trend_window_summary.get("max_window_size", 0)
+        try:
+            window_size = max(0, int(window_size_raw))
+        except (TypeError, ValueError):
+            window_size = 0
+        try:
+            max_window_size = max(0, int(max_window_size_raw))
+        except (TypeError, ValueError):
+            max_window_size = 0
+
+        return {
+            "window_size": window_size,
+            "max_window_size": max_window_size,
+            "cooldown_reads": _RUNTIME_ADAPTER_SLO_THRESHOLD_CROSS_COOLDOWN_READS,
+            "transition_frequency": self._build_runtime_adapter_slo_trend_threshold_cooldown_dimension_summary(
+                cooldown_state_entry=normalized_cooldown_state["transition_frequency"],
+            ),
+            "reason_frequency": self._build_runtime_adapter_slo_trend_threshold_cooldown_dimension_summary(
+                cooldown_state_entry=normalized_cooldown_state["reason_frequency"],
+            ),
+        }
+
+    @staticmethod
+    def _build_runtime_adapter_slo_trend_threshold_cooldown_dimension_summary(
+        *,
+        cooldown_state_entry: dict[str, int | bool],
+    ) -> dict[str, int | bool]:
+        initialized = bool(cooldown_state_entry["initialized"])
+        threshold_crossed = bool(cooldown_state_entry["threshold_crossed"])
+        reads_since_last_crossed_emit = int(cooldown_state_entry["reads_since_last_crossed_emit"])
+
+        if threshold_crossed:
+            next_crossed_emit_in_reads = max(
+                _RUNTIME_ADAPTER_SLO_THRESHOLD_CROSS_COOLDOWN_READS
+                - reads_since_last_crossed_emit,
+                0,
+            )
+        else:
+            next_crossed_emit_in_reads = 0
+
+        return {
+            "initialized": initialized,
+            "threshold_crossed": threshold_crossed,
+            "reads_since_last_crossed_emit": reads_since_last_crossed_emit,
+            "next_crossed_emit_in_reads": next_crossed_emit_in_reads,
+            "cooldown_active": threshold_crossed and next_crossed_emit_in_reads > 0,
+        }
+
     def _log_runtime_adapter_slo_trend_threshold_triggers(
         self,
         *,

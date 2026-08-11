@@ -3,6 +3,22 @@
 Lightweight chronological notes for decisions that do not require a full ADR.
 
 ## 2026-08-11
+### Runtime Adapter Trend-Threshold Cooldown-State Observability Summary (VS3 Step 22)
+Decision: Add an internal-only cooldown-state summary branch for runtime adapter trend-threshold internals so operations can inspect cooldown status per threshold dimension deterministically.
+Reason:
+- Improve diagnosability of Step 21 cooldown/hysteresis behavior without changing public contracts.
+- Keep enhancement minimal and reversible by reusing existing in-process cooldown state and trend summary context.
+Impact:
+- Health read-path internals now emit `telemetry_health_runtime_adapter_slo_trend_threshold_cooldown_summary` with per-dimension cooldown metadata (`initialized`, `threshold_crossed`, `reads_since_last_crossed_emit`, `next_crossed_emit_in_reads`, `cooldown_active`) and deterministic window/cooldown fields.
+- Cooldown-summary state-read/log failures are isolated to warning-only fail-open branches and do not impact health responses.
+- REST/WebSocket contracts, canonical envelope, schema/migrations, C5/C6 constraints, and runtime poll-action behavior remain unchanged.
+Related:
+- `backend/app/modules/telemetry/service.py`
+- `backend/tests/unit/test_telemetry_query_service.py`
+- `backend/tests/unit/test_telemetry_scaffold.py`
+- `backend/tests/integration/test_telemetry_endpoints.py`
+
+## 2026-08-11
 ### Runtime Adapter SLO Trend-Threshold Cooldown and Recovery Visibility (VS3 Step 21)
 Decision: Add internal-only cooldown/hysteresis state to runtime adapter SLO trend-threshold trigger evaluation so repeated crossed conditions are rate-limited and recovery/not-crossed transitions are explicitly visible.
 Reason:

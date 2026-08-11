@@ -1032,6 +1032,122 @@ def test_trend_threshold_cooldown_state_write_failure_is_fail_open(mock_db):
     assert len(write_failed_logs) == 1
 
 
+def test_trend_threshold_cooldown_summary_logs_dimension_metadata(mock_db):
+    svc = TelemetryQueryService(db=mock_db)
+
+    cooldown_state = {
+        "transition_frequency": {
+            "initialized": True,
+            "threshold_crossed": True,
+            "reads_since_last_crossed_emit": 1,
+        },
+        "reason_frequency": {
+            "initialized": True,
+            "threshold_crossed": False,
+            "reads_since_last_crossed_emit": 0,
+        },
+    }
+    trend_window_summary = _trend_window_summary(window_size=6)
+    trend_window_summary["max_window_size"] = 10
+
+    with patch("app.modules.telemetry.service.logger.info") as mock_info:
+        svc._safe_log_runtime_adapter_slo_trend_threshold_cooldown_summary(
+            trend_window_summary=trend_window_summary,
+            cooldown_state=cooldown_state,
+        )
+
+    summary_logs = _event_calls(
+        mock_info,
+        "telemetry_health_runtime_adapter_slo_trend_threshold_cooldown_summary",
+    )
+    assert len(summary_logs) == 1
+    summary_log = summary_logs[0]
+    assert summary_log.kwargs["window_size"] == 6
+    assert summary_log.kwargs["max_window_size"] == 10
+    assert summary_log.kwargs["cooldown_reads"] == 3
+
+    transition_cooldown = summary_log.kwargs["transition_frequency_cooldown"]
+    assert transition_cooldown["initialized"] is True
+    assert transition_cooldown["threshold_crossed"] is True
+    assert transition_cooldown["reads_since_last_crossed_emit"] == 1
+    assert transition_cooldown["next_crossed_emit_in_reads"] == 2
+    assert transition_cooldown["cooldown_active"] is True
+
+    reason_cooldown = summary_log.kwargs["reason_frequency_cooldown"]
+    assert reason_cooldown["initialized"] is True
+    assert reason_cooldown["threshold_crossed"] is False
+    assert reason_cooldown["reads_since_last_crossed_emit"] == 0
+    assert reason_cooldown["next_crossed_emit_in_reads"] == 0
+    assert reason_cooldown["cooldown_active"] is False
+
+
+def test_trend_threshold_cooldown_summary_state_read_failure_is_fail_open(mock_db):
+    svc = TelemetryQueryService(db=mock_db)
+    with (
+        patch.object(
+            svc,
+            "_build_runtime_adapter_slo_trend_threshold_cooldown_summary",
+            side_effect=RuntimeError("cooldown summary read failed"),
+        ),
+        patch("app.modules.telemetry.service.logger.warning") as mock_warning,
+    ):
+        svc._safe_log_runtime_adapter_slo_trend_threshold_cooldown_summary(
+            trend_window_summary=_trend_window_summary(window_size=1),
+            cooldown_state=svc._new_runtime_adapter_slo_threshold_cooldown_state(),
+        )
+
+    summary_read_failed_logs = _event_calls(
+        mock_warning,
+        "telemetry_health_runtime_adapter_slo_trend_threshold_cooldown_summary_state_read_failed",
+    )
+    assert len(summary_read_failed_logs) == 1
+
+
+def test_trend_threshold_cooldown_summary_log_failure_is_fail_open(mock_db):
+    svc = TelemetryQueryService(db=mock_db)
+    with (
+        patch("app.modules.telemetry.service.logger.info", side_effect=RuntimeError("log failed")),
+        patch("app.modules.telemetry.service.logger.warning") as mock_warning,
+    ):
+        svc._safe_log_runtime_adapter_slo_trend_threshold_cooldown_summary(
+            trend_window_summary=_trend_window_summary(window_size=1),
+            cooldown_state=svc._new_runtime_adapter_slo_threshold_cooldown_state(),
+        )
+
+    summary_log_failed_logs = _event_calls(
+        mock_warning,
+        "telemetry_health_runtime_adapter_slo_trend_threshold_cooldown_summary_log_failed",
+    )
+    assert len(summary_log_failed_logs) == 1
+
+
+def test_trend_threshold_cooldown_summary_defaults_invalid_fields_to_zero(mock_db):
+    svc = TelemetryQueryService(db=mock_db)
+
+    cooldown_summary = svc._build_runtime_adapter_slo_trend_threshold_cooldown_summary(
+        trend_window_summary={
+            "window_size": "invalid",
+            "max_window_size": None,
+        },
+        cooldown_state={
+            "transition_frequency": {
+                "initialized": "truthy",
+                "threshold_crossed": 1,
+                "reads_since_last_crossed_emit": "bad",
+            }
+        },
+    )
+
+    assert cooldown_summary["window_size"] == 0
+    assert cooldown_summary["max_window_size"] == 0
+    transition_cooldown = cooldown_summary["transition_frequency"]
+    assert transition_cooldown["initialized"] is True
+    assert transition_cooldown["threshold_crossed"] is True
+    assert transition_cooldown["reads_since_last_crossed_emit"] == 0
+    assert transition_cooldown["next_crossed_emit_in_reads"] == 3
+    assert transition_cooldown["cooldown_active"] is True
+
+
 @pytest.mark.asyncio
 async def test_get_health_runtime_adapter_slo_snapshot_invalid_values_are_fail_open(mock_db):
     counter_service = AsyncMock()
