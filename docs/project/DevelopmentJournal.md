@@ -1,5 +1,14 @@
 # Development Journal
 
+## [2026-08-11] - Vertical Slice 3 Step 15 (Runtime Adapter Anomaly Streak Visibility)
+
+- **Implemented:** Added rolling runtime adapter anomaly streak tracking in telemetry health read-path internals.
+- **Trend behavior:** Streak increments on consecutive anomaly snapshots (threshold breaches) and resets to zero on a healthy snapshot.
+- **Observability:** Uses structured warning/info logs only (`...anomaly_streak_incremented`, `...anomaly_streak_reset`) with no external contract changes.
+- **Scope guardrails:** No REST route/envelope changes, no schema migrations, and runtime poll-action semantics unchanged.
+- **Fail-open safety:** Snapshot/counter failure path remains warning-only and non-fatal; streak logic remains contained to internal read-path state.
+- **Validation:** Scoped Ruff passed; targeted telemetry query/scaffold/endpoints tests passed; full backend `pytest` regression passed (`184 passed`).
+
 ## [2026-08-11] - Vertical Slice 3 Step 14 (Runtime Adapter Backpressure Anomaly Logging Thresholds)
 
 - **Implemented:** Added internal-only anomaly warning thresholds in telemetry health runtime adapter SLO logging.

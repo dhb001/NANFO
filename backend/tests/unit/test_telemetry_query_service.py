@@ -364,6 +364,10 @@ async def test_get_health_warns_when_invalid_sample_ratio_exceeds_threshold(mock
     assert ratio_warning.kwargs["ingest_attempts"] == 5
     assert ratio_warning.kwargs["invalid_sample_ratio"] == pytest.approx(0.375)
     assert ratio_warning.kwargs["invalid_sample_ratio_threshold"] == pytest.approx(0.25)
+    assert any(
+        call.args and call.args[0] == "telemetry_health_runtime_adapter_anomaly_streak_incremented"
+        for call in mock_warning.call_args_list
+    )
 
 
 @pytest.mark.asyncio
@@ -437,3 +441,168 @@ async def test_get_health_warns_ingest_failures_with_zero_attempt_guard(mock_db)
     assert warning.kwargs["ingest_attempts"] == 0
     assert warning.kwargs["zero_attempt_guard_applied"] is True
     assert warning.kwargs["failure_ratio"] == pytest.approx(2.0)
+    assert any(
+        call.args and call.args[0] == "telemetry_health_runtime_adapter_anomaly_streak_incremented"
+        for call in mock_warning.call_args_list
+    )
+
+
+@pytest.mark.asyncio
+async def test_get_health_anomaly_streak_increments_on_consecutive_anomaly_snapshots(mock_db):
+    counter_service = AsyncMock()
+    counter_service.get_snapshot = AsyncMock(
+        side_effect=[
+            {
+                "ingested_events": 0,
+                "persisted_events": 0,
+                "fanout_events": 0,
+                "dropped_events": 0,
+                "runtime_exhausted_cycles": 0,
+                "runtime_exhausted_streak": 0,
+                "runtime_sustained_failure_windows": 0,
+                "runtime_sustained_failure_active": 0,
+                "runtime_adapter_last_batch_size": 0,
+                "runtime_adapter_invalid_samples": 0,
+                "runtime_adapter_ingest_attempts": 0,
+                "runtime_adapter_ingest_failures": 1,
+            },
+            {
+                "ingested_events": 0,
+                "persisted_events": 0,
+                "fanout_events": 0,
+                "dropped_events": 0,
+                "runtime_exhausted_cycles": 0,
+                "runtime_exhausted_streak": 0,
+                "runtime_sustained_failure_windows": 0,
+                "runtime_sustained_failure_active": 0,
+                "runtime_adapter_last_batch_size": 0,
+                "runtime_adapter_invalid_samples": 0,
+                "runtime_adapter_ingest_attempts": 0,
+                "runtime_adapter_ingest_failures": 1,
+            },
+        ]
+    )
+    svc = TelemetryQueryService(db=mock_db, counter_service=counter_service)
+    svc._repo.get_latest_observed_at = AsyncMock(return_value=None)
+    svc._repo.count_all = AsyncMock(return_value=0)
+
+    with patch("app.modules.telemetry.service.logger.warning") as mock_warning:
+        await svc.get_health()
+        await svc.get_health()
+
+    streak_warnings = [
+        call
+        for call in mock_warning.call_args_list
+        if call.args and call.args[0] == "telemetry_health_runtime_adapter_anomaly_streak_incremented"
+    ]
+    assert len(streak_warnings) == 2
+    assert streak_warnings[0].kwargs["anomaly_streak"] == 1
+    assert streak_warnings[1].kwargs["anomaly_streak"] == 2
+
+
+@pytest.mark.asyncio
+async def test_get_health_anomaly_streak_resets_on_healthy_snapshot(mock_db):
+    counter_service = AsyncMock()
+    counter_service.get_snapshot = AsyncMock(
+        side_effect=[
+            {
+                "ingested_events": 0,
+                "persisted_events": 0,
+                "fanout_events": 0,
+                "dropped_events": 0,
+                "runtime_exhausted_cycles": 0,
+                "runtime_exhausted_streak": 0,
+                "runtime_sustained_failure_windows": 0,
+                "runtime_sustained_failure_active": 0,
+                "runtime_adapter_last_batch_size": 0,
+                "runtime_adapter_invalid_samples": 0,
+                "runtime_adapter_ingest_attempts": 0,
+                "runtime_adapter_ingest_failures": 1,
+            },
+            {
+                "ingested_events": 0,
+                "persisted_events": 0,
+                "fanout_events": 0,
+                "dropped_events": 0,
+                "runtime_exhausted_cycles": 0,
+                "runtime_exhausted_streak": 0,
+                "runtime_sustained_failure_windows": 0,
+                "runtime_sustained_failure_active": 0,
+                "runtime_adapter_last_batch_size": 4,
+                "runtime_adapter_invalid_samples": 0,
+                "runtime_adapter_ingest_attempts": 4,
+                "runtime_adapter_ingest_failures": 0,
+            },
+        ]
+    )
+    svc = TelemetryQueryService(db=mock_db, counter_service=counter_service)
+    svc._repo.get_latest_observed_at = AsyncMock(return_value=None)
+    svc._repo.count_all = AsyncMock(return_value=0)
+
+    with (
+        patch("app.modules.telemetry.service.logger.warning") as mock_warning,
+        patch("app.modules.telemetry.service.logger.info") as mock_info,
+    ):
+        await svc.get_health()
+        await svc.get_health()
+
+    assert any(
+        call.args and call.args[0] == "telemetry_health_runtime_adapter_anomaly_streak_incremented"
+        for call in mock_warning.call_args_list
+    )
+    reset_logs = [
+        call
+        for call in mock_info.call_args_list
+        if call.args and call.args[0] == "telemetry_health_runtime_adapter_anomaly_streak_reset"
+    ]
+    assert len(reset_logs) == 1
+    assert reset_logs[0].kwargs["previous_streak"] == 1
+
+
+@pytest.mark.asyncio
+async def test_get_health_snapshot_failure_keeps_anomaly_streak_fail_open(mock_db):
+    counter_service = AsyncMock()
+    counter_service.get_snapshot = AsyncMock(
+        side_effect=[
+            {
+                "ingested_events": 0,
+                "persisted_events": 0,
+                "fanout_events": 0,
+                "dropped_events": 0,
+                "runtime_exhausted_cycles": 0,
+                "runtime_exhausted_streak": 0,
+                "runtime_sustained_failure_windows": 0,
+                "runtime_sustained_failure_active": 0,
+                "runtime_adapter_last_batch_size": 0,
+                "runtime_adapter_invalid_samples": 0,
+                "runtime_adapter_ingest_attempts": 0,
+                "runtime_adapter_ingest_failures": 1,
+            },
+            RuntimeError("redis unavailable"),
+        ]
+    )
+    svc = TelemetryQueryService(db=mock_db, counter_service=counter_service)
+    svc._repo.get_latest_observed_at = AsyncMock(return_value=None)
+    svc._repo.count_all = AsyncMock(return_value=0)
+
+    with (
+        patch("app.modules.telemetry.service.logger.warning") as mock_warning,
+        patch("app.modules.telemetry.service.logger.info") as mock_info,
+    ):
+        await svc.get_health()
+        await svc.get_health()
+
+    streak_warnings = [
+        call
+        for call in mock_warning.call_args_list
+        if call.args and call.args[0] == "telemetry_health_runtime_adapter_anomaly_streak_incremented"
+    ]
+    assert len(streak_warnings) == 1
+    assert any(
+        call.args and call.args[0] == "telemetry_health_counter_snapshot_failed"
+        for call in mock_warning.call_args_list
+    )
+    assert any(
+        call.args and call.args[0] == "telemetry_health_runtime_adapter_anomaly_streak_reset"
+        for call in mock_info.call_args_list
+    )

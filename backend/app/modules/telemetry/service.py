@@ -734,6 +734,7 @@ class TelemetryQueryService:
     ):
         self._repo = TelemetryRecordRepository(db)
         self._counter_service = counter_service
+        self._runtime_adapter_anomaly_streak = 0
 
     async def get_history(
         self,
@@ -872,9 +873,10 @@ class TelemetryQueryService:
                 ingest_attempts=runtime_adapter_slo_snapshot["ingest_attempts"],
                 ingest_failures=runtime_adapter_slo_snapshot["ingest_failures"],
             )
-            self._log_runtime_adapter_backpressure_anomalies(
+            anomaly_detected = self._log_runtime_adapter_backpressure_anomalies(
                 runtime_adapter_slo_snapshot=runtime_adapter_slo_snapshot
             )
+            self._update_runtime_adapter_anomaly_streak(anomaly_detected=anomaly_detected)
         except Exception as exc:  # noqa: BLE001
             logger.warning(
                 "telemetry_health_runtime_adapter_slo_snapshot_log_failed",
@@ -887,12 +889,14 @@ class TelemetryQueryService:
         self,
         *,
         runtime_adapter_slo_snapshot: dict[str, int],
-    ) -> None:
+    ) -> bool:
         ingest_attempts = runtime_adapter_slo_snapshot["ingest_attempts"]
         ingest_failures = runtime_adapter_slo_snapshot["ingest_failures"]
         invalid_samples = runtime_adapter_slo_snapshot["invalid_samples"]
+        anomaly_detected = False
 
         if ingest_failures > 0:
+            anomaly_detected = True
             zero_attempt_guard_applied = ingest_attempts == 0
             denominator = ingest_attempts if ingest_attempts > 0 else 1
             failure_ratio = ingest_failures / denominator
@@ -907,12 +911,32 @@ class TelemetryQueryService:
         total_samples = invalid_samples + ingest_attempts
         invalid_sample_ratio = (invalid_samples / total_samples) if total_samples > 0 else 0.0
         if invalid_sample_ratio > _RUNTIME_ADAPTER_INVALID_SAMPLE_RATIO_WARN_THRESHOLD:
+            anomaly_detected = True
             logger.warning(
                 "telemetry_health_runtime_adapter_invalid_sample_ratio_exceeded",
                 invalid_samples=invalid_samples,
                 ingest_attempts=ingest_attempts,
                 invalid_sample_ratio=invalid_sample_ratio,
                 invalid_sample_ratio_threshold=_RUNTIME_ADAPTER_INVALID_SAMPLE_RATIO_WARN_THRESHOLD,
+            )
+
+        return anomaly_detected
+
+    def _update_runtime_adapter_anomaly_streak(self, *, anomaly_detected: bool) -> None:
+        if anomaly_detected:
+            self._runtime_adapter_anomaly_streak += 1
+            logger.warning(
+                "telemetry_health_runtime_adapter_anomaly_streak_incremented",
+                anomaly_streak=self._runtime_adapter_anomaly_streak,
+            )
+            return
+
+        if self._runtime_adapter_anomaly_streak > 0:
+            previous_streak = self._runtime_adapter_anomaly_streak
+            self._runtime_adapter_anomaly_streak = 0
+            logger.info(
+                "telemetry_health_runtime_adapter_anomaly_streak_reset",
+                previous_streak=previous_streak,
             )
 
     async def _get_counter_snapshot(self) -> dict[str, int]:

@@ -3,6 +3,21 @@
 Lightweight chronological notes for decisions that do not require a full ADR.
 
 ## 2026-08-11
+### Runtime Adapter Rolling Anomaly Streak Visibility (VS3 Step 15)
+Decision: Add internal-only rolling anomaly streak state in telemetry health runtime adapter logging flow; increment on consecutive anomaly snapshots and reset on healthy snapshots.
+Reason:
+- Provide minimal trend visibility beyond single-snapshot anomaly warnings.
+- Keep behavior fully internal and fail-open while preserving existing contracts.
+Impact:
+- Telemetry health read path now emits structured streak trend signals (`incremented`, `reset`) for runtime adapter anomaly continuity.
+- No REST/API/schema/C5/C6/runtime-poll semantic drift introduced.
+Related:
+- `backend/app/modules/telemetry/service.py`
+- `backend/tests/unit/test_telemetry_query_service.py`
+- `backend/tests/unit/test_telemetry_scaffold.py`
+- `backend/tests/integration/test_telemetry_endpoints.py`
+
+## 2026-08-11
 ### Runtime Adapter Backpressure Anomaly Threshold Warnings (VS3 Step 14)
 Decision: Add internal-only warning thresholds to telemetry health runtime adapter SLO logging: warn on `ingest_failures > 0` with a safe zero-attempt denominator guard, and warn when invalid sample ratio exceeds configured threshold (`> 0.25`).
 Reason:
