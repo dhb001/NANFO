@@ -34,6 +34,19 @@ def _event_calls(mock_logger: MagicMock, event_name: str) -> list:
     ]
 
 
+def _trend_window_summary(
+    *,
+    window_size: int,
+    severity_transition_counts: dict[str, int] | None = None,
+    anomaly_reason_frequency: dict[str, int] | None = None,
+) -> dict[str, object]:
+    return {
+        "window_size": window_size,
+        "severity_transition_counts": severity_transition_counts or {},
+        "anomaly_reason_frequency": anomaly_reason_frequency or {},
+    }
+
+
 @pytest.mark.asyncio
 async def test_get_history_returns_paginated_response(mock_db):
     svc = TelemetryQueryService(db=mock_db)
@@ -538,19 +551,21 @@ async def test_get_health_trend_window_summary_aggregates_transitions_and_reason
     transition_not_crossed_logs = _event_calls(
         mock_info, "telemetry_health_runtime_adapter_slo_transition_frequency_threshold_not_crossed"
     )
-    assert len(transition_not_crossed_logs) == 4
-    final_transition_not_crossed = transition_not_crossed_logs[-1]
-    assert final_transition_not_crossed.kwargs["transition_frequency_threshold"] == 3
-    assert final_transition_not_crossed.kwargs["max_transition_count"] == 1
-    assert final_transition_not_crossed.kwargs["window_size"] == 4
+    assert len(transition_not_crossed_logs) == 1
+    transition_not_crossed = transition_not_crossed_logs[0]
+    assert transition_not_crossed.kwargs["transition_frequency_threshold"] == 3
+    assert transition_not_crossed.kwargs["max_transition_count"] == 0
+    assert transition_not_crossed.kwargs["window_size"] == 1
+    assert transition_not_crossed.kwargs["recovery_transition"] is False
     reason_not_crossed_logs = _event_calls(
         mock_info, "telemetry_health_runtime_adapter_slo_reason_frequency_threshold_not_crossed"
     )
-    assert len(reason_not_crossed_logs) == 4
-    final_reason_not_crossed = reason_not_crossed_logs[-1]
-    assert final_reason_not_crossed.kwargs["reason_frequency_threshold"] == 3
-    assert final_reason_not_crossed.kwargs["max_reason_frequency"] == 2
-    assert final_reason_not_crossed.kwargs["window_size"] == 4
+    assert len(reason_not_crossed_logs) == 1
+    reason_not_crossed = reason_not_crossed_logs[0]
+    assert reason_not_crossed.kwargs["reason_frequency_threshold"] == 3
+    assert reason_not_crossed.kwargs["max_reason_frequency"] == 0
+    assert reason_not_crossed.kwargs["window_size"] == 1
+    assert reason_not_crossed.kwargs["recovery_transition"] is False
 
 
 @pytest.mark.asyncio
@@ -659,7 +674,7 @@ async def test_get_health_trend_window_thresholds_crossed_for_transition_and_rea
 
     with (
         patch("app.modules.telemetry.service.logger.warning") as mock_warning,
-        patch("app.modules.telemetry.service.logger.info"),
+        patch("app.modules.telemetry.service.logger.info") as mock_info,
         patch("app.modules.telemetry.service.logger.error"),
     ):
         for _ in range(6):
@@ -668,24 +683,42 @@ async def test_get_health_trend_window_thresholds_crossed_for_transition_and_rea
     transition_crossed_logs = _event_calls(
         mock_warning, "telemetry_health_runtime_adapter_slo_transition_frequency_threshold_crossed"
     )
-    assert len(transition_crossed_logs) >= 1
-    final_transition_crossed = transition_crossed_logs[-1]
-    assert final_transition_crossed.kwargs["transition_frequency_threshold"] == 3
-    assert final_transition_crossed.kwargs["max_transition_count"] == 3
-    assert final_transition_crossed.kwargs["crossed_transition_counts"] == {"degraded->ok": 3}
-    assert final_transition_crossed.kwargs["window_size"] == 6
+    assert len(transition_crossed_logs) == 1
+    transition_crossed = transition_crossed_logs[0]
+    assert transition_crossed.kwargs["transition_frequency_threshold"] == 3
+    assert transition_crossed.kwargs["max_transition_count"] == 3
+    assert transition_crossed.kwargs["crossed_transition_counts"] == {"degraded->ok": 3}
+    assert transition_crossed.kwargs["window_size"] == 6
+    assert transition_crossed.kwargs["cooldown_re_emitted"] is False
 
     reason_crossed_logs = _event_calls(
         mock_warning, "telemetry_health_runtime_adapter_slo_reason_frequency_threshold_crossed"
     )
-    assert len(reason_crossed_logs) >= 1
-    final_reason_crossed = reason_crossed_logs[-1]
-    assert final_reason_crossed.kwargs["reason_frequency_threshold"] == 3
-    assert final_reason_crossed.kwargs["max_reason_frequency"] == 3
-    assert final_reason_crossed.kwargs["crossed_reason_frequency"] == {
+    assert len(reason_crossed_logs) == 1
+    reason_crossed = reason_crossed_logs[0]
+    assert reason_crossed.kwargs["reason_frequency_threshold"] == 3
+    assert reason_crossed.kwargs["max_reason_frequency"] == 3
+    assert reason_crossed.kwargs["crossed_reason_frequency"] == {
         "ingest_failures_detected": 3
     }
-    assert final_reason_crossed.kwargs["window_size"] == 6
+    assert reason_crossed.kwargs["window_size"] == 5
+    assert reason_crossed.kwargs["cooldown_re_emitted"] is False
+
+    reason_crossed_suppressed_logs = _event_calls(
+        mock_info,
+        "telemetry_health_runtime_adapter_slo_reason_frequency_threshold_crossed_suppressed",
+    )
+    assert len(reason_crossed_suppressed_logs) == 1
+    suppressed_log = reason_crossed_suppressed_logs[0]
+    assert suppressed_log.kwargs["reason_frequency_threshold"] == 3
+    assert suppressed_log.kwargs["max_reason_frequency"] == 3
+    assert suppressed_log.kwargs["crossed_reason_frequency"] == {
+        "ingest_failures_detected": 3
+    }
+    assert suppressed_log.kwargs["window_size"] == 6
+    assert suppressed_log.kwargs["cooldown_reads"] == 3
+    assert suppressed_log.kwargs["cooldown_reads_elapsed"] == 1
+    assert suppressed_log.kwargs["cooldown_reads_remaining"] == 2
 
 
 @pytest.mark.asyncio
@@ -860,6 +893,143 @@ async def test_get_health_trend_threshold_evaluation_failure_is_fail_open(mock_d
         mock_warning, "telemetry_health_runtime_adapter_slo_trend_threshold_evaluation_failed"
     )
     assert len(evaluation_failed_logs) == 1
+
+
+def test_trend_threshold_cooldown_re_emits_crossed_after_cooldown_reads(mock_db):
+    svc = TelemetryQueryService(db=mock_db)
+
+    with (
+        patch("app.modules.telemetry.service.logger.warning") as mock_warning,
+        patch("app.modules.telemetry.service.logger.info") as mock_info,
+    ):
+        svc._safe_log_runtime_adapter_slo_trend_threshold_triggers(
+            trend_window_summary=_trend_window_summary(
+                window_size=5,
+                anomaly_reason_frequency={"ingest_failures_detected": 3},
+            )
+        )
+        svc._safe_log_runtime_adapter_slo_trend_threshold_triggers(
+            trend_window_summary=_trend_window_summary(
+                window_size=6,
+                anomaly_reason_frequency={"ingest_failures_detected": 4},
+            )
+        )
+        svc._safe_log_runtime_adapter_slo_trend_threshold_triggers(
+            trend_window_summary=_trend_window_summary(
+                window_size=7,
+                anomaly_reason_frequency={"ingest_failures_detected": 5},
+            )
+        )
+        svc._safe_log_runtime_adapter_slo_trend_threshold_triggers(
+            trend_window_summary=_trend_window_summary(
+                window_size=8,
+                anomaly_reason_frequency={"ingest_failures_detected": 6},
+            )
+        )
+
+    reason_crossed_logs = _event_calls(
+        mock_warning, "telemetry_health_runtime_adapter_slo_reason_frequency_threshold_crossed"
+    )
+    assert len(reason_crossed_logs) == 2
+    first_crossed = reason_crossed_logs[0]
+    assert first_crossed.kwargs["window_size"] == 5
+    assert first_crossed.kwargs["cooldown_re_emitted"] is False
+    re_emitted_crossed = reason_crossed_logs[1]
+    assert re_emitted_crossed.kwargs["window_size"] == 8
+    assert re_emitted_crossed.kwargs["cooldown_re_emitted"] is True
+    assert re_emitted_crossed.kwargs["cooldown_reads_elapsed"] == 3
+
+    reason_crossed_suppressed_logs = _event_calls(
+        mock_info,
+        "telemetry_health_runtime_adapter_slo_reason_frequency_threshold_crossed_suppressed",
+    )
+    assert len(reason_crossed_suppressed_logs) == 2
+    assert reason_crossed_suppressed_logs[0].kwargs["cooldown_reads_elapsed"] == 1
+    assert reason_crossed_suppressed_logs[0].kwargs["cooldown_reads_remaining"] == 2
+    assert reason_crossed_suppressed_logs[1].kwargs["cooldown_reads_elapsed"] == 2
+    assert reason_crossed_suppressed_logs[1].kwargs["cooldown_reads_remaining"] == 1
+
+
+def test_trend_threshold_recovery_not_crossed_logs_transition(mock_db):
+    svc = TelemetryQueryService(db=mock_db)
+
+    with (
+        patch("app.modules.telemetry.service.logger.warning"),
+        patch("app.modules.telemetry.service.logger.info") as mock_info,
+    ):
+        svc._safe_log_runtime_adapter_slo_trend_threshold_triggers(
+            trend_window_summary=_trend_window_summary(
+                window_size=1,
+                severity_transition_counts={},
+                anomaly_reason_frequency={},
+            )
+        )
+        svc._safe_log_runtime_adapter_slo_trend_threshold_triggers(
+            trend_window_summary=_trend_window_summary(
+                window_size=2,
+                severity_transition_counts={},
+                anomaly_reason_frequency={"ingest_failures_detected": 3},
+            )
+        )
+        svc._safe_log_runtime_adapter_slo_trend_threshold_triggers(
+            trend_window_summary=_trend_window_summary(
+                window_size=3,
+                severity_transition_counts={},
+                anomaly_reason_frequency={"ingest_failures_detected": 2},
+            )
+        )
+
+    reason_not_crossed_logs = _event_calls(
+        mock_info, "telemetry_health_runtime_adapter_slo_reason_frequency_threshold_not_crossed"
+    )
+    assert len(reason_not_crossed_logs) == 2
+    assert reason_not_crossed_logs[0].kwargs["recovery_transition"] is False
+    assert reason_not_crossed_logs[1].kwargs["recovery_transition"] is True
+    assert reason_not_crossed_logs[1].kwargs["window_size"] == 3
+
+
+def test_trend_threshold_cooldown_state_read_failure_is_fail_open(mock_db):
+    svc = TelemetryQueryService(db=mock_db)
+
+    with (
+        patch.object(
+            svc,
+            "_read_runtime_adapter_slo_threshold_cooldown_state",
+            side_effect=RuntimeError("cooldown read failed"),
+        ),
+        patch("app.modules.telemetry.service.logger.warning") as mock_warning,
+    ):
+        svc._safe_log_runtime_adapter_slo_trend_threshold_triggers(
+            trend_window_summary=_trend_window_summary(window_size=1)
+        )
+
+    read_failed_logs = _event_calls(
+        mock_warning,
+        "telemetry_health_runtime_adapter_slo_trend_threshold_cooldown_state_read_failed",
+    )
+    assert len(read_failed_logs) == 1
+
+
+def test_trend_threshold_cooldown_state_write_failure_is_fail_open(mock_db):
+    svc = TelemetryQueryService(db=mock_db)
+
+    with (
+        patch.object(
+            svc,
+            "_write_runtime_adapter_slo_threshold_cooldown_state",
+            side_effect=RuntimeError("cooldown write failed"),
+        ),
+        patch("app.modules.telemetry.service.logger.warning") as mock_warning,
+    ):
+        svc._safe_log_runtime_adapter_slo_trend_threshold_triggers(
+            trend_window_summary=_trend_window_summary(window_size=1)
+        )
+
+    write_failed_logs = _event_calls(
+        mock_warning,
+        "telemetry_health_runtime_adapter_slo_trend_threshold_cooldown_state_write_failed",
+    )
+    assert len(write_failed_logs) == 1
 
 
 @pytest.mark.asyncio

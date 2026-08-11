@@ -1,5 +1,14 @@
 # Development Journal
 
+## [2026-08-11] - Vertical Slice 3 Step 21 (Runtime Adapter SLO Trend-Threshold Cooldown and Recovery Visibility)
+
+- **Implemented:** Added internal threshold cooldown/hysteresis state for runtime adapter SLO trend-threshold evaluation in telemetry health read-path internals.
+- **Cooldown behavior:** Threshold-crossed events are emitted on initial crossing, suppressed during cooldown reads (`3`), and re-emitted after cooldown expiry while still crossed (`...threshold_crossed_suppressed` + re-emitted crossed branch).
+- **Recovery visibility:** Not-crossed branch now emits explicit transition semantics (`recovery_transition=true`) when a previously crossed threshold recovers.
+- **Fail-open safety:** Added isolated warning-only cooldown state failure branches (`...trend_threshold_cooldown_state_read_failed`, `...trend_threshold_cooldown_state_write_failed`) while preserving existing threshold-evaluation and trend-window fail-open semantics.
+- **Scope guardrails:** Internal-only logging/state changes; no REST route/envelope changes, no schema migrations, no C5/C6 drift, and runtime poll-action semantics unchanged.
+- **Validation:** Scoped Ruff passed; targeted telemetry query/scaffold/endpoints tests passed; full backend `pytest` regression passed (`201 passed`).
+
 ## [2026-08-11] - Vertical Slice 3 Step 20 (Runtime Adapter SLO Trend-Threshold Trigger Visibility)
 
 - **Implemented:** Added deterministic internal threshold-trigger visibility on runtime adapter SLO trend-window summaries for transition-frequency and anomaly-reason-frequency counters.

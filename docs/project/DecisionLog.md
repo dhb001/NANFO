@@ -3,6 +3,23 @@
 Lightweight chronological notes for decisions that do not require a full ADR.
 
 ## 2026-08-11
+### Runtime Adapter SLO Trend-Threshold Cooldown and Recovery Visibility (VS3 Step 21)
+Decision: Add internal-only cooldown/hysteresis state to runtime adapter SLO trend-threshold trigger evaluation so repeated crossed conditions are rate-limited and recovery/not-crossed transitions are explicitly visible.
+Reason:
+- Reduce repeated high-noise crossed emissions while retaining deterministic trend-threshold signaling.
+- Preserve Step 16-20 reliability semantics by keeping new behavior internal to telemetry health read-path observability.
+Impact:
+- Crossed thresholds now emit on initial crossing, suppress repeated crossed emissions during cooldown reads, and re-emit crossed when cooldown expires while still crossed.
+- Not-crossed branches now include explicit recovery transition visibility (`recovery_transition`) when a previously crossed threshold clears.
+- Cooldown state read/write failures are isolated to warning-only fail-open branches and do not alter health responses.
+- REST/WebSocket contracts, canonical envelope, schema/migrations, trend-window model, and runtime poll-action behavior remain unchanged.
+Related:
+- `backend/app/modules/telemetry/service.py`
+- `backend/tests/unit/test_telemetry_query_service.py`
+- `backend/tests/unit/test_telemetry_scaffold.py`
+- `backend/tests/integration/test_telemetry_endpoints.py`
+
+## 2026-08-11
 ### Runtime Adapter SLO Trend-Threshold Trigger Visibility (VS3 Step 20)
 Decision: Add internal-only deterministic threshold trigger logging on runtime adapter SLO trend-window summaries for transition-frequency and anomaly-reason-frequency counters.
 Reason:
