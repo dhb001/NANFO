@@ -1,5 +1,14 @@
 # Development Journal
 
+## [2026-08-11] - Vertical Slice 3 Step 19 (Runtime Adapter SLO Trend-Window Transition Visibility)
+
+- **Implemented:** Added bounded internal runtime adapter SLO trend-window tracking in telemetry health read-path internals and emitted `telemetry_health_runtime_adapter_slo_trend_window_summary`.
+- **Window behavior:** Maintains an in-process bounded rolling window (`max_window_size=10`) over recent health reads and reports `window_size` plus deterministic capped transition aggregation.
+- **Trend summary:** Emits severity transition counts (`from->to`) and anomaly reason frequency aggregation across the active window.
+- **Fail-open safety:** Added isolated warning-only branches for trend-window state write/read/log failures (`...state_write_failed`, `...state_read_failed`, `...trend_window_log_failed`) without affecting health response behavior.
+- **Compatibility guardrails:** Step 16 persisted streak continuity, Step 17 transition metadata, and Step 18 rollup severity semantics remain unchanged; no REST route/envelope changes, no schema migrations, and runtime poll-action behavior unchanged.
+- **Validation:** Scoped Ruff passed; targeted telemetry query/scaffold/endpoints tests passed; full backend `pytest` regression passed (`195 passed`).
+
 ## [2026-08-11] - Vertical Slice 3 Step 18 (Runtime Adapter SLO Health Rollup Severity Visibility)
 
 - **Implemented:** Added a single internal-only runtime adapter SLO health rollup log branch in telemetry health read-path internals (`telemetry_health_runtime_adapter_slo_rollup`).

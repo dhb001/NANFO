@@ -3,6 +3,22 @@
 Lightweight chronological notes for decisions that do not require a full ADR.
 
 ## 2026-08-11
+### Runtime Adapter SLO Trend-Window Transition Visibility (VS3 Step 19)
+Decision: Add internal-only bounded trend-window visibility on telemetry health runtime adapter rollup flow, logging a rolling summary of severity transitions and anomaly reason frequency.
+Reason:
+- Extend single-snapshot rollup visibility with minimal trend context for operations diagnostics.
+- Keep implementation reversible and fail-open while preserving Step 16-18 behavior contracts.
+Impact:
+- Health read path now emits `telemetry_health_runtime_adapter_slo_trend_window_summary` with `window_size`, capped `max_window_size`, `severity_transition_counts`, and `anomaly_reason_frequency`.
+- Trend-window state write/read/log failures are isolated to warning-only branches and do not change health responses.
+- Public REST/WebSocket contracts, canonical envelope, schema/migrations, C5/C6 constraints, and runtime poll-action behavior remain unchanged.
+Related:
+- `backend/app/modules/telemetry/service.py`
+- `backend/tests/unit/test_telemetry_query_service.py`
+- `backend/tests/unit/test_telemetry_scaffold.py`
+- `backend/tests/integration/test_telemetry_endpoints.py`
+
+## 2026-08-11
 ### Runtime Adapter SLO Health Rollup Severity Visibility (VS3 Step 18)
 Decision: Add a single internal-only telemetry health rollup log branch for runtime adapter SLO visibility, with explicit severity mapping (`ok`, `degraded`, `critical`) and structured rollup payload fields.
 Reason:

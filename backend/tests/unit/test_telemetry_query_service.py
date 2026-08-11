@@ -253,6 +253,15 @@ async def test_get_health_falls_back_to_zero_counters_on_counter_failure(mock_db
     assert rollup_log.kwargs["invalid_sample_ratio"] == pytest.approx(0.0)
     assert rollup_log.kwargs["last_batch_size"] == 0
     assert rollup_log.kwargs["anomaly_reason_flags"] == []
+    trend_logs = _event_calls(mock_info, "telemetry_health_runtime_adapter_slo_trend_window_summary")
+    assert len(trend_logs) == 1
+    trend_log = trend_logs[0]
+    assert trend_log.kwargs["latest_severity"] == "ok"
+    assert trend_log.kwargs["latest_anomaly_reason_flags"] == []
+    assert trend_log.kwargs["window_size"] == 1
+    assert trend_log.kwargs["max_window_size"] == 10
+    assert trend_log.kwargs["severity_transition_counts"] == {}
+    assert trend_log.kwargs["anomaly_reason_frequency"] == {}
 
 
 @pytest.mark.asyncio
@@ -409,6 +418,240 @@ async def test_get_health_rollup_logs_critical_severity_when_anomaly_streak_reac
     assert rollup_log.kwargs["invalid_sample_ratio"] == pytest.approx(0.0)
     assert rollup_log.kwargs["last_batch_size"] == 6
     assert rollup_log.kwargs["anomaly_reason_flags"] == ["ingest_failures_detected"]
+
+
+@pytest.mark.asyncio
+async def test_get_health_trend_window_summary_aggregates_transitions_and_reason_frequency(
+    mock_db,
+):
+    counter_service = AsyncMock()
+    counter_service.get_snapshot = AsyncMock(
+        side_effect=[
+            {
+                "ingested_events": 0,
+                "persisted_events": 0,
+                "fanout_events": 0,
+                "dropped_events": 0,
+                "runtime_exhausted_cycles": 0,
+                "runtime_exhausted_streak": 0,
+                "runtime_sustained_failure_windows": 0,
+                "runtime_sustained_failure_active": 0,
+                "runtime_adapter_last_batch_size": 4,
+                "runtime_adapter_invalid_samples": 0,
+                "runtime_adapter_ingest_attempts": 4,
+                "runtime_adapter_ingest_failures": 0,
+                "runtime_adapter_anomaly_streak": 0,
+            },
+            {
+                "ingested_events": 0,
+                "persisted_events": 0,
+                "fanout_events": 0,
+                "dropped_events": 0,
+                "runtime_exhausted_cycles": 0,
+                "runtime_exhausted_streak": 0,
+                "runtime_sustained_failure_windows": 0,
+                "runtime_sustained_failure_active": 0,
+                "runtime_adapter_last_batch_size": 5,
+                "runtime_adapter_invalid_samples": 0,
+                "runtime_adapter_ingest_attempts": 5,
+                "runtime_adapter_ingest_failures": 1,
+                "runtime_adapter_anomaly_streak": 0,
+            },
+            {
+                "ingested_events": 0,
+                "persisted_events": 0,
+                "fanout_events": 0,
+                "dropped_events": 0,
+                "runtime_exhausted_cycles": 3,
+                "runtime_exhausted_streak": 2,
+                "runtime_sustained_failure_windows": 1,
+                "runtime_sustained_failure_active": 1,
+                "runtime_adapter_last_batch_size": 6,
+                "runtime_adapter_invalid_samples": 0,
+                "runtime_adapter_ingest_attempts": 6,
+                "runtime_adapter_ingest_failures": 0,
+                "runtime_adapter_anomaly_streak": 0,
+            },
+            {
+                "ingested_events": 0,
+                "persisted_events": 0,
+                "fanout_events": 0,
+                "dropped_events": 0,
+                "runtime_exhausted_cycles": 0,
+                "runtime_exhausted_streak": 0,
+                "runtime_sustained_failure_windows": 0,
+                "runtime_sustained_failure_active": 0,
+                "runtime_adapter_last_batch_size": 7,
+                "runtime_adapter_invalid_samples": 0,
+                "runtime_adapter_ingest_attempts": 7,
+                "runtime_adapter_ingest_failures": 1,
+                "runtime_adapter_anomaly_streak": 0,
+            },
+        ]
+    )
+    counter_service.set_runtime_adapter_anomaly_streak = AsyncMock(return_value=1)
+    svc = TelemetryQueryService(db=mock_db, counter_service=counter_service)
+    svc._repo.get_latest_observed_at = AsyncMock(return_value=None)
+    svc._repo.count_all = AsyncMock(return_value=0)
+
+    with (
+        patch("app.modules.telemetry.service.logger.info") as mock_info,
+        patch("app.modules.telemetry.service.logger.warning"),
+        patch("app.modules.telemetry.service.logger.error"),
+    ):
+        await svc.get_health()
+        await svc.get_health()
+        await svc.get_health()
+        await svc.get_health()
+
+    trend_logs = _event_calls(mock_info, "telemetry_health_runtime_adapter_slo_trend_window_summary")
+    assert len(trend_logs) == 4
+    final_trend_log = trend_logs[-1]
+    assert final_trend_log.kwargs["latest_severity"] == "degraded"
+    assert final_trend_log.kwargs["latest_anomaly_reason_flags"] == ["ingest_failures_detected"]
+    assert final_trend_log.kwargs["window_size"] == 4
+    assert final_trend_log.kwargs["max_window_size"] == 10
+    assert final_trend_log.kwargs["severity_transition_counts"] == {
+        "critical->degraded": 1,
+        "degraded->critical": 1,
+        "ok->degraded": 1,
+    }
+    assert final_trend_log.kwargs["anomaly_reason_frequency"] == {
+        "ingest_failures_detected": 2
+    }
+
+
+@pytest.mark.asyncio
+async def test_get_health_trend_window_summary_respects_bounded_max_size(mock_db):
+    counter_service = AsyncMock()
+    snapshots = []
+    for index in range(12):
+        snapshots.append(
+            {
+                "ingested_events": 0,
+                "persisted_events": 0,
+                "fanout_events": 0,
+                "dropped_events": 0,
+                "runtime_exhausted_cycles": 0,
+                "runtime_exhausted_streak": 0,
+                "runtime_sustained_failure_windows": 0,
+                "runtime_sustained_failure_active": 0,
+                "runtime_adapter_last_batch_size": 1,
+                "runtime_adapter_invalid_samples": 0,
+                "runtime_adapter_ingest_attempts": 1,
+                "runtime_adapter_ingest_failures": 1 if index % 2 == 1 else 0,
+                "runtime_adapter_anomaly_streak": 0,
+            }
+        )
+    counter_service.get_snapshot = AsyncMock(side_effect=snapshots)
+    counter_service.set_runtime_adapter_anomaly_streak = AsyncMock(return_value=1)
+    svc = TelemetryQueryService(db=mock_db, counter_service=counter_service)
+    svc._repo.get_latest_observed_at = AsyncMock(return_value=None)
+    svc._repo.count_all = AsyncMock(return_value=0)
+
+    with (
+        patch("app.modules.telemetry.service.logger.info") as mock_info,
+        patch("app.modules.telemetry.service.logger.warning"),
+        patch("app.modules.telemetry.service.logger.error"),
+    ):
+        for _ in range(12):
+            await svc.get_health()
+
+    trend_logs = _event_calls(mock_info, "telemetry_health_runtime_adapter_slo_trend_window_summary")
+    assert len(trend_logs) == 12
+    final_trend_log = trend_logs[-1]
+    assert final_trend_log.kwargs["window_size"] == 10
+    assert final_trend_log.kwargs["max_window_size"] == 10
+    transition_counts = final_trend_log.kwargs["severity_transition_counts"]
+    assert sum(transition_counts.values()) == 9
+
+
+@pytest.mark.asyncio
+async def test_get_health_trend_window_state_write_failure_is_fail_open(mock_db):
+    counter_service = AsyncMock()
+    counter_service.get_snapshot = AsyncMock(
+        return_value={
+            "ingested_events": 0,
+            "persisted_events": 0,
+            "fanout_events": 0,
+            "dropped_events": 0,
+            "runtime_exhausted_cycles": 0,
+            "runtime_exhausted_streak": 0,
+            "runtime_sustained_failure_windows": 0,
+            "runtime_sustained_failure_active": 0,
+            "runtime_adapter_last_batch_size": 3,
+            "runtime_adapter_invalid_samples": 0,
+            "runtime_adapter_ingest_attempts": 3,
+            "runtime_adapter_ingest_failures": 0,
+            "runtime_adapter_anomaly_streak": 0,
+        }
+    )
+    svc = TelemetryQueryService(db=mock_db, counter_service=counter_service)
+    svc._repo.get_latest_observed_at = AsyncMock(return_value=None)
+    svc._repo.count_all = AsyncMock(return_value=0)
+
+    with (
+        patch.object(
+            svc,
+            "_append_runtime_adapter_slo_trend_window_entry",
+            side_effect=RuntimeError("trend write failed"),
+        ),
+        patch("app.modules.telemetry.service.logger.warning") as mock_warning,
+        patch("app.modules.telemetry.service.logger.info") as mock_info,
+    ):
+        result = await svc.get_health()
+
+    assert result.status == "ok"
+    trend_state_write_failed = _event_calls(
+        mock_warning, "telemetry_health_runtime_adapter_slo_trend_window_state_write_failed"
+    )
+    assert len(trend_state_write_failed) == 1
+    trend_summary_logs = _event_calls(mock_info, "telemetry_health_runtime_adapter_slo_trend_window_summary")
+    assert len(trend_summary_logs) == 0
+
+
+@pytest.mark.asyncio
+async def test_get_health_trend_window_state_read_failure_is_fail_open(mock_db):
+    counter_service = AsyncMock()
+    counter_service.get_snapshot = AsyncMock(
+        return_value={
+            "ingested_events": 0,
+            "persisted_events": 0,
+            "fanout_events": 0,
+            "dropped_events": 0,
+            "runtime_exhausted_cycles": 0,
+            "runtime_exhausted_streak": 0,
+            "runtime_sustained_failure_windows": 0,
+            "runtime_sustained_failure_active": 0,
+            "runtime_adapter_last_batch_size": 3,
+            "runtime_adapter_invalid_samples": 0,
+            "runtime_adapter_ingest_attempts": 3,
+            "runtime_adapter_ingest_failures": 0,
+            "runtime_adapter_anomaly_streak": 0,
+        }
+    )
+    svc = TelemetryQueryService(db=mock_db, counter_service=counter_service)
+    svc._repo.get_latest_observed_at = AsyncMock(return_value=None)
+    svc._repo.count_all = AsyncMock(return_value=0)
+
+    with (
+        patch.object(
+            svc,
+            "_build_runtime_adapter_slo_trend_window_summary",
+            side_effect=RuntimeError("trend read failed"),
+        ),
+        patch("app.modules.telemetry.service.logger.warning") as mock_warning,
+        patch("app.modules.telemetry.service.logger.info") as mock_info,
+    ):
+        result = await svc.get_health()
+
+    assert result.status == "ok"
+    trend_state_read_failed = _event_calls(
+        mock_warning, "telemetry_health_runtime_adapter_slo_trend_window_state_read_failed"
+    )
+    assert len(trend_state_read_failed) == 1
+    trend_summary_logs = _event_calls(mock_info, "telemetry_health_runtime_adapter_slo_trend_window_summary")
+    assert len(trend_summary_logs) == 0
 
 
 @pytest.mark.asyncio

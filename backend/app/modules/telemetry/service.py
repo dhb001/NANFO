@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import uuid
 from abc import ABC, abstractmethod
+from collections import deque
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from typing import Any
@@ -36,6 +37,7 @@ _RUNTIME_SUSTAINED_FAILURE_ACTIVATED_EVENT_TYPE = "telemetry.collector.sustained
 _RUNTIME_SUSTAINED_FAILURE_RECOVERED_EVENT_TYPE = "telemetry.collector.sustained_failure_recovered"
 _RUNTIME_ADAPTER_INVALID_SAMPLE_RATIO_WARN_THRESHOLD = 0.25
 _RUNTIME_ADAPTER_ANOMALY_STREAK_CRITICAL_THRESHOLD = 3
+_RUNTIME_ADAPTER_SLO_TREND_WINDOW_MAX_SIZE = 10
 
 
 def compute_bounded_backoff_seconds(
@@ -735,6 +737,9 @@ class TelemetryQueryService:
     ):
         self._repo = TelemetryRecordRepository(db)
         self._counter_service = counter_service
+        self._runtime_adapter_slo_trend_window: deque[dict[str, Any]] = deque(
+            maxlen=_RUNTIME_ADAPTER_SLO_TREND_WINDOW_MAX_SIZE
+        )
 
     async def get_history(
         self,
@@ -888,10 +893,14 @@ class TelemetryQueryService:
                 anomaly_reason_flags=anomaly_reason_flags,
                 runtime_adapter_anomaly_streak=runtime_adapter_anomaly_streak,
             )
-            self._log_runtime_adapter_slo_health_rollup(
+            rollup_severity, _ = self._log_runtime_adapter_slo_health_rollup(
                 runtime_adapter_slo_snapshot=runtime_adapter_slo_snapshot,
                 runtime_adapter_anomaly_streak=current_anomaly_streak,
                 runtime_sustained_failure_active=runtime_sustained_failure_active,
+                anomaly_reason_flags=anomaly_reason_flags,
+            )
+            self._safe_log_runtime_adapter_slo_trend_window_summary(
+                severity=rollup_severity,
                 anomaly_reason_flags=anomaly_reason_flags,
             )
         except Exception as exc:  # noqa: BLE001
@@ -902,6 +911,88 @@ class TelemetryQueryService:
                 error=str(exc),
             )
 
+    def _safe_log_runtime_adapter_slo_trend_window_summary(
+        self,
+        *,
+        severity: str,
+        anomaly_reason_flags: list[str],
+    ) -> None:
+        try:
+            self._append_runtime_adapter_slo_trend_window_entry(
+                severity=severity,
+                anomaly_reason_flags=anomaly_reason_flags,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "telemetry_health_runtime_adapter_slo_trend_window_state_write_failed",
+                error=str(exc),
+            )
+            return
+
+        try:
+            trend_window_summary = self._build_runtime_adapter_slo_trend_window_summary()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "telemetry_health_runtime_adapter_slo_trend_window_state_read_failed",
+                error=str(exc),
+            )
+            return
+
+        try:
+            logger.info(
+                "telemetry_health_runtime_adapter_slo_trend_window_summary",
+                latest_severity=severity,
+                latest_anomaly_reason_flags=anomaly_reason_flags,
+                window_size=trend_window_summary["window_size"],
+                max_window_size=trend_window_summary["max_window_size"],
+                severity_transition_counts=trend_window_summary["severity_transition_counts"],
+                anomaly_reason_frequency=trend_window_summary["anomaly_reason_frequency"],
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "telemetry_health_runtime_adapter_slo_trend_window_log_failed",
+                error=str(exc),
+            )
+
+    def _append_runtime_adapter_slo_trend_window_entry(
+        self,
+        *,
+        severity: str,
+        anomaly_reason_flags: list[str],
+    ) -> None:
+        self._runtime_adapter_slo_trend_window.append(
+            {
+                "severity": severity,
+                "anomaly_reason_flags": tuple(anomaly_reason_flags),
+            }
+        )
+
+    def _build_runtime_adapter_slo_trend_window_summary(self) -> dict[str, Any]:
+        entries = list(self._runtime_adapter_slo_trend_window)
+        severity_transition_counts: dict[str, int] = {}
+        anomaly_reason_frequency: dict[str, int] = {}
+
+        for index in range(1, len(entries)):
+            previous_severity = str(entries[index - 1]["severity"])
+            current_severity = str(entries[index]["severity"])
+            transition_key = f"{previous_severity}->{current_severity}"
+            severity_transition_counts[transition_key] = (
+                severity_transition_counts.get(transition_key, 0) + 1
+            )
+
+        for entry in entries:
+            for reason in entry["anomaly_reason_flags"]:
+                anomaly_reason_frequency[str(reason)] = (
+                    anomaly_reason_frequency.get(str(reason), 0) + 1
+                )
+
+        return {
+            "window_size": len(entries),
+            "max_window_size": int(self._runtime_adapter_slo_trend_window.maxlen or 0),
+            "severity_transition_counts": dict(sorted(severity_transition_counts.items())),
+            "anomaly_reason_frequency": dict(sorted(anomaly_reason_frequency.items())),
+        }
+
     def _log_runtime_adapter_slo_health_rollup(
         self,
         *,
@@ -909,7 +1000,7 @@ class TelemetryQueryService:
         runtime_adapter_anomaly_streak: int,
         runtime_sustained_failure_active: bool,
         anomaly_reason_flags: list[str],
-    ) -> None:
+    ) -> tuple[str, str]:
         ingest_attempts = runtime_adapter_slo_snapshot["ingest_attempts"]
         ingest_failures = runtime_adapter_slo_snapshot["ingest_failures"]
         invalid_samples = runtime_adapter_slo_snapshot["invalid_samples"]
@@ -943,6 +1034,7 @@ class TelemetryQueryService:
             anomaly_reason_flags=anomaly_reason_flags,
             anomaly_streak_critical_threshold=_RUNTIME_ADAPTER_ANOMALY_STREAK_CRITICAL_THRESHOLD,
         )
+        return severity, severity_reason
 
     @staticmethod
     def _resolve_runtime_adapter_slo_rollup_severity(
