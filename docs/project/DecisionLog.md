@@ -3,6 +3,21 @@
 Lightweight chronological notes for decisions that do not require a full ADR.
 
 ## 2026-08-11
+### Runtime Adapter Anomaly Streak Transition Metadata Visibility (VS3 Step 17)
+Decision: Extend telemetry health runtime adapter streak observability with explicit transition metadata (`previous_streak`, `current_streak`, `anomaly_reason_flags`) emitted by an internal transition event log branch.
+Reason:
+- Improve operational trend diagnostics by exposing streak transitions and their triggering anomaly categories.
+- Preserve existing fail-open behavior and Step 16 Redis-backed streak continuity without introducing API/schema drift.
+Impact:
+- Health read path now emits `telemetry_health_runtime_adapter_anomaly_streak_transition` on increment/reset/unchanged branches with structured reason flags (`ingest_failures_detected`, `invalid_sample_ratio_exceeded`).
+- Public REST/WebSocket contracts, response envelope, schema/migrations, and runtime poll-action semantics remain unchanged.
+Related:
+- `backend/app/modules/telemetry/service.py`
+- `backend/tests/unit/test_telemetry_query_service.py`
+- `backend/tests/unit/test_telemetry_scaffold.py`
+- `backend/tests/integration/test_telemetry_endpoints.py`
+
+## 2026-08-11
 ### Persist Runtime Adapter Anomaly Streak via Redis Health Counters (VS3 Step 16)
 Decision: Move runtime adapter anomaly streak state from process-local memory to Redis-backed telemetry health counters; health read path now reads streak from counter snapshot and persists streak updates through counter service.
 Reason:

@@ -1,5 +1,13 @@
 # Development Journal
 
+## [2026-08-11] - Vertical Slice 3 Step 17 (Runtime Adapter Anomaly Streak Transition Metadata)
+
+- **Implemented:** Added runtime adapter anomaly streak transition metadata visibility in telemetry health read-path internals (`previous_streak`, `current_streak`, `anomaly_reason_flags`).
+- **Transition semantics:** Transition logs now emit on increment, reset, and unchanged branches via `telemetry_health_runtime_adapter_anomaly_streak_transition`, with warning level for increasing streak and info level otherwise.
+- **Reason flags:** Added explicit anomaly reason tagging for transition context (`ingest_failures_detected`, `invalid_sample_ratio_exceeded`) while preserving existing anomaly warning events.
+- **Fail-open safety:** Transition metadata remains internal-only and logging/counter failure handling stays non-fatal; no REST route/envelope changes, no schema migrations, and runtime poll-action semantics unchanged.
+- **Validation:** Scoped Ruff passed; targeted telemetry query/scaffold/endpoints tests passed; full backend `pytest` regression passed (`188 passed`).
+
 ## [2026-08-11] - Vertical Slice 3 Step 16 (Persisted Runtime Adapter Anomaly Streak)
 
 - **Implemented:** Persisted runtime adapter anomaly streak in Redis-backed telemetry health counters and wired health read-path streak load/store through `TelemetryHealthCounterService`.

@@ -7,7 +7,6 @@ from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
 from app.modules.telemetry.service import TelemetryQueryService
 
 
@@ -27,6 +26,12 @@ def _make_row(metric: str, device_id: uuid.UUID | None = None) -> MagicMock:
     row.tags = {"vendor": "test"}
     row.created_at = datetime.now(UTC)
     return row
+
+
+def _event_calls(mock_logger: MagicMock, event_name: str) -> list:
+    return [
+        call for call in mock_logger.call_args_list if call.args and call.args[0] == event_name
+    ]
 
 
 @pytest.mark.asyncio
@@ -136,20 +141,27 @@ async def test_get_health_logs_runtime_adapter_slo_snapshot(mock_db):
         result = await svc.get_health()
 
     assert result.status == "ok"
-    assert mock_info.call_count == 1
-    info_args = mock_info.call_args.args
-    info_kwargs = mock_info.call_args.kwargs
-    assert info_args[0] == "telemetry_health_runtime_adapter_slo_snapshot"
+    snapshot_logs = _event_calls(mock_info, "telemetry_health_runtime_adapter_slo_snapshot")
+    assert len(snapshot_logs) == 1
+    info_kwargs = snapshot_logs[0].kwargs
     assert info_kwargs["last_batch_size"] == 12
     assert info_kwargs["invalid_samples"] == 2
     assert info_kwargs["ingest_attempts"] == 10
     assert info_kwargs["ingest_failures"] == 1
     assert info_kwargs["status"] == "ok"
     assert info_kwargs["dropped_events"] == 1
-    assert any(
-        call.args and call.args[0] == "telemetry_health_runtime_adapter_ingest_failures_detected"
-        for call in mock_warning.call_args_list
+    ingest_failure_logs = _event_calls(
+        mock_warning, "telemetry_health_runtime_adapter_ingest_failures_detected"
     )
+    assert len(ingest_failure_logs) == 1
+    transition_logs = _event_calls(
+        mock_warning, "telemetry_health_runtime_adapter_anomaly_streak_transition"
+    )
+    assert len(transition_logs) == 1
+    transition_log = transition_logs[0]
+    assert transition_log.kwargs["previous_streak"] == 0
+    assert transition_log.kwargs["current_streak"] == 1
+    assert transition_log.kwargs["anomaly_reason_flags"] == ["ingest_failures_detected"]
 
 
 @pytest.mark.asyncio
@@ -198,17 +210,23 @@ async def test_get_health_falls_back_to_zero_counters_on_counter_failure(mock_db
 
     assert result.status == "ok"
     assert result.dropped_events == 0
-    info_args = mock_info.call_args.args
-    info_kwargs = mock_info.call_args.kwargs
-    assert info_args[0] == "telemetry_health_runtime_adapter_slo_snapshot"
+    snapshot_logs = _event_calls(mock_info, "telemetry_health_runtime_adapter_slo_snapshot")
+    assert len(snapshot_logs) == 1
+    info_kwargs = snapshot_logs[0].kwargs
     assert info_kwargs["last_batch_size"] == 0
     assert info_kwargs["invalid_samples"] == 0
     assert info_kwargs["ingest_attempts"] == 0
     assert info_kwargs["ingest_failures"] == 0
-    assert any(
-        call.args and call.args[0] == "telemetry_health_counter_snapshot_failed"
-        for call in mock_warning.call_args_list
+    counter_snapshot_failed_logs = _event_calls(mock_warning, "telemetry_health_counter_snapshot_failed")
+    assert len(counter_snapshot_failed_logs) == 1
+    transition_logs = _event_calls(
+        mock_info, "telemetry_health_runtime_adapter_anomaly_streak_transition"
     )
+    assert len(transition_logs) == 1
+    transition_log = transition_logs[0]
+    assert transition_log.kwargs["previous_streak"] == 0
+    assert transition_log.kwargs["current_streak"] == 0
+    assert transition_log.kwargs["anomaly_reason_flags"] == []
 
 
 @pytest.mark.asyncio
@@ -265,9 +283,9 @@ async def test_get_health_runtime_adapter_slo_snapshot_invalid_values_are_fail_o
         result = await svc.get_health()
 
     assert result.status == "ok"
-    info_args = mock_info.call_args.args
-    info_kwargs = mock_info.call_args.kwargs
-    assert info_args[0] == "telemetry_health_runtime_adapter_slo_snapshot"
+    snapshot_logs = _event_calls(mock_info, "telemetry_health_runtime_adapter_slo_snapshot")
+    assert len(snapshot_logs) == 1
+    info_kwargs = snapshot_logs[0].kwargs
     assert info_kwargs["last_batch_size"] == 0
     assert info_kwargs["invalid_samples"] == 0
     assert info_kwargs["ingest_attempts"] == 0
@@ -285,10 +303,18 @@ async def test_get_health_runtime_adapter_slo_snapshot_invalid_values_are_fail_o
         "runtime_adapter_invalid_samples",
         "runtime_adapter_ingest_attempts",
     }
-    assert any(
-        call.args and call.args[0] == "telemetry_health_runtime_adapter_ingest_failures_detected"
-        for call in mock_warning.call_args_list
+    ingest_failure_logs = _event_calls(
+        mock_warning, "telemetry_health_runtime_adapter_ingest_failures_detected"
     )
+    assert len(ingest_failure_logs) == 1
+    transition_logs = _event_calls(
+        mock_warning, "telemetry_health_runtime_adapter_anomaly_streak_transition"
+    )
+    assert len(transition_logs) == 1
+    transition_log = transition_logs[0]
+    assert transition_log.kwargs["previous_streak"] == 0
+    assert transition_log.kwargs["current_streak"] == 1
+    assert transition_log.kwargs["anomaly_reason_flags"] == ["ingest_failures_detected"]
 
 
 @pytest.mark.asyncio
@@ -367,10 +393,18 @@ async def test_get_health_warns_when_invalid_sample_ratio_exceeds_threshold(mock
     assert ratio_warning.kwargs["ingest_attempts"] == 5
     assert ratio_warning.kwargs["invalid_sample_ratio"] == pytest.approx(0.375)
     assert ratio_warning.kwargs["invalid_sample_ratio_threshold"] == pytest.approx(0.25)
-    assert any(
-        call.args and call.args[0] == "telemetry_health_runtime_adapter_anomaly_streak_incremented"
-        for call in mock_warning.call_args_list
+    streak_increment_logs = _event_calls(
+        mock_warning, "telemetry_health_runtime_adapter_anomaly_streak_incremented"
     )
+    assert len(streak_increment_logs) == 1
+    transition_logs = _event_calls(
+        mock_warning, "telemetry_health_runtime_adapter_anomaly_streak_transition"
+    )
+    assert len(transition_logs) == 1
+    transition_log = transition_logs[0]
+    assert transition_log.kwargs["previous_streak"] == 0
+    assert transition_log.kwargs["current_streak"] == 1
+    assert transition_log.kwargs["anomaly_reason_flags"] == ["invalid_sample_ratio_exceeded"]
 
 
 @pytest.mark.asyncio
@@ -446,10 +480,61 @@ async def test_get_health_warns_ingest_failures_with_zero_attempt_guard(mock_db)
     assert warning.kwargs["ingest_attempts"] == 0
     assert warning.kwargs["zero_attempt_guard_applied"] is True
     assert warning.kwargs["failure_ratio"] == pytest.approx(2.0)
-    assert any(
-        call.args and call.args[0] == "telemetry_health_runtime_adapter_anomaly_streak_incremented"
-        for call in mock_warning.call_args_list
+    streak_increment_logs = _event_calls(
+        mock_warning, "telemetry_health_runtime_adapter_anomaly_streak_incremented"
     )
+    assert len(streak_increment_logs) == 1
+    transition_logs = _event_calls(
+        mock_warning, "telemetry_health_runtime_adapter_anomaly_streak_transition"
+    )
+    assert len(transition_logs) == 1
+    transition_log = transition_logs[0]
+    assert transition_log.kwargs["previous_streak"] == 0
+    assert transition_log.kwargs["current_streak"] == 1
+    assert transition_log.kwargs["anomaly_reason_flags"] == ["ingest_failures_detected"]
+
+
+@pytest.mark.asyncio
+async def test_get_health_transition_metadata_includes_combined_anomaly_reason_flags(mock_db):
+    counter_service = AsyncMock()
+    counter_service.get_snapshot = AsyncMock(
+        return_value={
+            "ingested_events": 0,
+            "persisted_events": 0,
+            "fanout_events": 0,
+            "dropped_events": 0,
+            "runtime_exhausted_cycles": 0,
+            "runtime_exhausted_streak": 0,
+            "runtime_sustained_failure_windows": 0,
+            "runtime_sustained_failure_active": 0,
+            "runtime_adapter_last_batch_size": 4,
+            "runtime_adapter_invalid_samples": 3,
+            "runtime_adapter_ingest_attempts": 1,
+            "runtime_adapter_ingest_failures": 1,
+            "runtime_adapter_anomaly_streak": 2,
+        }
+    )
+    counter_service.set_runtime_adapter_anomaly_streak = AsyncMock(return_value=3)
+    svc = TelemetryQueryService(db=mock_db, counter_service=counter_service)
+    svc._repo.get_latest_observed_at = AsyncMock(return_value=None)
+    svc._repo.count_all = AsyncMock(return_value=0)
+
+    with patch("app.modules.telemetry.service.logger.warning") as mock_warning:
+        result = await svc.get_health()
+
+    assert result.status == "ok"
+    counter_service.set_runtime_adapter_anomaly_streak.assert_awaited_once_with(3)
+    transition_logs = _event_calls(
+        mock_warning, "telemetry_health_runtime_adapter_anomaly_streak_transition"
+    )
+    assert len(transition_logs) == 1
+    transition_log = transition_logs[0]
+    assert transition_log.kwargs["previous_streak"] == 2
+    assert transition_log.kwargs["current_streak"] == 3
+    assert transition_log.kwargs["anomaly_reason_flags"] == [
+        "ingest_failures_detected",
+        "invalid_sample_ratio_exceeded",
+    ]
 
 
 @pytest.mark.asyncio
@@ -514,6 +599,16 @@ async def test_get_health_anomaly_streak_increments_on_consecutive_anomaly_snaps
     assert streak_warnings[1].kwargs["anomaly_streak"] == 2
     assert mock_set_streak.await_args_list[0].args[0] == 1
     assert mock_set_streak.await_args_list[1].args[0] == 2
+    transition_logs = _event_calls(
+        mock_warning, "telemetry_health_runtime_adapter_anomaly_streak_transition"
+    )
+    assert len(transition_logs) == 2
+    assert transition_logs[0].kwargs["previous_streak"] == 0
+    assert transition_logs[0].kwargs["current_streak"] == 1
+    assert transition_logs[0].kwargs["anomaly_reason_flags"] == ["ingest_failures_detected"]
+    assert transition_logs[1].kwargs["previous_streak"] == 1
+    assert transition_logs[1].kwargs["current_streak"] == 2
+    assert transition_logs[1].kwargs["anomaly_reason_flags"] == ["ingest_failures_detected"]
 
 
 @pytest.mark.asyncio
@@ -582,6 +677,22 @@ async def test_get_health_anomaly_streak_resets_on_healthy_snapshot(mock_db):
     assert reset_logs[0].kwargs["previous_streak"] == 3
     assert mock_set_streak.await_args_list[0].args[0] == 3
     assert mock_set_streak.await_args_list[1].args[0] == 0
+    warning_transition_logs = _event_calls(
+        mock_warning, "telemetry_health_runtime_adapter_anomaly_streak_transition"
+    )
+    assert len(warning_transition_logs) == 1
+    assert warning_transition_logs[0].kwargs["previous_streak"] == 2
+    assert warning_transition_logs[0].kwargs["current_streak"] == 3
+    assert warning_transition_logs[0].kwargs["anomaly_reason_flags"] == [
+        "ingest_failures_detected"
+    ]
+    info_transition_logs = _event_calls(
+        mock_info, "telemetry_health_runtime_adapter_anomaly_streak_transition"
+    )
+    assert len(info_transition_logs) == 1
+    assert info_transition_logs[0].kwargs["previous_streak"] == 3
+    assert info_transition_logs[0].kwargs["current_streak"] == 0
+    assert info_transition_logs[0].kwargs["anomaly_reason_flags"] == []
 
 
 @pytest.mark.asyncio
@@ -632,6 +743,22 @@ async def test_get_health_snapshot_failure_keeps_anomaly_streak_fail_open(mock_d
         call.args and call.args[0] == "telemetry_health_runtime_adapter_anomaly_streak_reset"
         for call in mock_info.call_args_list
     )
+    warning_transition_logs = _event_calls(
+        mock_warning, "telemetry_health_runtime_adapter_anomaly_streak_transition"
+    )
+    assert len(warning_transition_logs) == 1
+    assert warning_transition_logs[0].kwargs["previous_streak"] == 0
+    assert warning_transition_logs[0].kwargs["current_streak"] == 1
+    assert warning_transition_logs[0].kwargs["anomaly_reason_flags"] == [
+        "ingest_failures_detected"
+    ]
+    info_transition_logs = _event_calls(
+        mock_info, "telemetry_health_runtime_adapter_anomaly_streak_transition"
+    )
+    assert len(info_transition_logs) == 1
+    assert info_transition_logs[0].kwargs["previous_streak"] == 0
+    assert info_transition_logs[0].kwargs["current_streak"] == 0
+    assert info_transition_logs[0].kwargs["anomaly_reason_flags"] == []
 
 
 @pytest.mark.asyncio
@@ -673,6 +800,14 @@ async def test_get_health_anomaly_streak_counter_write_failure_is_fail_open(mock
         call.args and call.args[0] == "telemetry_health_runtime_adapter_anomaly_streak_persist_failed"
         for call in mock_warning.call_args_list
     )
+    transition_logs = _event_calls(
+        mock_warning, "telemetry_health_runtime_adapter_anomaly_streak_transition"
+    )
+    assert len(transition_logs) == 1
+    transition_log = transition_logs[0]
+    assert transition_log.kwargs["previous_streak"] == 4
+    assert transition_log.kwargs["current_streak"] == 5
+    assert transition_log.kwargs["anomaly_reason_flags"] == ["ingest_failures_detected"]
 
 
 @pytest.mark.asyncio
@@ -699,6 +834,14 @@ async def test_get_health_anomaly_streak_counter_read_failure_falls_back_to_zero
         call.args and call.args[0] == "telemetry_health_runtime_adapter_anomaly_streak_reset"
         for call in mock_info.call_args_list
     )
+    transition_logs = _event_calls(
+        mock_info, "telemetry_health_runtime_adapter_anomaly_streak_transition"
+    )
+    assert len(transition_logs) == 1
+    transition_log = transition_logs[0]
+    assert transition_log.kwargs["previous_streak"] == 0
+    assert transition_log.kwargs["current_streak"] == 0
+    assert transition_log.kwargs["anomaly_reason_flags"] == []
 
 
 @pytest.mark.asyncio
@@ -738,3 +881,11 @@ async def test_get_health_uses_counter_snapshot_streak_for_cross_instance_contin
     ]
     assert len(streak_logs) == 1
     assert streak_logs[0].kwargs["anomaly_streak"] == 8
+    transition_logs = _event_calls(
+        mock_warning, "telemetry_health_runtime_adapter_anomaly_streak_transition"
+    )
+    assert len(transition_logs) == 1
+    transition_log = transition_logs[0]
+    assert transition_log.kwargs["previous_streak"] == 7
+    assert transition_log.kwargs["current_streak"] == 8
+    assert transition_log.kwargs["anomaly_reason_flags"] == ["ingest_failures_detected"]

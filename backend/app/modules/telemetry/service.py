@@ -878,11 +878,11 @@ class TelemetryQueryService:
                 ingest_attempts=runtime_adapter_slo_snapshot["ingest_attempts"],
                 ingest_failures=runtime_adapter_slo_snapshot["ingest_failures"],
             )
-            anomaly_detected = self._log_runtime_adapter_backpressure_anomalies(
+            anomaly_reason_flags = self._log_runtime_adapter_backpressure_anomalies(
                 runtime_adapter_slo_snapshot=runtime_adapter_slo_snapshot
             )
             await self._update_runtime_adapter_anomaly_streak(
-                anomaly_detected=anomaly_detected,
+                anomaly_reason_flags=anomaly_reason_flags,
                 runtime_adapter_anomaly_streak=runtime_adapter_anomaly_streak,
             )
         except Exception as exc:  # noqa: BLE001
@@ -897,14 +897,14 @@ class TelemetryQueryService:
         self,
         *,
         runtime_adapter_slo_snapshot: dict[str, int],
-    ) -> bool:
+    ) -> list[str]:
         ingest_attempts = runtime_adapter_slo_snapshot["ingest_attempts"]
         ingest_failures = runtime_adapter_slo_snapshot["ingest_failures"]
         invalid_samples = runtime_adapter_slo_snapshot["invalid_samples"]
-        anomaly_detected = False
+        anomaly_reason_flags: list[str] = []
 
         if ingest_failures > 0:
-            anomaly_detected = True
+            anomaly_reason_flags.append("ingest_failures_detected")
             zero_attempt_guard_applied = ingest_attempts == 0
             denominator = ingest_attempts if ingest_attempts > 0 else 1
             failure_ratio = ingest_failures / denominator
@@ -919,7 +919,7 @@ class TelemetryQueryService:
         total_samples = invalid_samples + ingest_attempts
         invalid_sample_ratio = (invalid_samples / total_samples) if total_samples > 0 else 0.0
         if invalid_sample_ratio > _RUNTIME_ADAPTER_INVALID_SAMPLE_RATIO_WARN_THRESHOLD:
-            anomaly_detected = True
+            anomaly_reason_flags.append("invalid_sample_ratio_exceeded")
             logger.warning(
                 "telemetry_health_runtime_adapter_invalid_sample_ratio_exceeded",
                 invalid_samples=invalid_samples,
@@ -928,21 +928,28 @@ class TelemetryQueryService:
                 invalid_sample_ratio_threshold=_RUNTIME_ADAPTER_INVALID_SAMPLE_RATIO_WARN_THRESHOLD,
             )
 
-        return anomaly_detected
+        return anomaly_reason_flags
 
     async def _update_runtime_adapter_anomaly_streak(
         self,
         *,
-        anomaly_detected: bool,
+        anomaly_reason_flags: list[str],
         runtime_adapter_anomaly_streak: int,
     ) -> None:
-        if anomaly_detected:
+        previous_streak = runtime_adapter_anomaly_streak
+
+        if anomaly_reason_flags:
             updated_streak = runtime_adapter_anomaly_streak + 1
             logger.warning(
                 "telemetry_health_runtime_adapter_anomaly_streak_incremented",
                 anomaly_streak=updated_streak,
             )
             await self._persist_runtime_adapter_anomaly_streak(streak=updated_streak)
+            self._log_runtime_adapter_anomaly_streak_transition(
+                previous_streak=previous_streak,
+                current_streak=updated_streak,
+                anomaly_reason_flags=anomaly_reason_flags,
+            )
             return
 
         if runtime_adapter_anomaly_streak > 0:
@@ -951,6 +958,33 @@ class TelemetryQueryService:
                 previous_streak=runtime_adapter_anomaly_streak,
             )
             await self._persist_runtime_adapter_anomaly_streak(streak=0)
+            self._log_runtime_adapter_anomaly_streak_transition(
+                previous_streak=previous_streak,
+                current_streak=0,
+                anomaly_reason_flags=anomaly_reason_flags,
+            )
+            return
+
+        self._log_runtime_adapter_anomaly_streak_transition(
+            previous_streak=previous_streak,
+            current_streak=previous_streak,
+            anomaly_reason_flags=anomaly_reason_flags,
+        )
+
+    def _log_runtime_adapter_anomaly_streak_transition(
+        self,
+        *,
+        previous_streak: int,
+        current_streak: int,
+        anomaly_reason_flags: list[str],
+    ) -> None:
+        log_fn = logger.warning if current_streak > previous_streak else logger.info
+        log_fn(
+            "telemetry_health_runtime_adapter_anomaly_streak_transition",
+            previous_streak=previous_streak,
+            current_streak=current_streak,
+            anomaly_reason_flags=anomaly_reason_flags,
+        )
 
     async def _persist_runtime_adapter_anomaly_streak(self, *, streak: int) -> None:
         if self._counter_service is None:
