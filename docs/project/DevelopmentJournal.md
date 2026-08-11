@@ -1,5 +1,14 @@
 # Development Journal
 
+## [2026-08-11] - Vertical Slice 3 Step 20 (Runtime Adapter SLO Trend-Threshold Trigger Visibility)
+
+- **Implemented:** Added deterministic internal threshold-trigger visibility on runtime adapter SLO trend-window summaries for transition-frequency and anomaly-reason-frequency counters.
+- **Threshold behavior:** Emits explicit crossed/not-crossed structured branches for both dimensions (`...transition_frequency_threshold_crossed|not_crossed`, `...reason_frequency_threshold_crossed|not_crossed`) using configured deterministic thresholds.
+- **Operational semantics:** Threshold evaluation consumes existing Step 19 trend summary output and does not alter trend-window storage, rollup severity mapping, or streak persistence behavior from Steps 16-19.
+- **Fail-open safety:** Added isolated warning-only evaluation failure branch (`telemetry_health_runtime_adapter_slo_trend_threshold_evaluation_failed`) while preserving existing fail-open handling for counter/trend state read-write/log failures.
+- **Scope guardrails:** Internal-only logging changes; no REST route/envelope changes, no schema migrations, and runtime poll-action semantics unchanged.
+- **Validation:** Scoped Ruff passed; targeted telemetry query/scaffold/endpoints tests passed; full backend `pytest` regression passed (`197 passed`).
+
 ## [2026-08-11] - Vertical Slice 3 Step 19 (Runtime Adapter SLO Trend-Window Transition Visibility)
 
 - **Implemented:** Added bounded internal runtime adapter SLO trend-window tracking in telemetry health read-path internals and emitted `telemetry_health_runtime_adapter_slo_trend_window_summary`.

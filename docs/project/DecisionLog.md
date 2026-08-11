@@ -3,6 +3,22 @@
 Lightweight chronological notes for decisions that do not require a full ADR.
 
 ## 2026-08-11
+### Runtime Adapter SLO Trend-Threshold Trigger Visibility (VS3 Step 20)
+Decision: Add internal-only deterministic threshold trigger logging on runtime adapter SLO trend-window summaries for transition-frequency and anomaly-reason-frequency counters.
+Reason:
+- Surface actionable trend escalation signals while preserving minimal, reversible observability-only scope.
+- Reuse Step 19 trend-window summary outputs and preserve Step 16-19 semantics unchanged.
+Impact:
+- Health read path now emits explicit crossed/not-crossed branches for both threshold dimensions (`transition_frequency`, `reason_frequency`) with configured deterministic thresholds.
+- Threshold evaluation failures are isolated to warning-only fail-open branch (`telemetry_health_runtime_adapter_slo_trend_threshold_evaluation_failed`) and do not impact health responses.
+- REST/WebSocket contracts, canonical envelope, schema/migrations, trend-window state model, and runtime poll-action behavior remain unchanged.
+Related:
+- `backend/app/modules/telemetry/service.py`
+- `backend/tests/unit/test_telemetry_query_service.py`
+- `backend/tests/unit/test_telemetry_scaffold.py`
+- `backend/tests/integration/test_telemetry_endpoints.py`
+
+## 2026-08-11
 ### Runtime Adapter SLO Trend-Window Transition Visibility (VS3 Step 19)
 Decision: Add internal-only bounded trend-window visibility on telemetry health runtime adapter rollup flow, logging a rolling summary of severity transitions and anomaly reason frequency.
 Reason:

@@ -262,6 +262,22 @@ async def test_get_health_falls_back_to_zero_counters_on_counter_failure(mock_db
     assert trend_log.kwargs["max_window_size"] == 10
     assert trend_log.kwargs["severity_transition_counts"] == {}
     assert trend_log.kwargs["anomaly_reason_frequency"] == {}
+    transition_not_crossed_logs = _event_calls(
+        mock_info, "telemetry_health_runtime_adapter_slo_transition_frequency_threshold_not_crossed"
+    )
+    assert len(transition_not_crossed_logs) == 1
+    transition_not_crossed = transition_not_crossed_logs[0]
+    assert transition_not_crossed.kwargs["transition_frequency_threshold"] == 3
+    assert transition_not_crossed.kwargs["max_transition_count"] == 0
+    assert transition_not_crossed.kwargs["window_size"] == 1
+    reason_not_crossed_logs = _event_calls(
+        mock_info, "telemetry_health_runtime_adapter_slo_reason_frequency_threshold_not_crossed"
+    )
+    assert len(reason_not_crossed_logs) == 1
+    reason_not_crossed = reason_not_crossed_logs[0]
+    assert reason_not_crossed.kwargs["reason_frequency_threshold"] == 3
+    assert reason_not_crossed.kwargs["max_reason_frequency"] == 0
+    assert reason_not_crossed.kwargs["window_size"] == 1
 
 
 @pytest.mark.asyncio
@@ -519,6 +535,157 @@ async def test_get_health_trend_window_summary_aggregates_transitions_and_reason
     assert final_trend_log.kwargs["anomaly_reason_frequency"] == {
         "ingest_failures_detected": 2
     }
+    transition_not_crossed_logs = _event_calls(
+        mock_info, "telemetry_health_runtime_adapter_slo_transition_frequency_threshold_not_crossed"
+    )
+    assert len(transition_not_crossed_logs) == 4
+    final_transition_not_crossed = transition_not_crossed_logs[-1]
+    assert final_transition_not_crossed.kwargs["transition_frequency_threshold"] == 3
+    assert final_transition_not_crossed.kwargs["max_transition_count"] == 1
+    assert final_transition_not_crossed.kwargs["window_size"] == 4
+    reason_not_crossed_logs = _event_calls(
+        mock_info, "telemetry_health_runtime_adapter_slo_reason_frequency_threshold_not_crossed"
+    )
+    assert len(reason_not_crossed_logs) == 4
+    final_reason_not_crossed = reason_not_crossed_logs[-1]
+    assert final_reason_not_crossed.kwargs["reason_frequency_threshold"] == 3
+    assert final_reason_not_crossed.kwargs["max_reason_frequency"] == 2
+    assert final_reason_not_crossed.kwargs["window_size"] == 4
+
+
+@pytest.mark.asyncio
+async def test_get_health_trend_window_thresholds_crossed_for_transition_and_reason_frequency(
+    mock_db,
+):
+    counter_service = AsyncMock()
+    counter_service.get_snapshot = AsyncMock(
+        side_effect=[
+            {
+                "ingested_events": 0,
+                "persisted_events": 0,
+                "fanout_events": 0,
+                "dropped_events": 0,
+                "runtime_exhausted_cycles": 0,
+                "runtime_exhausted_streak": 0,
+                "runtime_sustained_failure_windows": 0,
+                "runtime_sustained_failure_active": 0,
+                "runtime_adapter_last_batch_size": 1,
+                "runtime_adapter_invalid_samples": 0,
+                "runtime_adapter_ingest_attempts": 1,
+                "runtime_adapter_ingest_failures": 1,
+                "runtime_adapter_anomaly_streak": 0,
+            },
+            {
+                "ingested_events": 0,
+                "persisted_events": 0,
+                "fanout_events": 0,
+                "dropped_events": 0,
+                "runtime_exhausted_cycles": 0,
+                "runtime_exhausted_streak": 0,
+                "runtime_sustained_failure_windows": 0,
+                "runtime_sustained_failure_active": 0,
+                "runtime_adapter_last_batch_size": 1,
+                "runtime_adapter_invalid_samples": 0,
+                "runtime_adapter_ingest_attempts": 1,
+                "runtime_adapter_ingest_failures": 0,
+                "runtime_adapter_anomaly_streak": 1,
+            },
+            {
+                "ingested_events": 0,
+                "persisted_events": 0,
+                "fanout_events": 0,
+                "dropped_events": 0,
+                "runtime_exhausted_cycles": 0,
+                "runtime_exhausted_streak": 0,
+                "runtime_sustained_failure_windows": 0,
+                "runtime_sustained_failure_active": 0,
+                "runtime_adapter_last_batch_size": 1,
+                "runtime_adapter_invalid_samples": 0,
+                "runtime_adapter_ingest_attempts": 1,
+                "runtime_adapter_ingest_failures": 1,
+                "runtime_adapter_anomaly_streak": 0,
+            },
+            {
+                "ingested_events": 0,
+                "persisted_events": 0,
+                "fanout_events": 0,
+                "dropped_events": 0,
+                "runtime_exhausted_cycles": 0,
+                "runtime_exhausted_streak": 0,
+                "runtime_sustained_failure_windows": 0,
+                "runtime_sustained_failure_active": 0,
+                "runtime_adapter_last_batch_size": 1,
+                "runtime_adapter_invalid_samples": 0,
+                "runtime_adapter_ingest_attempts": 1,
+                "runtime_adapter_ingest_failures": 0,
+                "runtime_adapter_anomaly_streak": 1,
+            },
+            {
+                "ingested_events": 0,
+                "persisted_events": 0,
+                "fanout_events": 0,
+                "dropped_events": 0,
+                "runtime_exhausted_cycles": 0,
+                "runtime_exhausted_streak": 0,
+                "runtime_sustained_failure_windows": 0,
+                "runtime_sustained_failure_active": 0,
+                "runtime_adapter_last_batch_size": 1,
+                "runtime_adapter_invalid_samples": 0,
+                "runtime_adapter_ingest_attempts": 1,
+                "runtime_adapter_ingest_failures": 1,
+                "runtime_adapter_anomaly_streak": 0,
+            },
+            {
+                "ingested_events": 0,
+                "persisted_events": 0,
+                "fanout_events": 0,
+                "dropped_events": 0,
+                "runtime_exhausted_cycles": 0,
+                "runtime_exhausted_streak": 0,
+                "runtime_sustained_failure_windows": 0,
+                "runtime_sustained_failure_active": 0,
+                "runtime_adapter_last_batch_size": 1,
+                "runtime_adapter_invalid_samples": 0,
+                "runtime_adapter_ingest_attempts": 1,
+                "runtime_adapter_ingest_failures": 0,
+                "runtime_adapter_anomaly_streak": 1,
+            },
+        ]
+    )
+    counter_service.set_runtime_adapter_anomaly_streak = AsyncMock(return_value=1)
+    svc = TelemetryQueryService(db=mock_db, counter_service=counter_service)
+    svc._repo.get_latest_observed_at = AsyncMock(return_value=None)
+    svc._repo.count_all = AsyncMock(return_value=0)
+
+    with (
+        patch("app.modules.telemetry.service.logger.warning") as mock_warning,
+        patch("app.modules.telemetry.service.logger.info"),
+        patch("app.modules.telemetry.service.logger.error"),
+    ):
+        for _ in range(6):
+            await svc.get_health()
+
+    transition_crossed_logs = _event_calls(
+        mock_warning, "telemetry_health_runtime_adapter_slo_transition_frequency_threshold_crossed"
+    )
+    assert len(transition_crossed_logs) >= 1
+    final_transition_crossed = transition_crossed_logs[-1]
+    assert final_transition_crossed.kwargs["transition_frequency_threshold"] == 3
+    assert final_transition_crossed.kwargs["max_transition_count"] == 3
+    assert final_transition_crossed.kwargs["crossed_transition_counts"] == {"degraded->ok": 3}
+    assert final_transition_crossed.kwargs["window_size"] == 6
+
+    reason_crossed_logs = _event_calls(
+        mock_warning, "telemetry_health_runtime_adapter_slo_reason_frequency_threshold_crossed"
+    )
+    assert len(reason_crossed_logs) >= 1
+    final_reason_crossed = reason_crossed_logs[-1]
+    assert final_reason_crossed.kwargs["reason_frequency_threshold"] == 3
+    assert final_reason_crossed.kwargs["max_reason_frequency"] == 3
+    assert final_reason_crossed.kwargs["crossed_reason_frequency"] == {
+        "ingest_failures_detected": 3
+    }
+    assert final_reason_crossed.kwargs["window_size"] == 6
 
 
 @pytest.mark.asyncio
@@ -652,6 +819,47 @@ async def test_get_health_trend_window_state_read_failure_is_fail_open(mock_db):
     assert len(trend_state_read_failed) == 1
     trend_summary_logs = _event_calls(mock_info, "telemetry_health_runtime_adapter_slo_trend_window_summary")
     assert len(trend_summary_logs) == 0
+
+
+@pytest.mark.asyncio
+async def test_get_health_trend_threshold_evaluation_failure_is_fail_open(mock_db):
+    counter_service = AsyncMock()
+    counter_service.get_snapshot = AsyncMock(
+        return_value={
+            "ingested_events": 0,
+            "persisted_events": 0,
+            "fanout_events": 0,
+            "dropped_events": 0,
+            "runtime_exhausted_cycles": 0,
+            "runtime_exhausted_streak": 0,
+            "runtime_sustained_failure_windows": 0,
+            "runtime_sustained_failure_active": 0,
+            "runtime_adapter_last_batch_size": 1,
+            "runtime_adapter_invalid_samples": 0,
+            "runtime_adapter_ingest_attempts": 1,
+            "runtime_adapter_ingest_failures": 0,
+            "runtime_adapter_anomaly_streak": 0,
+        }
+    )
+    svc = TelemetryQueryService(db=mock_db, counter_service=counter_service)
+    svc._repo.get_latest_observed_at = AsyncMock(return_value=None)
+    svc._repo.count_all = AsyncMock(return_value=0)
+
+    with (
+        patch.object(
+            svc,
+            "_log_runtime_adapter_slo_trend_threshold_triggers",
+            side_effect=RuntimeError("threshold eval failed"),
+        ),
+        patch("app.modules.telemetry.service.logger.warning") as mock_warning,
+    ):
+        result = await svc.get_health()
+
+    assert result.status == "ok"
+    evaluation_failed_logs = _event_calls(
+        mock_warning, "telemetry_health_runtime_adapter_slo_trend_threshold_evaluation_failed"
+    )
+    assert len(evaluation_failed_logs) == 1
 
 
 @pytest.mark.asyncio

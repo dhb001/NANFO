@@ -38,6 +38,8 @@ _RUNTIME_SUSTAINED_FAILURE_RECOVERED_EVENT_TYPE = "telemetry.collector.sustained
 _RUNTIME_ADAPTER_INVALID_SAMPLE_RATIO_WARN_THRESHOLD = 0.25
 _RUNTIME_ADAPTER_ANOMALY_STREAK_CRITICAL_THRESHOLD = 3
 _RUNTIME_ADAPTER_SLO_TREND_WINDOW_MAX_SIZE = 10
+_RUNTIME_ADAPTER_SLO_TRANSITION_FREQUENCY_ALERT_THRESHOLD = 3
+_RUNTIME_ADAPTER_SLO_REASON_FREQUENCY_ALERT_THRESHOLD = 3
 
 
 def compute_bounded_backoff_seconds(
@@ -952,6 +954,87 @@ class TelemetryQueryService:
             logger.warning(
                 "telemetry_health_runtime_adapter_slo_trend_window_log_failed",
                 error=str(exc),
+            )
+            return
+
+        self._safe_log_runtime_adapter_slo_trend_threshold_triggers(
+            trend_window_summary=trend_window_summary
+        )
+
+    def _safe_log_runtime_adapter_slo_trend_threshold_triggers(
+        self,
+        *,
+        trend_window_summary: dict[str, Any],
+    ) -> None:
+        try:
+            self._log_runtime_adapter_slo_trend_threshold_triggers(
+                trend_window_summary=trend_window_summary
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "telemetry_health_runtime_adapter_slo_trend_threshold_evaluation_failed",
+                error=str(exc),
+            )
+
+    def _log_runtime_adapter_slo_trend_threshold_triggers(
+        self,
+        *,
+        trend_window_summary: dict[str, Any],
+    ) -> None:
+        transition_counts = {
+            str(key): int(value)
+            for key, value in sorted(
+                dict(trend_window_summary["severity_transition_counts"]).items()
+            )
+        }
+        reason_frequency = {
+            str(key): int(value)
+            for key, value in sorted(dict(trend_window_summary["anomaly_reason_frequency"]).items())
+        }
+        window_size = int(trend_window_summary["window_size"])
+
+        crossed_transition_counts = {
+            key: value
+            for key, value in transition_counts.items()
+            if value >= _RUNTIME_ADAPTER_SLO_TRANSITION_FREQUENCY_ALERT_THRESHOLD
+        }
+        max_transition_count = max(transition_counts.values(), default=0)
+        if crossed_transition_counts:
+            logger.warning(
+                "telemetry_health_runtime_adapter_slo_transition_frequency_threshold_crossed",
+                transition_frequency_threshold=_RUNTIME_ADAPTER_SLO_TRANSITION_FREQUENCY_ALERT_THRESHOLD,
+                max_transition_count=max_transition_count,
+                crossed_transition_counts=crossed_transition_counts,
+                window_size=window_size,
+            )
+        else:
+            logger.info(
+                "telemetry_health_runtime_adapter_slo_transition_frequency_threshold_not_crossed",
+                transition_frequency_threshold=_RUNTIME_ADAPTER_SLO_TRANSITION_FREQUENCY_ALERT_THRESHOLD,
+                max_transition_count=max_transition_count,
+                window_size=window_size,
+            )
+
+        crossed_reason_frequency = {
+            key: value
+            for key, value in reason_frequency.items()
+            if value >= _RUNTIME_ADAPTER_SLO_REASON_FREQUENCY_ALERT_THRESHOLD
+        }
+        max_reason_frequency = max(reason_frequency.values(), default=0)
+        if crossed_reason_frequency:
+            logger.warning(
+                "telemetry_health_runtime_adapter_slo_reason_frequency_threshold_crossed",
+                reason_frequency_threshold=_RUNTIME_ADAPTER_SLO_REASON_FREQUENCY_ALERT_THRESHOLD,
+                max_reason_frequency=max_reason_frequency,
+                crossed_reason_frequency=crossed_reason_frequency,
+                window_size=window_size,
+            )
+        else:
+            logger.info(
+                "telemetry_health_runtime_adapter_slo_reason_frequency_threshold_not_crossed",
+                reason_frequency_threshold=_RUNTIME_ADAPTER_SLO_REASON_FREQUENCY_ALERT_THRESHOLD,
+                max_reason_frequency=max_reason_frequency,
+                window_size=window_size,
             )
 
     def _append_runtime_adapter_slo_trend_window_entry(
