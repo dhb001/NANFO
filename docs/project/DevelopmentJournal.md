@@ -1,5 +1,14 @@
 # Development Journal
 
+## [2026-08-11] - Vertical Slice 3 Step 23 (Runtime Adapter Cooldown-Transition Event Visibility)
+
+- **Implemented:** Added internal-only deterministic cooldown-transition event visibility for runtime adapter threshold dimensions in telemetry health internals.
+- **Transition branches:** Added explicit transition events for cooldown lifecycle phases: `enter-cooldown`, `cooldown-suppressed`, `cooldown-expired-reemit`, and `cooldown-cleared/recovery`.
+- **Deterministic metadata:** Transition events now include per-dimension deterministic state metadata (`threshold_dimension`, `threshold_value`, `max_observed_value`, `crossed_values`, `previous/current threshold_crossed`, `previous/current reads_since_last_crossed_emit`, `cooldown_reads`, `recovery_transition`, `cooldown_re_emitted`).
+- **Fail-open safety:** Added warning-only fail-open fallbacks for cooldown-transition state read/write failures and transition event log failures while preserving Step 16-22 behavior/contracts and runtime poll-action semantics.
+- **Scope guardrails:** Internal logging-only change; no REST route/envelope changes, no schema migrations, no C5/C6 drift.
+- **Validation:** Scoped Ruff passed; targeted telemetry query + scaffold/endpoints tests passed; full backend `pytest` regression passed (`210 passed`).
+
 ## [2026-08-11] - Vertical Slice 3 Step 22 (Runtime Adapter Trend-Threshold Cooldown-State Observability Summary)
 
 - **Implemented:** Added internal-only cooldown-state observability summary logging for runtime adapter SLO trend-threshold internals (`telemetry_health_runtime_adapter_slo_trend_threshold_cooldown_summary`).

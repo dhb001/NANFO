@@ -41,6 +41,18 @@ _RUNTIME_ADAPTER_SLO_TREND_WINDOW_MAX_SIZE = 10
 _RUNTIME_ADAPTER_SLO_TRANSITION_FREQUENCY_ALERT_THRESHOLD = 3
 _RUNTIME_ADAPTER_SLO_REASON_FREQUENCY_ALERT_THRESHOLD = 3
 _RUNTIME_ADAPTER_SLO_THRESHOLD_CROSS_COOLDOWN_READS = 3
+_RUNTIME_ADAPTER_SLO_COOLDOWN_TRANSITION_ENTERED = (
+    "telemetry_health_runtime_adapter_slo_threshold_cooldown_transition_entered"
+)
+_RUNTIME_ADAPTER_SLO_COOLDOWN_TRANSITION_SUPPRESSED = (
+    "telemetry_health_runtime_adapter_slo_threshold_cooldown_transition_suppressed"
+)
+_RUNTIME_ADAPTER_SLO_COOLDOWN_TRANSITION_EXPIRED_REEMIT = (
+    "telemetry_health_runtime_adapter_slo_threshold_cooldown_transition_expired_reemit"
+)
+_RUNTIME_ADAPTER_SLO_COOLDOWN_TRANSITION_CLEARED_RECOVERY = (
+    "telemetry_health_runtime_adapter_slo_threshold_cooldown_transition_cleared_recovery"
+)
 
 
 def compute_bounded_backoff_seconds(
@@ -1057,6 +1069,10 @@ class TelemetryQueryService:
                 "telemetry_health_runtime_adapter_slo_trend_threshold_cooldown_state_read_failed",
                 error=str(exc),
             )
+            logger.warning(
+                "telemetry_health_runtime_adapter_slo_threshold_cooldown_transition_state_read_failed",
+                error=str(exc),
+            )
             return
 
         try:
@@ -1078,6 +1094,10 @@ class TelemetryQueryService:
         except Exception as exc:  # noqa: BLE001
             logger.warning(
                 "telemetry_health_runtime_adapter_slo_trend_threshold_cooldown_state_write_failed",
+                error=str(exc),
+            )
+            logger.warning(
+                "telemetry_health_runtime_adapter_slo_threshold_cooldown_transition_state_write_failed",
                 error=str(exc),
             )
 
@@ -1203,6 +1223,7 @@ class TelemetryQueryService:
         }
         max_transition_count = max(transition_counts.values(), default=0)
         updated_transition_state = self._log_runtime_adapter_slo_threshold_dimension_with_cooldown(
+            threshold_dimension="transition_frequency",
             threshold=_RUNTIME_ADAPTER_SLO_TRANSITION_FREQUENCY_ALERT_THRESHOLD,
             max_observed_value=max_transition_count,
             crossed_values=crossed_transition_counts,
@@ -1223,6 +1244,7 @@ class TelemetryQueryService:
         }
         max_reason_frequency = max(reason_frequency.values(), default=0)
         updated_reason_state = self._log_runtime_adapter_slo_threshold_dimension_with_cooldown(
+            threshold_dimension="reason_frequency",
             threshold=_RUNTIME_ADAPTER_SLO_REASON_FREQUENCY_ALERT_THRESHOLD,
             max_observed_value=max_reason_frequency,
             crossed_values=crossed_reason_frequency,
@@ -1244,6 +1266,7 @@ class TelemetryQueryService:
     def _log_runtime_adapter_slo_threshold_dimension_with_cooldown(
         self,
         *,
+        threshold_dimension: str,
         threshold: int,
         max_observed_value: int,
         crossed_values: dict[str, int],
@@ -1266,6 +1289,24 @@ class TelemetryQueryService:
 
         if is_crossed:
             if not was_initialized or not was_crossed:
+                updated_state = {
+                    "initialized": True,
+                    "threshold_crossed": True,
+                    "reads_since_last_crossed_emit": 0,
+                }
+                self._safe_log_runtime_adapter_slo_threshold_cooldown_transition_event(
+                    event_name=_RUNTIME_ADAPTER_SLO_COOLDOWN_TRANSITION_ENTERED,
+                    threshold_dimension=threshold_dimension,
+                    threshold_value=threshold,
+                    max_observed_value=max_observed_value,
+                    crossed_values=crossed_values,
+                    window_size=window_size,
+                    previous_state=normalized_state,
+                    current_state=updated_state,
+                    recovery_transition=False,
+                    cooldown_re_emitted=False,
+                    log_level="warning",
+                )
                 logger.warning(
                     crossed_event,
                     **{
@@ -1277,17 +1318,31 @@ class TelemetryQueryService:
                     cooldown_reads=_RUNTIME_ADAPTER_SLO_THRESHOLD_CROSS_COOLDOWN_READS,
                     cooldown_re_emitted=False,
                 )
-                return {
-                    "initialized": True,
-                    "threshold_crossed": True,
-                    "reads_since_last_crossed_emit": 0,
-                }
+                return updated_state
 
             reads_since_last_crossed_emit += 1
             if (
                 reads_since_last_crossed_emit
                 >= _RUNTIME_ADAPTER_SLO_THRESHOLD_CROSS_COOLDOWN_READS
             ):
+                updated_state = {
+                    "initialized": True,
+                    "threshold_crossed": True,
+                    "reads_since_last_crossed_emit": 0,
+                }
+                self._safe_log_runtime_adapter_slo_threshold_cooldown_transition_event(
+                    event_name=_RUNTIME_ADAPTER_SLO_COOLDOWN_TRANSITION_EXPIRED_REEMIT,
+                    threshold_dimension=threshold_dimension,
+                    threshold_value=threshold,
+                    max_observed_value=max_observed_value,
+                    crossed_values=crossed_values,
+                    window_size=window_size,
+                    previous_state=normalized_state,
+                    current_state=updated_state,
+                    recovery_transition=False,
+                    cooldown_re_emitted=True,
+                    log_level="warning",
+                )
                 logger.warning(
                     crossed_event,
                     **{
@@ -1300,12 +1355,26 @@ class TelemetryQueryService:
                     cooldown_re_emitted=True,
                     cooldown_reads_elapsed=reads_since_last_crossed_emit,
                 )
-                return {
-                    "initialized": True,
-                    "threshold_crossed": True,
-                    "reads_since_last_crossed_emit": 0,
-                }
+                return updated_state
 
+            updated_state = {
+                "initialized": True,
+                "threshold_crossed": True,
+                "reads_since_last_crossed_emit": reads_since_last_crossed_emit,
+            }
+            self._safe_log_runtime_adapter_slo_threshold_cooldown_transition_event(
+                event_name=_RUNTIME_ADAPTER_SLO_COOLDOWN_TRANSITION_SUPPRESSED,
+                threshold_dimension=threshold_dimension,
+                threshold_value=threshold,
+                max_observed_value=max_observed_value,
+                crossed_values=crossed_values,
+                window_size=window_size,
+                previous_state=normalized_state,
+                current_state=updated_state,
+                recovery_transition=False,
+                cooldown_re_emitted=False,
+                log_level="info",
+            )
             logger.info(
                 crossed_suppressed_event,
                 **{
@@ -1321,13 +1390,28 @@ class TelemetryQueryService:
                     - reads_since_last_crossed_emit
                 ),
             )
-            return {
-                "initialized": True,
-                "threshold_crossed": True,
-                "reads_since_last_crossed_emit": reads_since_last_crossed_emit,
-            }
+            return updated_state
 
+        updated_state = {
+            "initialized": True,
+            "threshold_crossed": False,
+            "reads_since_last_crossed_emit": 0,
+        }
         if not was_initialized or was_crossed:
+            if was_crossed:
+                self._safe_log_runtime_adapter_slo_threshold_cooldown_transition_event(
+                    event_name=_RUNTIME_ADAPTER_SLO_COOLDOWN_TRANSITION_CLEARED_RECOVERY,
+                    threshold_dimension=threshold_dimension,
+                    threshold_value=threshold,
+                    max_observed_value=max_observed_value,
+                    crossed_values={},
+                    window_size=window_size,
+                    previous_state=normalized_state,
+                    current_state=updated_state,
+                    recovery_transition=True,
+                    cooldown_re_emitted=False,
+                    log_level="info",
+                )
             logger.info(
                 not_crossed_event,
                 **{
@@ -1338,11 +1422,54 @@ class TelemetryQueryService:
                 recovery_transition=(was_initialized and was_crossed),
             )
 
-        return {
-            "initialized": True,
-            "threshold_crossed": False,
-            "reads_since_last_crossed_emit": 0,
-        }
+        return updated_state
+
+    def _safe_log_runtime_adapter_slo_threshold_cooldown_transition_event(
+        self,
+        *,
+        event_name: str,
+        threshold_dimension: str,
+        threshold_value: int,
+        max_observed_value: int,
+        crossed_values: dict[str, int],
+        window_size: int,
+        previous_state: dict[str, int | bool],
+        current_state: dict[str, int | bool],
+        recovery_transition: bool,
+        cooldown_re_emitted: bool,
+        log_level: str,
+    ) -> None:
+        log_fn = logger.warning if log_level == "warning" else logger.info
+        try:
+            log_fn(
+                event_name,
+                threshold_dimension=threshold_dimension,
+                threshold_value=threshold_value,
+                max_observed_value=max_observed_value,
+                crossed_values=dict(sorted(crossed_values.items())),
+                window_size=window_size,
+                cooldown_reads=_RUNTIME_ADAPTER_SLO_THRESHOLD_CROSS_COOLDOWN_READS,
+                previous_threshold_crossed=bool(previous_state["threshold_crossed"]),
+                current_threshold_crossed=bool(current_state["threshold_crossed"]),
+                previous_reads_since_last_crossed_emit=int(
+                    previous_state["reads_since_last_crossed_emit"]
+                ),
+                current_reads_since_last_crossed_emit=int(
+                    current_state["reads_since_last_crossed_emit"]
+                ),
+                recovery_transition=recovery_transition,
+                cooldown_re_emitted=cooldown_re_emitted,
+            )
+        except Exception as exc:  # noqa: BLE001
+            try:
+                logger.warning(
+                    "telemetry_health_runtime_adapter_slo_threshold_cooldown_transition_log_failed",
+                    event_name=event_name,
+                    threshold_dimension=threshold_dimension,
+                    error=str(exc),
+                )
+            except Exception:  # noqa: BLE001
+                return
 
     def _append_runtime_adapter_slo_trend_window_entry(
         self,

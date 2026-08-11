@@ -1008,6 +1008,11 @@ def test_trend_threshold_cooldown_state_read_failure_is_fail_open(mock_db):
         "telemetry_health_runtime_adapter_slo_trend_threshold_cooldown_state_read_failed",
     )
     assert len(read_failed_logs) == 1
+    transition_read_failed_logs = _event_calls(
+        mock_warning,
+        "telemetry_health_runtime_adapter_slo_threshold_cooldown_transition_state_read_failed",
+    )
+    assert len(transition_read_failed_logs) == 1
 
 
 def test_trend_threshold_cooldown_state_write_failure_is_fail_open(mock_db):
@@ -1030,6 +1035,174 @@ def test_trend_threshold_cooldown_state_write_failure_is_fail_open(mock_db):
         "telemetry_health_runtime_adapter_slo_trend_threshold_cooldown_state_write_failed",
     )
     assert len(write_failed_logs) == 1
+    transition_write_failed_logs = _event_calls(
+        mock_warning,
+        "telemetry_health_runtime_adapter_slo_threshold_cooldown_transition_state_write_failed",
+    )
+    assert len(transition_write_failed_logs) == 1
+
+
+def test_trend_threshold_cooldown_transition_entered_event_metadata(mock_db):
+    svc = TelemetryQueryService(db=mock_db)
+
+    with patch("app.modules.telemetry.service.logger.warning") as mock_warning:
+        svc._safe_log_runtime_adapter_slo_trend_threshold_triggers(
+            trend_window_summary=_trend_window_summary(
+                window_size=4,
+                anomaly_reason_frequency={"ingest_failures_detected": 3},
+            )
+        )
+
+    entered_logs = _event_calls(
+        mock_warning,
+        "telemetry_health_runtime_adapter_slo_threshold_cooldown_transition_entered",
+    )
+    assert len(entered_logs) == 1
+    entered = entered_logs[0]
+    assert entered.kwargs["threshold_dimension"] == "reason_frequency"
+    assert entered.kwargs["threshold_value"] == 3
+    assert entered.kwargs["max_observed_value"] == 3
+    assert entered.kwargs["crossed_values"] == {"ingest_failures_detected": 3}
+    assert entered.kwargs["window_size"] == 4
+    assert entered.kwargs["cooldown_reads"] == 3
+    assert entered.kwargs["previous_threshold_crossed"] is False
+    assert entered.kwargs["current_threshold_crossed"] is True
+    assert entered.kwargs["previous_reads_since_last_crossed_emit"] == 0
+    assert entered.kwargs["current_reads_since_last_crossed_emit"] == 0
+    assert entered.kwargs["recovery_transition"] is False
+    assert entered.kwargs["cooldown_re_emitted"] is False
+
+
+def test_trend_threshold_cooldown_transition_suppressed_event_metadata(mock_db):
+    svc = TelemetryQueryService(db=mock_db)
+
+    with (
+        patch("app.modules.telemetry.service.logger.warning"),
+        patch("app.modules.telemetry.service.logger.info") as mock_info,
+    ):
+        svc._safe_log_runtime_adapter_slo_trend_threshold_triggers(
+            trend_window_summary=_trend_window_summary(
+                window_size=5,
+                severity_transition_counts={"degraded->ok": 3},
+            )
+        )
+        svc._safe_log_runtime_adapter_slo_trend_threshold_triggers(
+            trend_window_summary=_trend_window_summary(
+                window_size=6,
+                severity_transition_counts={"degraded->ok": 4},
+            )
+        )
+
+    suppressed_logs = _event_calls(
+        mock_info,
+        "telemetry_health_runtime_adapter_slo_threshold_cooldown_transition_suppressed",
+    )
+    assert len(suppressed_logs) == 1
+    suppressed = suppressed_logs[0]
+    assert suppressed.kwargs["threshold_dimension"] == "transition_frequency"
+    assert suppressed.kwargs["threshold_value"] == 3
+    assert suppressed.kwargs["max_observed_value"] == 4
+    assert suppressed.kwargs["crossed_values"] == {"degraded->ok": 4}
+    assert suppressed.kwargs["window_size"] == 6
+    assert suppressed.kwargs["cooldown_reads"] == 3
+    assert suppressed.kwargs["previous_threshold_crossed"] is True
+    assert suppressed.kwargs["current_threshold_crossed"] is True
+    assert suppressed.kwargs["previous_reads_since_last_crossed_emit"] == 0
+    assert suppressed.kwargs["current_reads_since_last_crossed_emit"] == 1
+    assert suppressed.kwargs["recovery_transition"] is False
+    assert suppressed.kwargs["cooldown_re_emitted"] is False
+
+
+def test_trend_threshold_cooldown_transition_expired_reemit_event_metadata(mock_db):
+    svc = TelemetryQueryService(db=mock_db)
+
+    with (
+        patch("app.modules.telemetry.service.logger.warning") as mock_warning,
+        patch("app.modules.telemetry.service.logger.info"),
+    ):
+        svc._safe_log_runtime_adapter_slo_trend_threshold_triggers(
+            trend_window_summary=_trend_window_summary(
+                window_size=5,
+                anomaly_reason_frequency={"ingest_failures_detected": 3},
+            )
+        )
+        svc._safe_log_runtime_adapter_slo_trend_threshold_triggers(
+            trend_window_summary=_trend_window_summary(
+                window_size=6,
+                anomaly_reason_frequency={"ingest_failures_detected": 4},
+            )
+        )
+        svc._safe_log_runtime_adapter_slo_trend_threshold_triggers(
+            trend_window_summary=_trend_window_summary(
+                window_size=7,
+                anomaly_reason_frequency={"ingest_failures_detected": 5},
+            )
+        )
+        svc._safe_log_runtime_adapter_slo_trend_threshold_triggers(
+            trend_window_summary=_trend_window_summary(
+                window_size=8,
+                anomaly_reason_frequency={"ingest_failures_detected": 6},
+            )
+        )
+
+    expired_reemit_logs = _event_calls(
+        mock_warning,
+        "telemetry_health_runtime_adapter_slo_threshold_cooldown_transition_expired_reemit",
+    )
+    assert len(expired_reemit_logs) == 1
+    expired_reemit = expired_reemit_logs[0]
+    assert expired_reemit.kwargs["threshold_dimension"] == "reason_frequency"
+    assert expired_reemit.kwargs["threshold_value"] == 3
+    assert expired_reemit.kwargs["max_observed_value"] == 6
+    assert expired_reemit.kwargs["crossed_values"] == {"ingest_failures_detected": 6}
+    assert expired_reemit.kwargs["window_size"] == 8
+    assert expired_reemit.kwargs["cooldown_reads"] == 3
+    assert expired_reemit.kwargs["previous_threshold_crossed"] is True
+    assert expired_reemit.kwargs["current_threshold_crossed"] is True
+    assert expired_reemit.kwargs["previous_reads_since_last_crossed_emit"] == 2
+    assert expired_reemit.kwargs["current_reads_since_last_crossed_emit"] == 0
+    assert expired_reemit.kwargs["recovery_transition"] is False
+    assert expired_reemit.kwargs["cooldown_re_emitted"] is True
+
+
+def test_trend_threshold_cooldown_transition_cleared_recovery_event_metadata(mock_db):
+    svc = TelemetryQueryService(db=mock_db)
+
+    with (
+        patch("app.modules.telemetry.service.logger.warning"),
+        patch("app.modules.telemetry.service.logger.info") as mock_info,
+    ):
+        svc._safe_log_runtime_adapter_slo_trend_threshold_triggers(
+            trend_window_summary=_trend_window_summary(
+                window_size=2,
+                anomaly_reason_frequency={"ingest_failures_detected": 3},
+            )
+        )
+        svc._safe_log_runtime_adapter_slo_trend_threshold_triggers(
+            trend_window_summary=_trend_window_summary(
+                window_size=3,
+                anomaly_reason_frequency={"ingest_failures_detected": 2},
+            )
+        )
+
+    recovery_logs = _event_calls(
+        mock_info,
+        "telemetry_health_runtime_adapter_slo_threshold_cooldown_transition_cleared_recovery",
+    )
+    assert len(recovery_logs) == 1
+    recovery = recovery_logs[0]
+    assert recovery.kwargs["threshold_dimension"] == "reason_frequency"
+    assert recovery.kwargs["threshold_value"] == 3
+    assert recovery.kwargs["max_observed_value"] == 2
+    assert recovery.kwargs["crossed_values"] == {}
+    assert recovery.kwargs["window_size"] == 3
+    assert recovery.kwargs["cooldown_reads"] == 3
+    assert recovery.kwargs["previous_threshold_crossed"] is True
+    assert recovery.kwargs["current_threshold_crossed"] is False
+    assert recovery.kwargs["previous_reads_since_last_crossed_emit"] == 0
+    assert recovery.kwargs["current_reads_since_last_crossed_emit"] == 0
+    assert recovery.kwargs["recovery_transition"] is True
+    assert recovery.kwargs["cooldown_re_emitted"] is False
 
 
 def test_trend_threshold_cooldown_summary_logs_dimension_metadata(mock_db):
@@ -1146,6 +1319,51 @@ def test_trend_threshold_cooldown_summary_defaults_invalid_fields_to_zero(mock_d
     assert transition_cooldown["reads_since_last_crossed_emit"] == 0
     assert transition_cooldown["next_crossed_emit_in_reads"] == 3
     assert transition_cooldown["cooldown_active"] is True
+
+
+def test_trend_threshold_cooldown_transition_log_failure_is_fail_open(mock_db):
+    svc = TelemetryQueryService(db=mock_db)
+
+    with (
+        patch(
+            "app.modules.telemetry.service.logger.info",
+            side_effect=[RuntimeError("transition log failed")],
+        ),
+        patch("app.modules.telemetry.service.logger.warning") as mock_warning,
+    ):
+        svc._safe_log_runtime_adapter_slo_threshold_cooldown_transition_event(
+            event_name="telemetry_health_runtime_adapter_slo_threshold_cooldown_transition_suppressed",
+            threshold_dimension="transition_frequency",
+            threshold_value=3,
+            max_observed_value=4,
+            crossed_values={"degraded->ok": 4},
+            window_size=6,
+            previous_state={
+                "initialized": True,
+                "threshold_crossed": True,
+                "reads_since_last_crossed_emit": 0,
+            },
+            current_state={
+                "initialized": True,
+                "threshold_crossed": True,
+                "reads_since_last_crossed_emit": 1,
+            },
+            recovery_transition=False,
+            cooldown_re_emitted=False,
+            log_level="info",
+        )
+
+    transition_log_failed_logs = _event_calls(
+        mock_warning,
+        "telemetry_health_runtime_adapter_slo_threshold_cooldown_transition_log_failed",
+    )
+    assert len(transition_log_failed_logs) == 1
+    transition_log_failed = transition_log_failed_logs[0]
+    assert (
+        transition_log_failed.kwargs["event_name"]
+        == "telemetry_health_runtime_adapter_slo_threshold_cooldown_transition_suppressed"
+    )
+    assert transition_log_failed.kwargs["threshold_dimension"] == "transition_frequency"
 
 
 @pytest.mark.asyncio

@@ -3,6 +3,22 @@
 Lightweight chronological notes for decisions that do not require a full ADR.
 
 ## 2026-08-11
+### Runtime Adapter Cooldown-Transition Event Visibility (VS3 Step 23)
+Decision: Add internal-only deterministic cooldown-transition event visibility for runtime adapter trend-threshold dimensions, covering enter-cooldown, cooldown-suppressed, cooldown-expired-reemit, and cooldown-cleared/recovery phases.
+Reason:
+- Improve operational explainability of Step 21 cooldown/hysteresis behavior with explicit transition-phase diagnostics.
+- Preserve reversible, minimal scope by emitting structured internal log branches from existing threshold evaluation flow.
+Impact:
+- Telemetry health internals now emit per-dimension cooldown transition events with deterministic state metadata for both threshold dimensions.
+- Cooldown-transition state read/write and transition-event log failures are isolated to warning-only fail-open branches and do not affect health responses.
+- REST/WebSocket contracts, canonical envelope, schema/migrations, C5/C6 constraints, and runtime poll-action behavior remain unchanged.
+Related:
+- `backend/app/modules/telemetry/service.py`
+- `backend/tests/unit/test_telemetry_query_service.py`
+- `backend/tests/unit/test_telemetry_scaffold.py`
+- `backend/tests/integration/test_telemetry_endpoints.py`
+
+## 2026-08-11
 ### Runtime Adapter Trend-Threshold Cooldown-State Observability Summary (VS3 Step 22)
 Decision: Add an internal-only cooldown-state summary branch for runtime adapter trend-threshold internals so operations can inspect cooldown status per threshold dimension deterministically.
 Reason:
