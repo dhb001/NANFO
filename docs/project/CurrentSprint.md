@@ -3,7 +3,7 @@
 ## Active Goals
 - Vertical Slice 1 Implementation: **COMPLETE** — all modules implemented, tested, and migrated.
 - Vertical Slice 2 Implementation: **COMPLETE** — telemetry ingestion/persistence/read APIs and telemetry health counters + `/ws/telemetry` fanout delivered through Step 8.
-- Vertical Slice 3 Implementation: **IN PROGRESS** — runtime collector reliability and alerting/event visibility baseline delivered through **VS3 Step 15** (runtime adapter anomaly streak visibility in telemetry health read-path internals).
+- Vertical Slice 3 Implementation: **IN PROGRESS** — runtime collector reliability and alerting/event visibility baseline delivered through **VS3 Step 16** (runtime adapter anomaly streak persisted in Redis-backed telemetry health counters).
 
 ## Subsystem Progress — Vertical Slice 3
 
@@ -22,6 +22,7 @@
 - [x] Step 13: Runtime adapter SLO snapshot visibility in telemetry health internals
 - [x] Step 14: Runtime adapter backpressure anomaly warning thresholds in health logging
 - [x] Step 15: Runtime adapter rolling anomaly streak visibility in health logging
+- [x] Step 16: Runtime adapter anomaly streak persisted via Redis health counters
 
 ## Subsystem Progress — Vertical Slice 2
 

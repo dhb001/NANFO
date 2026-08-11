@@ -1,5 +1,13 @@
 # Development Journal
 
+## [2026-08-11] - Vertical Slice 3 Step 16 (Persisted Runtime Adapter Anomaly Streak)
+
+- **Implemented:** Persisted runtime adapter anomaly streak in Redis-backed telemetry health counters and wired health read-path streak load/store through `TelemetryHealthCounterService`.
+- **Continuity behavior:** Streak continuity now comes from counter snapshot state (cross-instance safe) instead of process-local in-memory state.
+- **Fail-open safety:** Counter read failures still fall back to zero snapshot; counter write failures during streak persistence are warning-only (`telemetry_health_runtime_adapter_anomaly_streak_persist_failed`) and non-fatal.
+- **Scope guardrails:** Internal-only behavior; no REST route/envelope changes, no schema migrations, and runtime poll-action semantics unchanged.
+- **Validation:** Scoped Ruff passed; targeted telemetry counters/query/scaffold/endpoints tests passed; full backend `pytest` regression passed (`187 passed`).
+
 ## [2026-08-11] - Vertical Slice 3 Step 15 (Runtime Adapter Anomaly Streak Visibility)
 
 - **Implemented:** Added rolling runtime adapter anomaly streak tracking in telemetry health read-path internals.

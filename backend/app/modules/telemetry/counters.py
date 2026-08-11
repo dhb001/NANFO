@@ -16,6 +16,7 @@ COUNTER_RUNTIME_ADAPTER_LAST_BATCH_SIZE = "telemetry:health:runtime_adapter_last
 COUNTER_RUNTIME_ADAPTER_INVALID_SAMPLES = "telemetry:health:runtime_adapter_invalid_samples"
 COUNTER_RUNTIME_ADAPTER_INGEST_ATTEMPTS = "telemetry:health:runtime_adapter_ingest_attempts"
 COUNTER_RUNTIME_ADAPTER_INGEST_FAILURES = "telemetry:health:runtime_adapter_ingest_failures"
+COUNTER_RUNTIME_ADAPTER_ANOMALY_STREAK = "telemetry:health:runtime_adapter_anomaly_streak"
 
 
 class TelemetryHealthCounterService:
@@ -66,6 +67,11 @@ class TelemetryHealthCounterService:
     async def increment_runtime_adapter_ingest_failure(self) -> int:
         return int(await self._redis.incr(COUNTER_RUNTIME_ADAPTER_INGEST_FAILURES))
 
+    async def set_runtime_adapter_anomaly_streak(self, streak: int) -> int:
+        value = max(0, int(streak))
+        await self._redis.set(COUNTER_RUNTIME_ADAPTER_ANOMALY_STREAK, value)
+        return value
+
     async def get_snapshot(self) -> dict[str, int]:
         (
             ingested,
@@ -80,6 +86,7 @@ class TelemetryHealthCounterService:
             runtime_adapter_invalid_samples,
             runtime_adapter_ingest_attempts,
             runtime_adapter_ingest_failures,
+            runtime_adapter_anomaly_streak,
         ) = await self._redis.mget(
             COUNTER_INGESTED_EVENTS,
             COUNTER_PERSISTED_EVENTS,
@@ -93,6 +100,7 @@ class TelemetryHealthCounterService:
             COUNTER_RUNTIME_ADAPTER_INVALID_SAMPLES,
             COUNTER_RUNTIME_ADAPTER_INGEST_ATTEMPTS,
             COUNTER_RUNTIME_ADAPTER_INGEST_FAILURES,
+            COUNTER_RUNTIME_ADAPTER_ANOMALY_STREAK,
         )
         return {
             "ingested_events": self._to_int(ingested),
@@ -107,6 +115,7 @@ class TelemetryHealthCounterService:
             "runtime_adapter_invalid_samples": self._to_int(runtime_adapter_invalid_samples),
             "runtime_adapter_ingest_attempts": self._to_int(runtime_adapter_ingest_attempts),
             "runtime_adapter_ingest_failures": self._to_int(runtime_adapter_ingest_failures),
+            "runtime_adapter_anomaly_streak": self._to_int(runtime_adapter_anomaly_streak),
         }
 
     @staticmethod

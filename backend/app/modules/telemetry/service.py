@@ -734,7 +734,6 @@ class TelemetryQueryService:
     ):
         self._repo = TelemetryRecordRepository(db)
         self._counter_service = counter_service
-        self._runtime_adapter_anomaly_streak = 0
 
     async def get_history(
         self,
@@ -788,9 +787,14 @@ class TelemetryQueryService:
         dropped_events = counters["dropped_events"]
         runtime_sustained_failure_active = counters.get("runtime_sustained_failure_active", 0) > 0
         status = "degraded" if runtime_sustained_failure_active else "ok"
+        runtime_adapter_anomaly_streak = self._coerce_non_negative_counter(
+            counters.get("runtime_adapter_anomaly_streak", 0),
+            counter_name="runtime_adapter_anomaly_streak",
+        )
         runtime_adapter_slo_snapshot = self._build_runtime_adapter_slo_snapshot(counters)
-        self._safe_log_runtime_adapter_slo_snapshot(
+        await self._safe_log_runtime_adapter_slo_snapshot(
             runtime_adapter_slo_snapshot=runtime_adapter_slo_snapshot,
+            runtime_adapter_anomaly_streak=runtime_adapter_anomaly_streak,
             status=status,
             dropped_events=dropped_events,
         )
@@ -856,10 +860,11 @@ class TelemetryQueryService:
 
         return numeric
 
-    def _safe_log_runtime_adapter_slo_snapshot(
+    async def _safe_log_runtime_adapter_slo_snapshot(
         self,
         *,
         runtime_adapter_slo_snapshot: dict[str, int],
+        runtime_adapter_anomaly_streak: int,
         status: str,
         dropped_events: int,
     ) -> None:
@@ -876,7 +881,10 @@ class TelemetryQueryService:
             anomaly_detected = self._log_runtime_adapter_backpressure_anomalies(
                 runtime_adapter_slo_snapshot=runtime_adapter_slo_snapshot
             )
-            self._update_runtime_adapter_anomaly_streak(anomaly_detected=anomaly_detected)
+            await self._update_runtime_adapter_anomaly_streak(
+                anomaly_detected=anomaly_detected,
+                runtime_adapter_anomaly_streak=runtime_adapter_anomaly_streak,
+            )
         except Exception as exc:  # noqa: BLE001
             logger.warning(
                 "telemetry_health_runtime_adapter_slo_snapshot_log_failed",
@@ -922,21 +930,38 @@ class TelemetryQueryService:
 
         return anomaly_detected
 
-    def _update_runtime_adapter_anomaly_streak(self, *, anomaly_detected: bool) -> None:
+    async def _update_runtime_adapter_anomaly_streak(
+        self,
+        *,
+        anomaly_detected: bool,
+        runtime_adapter_anomaly_streak: int,
+    ) -> None:
         if anomaly_detected:
-            self._runtime_adapter_anomaly_streak += 1
+            updated_streak = runtime_adapter_anomaly_streak + 1
             logger.warning(
                 "telemetry_health_runtime_adapter_anomaly_streak_incremented",
-                anomaly_streak=self._runtime_adapter_anomaly_streak,
+                anomaly_streak=updated_streak,
             )
+            await self._persist_runtime_adapter_anomaly_streak(streak=updated_streak)
             return
 
-        if self._runtime_adapter_anomaly_streak > 0:
-            previous_streak = self._runtime_adapter_anomaly_streak
-            self._runtime_adapter_anomaly_streak = 0
+        if runtime_adapter_anomaly_streak > 0:
             logger.info(
                 "telemetry_health_runtime_adapter_anomaly_streak_reset",
-                previous_streak=previous_streak,
+                previous_streak=runtime_adapter_anomaly_streak,
+            )
+            await self._persist_runtime_adapter_anomaly_streak(streak=0)
+
+    async def _persist_runtime_adapter_anomaly_streak(self, *, streak: int) -> None:
+        if self._counter_service is None:
+            return
+        try:
+            await self._counter_service.set_runtime_adapter_anomaly_streak(streak)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "telemetry_health_runtime_adapter_anomaly_streak_persist_failed",
+                anomaly_streak=streak,
+                error=str(exc),
             )
 
     async def _get_counter_snapshot(self) -> dict[str, int]:
@@ -954,6 +979,7 @@ class TelemetryQueryService:
                 "runtime_adapter_invalid_samples": 0,
                 "runtime_adapter_ingest_attempts": 0,
                 "runtime_adapter_ingest_failures": 0,
+                "runtime_adapter_anomaly_streak": 0,
             }
         try:
             return await self._counter_service.get_snapshot()
@@ -972,4 +998,5 @@ class TelemetryQueryService:
                 "runtime_adapter_invalid_samples": 0,
                 "runtime_adapter_ingest_attempts": 0,
                 "runtime_adapter_ingest_failures": 0,
+                "runtime_adapter_anomaly_streak": 0,
             }

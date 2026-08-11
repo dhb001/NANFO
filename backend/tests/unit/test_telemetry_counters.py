@@ -26,6 +26,7 @@ async def test_telemetry_health_counter_snapshot_defaults_to_zero(fake_redis):
         "runtime_adapter_invalid_samples": 0,
         "runtime_adapter_ingest_attempts": 0,
         "runtime_adapter_ingest_failures": 0,
+        "runtime_adapter_anomaly_streak": 0,
     }
 
 
@@ -48,6 +49,7 @@ async def test_telemetry_health_counter_increments_are_reflected_in_snapshot(fak
     await svc.increment_runtime_adapter_ingest_attempt()
     await svc.increment_runtime_adapter_ingest_attempt()
     await svc.increment_runtime_adapter_ingest_failure()
+    await svc.set_runtime_adapter_anomaly_streak(2)
 
     snapshot = await svc.get_snapshot()
 
@@ -64,4 +66,5 @@ async def test_telemetry_health_counter_increments_are_reflected_in_snapshot(fak
         "runtime_adapter_invalid_samples": 2,
         "runtime_adapter_ingest_attempts": 2,
         "runtime_adapter_ingest_failures": 1,
+        "runtime_adapter_anomaly_streak": 2,
     }

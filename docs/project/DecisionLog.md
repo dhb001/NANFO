@@ -3,6 +3,21 @@
 Lightweight chronological notes for decisions that do not require a full ADR.
 
 ## 2026-08-11
+### Persist Runtime Adapter Anomaly Streak via Redis Health Counters (VS3 Step 16)
+Decision: Move runtime adapter anomaly streak state from process-local memory to Redis-backed telemetry health counters; health read path now reads streak from counter snapshot and persists streak updates through counter service.
+Reason:
+- Preserve anomaly trend continuity across app instances/restarts.
+- Keep fail-open reliability by treating counter read/write failures as warning-only with safe fallback behavior.
+Impact:
+- Cross-instance streak continuity is now supported through shared Redis state.
+- Public API contracts and runtime poll-action semantics remain unchanged.
+Related:
+- `backend/app/modules/telemetry/counters.py`
+- `backend/app/modules/telemetry/service.py`
+- `backend/tests/unit/test_telemetry_counters.py`
+- `backend/tests/unit/test_telemetry_query_service.py`
+
+## 2026-08-11
 ### Runtime Adapter Rolling Anomaly Streak Visibility (VS3 Step 15)
 Decision: Add internal-only rolling anomaly streak state in telemetry health runtime adapter logging flow; increment on consecutive anomaly snapshots and reset on healthy snapshots.
 Reason:
