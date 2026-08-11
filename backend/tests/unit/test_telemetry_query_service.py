@@ -47,6 +47,87 @@ def _trend_window_summary(
     }
 
 
+def _append_correlation_window_entry(
+    svc: TelemetryQueryService,
+    *,
+    window_size: int,
+    transition_phase: str,
+    reason_phase: str,
+    transition_threshold_crossed: bool,
+    transition_cooldown_active: bool,
+    transition_next_emit_in_reads: int,
+    reason_threshold_crossed: bool,
+    reason_cooldown_active: bool,
+    reason_next_emit_in_reads: int,
+    transition_max_observed_value: int,
+    reason_max_observed_value: int,
+    transition_recovery_transition: bool = False,
+    reason_recovery_transition: bool = False,
+    transition_cooldown_re_emitted: bool = False,
+    reason_cooldown_re_emitted: bool = False,
+) -> None:
+    transition_reads_since_last_crossed_emit = (
+        max(3 - transition_next_emit_in_reads, 0) if transition_threshold_crossed else 0
+    )
+    reason_reads_since_last_crossed_emit = (
+        max(3 - reason_next_emit_in_reads, 0) if reason_threshold_crossed else 0
+    )
+
+    svc._append_runtime_adapter_slo_trend_threshold_correlation_window_entry(
+        trend_window_summary=_trend_window_summary(window_size=window_size),
+        latest_threshold_trigger_state={
+            "transition_frequency": {
+                "threshold_dimension": "transition_frequency",
+                "threshold_value": 3,
+                "max_observed_value": transition_max_observed_value,
+                "crossed_values": (
+                    {"ok->degraded": transition_max_observed_value}
+                    if transition_threshold_crossed
+                    else {}
+                ),
+                "threshold_crossed": transition_threshold_crossed,
+                "recovery_transition": transition_recovery_transition,
+                "cooldown_re_emitted": transition_cooldown_re_emitted,
+                "window_size": window_size,
+            },
+            "reason_frequency": {
+                "threshold_dimension": "reason_frequency",
+                "threshold_value": 3,
+                "max_observed_value": reason_max_observed_value,
+                "crossed_values": (
+                    {"ingest_failures_detected": reason_max_observed_value}
+                    if reason_threshold_crossed
+                    else {}
+                ),
+                "threshold_crossed": reason_threshold_crossed,
+                "recovery_transition": reason_recovery_transition,
+                "cooldown_re_emitted": reason_cooldown_re_emitted,
+                "window_size": window_size,
+            },
+        },
+        cooldown_transition_phase={
+            "transition_frequency": transition_phase,
+            "reason_frequency": reason_phase,
+        },
+        cooldown_summary={
+            "transition_frequency": {
+                "initialized": True,
+                "threshold_crossed": transition_threshold_crossed,
+                "reads_since_last_crossed_emit": transition_reads_since_last_crossed_emit,
+                "next_crossed_emit_in_reads": transition_next_emit_in_reads,
+                "cooldown_active": transition_cooldown_active,
+            },
+            "reason_frequency": {
+                "initialized": True,
+                "threshold_crossed": reason_threshold_crossed,
+                "reads_since_last_crossed_emit": reason_reads_since_last_crossed_emit,
+                "next_crossed_emit_in_reads": reason_next_emit_in_reads,
+                "cooldown_active": reason_cooldown_active,
+            },
+        },
+    )
+
+
 @pytest.mark.asyncio
 async def test_get_history_returns_paginated_response(mock_db):
     svc = TelemetryQueryService(db=mock_db)
@@ -1364,6 +1445,282 @@ def test_trend_threshold_cooldown_transition_log_failure_is_fail_open(mock_db):
         == "telemetry_health_runtime_adapter_slo_threshold_cooldown_transition_suppressed"
     )
     assert transition_log_failed.kwargs["threshold_dimension"] == "transition_frequency"
+
+
+def test_trend_threshold_correlation_snapshot_aggregates_phase_and_summary_windows(mock_db):
+    svc = TelemetryQueryService(db=mock_db)
+
+    _append_correlation_window_entry(
+        svc,
+        window_size=4,
+        transition_phase="enter-cooldown",
+        reason_phase="cooldown-suppressed",
+        transition_threshold_crossed=True,
+        transition_cooldown_active=True,
+        transition_next_emit_in_reads=3,
+        reason_threshold_crossed=True,
+        reason_cooldown_active=True,
+        reason_next_emit_in_reads=2,
+        transition_max_observed_value=4,
+        reason_max_observed_value=3,
+    )
+    _append_correlation_window_entry(
+        svc,
+        window_size=5,
+        transition_phase="cooldown-suppressed",
+        reason_phase="cooldown-expired-reemit",
+        transition_threshold_crossed=True,
+        transition_cooldown_active=True,
+        transition_next_emit_in_reads=2,
+        reason_threshold_crossed=True,
+        reason_cooldown_active=True,
+        reason_next_emit_in_reads=3,
+        transition_max_observed_value=5,
+        reason_max_observed_value=6,
+        reason_cooldown_re_emitted=True,
+    )
+    _append_correlation_window_entry(
+        svc,
+        window_size=6,
+        transition_phase="cooldown-cleared-recovery",
+        reason_phase="",
+        transition_threshold_crossed=False,
+        transition_cooldown_active=False,
+        transition_next_emit_in_reads=0,
+        reason_threshold_crossed=False,
+        reason_cooldown_active=False,
+        reason_next_emit_in_reads=0,
+        transition_max_observed_value=1,
+        reason_max_observed_value=1,
+        transition_recovery_transition=True,
+    )
+
+    snapshot = svc._build_runtime_adapter_slo_trend_threshold_correlation_snapshot()
+
+    assert snapshot["window_size"] == 3
+    assert snapshot["max_window_size"] == 10
+    assert snapshot["cooldown_reads"] == 3
+
+    transition_phase_counts = snapshot["cooldown_transition_phase_counts"]["transition_frequency"]
+    assert transition_phase_counts["enter-cooldown"] == 1
+    assert transition_phase_counts["cooldown-suppressed"] == 1
+    assert transition_phase_counts["cooldown-expired-reemit"] == 0
+    assert transition_phase_counts["cooldown-cleared-recovery"] == 1
+
+    reason_phase_counts = snapshot["cooldown_transition_phase_counts"]["reason_frequency"]
+    assert reason_phase_counts["enter-cooldown"] == 0
+    assert reason_phase_counts["cooldown-suppressed"] == 1
+    assert reason_phase_counts["cooldown-expired-reemit"] == 1
+    assert reason_phase_counts["cooldown-cleared-recovery"] == 0
+
+    transition_window_state = snapshot["cooldown_summary_window_state"]["transition_frequency"]
+    assert transition_window_state["threshold_crossed_reads"] == 2
+    assert transition_window_state["cooldown_active_reads"] == 2
+    assert transition_window_state["max_next_crossed_emit_in_reads"] == 3
+
+    reason_window_state = snapshot["cooldown_summary_window_state"]["reason_frequency"]
+    assert reason_window_state["threshold_crossed_reads"] == 2
+    assert reason_window_state["cooldown_active_reads"] == 2
+    assert reason_window_state["max_next_crossed_emit_in_reads"] == 3
+
+    latest_trigger_state = snapshot["latest_threshold_trigger_state"]
+    assert latest_trigger_state["transition_frequency"]["threshold_crossed"] is False
+    assert latest_trigger_state["transition_frequency"]["recovery_transition"] is True
+    assert latest_trigger_state["transition_frequency"]["window_size"] == 6
+    assert latest_trigger_state["reason_frequency"]["threshold_crossed"] is False
+    assert latest_trigger_state["reason_frequency"]["window_size"] == 6
+
+    latest_cooldown_state = snapshot["latest_cooldown_summary_state"]
+    assert latest_cooldown_state["transition_frequency"]["threshold_crossed"] is False
+    assert latest_cooldown_state["transition_frequency"]["cooldown_active"] is False
+    assert latest_cooldown_state["reason_frequency"]["threshold_crossed"] is False
+    assert latest_cooldown_state["reason_frequency"]["cooldown_active"] is False
+
+
+def test_trend_threshold_correlation_snapshot_window_is_bounded(mock_db):
+    svc = TelemetryQueryService(db=mock_db)
+
+    for index in range(12):
+        is_crossed = index % 2 == 0
+        _append_correlation_window_entry(
+            svc,
+            window_size=index + 1,
+            transition_phase=("cooldown-suppressed" if is_crossed else ""),
+            reason_phase=("enter-cooldown" if is_crossed else ""),
+            transition_threshold_crossed=is_crossed,
+            transition_cooldown_active=is_crossed,
+            transition_next_emit_in_reads=(1 if is_crossed else 0),
+            reason_threshold_crossed=is_crossed,
+            reason_cooldown_active=is_crossed,
+            reason_next_emit_in_reads=(2 if is_crossed else 0),
+            transition_max_observed_value=index + 2,
+            reason_max_observed_value=index + 3,
+        )
+
+    snapshot = svc._build_runtime_adapter_slo_trend_threshold_correlation_snapshot()
+
+    assert snapshot["window_size"] == 10
+    assert snapshot["max_window_size"] == 10
+    latest_trigger_state = snapshot["latest_threshold_trigger_state"]
+    assert latest_trigger_state["transition_frequency"]["window_size"] == 12
+    assert latest_trigger_state["reason_frequency"]["window_size"] == 12
+
+
+def test_trend_threshold_correlation_snapshot_logs_metadata(mock_db):
+    svc = TelemetryQueryService(db=mock_db)
+
+    with patch("app.modules.telemetry.service.logger.info") as mock_info:
+        svc._safe_log_runtime_adapter_slo_trend_threshold_correlation_snapshot(
+            trend_window_summary=_trend_window_summary(window_size=4),
+            latest_threshold_trigger_state={
+                "transition_frequency": {
+                    "threshold_dimension": "transition_frequency",
+                    "threshold_value": 3,
+                    "max_observed_value": 4,
+                    "crossed_values": {"ok->degraded": 4},
+                    "threshold_crossed": True,
+                    "recovery_transition": False,
+                    "cooldown_re_emitted": False,
+                    "window_size": 4,
+                },
+                "reason_frequency": {
+                    "threshold_dimension": "reason_frequency",
+                    "threshold_value": 3,
+                    "max_observed_value": 1,
+                    "crossed_values": {},
+                    "threshold_crossed": False,
+                    "recovery_transition": False,
+                    "cooldown_re_emitted": False,
+                    "window_size": 4,
+                },
+            },
+            cooldown_transition_phase={
+                "transition_frequency": "enter-cooldown",
+                "reason_frequency": "",
+            },
+            cooldown_summary={
+                "transition_frequency": {
+                    "initialized": True,
+                    "threshold_crossed": True,
+                    "reads_since_last_crossed_emit": 0,
+                    "next_crossed_emit_in_reads": 3,
+                    "cooldown_active": True,
+                },
+                "reason_frequency": {
+                    "initialized": True,
+                    "threshold_crossed": False,
+                    "reads_since_last_crossed_emit": 0,
+                    "next_crossed_emit_in_reads": 0,
+                    "cooldown_active": False,
+                },
+            },
+        )
+
+    correlation_logs = _event_calls(
+        mock_info,
+        "telemetry_health_runtime_adapter_slo_threshold_correlation_snapshot",
+    )
+    assert len(correlation_logs) == 1
+    correlation_log = correlation_logs[0]
+    assert correlation_log.kwargs["window_size"] == 1
+    assert correlation_log.kwargs["max_window_size"] == 10
+    assert correlation_log.kwargs["cooldown_reads"] == 3
+
+    transition_phase_counts = correlation_log.kwargs["cooldown_transition_phase_counts"][
+        "transition_frequency"
+    ]
+    assert transition_phase_counts["enter-cooldown"] == 1
+    assert transition_phase_counts["cooldown-suppressed"] == 0
+    assert transition_phase_counts["cooldown-expired-reemit"] == 0
+    assert transition_phase_counts["cooldown-cleared-recovery"] == 0
+
+    reason_phase_counts = correlation_log.kwargs["cooldown_transition_phase_counts"]["reason_frequency"]
+    assert reason_phase_counts["enter-cooldown"] == 0
+
+    latest_trigger_state = correlation_log.kwargs["latest_threshold_trigger_state"]
+    assert latest_trigger_state["transition_frequency"]["threshold_crossed"] is True
+    assert latest_trigger_state["transition_frequency"]["max_observed_value"] == 4
+    assert latest_trigger_state["reason_frequency"]["threshold_crossed"] is False
+
+
+def test_trend_threshold_correlation_snapshot_state_write_failure_is_fail_open(mock_db):
+    svc = TelemetryQueryService(db=mock_db)
+
+    with (
+        patch.object(
+            svc,
+            "_append_runtime_adapter_slo_trend_threshold_correlation_window_entry",
+            side_effect=RuntimeError("correlation write failed"),
+        ),
+        patch("app.modules.telemetry.service.logger.warning") as mock_warning,
+    ):
+        svc._safe_log_runtime_adapter_slo_trend_threshold_correlation_snapshot(
+            trend_window_summary=_trend_window_summary(window_size=1),
+            latest_threshold_trigger_state=svc._new_runtime_adapter_slo_latest_threshold_trigger_state(),
+            cooldown_transition_phase={
+                "transition_frequency": "",
+                "reason_frequency": "",
+            },
+            cooldown_summary={},
+        )
+
+    write_failed_logs = _event_calls(
+        mock_warning,
+        "telemetry_health_runtime_adapter_slo_threshold_correlation_snapshot_state_write_failed",
+    )
+    assert len(write_failed_logs) == 1
+
+
+def test_trend_threshold_correlation_snapshot_state_read_failure_is_fail_open(mock_db):
+    svc = TelemetryQueryService(db=mock_db)
+
+    with (
+        patch.object(
+            svc,
+            "_build_runtime_adapter_slo_trend_threshold_correlation_snapshot",
+            side_effect=RuntimeError("correlation read failed"),
+        ),
+        patch("app.modules.telemetry.service.logger.warning") as mock_warning,
+    ):
+        svc._safe_log_runtime_adapter_slo_trend_threshold_correlation_snapshot(
+            trend_window_summary=_trend_window_summary(window_size=1),
+            latest_threshold_trigger_state=svc._new_runtime_adapter_slo_latest_threshold_trigger_state(),
+            cooldown_transition_phase={
+                "transition_frequency": "",
+                "reason_frequency": "",
+            },
+            cooldown_summary={},
+        )
+
+    read_failed_logs = _event_calls(
+        mock_warning,
+        "telemetry_health_runtime_adapter_slo_threshold_correlation_snapshot_state_read_failed",
+    )
+    assert len(read_failed_logs) == 1
+
+
+def test_trend_threshold_correlation_snapshot_log_failure_is_fail_open(mock_db):
+    svc = TelemetryQueryService(db=mock_db)
+
+    with (
+        patch("app.modules.telemetry.service.logger.info", side_effect=RuntimeError("log failed")),
+        patch("app.modules.telemetry.service.logger.warning") as mock_warning,
+    ):
+        svc._safe_log_runtime_adapter_slo_trend_threshold_correlation_snapshot(
+            trend_window_summary=_trend_window_summary(window_size=1),
+            latest_threshold_trigger_state=svc._new_runtime_adapter_slo_latest_threshold_trigger_state(),
+            cooldown_transition_phase={
+                "transition_frequency": "",
+                "reason_frequency": "",
+            },
+            cooldown_summary={},
+        )
+
+    log_failed_logs = _event_calls(
+        mock_warning,
+        "telemetry_health_runtime_adapter_slo_threshold_correlation_snapshot_log_failed",
+    )
+    assert len(log_failed_logs) == 1
 
 
 @pytest.mark.asyncio

@@ -2,6 +2,23 @@
 
 Lightweight chronological notes for decisions that do not require a full ADR.
 
+## 2026-08-12
+### Runtime Adapter Cooldown-Correlation Snapshot Aggregation (VS3 Step 24)
+Decision: Add an internal-only cooldown-correlation snapshot aggregation branch that captures deterministic per-dimension threshold trigger state, cooldown transition phase counts, and cooldown-summary window aggregates over a bounded in-process window.
+Reason:
+- Improve operational explainability by correlating threshold trigger outcomes with cooldown transition phases and cooldown-summary state in one deterministic internal snapshot.
+- Preserve minimal/reversible scope by extending existing Step 21-23 internal threshold/cooldown observability flow without changing external contracts.
+Impact:
+- Telemetry health internals now emit `telemetry_health_runtime_adapter_slo_threshold_correlation_snapshot` with bounded-window aggregate metadata for `transition_frequency` and `reason_frequency` dimensions.
+- Threshold evaluation now returns deterministic correlation metadata (`updated_state`, `latest_threshold_trigger_state`, `cooldown_transition_phase`) consumed by snapshot aggregation.
+- Correlation snapshot state-write/state-read/log failures are isolated to warning-only fail-open branches and do not affect health responses.
+- REST/WebSocket contracts, canonical envelope, schema/migrations, C5/C6 constraints, and runtime poll-action behavior remain unchanged.
+Related:
+- `backend/app/modules/telemetry/service.py`
+- `backend/tests/unit/test_telemetry_query_service.py`
+- `backend/tests/unit/test_telemetry_scaffold.py`
+- `backend/tests/integration/test_telemetry_endpoints.py`
+
 ## 2026-08-11
 ### Runtime Adapter Cooldown-Transition Event Visibility (VS3 Step 23)
 Decision: Add internal-only deterministic cooldown-transition event visibility for runtime adapter trend-threshold dimensions, covering enter-cooldown, cooldown-suppressed, cooldown-expired-reemit, and cooldown-cleared/recovery phases.

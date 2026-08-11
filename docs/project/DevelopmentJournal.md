@@ -1,5 +1,14 @@
 # Development Journal
 
+## [2026-08-12] - Vertical Slice 3 Step 24 (Runtime Adapter Cooldown-Correlation Snapshot Aggregation)
+
+- **Implemented:** Added internal-only deterministic cooldown-correlation snapshot aggregation for runtime adapter trend-threshold dimensions in telemetry health internals.
+- **Correlation snapshot event:** Added `telemetry_health_runtime_adapter_slo_threshold_correlation_snapshot` with bounded-window aggregate metadata: `latest_threshold_trigger_state`, per-dimension `cooldown_transition_phase_counts`, `cooldown_summary_window_state`, and `latest_cooldown_summary_state`.
+- **Threshold contract wiring:** Extended threshold evaluation return contract to carry per-dimension `updated_state`, deterministic `latest_threshold_trigger_state`, and normalized cooldown transition phase (`enter-cooldown`, `cooldown-suppressed`, `cooldown-expired-reemit`, `cooldown-cleared-recovery`) for correlation aggregation.
+- **Fail-open safety:** Added warning-only correlation fallback branches (`...correlation_snapshot_state_write_failed`, `...correlation_snapshot_state_read_failed`, `...correlation_snapshot_log_failed`) while preserving Step 16-23 behavior/contracts and runtime poll-action semantics.
+- **Scope guardrails:** Internal logging/state-only increment; no REST route/envelope changes, no schema migrations, no C5/C6 drift.
+- **Validation:** Scoped Ruff passed; targeted telemetry query + scaffold + endpoints tests passed; full backend `pytest` regression passed (`216 passed`).
+
 ## [2026-08-11] - Vertical Slice 3 Step 23 (Runtime Adapter Cooldown-Transition Event Visibility)
 
 - **Implemented:** Added internal-only deterministic cooldown-transition event visibility for runtime adapter threshold dimensions in telemetry health internals.
