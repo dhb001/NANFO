@@ -1,5 +1,15 @@
 # Development Journal
 
+## [2026-08-12] - Vertical Slice 3 Step 26 (Runtime Adapter Dropped-Sample Backpressure Hardening)
+
+- **Implemented:** Added dropped-sample runtime adapter counter and observability wiring to harden backpressure/SLO diagnostics.
+- **Counter contract:** Introduced `runtime_adapter_dropped_samples` in telemetry health counter snapshot and incremented it on invalid sample drops and ingest-failure drops in runtime poll path.
+- **SLO snapshot/rollup visibility:** Extended runtime adapter SLO snapshot and rollup metadata with `dropped_samples`, and added anomaly warning branch `telemetry_health_runtime_adapter_dropped_samples_detected`.
+- **Anomaly semantics:** Dropped samples now contribute deterministic anomaly reason metadata (`dropped_samples_detected`) used by streak transition/rollup trend internals.
+- **Fail-open safety:** Counter updates and warning branches remain warning-only/non-fatal; runtime retry/backoff and API health response contracts remain unchanged.
+- **Scope guardrails:** No REST route/envelope changes, no schema migrations, no C5/C6 drift.
+- **Validation:** Scoped Ruff passed; targeted telemetry counters/scaffold/query + telemetry endpoints tests passed; full backend `pytest` regression passed (`220 passed`).
+
 ## [2026-08-12] - Vertical Slice 3 Step 25 (Runtime Adapter Mode Factory Beyond Stub)
 
 - **Implemented:** Advanced runtime adapter path beyond stub by adding configurable production adapter mode selection in startup wiring (`stub` / `seeded`).

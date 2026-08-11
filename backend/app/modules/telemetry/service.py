@@ -250,6 +250,11 @@ def build_runtime_poll_action(
                     adapter_name=adapter_name,
                     counter_name="runtime_adapter_invalid_samples",
                 )
+                await _safe_runtime_adapter_counter_update(
+                    collector_runner.counter_service.increment_runtime_adapter_dropped_sample,
+                    adapter_name=adapter_name,
+                    counter_name="runtime_adapter_dropped_samples",
+                )
                 logger.warning(
                     "telemetry_runtime_adapter_sample_invalid",
                     adapter=adapter_name,
@@ -263,6 +268,11 @@ def build_runtime_poll_action(
                     collector_runner.counter_service.increment_runtime_adapter_invalid_sample,
                     adapter_name=adapter_name,
                     counter_name="runtime_adapter_invalid_samples",
+                )
+                await _safe_runtime_adapter_counter_update(
+                    collector_runner.counter_service.increment_runtime_adapter_dropped_sample,
+                    adapter_name=adapter_name,
+                    counter_name="runtime_adapter_dropped_samples",
                 )
                 logger.warning(
                     "telemetry_runtime_adapter_sample_invalid",
@@ -284,6 +294,11 @@ def build_runtime_poll_action(
                     collector_runner.counter_service.increment_runtime_adapter_ingest_failure,
                     adapter_name=adapter_name,
                     counter_name="runtime_adapter_ingest_failures",
+                )
+                await _safe_runtime_adapter_counter_update(
+                    collector_runner.counter_service.increment_runtime_adapter_dropped_sample,
+                    adapter_name=adapter_name,
+                    counter_name="runtime_adapter_dropped_samples",
                 )
                 logger.warning(
                     "telemetry_runtime_adapter_ingest_failed",
@@ -1017,6 +1032,10 @@ class TelemetryQueryService:
                 counters.get("runtime_adapter_invalid_samples", 0),
                 counter_name="runtime_adapter_invalid_samples",
             ),
+            "dropped_samples": self._coerce_non_negative_counter(
+                counters.get("runtime_adapter_dropped_samples", 0),
+                counter_name="runtime_adapter_dropped_samples",
+            ),
             "ingest_attempts": self._coerce_non_negative_counter(
                 counters.get("runtime_adapter_ingest_attempts", 0),
                 counter_name="runtime_adapter_ingest_attempts",
@@ -1065,6 +1084,7 @@ class TelemetryQueryService:
                 dropped_events=dropped_events,
                 last_batch_size=runtime_adapter_slo_snapshot["last_batch_size"],
                 invalid_samples=runtime_adapter_slo_snapshot["invalid_samples"],
+                dropped_samples=runtime_adapter_slo_snapshot["dropped_samples"],
                 ingest_attempts=runtime_adapter_slo_snapshot["ingest_attempts"],
                 ingest_failures=runtime_adapter_slo_snapshot["ingest_failures"],
             )
@@ -1942,6 +1962,7 @@ class TelemetryQueryService:
         ingest_attempts = runtime_adapter_slo_snapshot["ingest_attempts"]
         ingest_failures = runtime_adapter_slo_snapshot["ingest_failures"]
         invalid_samples = runtime_adapter_slo_snapshot["invalid_samples"]
+        dropped_samples = runtime_adapter_slo_snapshot["dropped_samples"]
         invalid_sample_ratio = self._compute_invalid_sample_ratio(
             invalid_samples=invalid_samples,
             ingest_attempts=ingest_attempts,
@@ -1967,6 +1988,7 @@ class TelemetryQueryService:
             ingest_attempts=ingest_attempts,
             ingest_failures=ingest_failures,
             invalid_samples=invalid_samples,
+            dropped_samples=dropped_samples,
             invalid_sample_ratio=invalid_sample_ratio,
             last_batch_size=runtime_adapter_slo_snapshot["last_batch_size"],
             anomaly_reason_flags=anomaly_reason_flags,
@@ -2005,6 +2027,7 @@ class TelemetryQueryService:
         ingest_attempts = runtime_adapter_slo_snapshot["ingest_attempts"]
         ingest_failures = runtime_adapter_slo_snapshot["ingest_failures"]
         invalid_samples = runtime_adapter_slo_snapshot["invalid_samples"]
+        dropped_samples = runtime_adapter_slo_snapshot["dropped_samples"]
         anomaly_reason_flags: list[str] = []
 
         if ingest_failures > 0:
@@ -2018,6 +2041,16 @@ class TelemetryQueryService:
                 ingest_attempts=ingest_attempts,
                 failure_ratio=failure_ratio,
                 zero_attempt_guard_applied=zero_attempt_guard_applied,
+            )
+
+        if dropped_samples > 0:
+            anomaly_reason_flags.append("dropped_samples_detected")
+            logger.warning(
+                "telemetry_health_runtime_adapter_dropped_samples_detected",
+                dropped_samples=dropped_samples,
+                invalid_samples=invalid_samples,
+                ingest_failures=ingest_failures,
+                ingest_attempts=ingest_attempts,
             )
 
         invalid_sample_ratio = self._compute_invalid_sample_ratio(

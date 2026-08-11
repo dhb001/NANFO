@@ -3,6 +3,25 @@
 Lightweight chronological notes for decisions that do not require a full ADR.
 
 ## 2026-08-12
+### Runtime Adapter Dropped-Sample Backpressure Hardening (VS3 Step 26)
+Decision: Add runtime adapter dropped-sample counter semantics and include dropped-sample anomaly visibility in telemetry health SLO internals.
+Reason:
+- Complete VS3 backpressure/SLO hardening scope with explicit dropped-sample accounting across invalid sample and ingest-failure drop paths.
+- Improve operational explainability by surfacing dropped-sample pressure in snapshot, rollup, and anomaly transition metadata.
+Impact:
+- Added Redis-backed runtime counter `runtime_adapter_dropped_samples` to telemetry health snapshot contract.
+- Runtime poll path now increments dropped-sample counter for invalid runtime samples and ingest-failure drops.
+- Health internals now emit dropped-sample SLO visibility (`dropped_samples` in snapshot/rollup) and warning branch `telemetry_health_runtime_adapter_dropped_samples_detected` with anomaly reason `dropped_samples_detected`.
+- REST/WebSocket contracts, canonical envelope, schema/migrations, C5/C6 constraints, and fail-open retry/runtime semantics remain unchanged.
+Related:
+- `backend/app/modules/telemetry/counters.py`
+- `backend/app/modules/telemetry/service.py`
+- `backend/tests/unit/test_telemetry_counters.py`
+- `backend/tests/unit/test_telemetry_scaffold.py`
+- `backend/tests/unit/test_telemetry_query_service.py`
+- `backend/tests/integration/test_telemetry_endpoints.py`
+
+## 2026-08-12
 ### Runtime Adapter Mode Factory and Seeded Adapter Expansion (VS3 Step 25)
 Decision: Expand runtime adapter path beyond stub by introducing a mode-driven production adapter factory and adding a deterministic seeded runtime adapter mode.
 Reason:

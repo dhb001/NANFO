@@ -193,6 +193,7 @@ async def test_runtime_poll_action_ingests_valid_samples(fake_redis):
     snapshot = await svc.counter_service.get_snapshot()
     assert snapshot["runtime_adapter_last_batch_size"] == 1
     assert snapshot["runtime_adapter_invalid_samples"] == 0
+    assert snapshot["runtime_adapter_dropped_samples"] == 0
     assert snapshot["runtime_adapter_ingest_attempts"] == 1
     assert snapshot["runtime_adapter_ingest_failures"] == 0
 
@@ -213,6 +214,7 @@ async def test_runtime_poll_action_ignores_invalid_batch_type_fail_open(fake_red
     snapshot = await svc.counter_service.get_snapshot()
     assert snapshot["runtime_adapter_last_batch_size"] == 0
     assert snapshot["runtime_adapter_invalid_samples"] == 0
+    assert snapshot["runtime_adapter_dropped_samples"] == 0
     assert snapshot["runtime_adapter_ingest_attempts"] == 0
     assert snapshot["runtime_adapter_ingest_failures"] == 0
 
@@ -247,6 +249,7 @@ async def test_runtime_poll_action_skips_invalid_samples_and_keeps_valid_ones(fa
     snapshot = await svc.counter_service.get_snapshot()
     assert snapshot["runtime_adapter_last_batch_size"] == 3
     assert snapshot["runtime_adapter_invalid_samples"] == 2
+    assert snapshot["runtime_adapter_dropped_samples"] == 2
     assert snapshot["runtime_adapter_ingest_attempts"] == 1
     assert snapshot["runtime_adapter_ingest_failures"] == 0
 
@@ -287,6 +290,7 @@ async def test_runtime_poll_action_ingest_failure_raises_for_retry(fake_redis):
     snapshot = await svc.counter_service.get_snapshot()
     assert snapshot["runtime_adapter_last_batch_size"] == 1
     assert snapshot["runtime_adapter_invalid_samples"] == 0
+    assert snapshot["runtime_adapter_dropped_samples"] == 1
     assert snapshot["runtime_adapter_ingest_attempts"] == 1
     assert snapshot["runtime_adapter_ingest_failures"] == 1
 

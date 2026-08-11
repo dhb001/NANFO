@@ -219,6 +219,7 @@ async def test_get_health_logs_runtime_adapter_slo_snapshot(mock_db):
             "runtime_sustained_failure_active": 0,
             "runtime_adapter_last_batch_size": 12,
             "runtime_adapter_invalid_samples": 2,
+            "runtime_adapter_dropped_samples": 0,
             "runtime_adapter_ingest_attempts": 10,
             "runtime_adapter_ingest_failures": 1,
             "runtime_adapter_anomaly_streak": 0,
@@ -240,6 +241,7 @@ async def test_get_health_logs_runtime_adapter_slo_snapshot(mock_db):
     info_kwargs = snapshot_logs[0].kwargs
     assert info_kwargs["last_batch_size"] == 12
     assert info_kwargs["invalid_samples"] == 2
+    assert info_kwargs["dropped_samples"] == 0
     assert info_kwargs["ingest_attempts"] == 10
     assert info_kwargs["ingest_failures"] == 1
     assert info_kwargs["status"] == "ok"
@@ -266,6 +268,7 @@ async def test_get_health_logs_runtime_adapter_slo_snapshot(mock_db):
     assert rollup_log.kwargs["ingest_attempts"] == 10
     assert rollup_log.kwargs["ingest_failures"] == 1
     assert rollup_log.kwargs["invalid_samples"] == 2
+    assert rollup_log.kwargs["dropped_samples"] == 0
     assert rollup_log.kwargs["invalid_sample_ratio"] == pytest.approx(2 / 12)
     assert rollup_log.kwargs["last_batch_size"] == 12
     assert rollup_log.kwargs["anomaly_reason_flags"] == ["ingest_failures_detected"]
@@ -322,6 +325,7 @@ async def test_get_health_falls_back_to_zero_counters_on_counter_failure(mock_db
     info_kwargs = snapshot_logs[0].kwargs
     assert info_kwargs["last_batch_size"] == 0
     assert info_kwargs["invalid_samples"] == 0
+    assert info_kwargs["dropped_samples"] == 0
     assert info_kwargs["ingest_attempts"] == 0
     assert info_kwargs["ingest_failures"] == 0
     counter_snapshot_failed_logs = _event_calls(mock_warning, "telemetry_health_counter_snapshot_failed")
@@ -344,6 +348,7 @@ async def test_get_health_falls_back_to_zero_counters_on_counter_failure(mock_db
     assert rollup_log.kwargs["ingest_attempts"] == 0
     assert rollup_log.kwargs["ingest_failures"] == 0
     assert rollup_log.kwargs["invalid_samples"] == 0
+    assert rollup_log.kwargs["dropped_samples"] == 0
     assert rollup_log.kwargs["invalid_sample_ratio"] == pytest.approx(0.0)
     assert rollup_log.kwargs["last_batch_size"] == 0
     assert rollup_log.kwargs["anomaly_reason_flags"] == []
@@ -413,6 +418,7 @@ async def test_get_health_rollup_logs_ok_severity_for_healthy_runtime_adapter(mo
             "runtime_sustained_failure_active": 0,
             "runtime_adapter_last_batch_size": 5,
             "runtime_adapter_invalid_samples": 1,
+            "runtime_adapter_dropped_samples": 0,
             "runtime_adapter_ingest_attempts": 9,
             "runtime_adapter_ingest_failures": 0,
             "runtime_adapter_anomaly_streak": 0,
@@ -456,6 +462,7 @@ async def test_get_health_rollup_logs_critical_severity_when_runtime_failure_act
             "runtime_sustained_failure_active": 1,
             "runtime_adapter_last_batch_size": 7,
             "runtime_adapter_invalid_samples": 2,
+            "runtime_adapter_dropped_samples": 0,
             "runtime_adapter_ingest_attempts": 8,
             "runtime_adapter_ingest_failures": 0,
             "runtime_adapter_anomaly_streak": 0,
@@ -501,6 +508,7 @@ async def test_get_health_rollup_logs_critical_severity_when_anomaly_streak_reac
             "runtime_sustained_failure_active": 0,
             "runtime_adapter_last_batch_size": 6,
             "runtime_adapter_invalid_samples": 0,
+            "runtime_adapter_dropped_samples": 0,
             "runtime_adapter_ingest_attempts": 4,
             "runtime_adapter_ingest_failures": 1,
             "runtime_adapter_anomaly_streak": 2,
@@ -862,6 +870,7 @@ async def test_get_health_trend_window_state_write_failure_is_fail_open(mock_db)
             "runtime_sustained_failure_active": 0,
             "runtime_adapter_last_batch_size": 3,
             "runtime_adapter_invalid_samples": 0,
+            "runtime_adapter_dropped_samples": 0,
             "runtime_adapter_ingest_attempts": 3,
             "runtime_adapter_ingest_failures": 0,
             "runtime_adapter_anomaly_streak": 0,
@@ -906,6 +915,7 @@ async def test_get_health_trend_window_state_read_failure_is_fail_open(mock_db):
             "runtime_sustained_failure_active": 0,
             "runtime_adapter_last_batch_size": 3,
             "runtime_adapter_invalid_samples": 0,
+            "runtime_adapter_dropped_samples": 0,
             "runtime_adapter_ingest_attempts": 3,
             "runtime_adapter_ingest_failures": 0,
             "runtime_adapter_anomaly_streak": 0,
@@ -950,6 +960,7 @@ async def test_get_health_trend_threshold_evaluation_failure_is_fail_open(mock_d
             "runtime_sustained_failure_active": 0,
             "runtime_adapter_last_batch_size": 1,
             "runtime_adapter_invalid_samples": 0,
+            "runtime_adapter_dropped_samples": 0,
             "runtime_adapter_ingest_attempts": 1,
             "runtime_adapter_ingest_failures": 0,
             "runtime_adapter_anomaly_streak": 0,
@@ -1802,6 +1813,7 @@ async def test_get_health_runtime_adapter_slo_snapshot_log_failure_is_fail_open(
             "runtime_sustained_failure_active": 0,
             "runtime_adapter_last_batch_size": 2,
             "runtime_adapter_invalid_samples": 0,
+            "runtime_adapter_dropped_samples": 0,
             "runtime_adapter_ingest_attempts": 2,
             "runtime_adapter_ingest_failures": 0,
             "runtime_adapter_anomaly_streak": 0,
@@ -1839,6 +1851,7 @@ async def test_get_health_warns_when_invalid_sample_ratio_exceeds_threshold(mock
             "runtime_sustained_failure_active": 0,
             "runtime_adapter_last_batch_size": 8,
             "runtime_adapter_invalid_samples": 3,
+            "runtime_adapter_dropped_samples": 0,
             "runtime_adapter_ingest_attempts": 5,
             "runtime_adapter_ingest_failures": 0,
             "runtime_adapter_anomaly_streak": 0,
@@ -1892,6 +1905,7 @@ async def test_get_health_does_not_warn_when_invalid_sample_ratio_within_thresho
             "runtime_sustained_failure_active": 0,
             "runtime_adapter_last_batch_size": 10,
             "runtime_adapter_invalid_samples": 2,
+            "runtime_adapter_dropped_samples": 0,
             "runtime_adapter_ingest_attempts": 8,
             "runtime_adapter_ingest_failures": 0,
             "runtime_adapter_anomaly_streak": 0,
@@ -1926,6 +1940,7 @@ async def test_get_health_warns_ingest_failures_with_zero_attempt_guard(mock_db)
             "runtime_sustained_failure_active": 0,
             "runtime_adapter_last_batch_size": 0,
             "runtime_adapter_invalid_samples": 0,
+            "runtime_adapter_dropped_samples": 0,
             "runtime_adapter_ingest_attempts": 0,
             "runtime_adapter_ingest_failures": 2,
             "runtime_adapter_anomaly_streak": 0,
@@ -1965,6 +1980,56 @@ async def test_get_health_warns_ingest_failures_with_zero_attempt_guard(mock_db)
 
 
 @pytest.mark.asyncio
+async def test_get_health_warns_when_runtime_adapter_dropped_samples_detected(mock_db):
+    counter_service = AsyncMock()
+    counter_service.get_snapshot = AsyncMock(
+        return_value={
+            "ingested_events": 0,
+            "persisted_events": 0,
+            "fanout_events": 0,
+            "dropped_events": 0,
+            "runtime_exhausted_cycles": 0,
+            "runtime_exhausted_streak": 0,
+            "runtime_sustained_failure_windows": 0,
+            "runtime_sustained_failure_active": 0,
+            "runtime_adapter_last_batch_size": 3,
+            "runtime_adapter_invalid_samples": 0,
+            "runtime_adapter_dropped_samples": 2,
+            "runtime_adapter_ingest_attempts": 3,
+            "runtime_adapter_ingest_failures": 0,
+            "runtime_adapter_anomaly_streak": 0,
+        }
+    )
+    svc = TelemetryQueryService(db=mock_db, counter_service=counter_service)
+    svc._repo.get_latest_observed_at = AsyncMock(return_value=None)
+    svc._repo.count_all = AsyncMock(return_value=0)
+
+    with patch("app.modules.telemetry.service.logger.warning") as mock_warning:
+        result = await svc.get_health()
+
+    assert result.status == "ok"
+    dropped_sample_warnings = [
+        call
+        for call in mock_warning.call_args_list
+        if call.args and call.args[0] == "telemetry_health_runtime_adapter_dropped_samples_detected"
+    ]
+    assert len(dropped_sample_warnings) == 1
+    dropped_sample_warning = dropped_sample_warnings[0]
+    assert dropped_sample_warning.kwargs["dropped_samples"] == 2
+    assert dropped_sample_warning.kwargs["invalid_samples"] == 0
+    assert dropped_sample_warning.kwargs["ingest_failures"] == 0
+    assert dropped_sample_warning.kwargs["ingest_attempts"] == 3
+    transition_logs = _event_calls(
+        mock_warning, "telemetry_health_runtime_adapter_anomaly_streak_transition"
+    )
+    assert len(transition_logs) == 1
+    transition_log = transition_logs[0]
+    assert transition_log.kwargs["previous_streak"] == 0
+    assert transition_log.kwargs["current_streak"] == 1
+    assert transition_log.kwargs["anomaly_reason_flags"] == ["dropped_samples_detected"]
+
+
+@pytest.mark.asyncio
 async def test_get_health_transition_metadata_includes_combined_anomaly_reason_flags(mock_db):
     counter_service = AsyncMock()
     counter_service.get_snapshot = AsyncMock(
@@ -1979,6 +2044,7 @@ async def test_get_health_transition_metadata_includes_combined_anomaly_reason_f
             "runtime_sustained_failure_active": 0,
             "runtime_adapter_last_batch_size": 4,
             "runtime_adapter_invalid_samples": 3,
+            "runtime_adapter_dropped_samples": 2,
             "runtime_adapter_ingest_attempts": 1,
             "runtime_adapter_ingest_failures": 1,
             "runtime_adapter_anomaly_streak": 2,
@@ -2003,6 +2069,7 @@ async def test_get_health_transition_metadata_includes_combined_anomaly_reason_f
     assert transition_log.kwargs["current_streak"] == 3
     assert transition_log.kwargs["anomaly_reason_flags"] == [
         "ingest_failures_detected",
+        "dropped_samples_detected",
         "invalid_sample_ratio_exceeded",
     ]
 
@@ -2246,6 +2313,7 @@ async def test_get_health_anomaly_streak_counter_write_failure_is_fail_open(mock
             "runtime_sustained_failure_active": 0,
             "runtime_adapter_last_batch_size": 0,
             "runtime_adapter_invalid_samples": 0,
+            "runtime_adapter_dropped_samples": 0,
             "runtime_adapter_ingest_attempts": 0,
             "runtime_adapter_ingest_failures": 1,
             "runtime_adapter_anomaly_streak": 4,
@@ -2329,6 +2397,7 @@ async def test_get_health_uses_counter_snapshot_streak_for_cross_instance_contin
             "runtime_sustained_failure_active": 0,
             "runtime_adapter_last_batch_size": 0,
             "runtime_adapter_invalid_samples": 0,
+            "runtime_adapter_dropped_samples": 0,
             "runtime_adapter_ingest_attempts": 0,
             "runtime_adapter_ingest_failures": 1,
             "runtime_adapter_anomaly_streak": 7,

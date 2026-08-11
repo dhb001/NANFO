@@ -14,6 +14,7 @@ COUNTER_RUNTIME_SUSTAINED_FAILURE_WINDOWS = "telemetry:health:runtime_sustained_
 COUNTER_RUNTIME_SUSTAINED_FAILURE_ACTIVE = "telemetry:health:runtime_sustained_failure_active"
 COUNTER_RUNTIME_ADAPTER_LAST_BATCH_SIZE = "telemetry:health:runtime_adapter_last_batch_size"
 COUNTER_RUNTIME_ADAPTER_INVALID_SAMPLES = "telemetry:health:runtime_adapter_invalid_samples"
+COUNTER_RUNTIME_ADAPTER_DROPPED_SAMPLES = "telemetry:health:runtime_adapter_dropped_samples"
 COUNTER_RUNTIME_ADAPTER_INGEST_ATTEMPTS = "telemetry:health:runtime_adapter_ingest_attempts"
 COUNTER_RUNTIME_ADAPTER_INGEST_FAILURES = "telemetry:health:runtime_adapter_ingest_failures"
 COUNTER_RUNTIME_ADAPTER_ANOMALY_STREAK = "telemetry:health:runtime_adapter_anomaly_streak"
@@ -61,6 +62,9 @@ class TelemetryHealthCounterService:
     async def increment_runtime_adapter_invalid_sample(self) -> int:
         return int(await self._redis.incr(COUNTER_RUNTIME_ADAPTER_INVALID_SAMPLES))
 
+    async def increment_runtime_adapter_dropped_sample(self) -> int:
+        return int(await self._redis.incr(COUNTER_RUNTIME_ADAPTER_DROPPED_SAMPLES))
+
     async def increment_runtime_adapter_ingest_attempt(self) -> int:
         return int(await self._redis.incr(COUNTER_RUNTIME_ADAPTER_INGEST_ATTEMPTS))
 
@@ -84,6 +88,7 @@ class TelemetryHealthCounterService:
             runtime_sustained_failure_active,
             runtime_adapter_last_batch_size,
             runtime_adapter_invalid_samples,
+            runtime_adapter_dropped_samples,
             runtime_adapter_ingest_attempts,
             runtime_adapter_ingest_failures,
             runtime_adapter_anomaly_streak,
@@ -98,6 +103,7 @@ class TelemetryHealthCounterService:
             COUNTER_RUNTIME_SUSTAINED_FAILURE_ACTIVE,
             COUNTER_RUNTIME_ADAPTER_LAST_BATCH_SIZE,
             COUNTER_RUNTIME_ADAPTER_INVALID_SAMPLES,
+            COUNTER_RUNTIME_ADAPTER_DROPPED_SAMPLES,
             COUNTER_RUNTIME_ADAPTER_INGEST_ATTEMPTS,
             COUNTER_RUNTIME_ADAPTER_INGEST_FAILURES,
             COUNTER_RUNTIME_ADAPTER_ANOMALY_STREAK,
@@ -113,6 +119,7 @@ class TelemetryHealthCounterService:
             "runtime_sustained_failure_active": self._to_int(runtime_sustained_failure_active),
             "runtime_adapter_last_batch_size": self._to_int(runtime_adapter_last_batch_size),
             "runtime_adapter_invalid_samples": self._to_int(runtime_adapter_invalid_samples),
+            "runtime_adapter_dropped_samples": self._to_int(runtime_adapter_dropped_samples),
             "runtime_adapter_ingest_attempts": self._to_int(runtime_adapter_ingest_attempts),
             "runtime_adapter_ingest_failures": self._to_int(runtime_adapter_ingest_failures),
             "runtime_adapter_anomaly_streak": self._to_int(runtime_adapter_anomaly_streak),
