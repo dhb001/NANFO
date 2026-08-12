@@ -48,7 +48,8 @@ class TopologyQueryService:
         RETURN d.device_id AS device_id,
                d.hostname AS hostname,
                d.device_type AS device_type,
-               d.status AS status
+               d.status AS status,
+               d.spatial_ref_id AS spatial_ref_id
         ORDER BY d.device_id ASC
         LIMIT $fetch_limit
         """
@@ -93,6 +94,7 @@ class TopologyQueryService:
                 hostname=n["hostname"],
                 device_type=n["device_type"],
                 status=n["status"],
+                spatial_ref_id=n.get("spatial_ref_id"),
             )
             for n in page_rows
         ]
@@ -128,6 +130,7 @@ class TopologyQueryService:
             hostname: n_out.hostname,
             device_type: n_out.device_type,
             status: n_out.status,
+            spatial_ref_id: n_out.spatial_ref_id,
             edge_type: 'connected_to',
             direction: 'outbound'
         }) AS outbound
@@ -138,6 +141,7 @@ class TopologyQueryService:
             hostname: n_in.hostname,
             device_type: n_in.device_type,
             status: n_in.status,
+            spatial_ref_id: n_in.spatial_ref_id,
             edge_type: 'connected_to',
             direction: 'inbound'
         }) AS neighbours
@@ -145,7 +149,8 @@ class TopologyQueryService:
             device_id: d.device_id,
             hostname: d.hostname,
             device_type: d.device_type,
-            status: d.status
+            status: d.status,
+            spatial_ref_id: d.spatial_ref_id
         } AS node,
         [n IN neighbours WHERE n.device_id IS NOT NULL] AS neighbours
         """

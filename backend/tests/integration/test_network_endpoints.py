@@ -329,6 +329,7 @@ class TestTopologyNodeEndpoint:
                 "hostname": "core-1",
                 "device_type": "router",
                 "status": "active",
+                "spatial_ref_id": "campus-a/core-1",
             },
             "neighbours": [
                 {
@@ -336,6 +337,7 @@ class TestTopologyNodeEndpoint:
                     "hostname": "edge-2",
                     "device_type": "switch",
                     "status": "active",
+                    "spatial_ref_id": "campus-a/edge-2",
                     "edge_type": "connected_to",
                     "direction": "inbound",
                 },
@@ -344,6 +346,7 @@ class TestTopologyNodeEndpoint:
                     "hostname": "edge-3",
                     "device_type": "switch",
                     "status": "active",
+                    "spatial_ref_id": None,
                     "edge_type": "connected_to",
                     "direction": "outbound",
                 },
@@ -372,8 +375,50 @@ class TestTopologyNodeEndpoint:
         assert "data" in body
         assert "meta" in body
         assert "errors" in body
+        assert body["data"]["node"]["spatial_ref_id"] == "campus-a/core-1"
+        assert body["data"]["neighbours"][0]["spatial_ref_id"] == "campus-a/edge-2"
         assert body["data"]["neighbours"][0]["edge_type"] == "connected_to"
         assert body["data"]["neighbours"][0]["direction"] == "inbound"
+
+    def test_topology_graph_envelope_can_carry_spatial_ref_id_when_present(self, client, headers):
+        payload = TopologyGraphResponse(
+            nodes=[
+                {
+                    "device_id": "device-1",
+                    "hostname": "core-1",
+                    "device_type": "router",
+                    "status": "active",
+                    "spatial_ref_id": "campus-a/core-1",
+                },
+                {
+                    "device_id": "device-2",
+                    "hostname": "edge-2",
+                    "device_type": "switch",
+                    "status": "active",
+                    "spatial_ref_id": None,
+                },
+            ],
+            edges=[],
+        )
+
+        with (
+            patch(
+                "app.modules.network.topology.TopologyQueryService.get_graph",
+                return_value=(payload, None),
+            ),
+            patch("app.api.v1.topology.get_neo4j_driver") as mock_driver,
+        ):
+            mock_driver.return_value = AsyncMock()
+            response = client.get(
+                "/api/v1/topology/graph",
+                params={"network_id": str(uuid.uuid4())},
+                headers=headers,
+            )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["data"]["nodes"][0]["spatial_ref_id"] == "campus-a/core-1"
+        assert body["data"]["nodes"][1]["spatial_ref_id"] is None
 
     def test_topology_nodes_endpoint_accepts_depth_parameter(self, client, headers):
         payload = {

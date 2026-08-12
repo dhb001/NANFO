@@ -42,12 +42,21 @@ class TopologyNeighbourNode(BaseModel):
     hostname: str
     device_type: str
     status: str
+    spatial_ref_id: str | None = None
     edge_type: str
     direction: str
 
 
+class TopologyPrimaryNode(BaseModel):
+    device_id: str
+    hostname: str
+    device_type: str
+    status: str
+    spatial_ref_id: str | None = None
+
+
 class TopologyNodeWithNeighbours(BaseModel):
-    node: dict
+    node: TopologyPrimaryNode
     neighbours: list[TopologyNeighbourNode]
 
 

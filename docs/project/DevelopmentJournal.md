@@ -1,5 +1,14 @@
 # Development Journal
 
+## [2026-08-12] - Vertical Slice 6 Step 5 (Governed Topology Read-Path Spatial Reference Exposure)
+
+- **Implemented:** Exposed `spatial_ref_id` on governed topology read paths by extending topology graph/node response payload models and Neo4j read queries.
+- **Read-path updates:** `TopologyQueryService.get_graph()` now returns node `spatial_ref_id` when present, and `get_node_with_neighbours()` now includes `spatial_ref_id` for the primary node and each neighbour.
+- **API contract updates:** Topology API response typing now explicitly models optional spatial-reference fields while preserving existing envelope and endpoint behavior.
+- **Coverage updates:** Added unit/integration assertions for spatial-reference presence and nullability on topology graph and node-with-neighbours responses.
+- **Scope guardrails:** No new routes, no C6 deferred endpoint activation, no schema migration, no C5 boundary change, and no envelope drift.
+- **Validation:** Scoped Ruff passed; targeted network/topology/ws + simulation-flow tests passed (`73 passed`); full backend regression passed (`279 passed`).
+
 ## [2026-08-12] - Vertical Slice 6 Step 4 (Digital Twin Spatial Metadata Payload Mapping)
 
 - **Implemented:** Extended simulation-to-digital-twin websocket payload mapping to include optional spatial metadata in scene deltas when present.

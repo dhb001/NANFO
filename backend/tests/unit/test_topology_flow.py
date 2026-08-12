@@ -217,9 +217,27 @@ async def test_network_repository_get_workspace_ids_for_network_ids_returns_empt
 @pytest.mark.asyncio
 async def test_get_graph_paginates_and_returns_next_cursor_with_stable_order():
     node_rows = [
-        {"device_id": "a", "hostname": "a-host", "device_type": "router", "status": "active"},
-        {"device_id": "b", "hostname": "b-host", "device_type": "switch", "status": "active"},
-        {"device_id": "c", "hostname": "c-host", "device_type": "switch", "status": "active"},
+        {
+            "device_id": "a",
+            "hostname": "a-host",
+            "device_type": "router",
+            "status": "active",
+            "spatial_ref_id": "campus-a/device-a",
+        },
+        {
+            "device_id": "b",
+            "hostname": "b-host",
+            "device_type": "switch",
+            "status": "active",
+            "spatial_ref_id": None,
+        },
+        {
+            "device_id": "c",
+            "hostname": "c-host",
+            "device_type": "switch",
+            "status": "active",
+            "spatial_ref_id": None,
+        },
     ]
     edge_rows = [{"source_id": "a", "target_id": "b"}]
 
@@ -248,6 +266,8 @@ async def test_get_graph_paginates_and_returns_next_cursor_with_stable_order():
     assert len(result.edges) == 1
     assert result.edges[0].source_id == "a"
     assert result.edges[0].target_id == "b"
+    assert result.nodes[0].spatial_ref_id == "campus-a/device-a"
+    assert result.nodes[1].spatial_ref_id is None
     assert next_cursor == "b"
 
     first_call = session.run.await_args_list[0]
@@ -258,8 +278,20 @@ async def test_get_graph_paginates_and_returns_next_cursor_with_stable_order():
 @pytest.mark.asyncio
 async def test_get_graph_returns_none_next_cursor_when_last_page():
     node_rows = [
-        {"device_id": "a", "hostname": "a-host", "device_type": "router", "status": "active"},
-        {"device_id": "b", "hostname": "b-host", "device_type": "switch", "status": "active"},
+        {
+            "device_id": "a",
+            "hostname": "a-host",
+            "device_type": "router",
+            "status": "active",
+            "spatial_ref_id": "campus-a/device-a",
+        },
+        {
+            "device_id": "b",
+            "hostname": "b-host",
+            "device_type": "switch",
+            "status": "active",
+            "spatial_ref_id": "campus-a/device-b",
+        },
     ]
     edge_rows = []
 
@@ -285,6 +317,8 @@ async def test_get_graph_returns_none_next_cursor_when_last_page():
     )
 
     assert [n.device_id for n in result.nodes] == ["a", "b"]
+    assert result.nodes[0].spatial_ref_id == "campus-a/device-a"
+    assert result.nodes[1].spatial_ref_id == "campus-a/device-b"
     assert result.edges == []
     assert next_cursor is None
 
@@ -320,6 +354,7 @@ async def test_get_node_with_neighbours_returns_node_and_sorted_neighbours():
             "hostname": "core-1",
             "device_type": "router",
             "status": "active",
+            "spatial_ref_id": "campus-a/core-1",
         },
         "neighbours": [
             {
@@ -327,6 +362,7 @@ async def test_get_node_with_neighbours_returns_node_and_sorted_neighbours():
                 "hostname": "edge-3",
                 "device_type": "switch",
                 "status": "active",
+                "spatial_ref_id": None,
                 "edge_type": "connected_to",
                 "direction": "outbound",
             },
@@ -335,6 +371,7 @@ async def test_get_node_with_neighbours_returns_node_and_sorted_neighbours():
                 "hostname": "edge-2",
                 "device_type": "switch",
                 "status": "active",
+                "spatial_ref_id": "campus-a/edge-2",
                 "edge_type": "connected_to",
                 "direction": "inbound",
             },
@@ -357,7 +394,10 @@ async def test_get_node_with_neighbours_returns_node_and_sorted_neighbours():
 
     assert result is not None
     assert result["node"]["device_id"] == "device-1"
+    assert result["node"]["spatial_ref_id"] == "campus-a/core-1"
     assert [n["device_id"] for n in result["neighbours"]] == ["device-2", "device-3"]
+    assert result["neighbours"][0]["spatial_ref_id"] == "campus-a/edge-2"
+    assert result["neighbours"][1]["spatial_ref_id"] is None
     assert result["neighbours"][0]["edge_type"] == "connected_to"
     assert result["neighbours"][0]["direction"] == "inbound"
 
@@ -390,6 +430,7 @@ async def test_get_node_with_neighbours_forces_depth_to_one():
             "hostname": "core-1",
             "device_type": "router",
             "status": "active",
+            "spatial_ref_id": None,
         },
         "neighbours": [],
     }

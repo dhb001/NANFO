@@ -84,6 +84,7 @@ class TopologyNode(BaseModel):
     hostname: str
     device_type: str
     status: str
+    spatial_ref_id: str | None = None
 
 
 class TopologyEdge(BaseModel):

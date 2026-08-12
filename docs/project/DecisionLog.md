@@ -3,6 +3,25 @@
 Lightweight chronological notes for decisions that do not require a full ADR.
 
 ## 2026-08-12
+### Topology Read-Path Spatial Reference Exposure Under Existing Contracts (VS6 Step 5)
+Decision: Extend governed topology read-path payloads (`/api/v1/topology/graph`, `/api/v1/topology/nodes/{device_id}`) to include optional `spatial_ref_id` where available.
+Reason:
+- VS6 Step 5 requires surfacing spatial references on read paths without introducing new endpoint surface area.
+- Topology service already writes/stores `spatial_ref_id` on Device nodes from VS6 Steps 1-2; read-path exposure is the minimal contract completion.
+- Optional-field exposure preserves backwards compatibility for existing consumers and nodes lacking spatial references.
+Impact:
+- Topology node schemas now carry nullable `spatial_ref_id` fields.
+- Neo4j read queries for graph and node-with-neighbours now project `spatial_ref_id` from Device nodes.
+- Unit/integration tests now verify `spatial_ref_id` presence and null behavior in topology responses.
+- No route additions, no C6 deferred endpoint changes, and no schema/envelope drift.
+Related:
+- `backend/app/modules/network/schemas.py`
+- `backend/app/modules/network/topology.py`
+- `backend/app/api/v1/topology.py`
+- `backend/tests/unit/test_topology_flow.py`
+- `backend/tests/integration/test_network_endpoints.py`
+
+## 2026-08-12
 ### Optional Spatial Metadata Mapping in Digital Twin Scene Deltas (VS6 Step 4)
 Decision: Extend simulation websocket delta translation to include optional spatial fields (`spatial_ref_id`, `spatial_metadata`) when provided by simulation event payloads.
 Reason:
