@@ -8,11 +8,12 @@ import uuid
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from fastapi.testclient import TestClient
+
 from app.core.dependencies import get_db, get_redis
 from app.core.security import create_access_token
 from app.main import app
 from app.modules.network.schemas import TopologyGraphResponse
-from fastapi.testclient import TestClient
 
 
 def _make_token():
@@ -122,6 +123,7 @@ class TestDeviceEndpoints:
             "vendor": None,
             "model": None,
             "location_hint": None,
+            "spatial_ref_id": "campus-a/building-1/floor-2/room-204/rack-3/device-router-01",
             "status": "active",
             "created_at": datetime.now(UTC).isoformat(),
         }
@@ -132,7 +134,11 @@ class TestDeviceEndpoints:
         ):
             response = client.post(
                 f"/api/v1/networks/{network_id}/devices",
-                json={"hostname": "router-01", "device_type": "router"},
+                json={
+                    "hostname": "router-01",
+                    "device_type": "router",
+                    "spatial_ref_id": "campus-a/building-1/floor-2/room-204/rack-3/device-router-01",
+                },
                 headers=headers,
             )
         body = response.json()
@@ -140,6 +146,7 @@ class TestDeviceEndpoints:
         assert "data" in body
         assert "meta" in body
         assert "errors" in body
+        assert body["data"]["spatial_ref_id"] == "campus-a/building-1/floor-2/room-204/rack-3/device-router-01"
 
 
 class TestC6DeferredEndpointsAbsent:

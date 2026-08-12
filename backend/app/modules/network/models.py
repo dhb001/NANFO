@@ -7,8 +7,8 @@ networks.workspace_id is a logical reference to Organization module — NO SQL F
 import uuid
 from datetime import datetime
 
-from sqlalchemy import ForeignKey, Text, TIMESTAMP, func
-from sqlalchemy.dialects.postgresql import UUID, INET
+from sqlalchemy import TIMESTAMP, ForeignKey, Text, func
+from sqlalchemy.dialects.postgresql import INET, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.postgres import Base
@@ -46,6 +46,8 @@ class Device(Base):
     # location_hint: intentionally ephemeral free text.
     # Will be superseded by spatial_ref_id (UOM reference) in M6 Digital Twin slice.
     location_hint: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # spatial_ref_id: Digital Twin/UOM spatial object reference.
+    spatial_ref_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(Text, nullable=False, default="active")
     created_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now())

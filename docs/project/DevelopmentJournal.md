@@ -1,5 +1,14 @@
 # Development Journal
 
+## [2026-08-12] - Vertical Slice 6 Step 1 (Device Spatial Reference Baseline)
+
+- **Implemented:** Started M6/VS6 spatial-reference objective by introducing optional `spatial_ref_id` on network `Device` model and threading it through create-device request/response flow.
+- **Schema/model updates:** Added `spatial_ref_id` to SQLAlchemy `Device` model and network device Pydantic schemas; create-device repository/service paths now persist and return the field.
+- **Migration safety:** Added Alembic migration `0003_device_spatial_ref` to add nullable `devices.spatial_ref_id` plus index, keeping rollout reversible and backward-compatible.
+- **Coverage updates:** Expanded unit/integration network endpoint/service tests to validate `spatial_ref_id` acceptance and response propagation on device creation.
+- **Scope guardrails:** No API envelope drift, no C5/C6 boundary changes, no runtime/websocket fail-open behavior changes, and no unrelated refactors.
+- **Validation:** Scoped Ruff passed; targeted network unit/integration tests passed (`29 passed`); full backend regression passed (`266 passed`).
+
 ## [2026-08-12] - Vertical Slice 5 Closure (Remaining Scope Complete)
 
 - **Completed:** Closed all remaining VS5 steps (2-4) after Step 1 baseline with per-delta deny-list revalidation, session-security close-reason observability, and expanded simulation lifecycle WS coverage.

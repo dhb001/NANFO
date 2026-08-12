@@ -11,7 +11,6 @@ from datetime import datetime
 
 from pydantic import BaseModel
 
-
 # ── Network schemas ───────────────────────────────────────────────────────────
 
 class CreateNetworkRequest(BaseModel):
@@ -48,6 +47,7 @@ class CreateDeviceRequest(BaseModel):
     vendor: str | None = None
     model: str | None = None
     location_hint: str | None = None
+    spatial_ref_id: str | None = None
 
 
 class DeviceResponse(BaseModel):
@@ -59,6 +59,7 @@ class DeviceResponse(BaseModel):
     vendor: str | None
     model: str | None
     location_hint: str | None
+    spatial_ref_id: str | None
     status: str
     created_at: datetime
 

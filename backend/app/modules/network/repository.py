@@ -80,6 +80,7 @@ class DeviceRepository:
         vendor: str | None,
         model: str | None,
         location_hint: str | None,
+        spatial_ref_id: str | None,
     ) -> Device:
         device = Device(
             network_id=network_id,
@@ -89,6 +90,7 @@ class DeviceRepository:
             vendor=vendor,
             model=model,
             location_hint=location_hint,
+            spatial_ref_id=spatial_ref_id,
             status="active",
         )
         self._db.add(device)

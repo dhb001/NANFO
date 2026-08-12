@@ -3,6 +3,26 @@
 Lightweight chronological notes for decisions that do not require a full ADR.
 
 ## 2026-08-12
+### Device Spatial Reference Baseline for M6/VS6 (VS6 Step 1)
+Decision: Introduce optional `spatial_ref_id` on Network `Device` persistence and API create/read contracts as the first executable M6 spatial-reference increment.
+Reason:
+- `CurrentSprint` explicitly defers Digital Twin spatial references to M6; prior model contained only `location_hint` free text.
+- Minimal reversible rollout requires nullable field introduction first, without forcing immediate event/read-path propagation or breaking create flows.
+- Backward compatibility is preserved by keeping `spatial_ref_id` optional end-to-end.
+Impact:
+- Added Alembic migration `0003_device_spatial_ref` to append nullable `devices.spatial_ref_id` with index.
+- `Device` ORM model and create-device schema/service/repository flow now accept/store/return `spatial_ref_id`.
+- No API envelope drift, no C5/C6 scope change, and no runtime/websocket behavior change in Step 1.
+Related:
+- `backend/alembic/versions/0003_device_spatial_ref.py`
+- `backend/app/modules/network/models.py`
+- `backend/app/modules/network/schemas.py`
+- `backend/app/modules/network/repository.py`
+- `backend/app/modules/network/service.py`
+- `backend/tests/unit/test_network_service.py`
+- `backend/tests/integration/test_network_endpoints.py`
+
+## 2026-08-12
 ### VS5 Closure: Remaining Scope Complete and Tracking Finalized
 Decision: Mark VS5 complete after delivering Steps 2-4 with full validation gates and final tracking closure, then roll planning forward to VS6 Step 1.
 Reason:

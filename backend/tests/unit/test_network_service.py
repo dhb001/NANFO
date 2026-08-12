@@ -37,6 +37,7 @@ def _make_device(network_id: uuid.UUID | None = None) -> Device:
     d.vendor = "Cisco"
     d.model = "C9300"
     d.location_hint = None
+    d.spatial_ref_id = None
     d.status = "active"
     d.created_at = MagicMock()
     return d
@@ -131,7 +132,11 @@ class TestDeviceService:
         ):
             result = await dev_svc.add_device(
                 network_id=network.network_id,
-                req=CreateDeviceRequest(hostname="router-01", device_type="router"),
+                req=CreateDeviceRequest(
+                    hostname="router-01",
+                    device_type="router",
+                    spatial_ref_id="campus-a/building-1/floor-2/room-204/rack-3/device-router-01",
+                ),
                 actor_id="u1",
                 correlation_id=str(uuid.uuid4()),
             )
@@ -141,6 +146,29 @@ class TestDeviceService:
         assert call_kwargs["event_type"] == "network.device.added"
         assert call_kwargs["payload"]["workspace_id"] == str(network.workspace_id)
         assert result.device_id == device.device_id
+
+    @pytest.mark.asyncio
+    async def test_add_device_passes_spatial_ref_id_to_repository(self, dev_svc):
+        network = _make_network()
+        device = _make_device(network_id=network.network_id)
+
+        with (
+            patch.object(dev_svc._network_repo, "get_by_id", return_value=network),
+            patch.object(dev_svc._repo, "create", return_value=device) as mock_create,
+            patch("app.modules.network.service.publish_event", new_callable=AsyncMock),
+        ):
+            await dev_svc.add_device(
+                network_id=network.network_id,
+                req=CreateDeviceRequest(
+                    hostname="router-01",
+                    device_type="router",
+                    spatial_ref_id="campus-a/device-1",
+                ),
+                actor_id="u1",
+                correlation_id=str(uuid.uuid4()),
+            )
+
+        assert mock_create.await_args.kwargs["spatial_ref_id"] == "campus-a/device-1"
 
     @pytest.mark.asyncio
     async def test_add_device_to_unknown_network_raises_404(self, dev_svc):

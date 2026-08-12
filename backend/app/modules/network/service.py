@@ -123,6 +123,7 @@ class DeviceService:
             vendor=req.vendor,
             model=req.model,
             location_hint=req.location_hint,
+            spatial_ref_id=req.spatial_ref_id,
         )
         await self._db.commit()
         await self._db.refresh(device)
