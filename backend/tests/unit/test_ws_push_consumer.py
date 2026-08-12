@@ -252,7 +252,7 @@ async def test_ws_digital_twin_consumer_pushes_simulation_completed_delta():
 
 @pytest.mark.asyncio
 async def test_ws_digital_twin_consumer_unmapped_event_is_noop():
-    event = _simulation_event("simulation.branch_created")
+    event = _simulation_event("simulation.unknown")
 
     with patch("app.events.consumers.ws_push_consumer.digital_twin_ws_manager") as mock_digital_twin_ws_manager:
         mock_digital_twin_ws_manager.push_delta = AsyncMock()
@@ -325,6 +325,32 @@ async def test_ws_digital_twin_consumer_pushes_simulation_cancelled_delta():
 
 
 @pytest.mark.asyncio
+async def test_ws_digital_twin_consumer_pushes_simulation_branch_created_delta():
+    event = _simulation_event(
+        "simulation.branch_created",
+        payload={
+            "network_id": str(uuid.uuid4()),
+            "simulation_id": str(uuid.uuid4()),
+            "scenario_id": str(uuid.uuid4()),
+            "scene_object_id": "simulation-state",
+            "state": "draft",
+            "status": "draft",
+            "risk_gate": "required",
+        },
+    )
+
+    with patch("app.events.consumers.ws_push_consumer.digital_twin_ws_manager") as mock_digital_twin_ws_manager:
+        mock_digital_twin_ws_manager.push_delta = AsyncMock()
+        await handle_ws_digital_twin_event(event)
+
+    kwargs = mock_digital_twin_ws_manager.push_delta.await_args.kwargs
+    assert kwargs["event_type"] == "simulation.branch_created"
+    assert kwargs["delta_type"] == "update"
+    assert kwargs["scene_object"]["state"] == "draft"
+    assert kwargs["scene_object"]["status"] == "draft"
+
+
+@pytest.mark.asyncio
 async def test_ws_digital_twin_consumer_includes_spatial_ref_metadata_when_present():
     event = _simulation_event(
         "simulation.completed",
@@ -389,7 +415,9 @@ def test_ws_push_handlers_include_simulation_events_for_digital_twin():
     assert "simulation.completed" in WS_PUSH_HANDLERS
     assert "simulation.paused" in WS_PUSH_HANDLERS
     assert "simulation.cancelled" in WS_PUSH_HANDLERS
+    assert "simulation.branch_created" in WS_PUSH_HANDLERS
     assert WS_PUSH_HANDLERS["simulation.started"] is handle_ws_digital_twin_event
     assert WS_PUSH_HANDLERS["simulation.completed"] is handle_ws_digital_twin_event
     assert WS_PUSH_HANDLERS["simulation.paused"] is handle_ws_digital_twin_event
     assert WS_PUSH_HANDLERS["simulation.cancelled"] is handle_ws_digital_twin_event
+    assert WS_PUSH_HANDLERS["simulation.branch_created"] is handle_ws_digital_twin_event

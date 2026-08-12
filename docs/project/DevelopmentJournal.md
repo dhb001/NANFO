@@ -1,5 +1,45 @@
 # Development Journal
 
+## [2026-08-13] - Vertical Slice 7 Closure (Simulation Lifecycle Baseline Complete)
+
+- **Completed:** Closed remaining VS7 scope (Steps 4-7) with branch creation, simulation detail read, deterministic compare deltas, and lifecycle audit/contract alignment.
+- **Contract closure:** Simulation API surface now includes all PRD-listed endpoints (`start`, `pause`, `branch`, `{id}`, `{id}/compare/{baselineId}`) under canonical envelope responses.
+- **Lifecycle alignment:** Branch creation now emits `simulation.branch_created`; audit and digital twin websocket consumer mappings include the full implemented simulation lifecycle event set.
+- **Governance/constraints:** No C5/C6 drift, no schema migration beyond Step 1 baseline, no undocumented channel additions, and fail-open behavior preserved for queue publish degradation branches.
+- **Validation closure:** Required scoped Ruff + targeted suites passed for Step 7 scope (`67 passed`); final backend full regression gate passed (`313 passed`).
+
+## [2026-08-13] - Vertical Slice 7 Step 7 (Lifecycle Audit Coverage + Contract Alignment)
+
+- **Implemented:** Aligned lifecycle event contracts by adding `simulation.branch_created` publication on branch creation and extending governed consumers to handle the new simulation lifecycle event.
+- **Audit coverage:** Audit consumer mapping now includes simulation lifecycle events (`simulation.started`, `simulation.completed`, `simulation.paused`, `simulation.cancelled`, `simulation.branch_created`) with simulation resource attribution.
+- **WebSocket contract alignment:** `/ws/digital-twin` simulation event translation now includes `simulation.branch_created` using the existing scene-delta `update` shape (no channel or envelope drift).
+- **Governance/constraints:** Event naming follows PRD/EventAPI conventions, no new endpoint beyond approved Simulation PRD surface, no schema migration required, and C5/C6 constraints unchanged.
+- **Validation:** Scoped Ruff passed; expanded simulation/audit/ws target suite passed (`67 passed`); full backend regression passed (`313 passed`).
+
+## [2026-08-13] - Vertical Slice 7 Step 6 (Compare Endpoint Deterministic Deltas)
+
+- **Implemented:** Added `GET /api/v1/simulations/{id}/compare/{baselineId}` with deterministic baseline deltas for `latency_ms`, `loss_pct`, and `throughput_mbps`.
+- **Service behavior:** Compare flow now enforces parent simulation/baseline existence, C5 workspace validation for both records, and same-network conflict checks before computing deltas.
+- **Deterministic output:** Metric extraction normalizes missing/non-numeric values to `0.0` to preserve stable compare semantics and predictable envelope contracts.
+- **Governance/constraints:** Endpoint and compare fields align to Simulation PRD ACs; no schema migration, no websocket contract changes, and no C6 scope changes.
+- **Validation:** Scoped Ruff passed; simulation-targeted unit/integration suite passed (`41 passed`); full backend regression passed (`309 passed`).
+
+## [2026-08-13] - Vertical Slice 7 Step 5 (Simulation Detail Read Endpoint)
+
+- **Implemented:** Added `GET /api/v1/simulations/{id}` with canonical envelope typing and service-layer read flow for persisted lifecycle records.
+- **Read contract:** Response now exposes lifecycle lineage/state plus persisted run metadata (`validation`, `run_output`, `model_versions`, `audit_provenance`, queue outcome fields, and timestamps).
+- **Boundary enforcement:** Detail read validates simulation existence and preserves C5 workspace boundary checks through Organization service boundary before returning data.
+- **Governance/constraints:** Endpoint is explicitly listed in Simulation PRD, no schema migration required, and no event/channel contract changes for Step 5 scope.
+- **Validation:** Scoped Ruff passed; simulation-targeted unit/integration suite passed (`35 passed`); full backend regression passed (`303 passed`).
+
+## [2026-08-13] - Vertical Slice 7 Step 4 (Branch Endpoint + Draft Lineage Persistence)
+
+- **Implemented:** Added `POST /api/v1/simulations/branch` (`201`) with canonical envelope typing and service-layer draft branch creation against a persisted parent simulation.
+- **Lineage persistence:** Branch creation now persists a new simulation row with `parent_simulation_id` linkage, inherited ownership context (`network_id`, `workspace_id`), draft lifecycle state (`state=status=draft`), and deterministic branch scenario derivation.
+- **Validation/provenance behavior:** Branch drafts carry `validation.pipeline_stage=branch_draft`, inherited required checks/policy reference where present, and branch provenance markers (`branch_from_simulation_id`, `branch_correlation_id`) in audit metadata.
+- **Governance/constraints:** Endpoint scope matches Simulation PRD, no new domain events or websocket channels introduced, no schema migration required (Step 1 baseline already includes lineage fields), C5 workspace validation preserved via Organization service boundary, and C6 unchanged.
+- **Validation:** Scoped Ruff passed; targeted simulation unit/integration tests passed (`30 passed`); full backend regression passed (`298 passed`).
+
 ## [2026-08-12] - Vertical Slice 7 Step 3 (Pause Endpoint + Resume Semantics)
 
 - **Implemented:** Added `POST /api/v1/simulations/pause` and resume support on `POST /api/v1/simulations/start` via optional `simulation_id` while preserving canonical response envelope contracts.

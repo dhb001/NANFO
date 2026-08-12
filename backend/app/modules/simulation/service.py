@@ -85,6 +85,22 @@ def _coerce_iso_datetime(value: Any) -> datetime:
         return datetime.now(UTC)
 
 
+def _coerce_metric_value(raw: Any) -> float:
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _extract_metrics(run_output: Any) -> dict[str, float]:
+    payload = run_output if isinstance(run_output, dict) else {}
+    return {
+        "latency_ms": _coerce_metric_value(payload.get("latency_ms")),
+        "loss_pct": _coerce_metric_value(payload.get("loss_pct")),
+        "throughput_mbps": _coerce_metric_value(payload.get("throughput_mbps")),
+    }
+
+
 class ScenarioValidationHandoffService:
     """Build deterministic simulation validation handoff payloads."""
 
@@ -157,7 +173,7 @@ class SimulationEventService:
 
 
 class SimulationStartService:
-    """Start simulation handoff flow with C5-safe validation and persistence."""
+    """Simulation lifecycle service for start/resume/pause/branch flows."""
 
     def __init__(self, *, db: AsyncSession, redis: aioredis.Redis):
         self._db = db
@@ -381,6 +397,228 @@ class SimulationStartService:
             "risk_gate": "required",
             "scenario_id": str(simulation.scenario_id),
             "correlation_id": correlation_id,
+        }
+
+    async def branch_simulation(
+        self,
+        *,
+        parent_simulation_id: uuid.UUID,
+        scenario_name: str,
+        correlation_id: str,
+        requested_by_user_id: str,
+    ) -> dict[str, Any]:
+        parent = await self._repo.get_by_id(parent_simulation_id)
+        if parent is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Simulation not found.")
+
+        await self._workspace_svc.get_active_workspace(parent.workspace_id)
+
+        normalized_scenario_name = _coerce_non_empty_text(
+            scenario_name,
+            fallback=f"branch-{str(parent.simulation_id)[:8]}",
+        )
+        normalized_requested_by = _coerce_requested_by_user_id(requested_by_user_id)
+        requested_at = datetime.now(UTC)
+        requested_at_iso = requested_at.isoformat()
+
+        required_checks = ["simulation_before_deployment"]
+        policy_reference = "ADR-008"
+        if isinstance(parent.validation, dict):
+            candidate_checks = _normalize_validation_checks(parent.validation.get("required_checks"))
+            if candidate_checks:
+                required_checks = candidate_checks
+            candidate_policy = str(parent.validation.get("policy_reference", "")).strip()
+            if candidate_policy:
+                policy_reference = candidate_policy
+
+        validation = {
+            "pipeline_stage": "branch_draft",
+            "required_checks": required_checks,
+            "policy_reference": policy_reference,
+            "status": "pending",
+            "queued_at": requested_at_iso,
+            "requested_by_user_id": normalized_requested_by,
+        }
+
+        run_output: dict[str, Any]
+        if isinstance(parent.run_output, dict):
+            run_output = dict(parent.run_output)
+        else:
+            run_output = {
+                "latency_ms": 0.0,
+                "loss_pct": 0.0,
+                "throughput_mbps": 0.0,
+            }
+
+        model_versions = dict(parent.model_versions) if isinstance(parent.model_versions, dict) else {}
+        audit_provenance = dict(parent.audit_provenance) if isinstance(parent.audit_provenance, dict) else {}
+        audit_provenance["branch_from_simulation_id"] = str(parent.simulation_id)
+        audit_provenance["branch_correlation_id"] = correlation_id
+
+        branch_simulation_id = uuid.uuid4()
+        branch_scenario_id = uuid.UUID(
+            _derive_scenario_id(str(parent.network_id), normalized_scenario_name)
+        )
+
+        branch = await self._repo.create(
+            simulation_id=branch_simulation_id,
+            parent_simulation_id=parent.simulation_id,
+            network_id=parent.network_id,
+            workspace_id=parent.workspace_id,
+            scenario_id=branch_scenario_id,
+            scenario_name=normalized_scenario_name,
+            state="draft",
+            status="draft",
+            risk_gate="required",
+            validation=validation,
+            run_output=run_output,
+            model_versions=model_versions,
+            audit_provenance=audit_provenance,
+            queue_status="draft",
+            stream_entry_id=None,
+            warning=None,
+            requested_by_user_id=normalized_requested_by,
+            requested_at=requested_at,
+        )
+        event_payload = {
+            "simulation_id": str(branch.simulation_id),
+            "parent_simulation_id": str(parent.simulation_id),
+            "scenario_id": str(branch.scenario_id),
+            "network_id": str(branch.network_id),
+            "scene_object_id": _DEFAULT_SIMULATION_OBJECT_ID,
+            "state": str(branch.state),
+            "status": str(branch.status),
+            "risk_gate": str(branch.risk_gate),
+            "scenario_name": str(branch.scenario_name),
+            "validation": validation,
+            "requested_at": requested_at_iso,
+            "correlation_id": correlation_id,
+        }
+
+        publish_payload = {
+            "simulation_id": event_payload["simulation_id"],
+            "parent_simulation_id": event_payload["parent_simulation_id"],
+            "scenario_id": event_payload["scenario_id"],
+            "network_id": event_payload["network_id"],
+            "scene_object_id": event_payload["scene_object_id"],
+            "state": event_payload["state"],
+            "status": event_payload["status"],
+            "risk_gate": event_payload["risk_gate"],
+            "validation": event_payload["validation"],
+        }
+
+        try:
+            await publish_event(
+                redis=self._redis,
+                event_type="simulation.branch_created",
+                source="simulation",
+                payload=publish_payload,
+                correlation_id=correlation_id,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "simulation_branch_event_publish_failed",
+                simulation_id=str(branch.simulation_id),
+                parent_simulation_id=str(parent.simulation_id),
+                correlation_id=correlation_id,
+                error=str(exc),
+            )
+
+        await self._db.commit()
+
+        return event_payload
+
+    async def get_simulation_detail(
+        self,
+        *,
+        simulation_id: uuid.UUID,
+        requested_by_user_id: str,
+    ) -> dict[str, Any]:
+        _ = requested_by_user_id
+        simulation = await self._repo.get_by_id(simulation_id)
+        if simulation is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Simulation not found.")
+
+        await self._workspace_svc.get_active_workspace(simulation.workspace_id)
+
+        return {
+            "simulation_id": str(simulation.simulation_id),
+            "parent_simulation_id": (
+                str(simulation.parent_simulation_id)
+                if simulation.parent_simulation_id is not None
+                else None
+            ),
+            "scenario_id": str(simulation.scenario_id),
+            "network_id": str(simulation.network_id),
+            "workspace_id": str(simulation.workspace_id),
+            "scene_object_id": _DEFAULT_SIMULATION_OBJECT_ID,
+            "state": str(simulation.state),
+            "status": str(simulation.status),
+            "risk_gate": str(simulation.risk_gate),
+            "scenario_name": str(simulation.scenario_name),
+            "validation": dict(simulation.validation) if isinstance(simulation.validation, dict) else {},
+            "run_output": dict(simulation.run_output) if isinstance(simulation.run_output, dict) else {},
+            "model_versions": (
+                dict(simulation.model_versions)
+                if isinstance(simulation.model_versions, dict)
+                else {}
+            ),
+            "audit_provenance": (
+                dict(simulation.audit_provenance)
+                if isinstance(simulation.audit_provenance, dict)
+                else {}
+            ),
+            "queue_status": str(simulation.queue_status),
+            "stream_entry_id": simulation.stream_entry_id,
+            "warning": simulation.warning,
+            "requested_by_user_id": str(simulation.requested_by_user_id),
+            "requested_at": simulation.requested_at.isoformat(),
+            "created_at": simulation.created_at.isoformat(),
+            "updated_at": simulation.updated_at.isoformat(),
+        }
+
+    async def compare_simulations(
+        self,
+        *,
+        simulation_id: uuid.UUID,
+        baseline_simulation_id: uuid.UUID,
+        requested_by_user_id: str,
+    ) -> dict[str, Any]:
+        _ = requested_by_user_id
+        simulation = await self._repo.get_by_id(simulation_id)
+        if simulation is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Simulation not found.")
+
+        baseline = await self._repo.get_by_id(baseline_simulation_id)
+        if baseline is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Baseline simulation not found.")
+
+        await self._workspace_svc.get_active_workspace(simulation.workspace_id)
+        await self._workspace_svc.get_active_workspace(baseline.workspace_id)
+
+        if simulation.network_id != baseline.network_id:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Simulations belong to different networks.",
+            )
+
+        simulation_metrics = _extract_metrics(simulation.run_output)
+        baseline_metrics = _extract_metrics(baseline.run_output)
+        deltas = {
+            "latency_ms": simulation_metrics["latency_ms"] - baseline_metrics["latency_ms"],
+            "loss_pct": simulation_metrics["loss_pct"] - baseline_metrics["loss_pct"],
+            "throughput_mbps": simulation_metrics["throughput_mbps"] - baseline_metrics["throughput_mbps"],
+        }
+
+        return {
+            "simulation_id": str(simulation.simulation_id),
+            "baseline_simulation_id": str(baseline.simulation_id),
+            "scenario_id": str(simulation.scenario_id),
+            "baseline_scenario_id": str(baseline.scenario_id),
+            "network_id": str(simulation.network_id),
+            "simulation_metrics": simulation_metrics,
+            "baseline_metrics": baseline_metrics,
+            "deltas": deltas,
         }
 
 

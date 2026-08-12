@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import time
 import uuid
-from typing import Annotated
+from typing import Annotated, Any
 
 import redis.asyncio as aioredis
 from fastapi import APIRouter, Depends, status
@@ -37,6 +37,11 @@ class StartSimulationRequest(BaseModel):
 
 class PauseSimulationRequest(BaseModel):
     simulation_id: uuid.UUID
+
+
+class BranchSimulationRequest(BaseModel):
+    parent_simulation_id: uuid.UUID
+    scenario_name: str = Field(min_length=1, max_length=120)
 
 
 class ScenarioValidationState(BaseModel):
@@ -75,6 +80,62 @@ class PauseSimulationResponse(BaseModel):
     risk_gate: str
     scenario_id: str
     correlation_id: str
+
+
+class BranchSimulationResponse(BaseModel):
+    simulation_id: str
+    parent_simulation_id: str
+    scenario_id: str
+    network_id: str
+    scene_object_id: str
+    state: str
+    status: str
+    risk_gate: str
+    scenario_name: str
+    validation: ScenarioValidationState
+    requested_at: str
+    correlation_id: str
+
+
+class SimulationDetailResponse(BaseModel):
+    simulation_id: str
+    parent_simulation_id: str | None
+    scenario_id: str
+    network_id: str
+    workspace_id: str
+    scene_object_id: str
+    state: str
+    status: str
+    risk_gate: str
+    scenario_name: str
+    validation: dict[str, Any]
+    run_output: dict[str, Any]
+    model_versions: dict[str, Any]
+    audit_provenance: dict[str, Any]
+    queue_status: str
+    stream_entry_id: str | None
+    warning: str | None
+    requested_by_user_id: str
+    requested_at: str
+    created_at: str
+    updated_at: str
+
+
+class SimulationMetricsSnapshot(BaseModel):
+    latency_ms: float
+    loss_pct: float
+    throughput_mbps: float
+
+
+class SimulationCompareResponse(BaseModel):
+    simulation_id: str
+    baseline_simulation_id: str
+    scenario_id: str
+    baseline_scenario_id: str
+    network_id: str
+    simulation_metrics: SimulationMetricsSnapshot
+    baseline_metrics: SimulationMetricsSnapshot
+    deltas: SimulationMetricsSnapshot
 
 
 @router.post("/start", response_model=APIResponse[SimulationValidationHandoffResponse], status_code=status.HTTP_202_ACCEPTED)
@@ -120,4 +181,63 @@ async def pause_simulation(
         requested_by_user_id=claims.user_id,
     )
     payload = PauseSimulationResponse.model_validate(result)
+    return success_response(payload, meta.request_id, started, meta.timestamp)
+
+
+@router.post("/branch", response_model=APIResponse[BranchSimulationResponse], status_code=status.HTTP_201_CREATED)
+async def branch_simulation(
+    req: BranchSimulationRequest,
+    claims: Annotated[TokenClaims, Depends(get_current_user)],
+    meta: Annotated[RequestMeta, Depends(get_request_meta)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    redis: Annotated[aioredis.Redis, Depends(get_redis)],
+):
+    started = time.monotonic()
+    result = await SimulationStartService(db=db, redis=redis).branch_simulation(
+        parent_simulation_id=req.parent_simulation_id,
+        scenario_name=req.scenario_name,
+        correlation_id=meta.request_id,
+        requested_by_user_id=claims.user_id,
+    )
+    payload = BranchSimulationResponse.model_validate(result)
+    return success_response(payload, meta.request_id, started, meta.timestamp)
+
+
+@router.get("/{simulation_id}", response_model=APIResponse[SimulationDetailResponse], status_code=status.HTTP_200_OK)
+async def get_simulation_detail(
+    simulation_id: uuid.UUID,
+    claims: Annotated[TokenClaims, Depends(get_current_user)],
+    meta: Annotated[RequestMeta, Depends(get_request_meta)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    redis: Annotated[aioredis.Redis, Depends(get_redis)],
+):
+    started = time.monotonic()
+    result = await SimulationStartService(db=db, redis=redis).get_simulation_detail(
+        simulation_id=simulation_id,
+        requested_by_user_id=claims.user_id,
+    )
+    payload = SimulationDetailResponse.model_validate(result)
+    return success_response(payload, meta.request_id, started, meta.timestamp)
+
+
+@router.get(
+    "/{simulation_id}/compare/{baseline_id}",
+    response_model=APIResponse[SimulationCompareResponse],
+    status_code=status.HTTP_200_OK,
+)
+async def compare_simulations(
+    simulation_id: uuid.UUID,
+    baseline_id: uuid.UUID,
+    claims: Annotated[TokenClaims, Depends(get_current_user)],
+    meta: Annotated[RequestMeta, Depends(get_request_meta)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    redis: Annotated[aioredis.Redis, Depends(get_redis)],
+):
+    started = time.monotonic()
+    result = await SimulationStartService(db=db, redis=redis).compare_simulations(
+        simulation_id=simulation_id,
+        baseline_simulation_id=baseline_id,
+        requested_by_user_id=claims.user_id,
+    )
+    payload = SimulationCompareResponse.model_validate(result)
     return success_response(payload, meta.request_id, started, meta.timestamp)

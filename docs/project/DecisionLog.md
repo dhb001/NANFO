@@ -2,6 +2,104 @@
 
 Lightweight chronological notes for decisions that do not require a full ADR.
 
+## 2026-08-13
+### VS7 Closure Gate Completion and Simulation Lifecycle Baseline Finalization
+Decision: Mark VS7 complete after delivering Steps 4-7 with full backend regression and tracking closure.
+Reason:
+- All VS7 checklist items in sprint tracking are now implemented and validated.
+- Simulation PRD endpoint surface and lifecycle contract goals are complete for baseline scope.
+- Closure entry provides a governance checkpoint before opening next-slice planning.
+Impact:
+- VS7 now closes with persisted branch lineage, detail read, deterministic compare deltas, and lifecycle audit/ws contract alignment.
+- Project tracking reflects closure gate completion and VS7 complete state.
+- No additional schema/API boundary changes introduced by closure itself.
+Related:
+- `docs/project/CurrentSprint.md`
+- `docs/project/DevelopmentJournal.md`
+- `docs/project/DecisionLog.md`
+
+## 2026-08-13
+### Simulation Lifecycle Contract Alignment via `simulation.branch_created` + Audit Coverage (VS7 Step 7)
+Decision: Extend simulation lifecycle contract coverage by publishing `simulation.branch_created` during branch creation, routing it through existing digital twin delta translation, and adding lifecycle event audit coverage for simulation events.
+Reason:
+- VS7 Step 7 requires lifecycle audit coverage and contract alignment updates after branch/read/compare endpoint delivery.
+- EventAPI naming convention and existing simulation lifecycle model support additive optional lifecycle events without envelope changes.
+- Existing ws/audit consumer architecture can absorb this event with minimal reversible scope.
+Impact:
+- Branch flow now emits `simulation.branch_created` with governed simulation payload fields.
+- Audit consumer now maps simulation lifecycle events to `resource_type=simulation` and resolves simulation resource IDs from payload.
+- WebSocket push consumer now translates `simulation.branch_created` to `/ws/digital-twin` update deltas under existing scene-object shape.
+- No route additions, no schema migration, no C5/C6 drift.
+Assumptions:
+- `simulation.branch_created` is treated as a non-breaking additive lifecycle event under current simulation PRD/event governance.
+Related:
+- `backend/app/modules/simulation/service.py`
+- `backend/app/events/consumers/audit_consumer.py`
+- `backend/app/events/consumers/ws_push_consumer.py`
+- `backend/tests/unit/test_simulation_service.py`
+- `backend/tests/unit/test_audit_consumer.py`
+- `backend/tests/unit/test_ws_push_consumer.py`
+
+## 2026-08-13
+### Deterministic Compare Endpoint Semantics for Baseline Deltas (VS7 Step 6)
+Decision: Implement compare semantics on `GET /api/v1/simulations/{id}/compare/{baselineId}` using deterministic numeric extraction over persisted `run_output` and return explicit simulation/baseline snapshots plus metric deltas.
+Reason:
+- Simulation PRD acceptance criteria requires baseline compare for latency/loss/throughput deltas.
+- Deterministic coercion of absent/non-numeric fields to `0.0` avoids unstable response behavior and keeps compare output predictable.
+- C5 boundary safety requires workspace validation on both simulation records before compare.
+Impact:
+- Added compare API response contract with `simulation_metrics`, `baseline_metrics`, and `deltas` objects.
+- Added conflict semantics (`409`) when simulation and baseline belong to different networks.
+- No schema migration, no websocket/event contract changes, and no C6 drift.
+Assumptions:
+- Compare endpoint currently operates on persisted simulation metadata records only; TimescaleDB-backed extended analytics remain out of Step 6 scope.
+Related:
+- `backend/app/api/v1/simulation.py`
+- `backend/app/modules/simulation/service.py`
+- `backend/tests/unit/test_simulation_service.py`
+- `backend/tests/integration/test_simulation_endpoints.py`
+
+## 2026-08-13
+### Simulation Detail Read Contract via Persisted Lifecycle Metadata (VS7 Step 5)
+Decision: Add `GET /api/v1/simulations/{id}` read endpoint returning a canonical envelope view over persisted simulation lifecycle metadata, including lineage and queue outcome fields.
+Reason:
+- Simulation PRD explicitly lists simulation detail read endpoint as required lifecycle surface.
+- Existing Step 1 persistence schema already contains required fields; read endpoint is minimal/no-migration increment.
+- C5 boundary checks must remain enforced for simulation reads through Organization service boundary.
+Impact:
+- Added detail API response model and service read flow for simulation metadata fields (`validation`, `run_output`, `model_versions`, `audit_provenance`, queue fields, timestamps).
+- Not-found behavior returns standard 404 wrapped by canonical error envelope.
+- No event contract or websocket routing changes for Step 5 scope.
+Assumptions:
+- Detail endpoint returns stored metadata snapshots as-is; no additional enrichment from external stores is required in this step.
+Related:
+- `backend/app/api/v1/simulation.py`
+- `backend/app/modules/simulation/service.py`
+- `backend/tests/unit/test_simulation_service.py`
+- `backend/tests/integration/test_simulation_endpoints.py`
+
+## 2026-08-13
+### Branch via Persisted Draft Record with Parent Lineage Linkage (VS7 Step 4)
+Decision: Implement simulation branching with `POST /api/v1/simulations/branch` by creating a new draft simulation record linked through `parent_simulation_id` to an existing persisted simulation.
+Reason:
+- `Simulation.md` explicitly defines `/simulations/branch` and requires scenario lineage support for what-if workflows.
+- Existing Step 1 simulation schema already includes `parent_simulation_id`, enabling lineage persistence without extra migration scope.
+- Draft-only creation keeps Step 4 minimal and reversible while preserving existing start/pause queue semantics and event contracts.
+Impact:
+- Added `branch_simulation(...)` service flow with parent existence + C5 workspace validation before persistence.
+- Branch records now persist as `state=status=draft`, `queue_status=draft`, inherited ownership context, and branch validation metadata (`pipeline_stage=branch_draft`).
+- API route `POST /api/v1/simulations/branch` now returns canonical envelope payload including both `simulation_id` and `parent_simulation_id` lineage reference.
+- No new event names, no websocket routing changes, no schema migration, and no C6 drift.
+Assumptions:
+- Branch scenario identity is deterministically derived from `(network_id, scenario_name)` and can differ from parent `scenario_id` when label changes.
+Related:
+- `backend/app/api/v1/simulation.py`
+- `backend/app/modules/simulation/service.py`
+- `backend/app/modules/simulation/repository.py`
+- `backend/tests/unit/test_simulation_service.py`
+- `backend/tests/integration/test_simulation_endpoints.py`
+- `backend/tests/unit/test_simulation_repository.py`
+
 ## 2026-08-12
 ### Pause Endpoint and Resume-via-Start Lifecycle Semantics (VS7 Step 3)
 Decision: Implement simulation pause with `POST /api/v1/simulations/pause` and implement resume semantics via optional `simulation_id` on existing `POST /api/v1/simulations/start` rather than introducing any new resume endpoint/event type.

@@ -20,6 +20,9 @@ All endpoints must follow `docs/api/API_STANDARD.md`.
 ## 3.1 Event Contracts (Baseline)
 - `simulation.started` — emitted when a scenario validation handoff is queued for simulation-before-deployment processing.
 - `simulation.completed` — emitted when a scenario run reaches completed state and final state deltas can be propagated.
+- `simulation.paused` — emitted when an active/queued simulation transitions to paused state.
+- `simulation.cancelled` — emitted when a simulation transitions to cancelled state.
+- `simulation.branch_created` — emitted when a draft branch simulation is created from a parent simulation lineage.
 
 Baseline payload fields for digital twin synchronization:
 - `simulation_id`

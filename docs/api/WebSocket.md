@@ -154,7 +154,7 @@ For `remove` deltas:
 }
 ```
 
-`simulation.completed` reuses the same shape with updated `state`, `status`, and `risk_gate` values.
+`simulation.completed`, `simulation.paused`, `simulation.cancelled`, and `simulation.branch_created` reuse the same shape with updated lifecycle `state`, `status`, and `risk_gate` values.
 
 ---
 

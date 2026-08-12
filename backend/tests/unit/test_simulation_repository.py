@@ -95,3 +95,18 @@ async def test_update_queue_outcome_mutates_record_and_flushes(mock_db):
     assert simulation.stream_entry_id is None
     assert simulation.warning == "event_queue_unavailable"
     mock_db.flush.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_list_children_returns_rows_for_parent_simulation(mock_db):
+    parent_simulation_id = uuid.uuid4()
+    child = MagicMock(spec=Simulation)
+    result = MagicMock()
+    result.scalars.return_value.all.return_value = [child]
+    mock_db.execute = AsyncMock(return_value=result)
+
+    repo = SimulationRepository(mock_db)
+    children = await repo.list_children(parent_simulation_id=parent_simulation_id)
+
+    assert children == [child]
+    mock_db.execute.assert_awaited_once()

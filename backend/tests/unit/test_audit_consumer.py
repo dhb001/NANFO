@@ -112,3 +112,50 @@ def test_audit_handlers_include_telemetry_sustained_failure_events():
     assert "telemetry.collector.sustained_failure_recovered" in AUDIT_HANDLERS
     assert AUDIT_HANDLERS["telemetry.collector.sustained_failure_activated"] is handle_audit_event
     assert AUDIT_HANDLERS["telemetry.collector.sustained_failure_recovered"] is handle_audit_event
+
+
+@pytest.mark.asyncio
+async def test_audit_consumer_writes_simulation_branch_created_event():
+    db = AsyncMock()
+    db.commit = AsyncMock()
+
+    simulation_id = str(uuid.uuid4())
+    parent_simulation_id = str(uuid.uuid4())
+    correlation_id = str(uuid.uuid4())
+    payload = {
+        "simulation_id": simulation_id,
+        "parent_simulation_id": parent_simulation_id,
+        "network_id": str(uuid.uuid4()),
+    }
+    event = {
+        "event_type": "simulation.branch_created",
+        "correlation_id": correlation_id,
+        "payload": payload,
+    }
+
+    repo = MagicMock()
+    repo.append = AsyncMock()
+
+    with (
+        patch(
+            "app.events.consumers.audit_consumer.AsyncSessionLocal",
+            return_value=_session_context_manager(db),
+        ),
+        patch("app.events.consumers.audit_consumer.AuditLogRepository", return_value=repo),
+    ):
+        await handle_audit_event(event)
+
+    append_kwargs = repo.append.await_args.kwargs
+    assert append_kwargs["event_type"] == "simulation.branch_created"
+    assert append_kwargs["resource_type"] == "simulation"
+    assert append_kwargs["resource_id"] == uuid.UUID(simulation_id)
+    assert append_kwargs["correlation_id"] == uuid.UUID(correlation_id)
+    db.commit.assert_awaited_once()
+
+
+def test_audit_handlers_include_simulation_lifecycle_events():
+    assert "simulation.started" in AUDIT_HANDLERS
+    assert "simulation.completed" in AUDIT_HANDLERS
+    assert "simulation.paused" in AUDIT_HANDLERS
+    assert "simulation.cancelled" in AUDIT_HANDLERS
+    assert "simulation.branch_created" in AUDIT_HANDLERS

@@ -7,18 +7,18 @@
 - Vertical Slice 4 Implementation: **COMPLETE** — runtime adapter increment, SLO alerting/runbook operationalization, deferred-topology governed design start, and executable Digital Twin scenario-validation handoff baseline delivered through **VS4 Step 4**.
 - Vertical Slice 5 Implementation: **COMPLETE** — digital twin websocket session-security hardening and governed simulation lifecycle event coverage delivered through **VS5 Step 4**, with closure regression gate complete.
 - Vertical Slice 6 Implementation: **COMPLETE** — Digital Twin spatial-reference execution delivered through **VS6 Step 5** with closure regression gate complete.
-- Vertical Slice 7 Implementation: **IN PROGRESS** — Simulation lifecycle baseline execution advanced through **VS7 Step 3** with start persistence, pause endpoint, and resume semantics in place.
+- Vertical Slice 7 Implementation: **COMPLETE** — Simulation lifecycle baseline execution delivered through **VS7 Step 7** with branch/read/compare endpoints, lifecycle audit/contract alignment, and closure regression gate complete.
 
 ## Subsystem Progress — Vertical Slice 7
 
 - [x] Step 1: Add simulation lifecycle persistence baseline table/model/repository (with required migration)
 - [x] Step 2: Persist simulation start flow with C5-safe network/workspace validation and fail-open queue semantics
 - [x] Step 3: Add `POST /api/v1/simulations/pause` and resume semantics via `POST /api/v1/simulations/start`
-- [ ] Step 4: Add `POST /api/v1/simulations/branch` with draft lineage persistence
-- [ ] Step 5: Add `GET /api/v1/simulations/{id}` read endpoint
-- [ ] Step 6: Add `GET /api/v1/simulations/{id}/compare/{baselineId}` deterministic compare deltas
-- [ ] Step 7: Add simulation lifecycle audit coverage and contract alignment updates
-- [ ] Closure Gate: Final full backend regression pass + VS7 project tracking finalized
+- [x] Step 4: Add `POST /api/v1/simulations/branch` with draft lineage persistence
+- [x] Step 5: Add `GET /api/v1/simulations/{id}` read endpoint
+- [x] Step 6: Add `GET /api/v1/simulations/{id}/compare/{baselineId}` deterministic compare deltas
+- [x] Step 7: Add simulation lifecycle audit coverage and contract alignment updates
+- [x] Closure Gate: Final full backend regression pass + VS7 project tracking finalized
 
 ## Subsystem Progress — Vertical Slice 6
 
@@ -115,4 +115,4 @@
 - Repo-wide Ruff debt outside VS2 Step 8 scope remains and is tracked for later cleanup.
 
 ## Next Sprint Candidates
-- VS7 Step 4: add `POST /api/v1/simulations/branch` with draft lineage persistence.
+- TBD (next slice planning kickoff).

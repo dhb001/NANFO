@@ -100,3 +100,23 @@ class SimulationRepository:
             simulation.risk_gate = risk_gate
         await self._db.flush()
         return simulation
+
+    async def list_by_scenario_id(
+        self,
+        *,
+        scenario_id: uuid.UUID,
+    ) -> list[Simulation]:
+        result = await self._db.execute(
+            select(Simulation).where(Simulation.scenario_id == scenario_id)
+        )
+        return list(result.scalars().all())
+
+    async def list_children(
+        self,
+        *,
+        parent_simulation_id: uuid.UUID,
+    ) -> list[Simulation]:
+        result = await self._db.execute(
+            select(Simulation).where(Simulation.parent_simulation_id == parent_simulation_id)
+        )
+        return list(result.scalars().all())

@@ -80,6 +80,9 @@ When an event is consumed by a WebSocket push subscriber, it is translated into 
 | `network.device.deleted` | `/ws/topology` | `remove` |
 | `simulation.started` | `/ws/digital-twin` | scene delta (`update`) |
 | `simulation.completed` | `/ws/digital-twin` | scene delta (`update`) |
+| `simulation.paused` | `/ws/digital-twin` | scene delta (`update`) |
+| `simulation.cancelled` | `/ws/digital-twin` | scene delta (`update`) |
+| `simulation.branch_created` | `/ws/digital-twin` | scene delta (`update`) |
 | `telemetry.*` | `/ws/telemetry` | metric delta |
 | `alert.*` | `/ws/alerts` | alert delta |
 

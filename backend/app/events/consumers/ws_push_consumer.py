@@ -43,6 +43,7 @@ _SIMULATION_EVENT_TO_DELTA: dict[str, str] = {
     "simulation.completed": "update",
     "simulation.paused": "update",
     "simulation.cancelled": "update",
+    "simulation.branch_created": "update",
 }
 
 
@@ -259,4 +260,5 @@ WS_PUSH_HANDLERS: dict[str, object] = {
     "simulation.completed": handle_ws_digital_twin_event,
     "simulation.paused": handle_ws_digital_twin_event,
     "simulation.cancelled": handle_ws_digital_twin_event,
+    "simulation.branch_created": handle_ws_digital_twin_event,
 }
