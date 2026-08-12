@@ -27,6 +27,7 @@ from app.modules.network.schemas import (
     DeviceResponse,
     NetworkListResponse,
     NetworkResponse,
+    UpdateDeviceRequest,
 )
 from app.modules.organization.service import WorkspaceService as OrgWorkspaceService
 
@@ -161,3 +162,49 @@ class DeviceService:
             page=page,
             page_size=page_size,
         )
+
+    async def update_device_spatial_ref(
+        self,
+        network_id: uuid.UUID,
+        device_id: uuid.UUID,
+        req: UpdateDeviceRequest,
+        actor_id: str,
+        correlation_id: str,
+    ) -> DeviceResponse:
+        network = await self._network_repo.get_by_id(network_id)
+        if network is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Network not found.")
+
+        current = await self._repo.get_by_id(device_id)
+        if current is None or current.network_id != network_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Device not found.")
+
+        if current.spatial_ref_id == req.spatial_ref_id:
+            return DeviceResponse.model_validate(current)
+
+        device = await self._repo.update_spatial_ref_id(
+            network_id=network_id,
+            device_id=device_id,
+            spatial_ref_id=req.spatial_ref_id,
+        )
+        if device is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Device not found.")
+
+        await self._db.commit()
+        await self._db.refresh(device)
+
+        changed_fields = {"spatial_ref_id": device.spatial_ref_id}
+        await publish_event(
+            redis=self._redis,
+            event_type="network.device.updated",
+            source="network",
+            payload={
+                "device_id": str(device.device_id),
+                "network_id": str(network_id),
+                "workspace_id": str(network.workspace_id),
+                "changed_fields": changed_fields,
+                "actor_id": actor_id,
+            },
+            correlation_id=correlation_id,
+        )
+        return DeviceResponse.model_validate(device)

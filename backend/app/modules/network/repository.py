@@ -103,6 +103,23 @@ class DeviceRepository:
         )
         return result.scalar_one_or_none()
 
+    async def update_spatial_ref_id(
+        self,
+        *,
+        network_id: uuid.UUID,
+        device_id: uuid.UUID,
+        spatial_ref_id: str | None,
+    ) -> Device | None:
+        device = await self.get_by_id(device_id)
+        if device is None:
+            return None
+        if device.network_id != network_id:
+            return None
+
+        device.spatial_ref_id = spatial_ref_id
+        await self._db.flush()
+        return device
+
     async def list_for_network(
         self, network_id: uuid.UUID, page: int = 1, page_size: int = 20
     ) -> tuple[list[Device], int]:

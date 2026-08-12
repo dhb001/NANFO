@@ -12,6 +12,7 @@ from app.events.consumers.ws_push_consumer import (
     WS_PUSH_HANDLERS,
     handle_ws_alert_event,
     handle_ws_digital_twin_event,
+    handle_ws_push_event,
 )
 
 
@@ -23,6 +24,17 @@ def _alert_event(event_type: str = "alert.generated", payload: object | None = N
         "timestamp": datetime.now(UTC).isoformat(),
         "source": "telemetry",
         "payload": payload if payload is not None else {"severity": "critical"},
+    }
+
+
+def _topology_event(event_type: str, payload: dict) -> dict:
+    return {
+        "event_id": str(uuid.uuid4()),
+        "event_type": event_type,
+        "correlation_id": str(uuid.uuid4()),
+        "timestamp": datetime.now(UTC).isoformat(),
+        "source": "network",
+        "payload": payload,
     }
 
 
@@ -151,6 +163,30 @@ async def test_ws_alert_consumer_counter_increment_failure_is_fail_open():
 
     mock_alerts_ws_manager.push_delta.assert_awaited_once()
     fake_redis.incr.assert_awaited_once_with("alerts:ws:fanout:generated:success")
+
+
+@pytest.mark.asyncio
+async def test_ws_topology_update_delta_includes_changed_fields_for_spatial_ref_id():
+    payload = {
+        "device_id": str(uuid.uuid4()),
+        "network_id": str(uuid.uuid4()),
+        "changed_fields": {"spatial_ref_id": "campus-a/device-77"},
+    }
+    event = _topology_event("network.device.updated", payload)
+
+    with patch("app.events.consumers.ws_push_consumer.topology_ws_manager") as mock_topology_ws_manager:
+        mock_topology_ws_manager.push_delta = AsyncMock()
+        await handle_ws_push_event(event)
+
+    mock_topology_ws_manager.push_delta.assert_awaited_once()
+    kwargs = mock_topology_ws_manager.push_delta.await_args.kwargs
+    assert kwargs["event_type"] == "network.device.updated"
+    assert kwargs["delta_type"] == "update"
+    assert kwargs["network_id"] == payload["network_id"]
+    assert kwargs["node"] == {
+        "device_id": payload["device_id"],
+        "spatial_ref_id": "campus-a/device-77",
+    }
 
 
 def test_ws_push_handlers_include_alert_lifecycle_events():

@@ -3,6 +3,28 @@
 Lightweight chronological notes for decisions that do not require a full ADR.
 
 ## 2026-08-12
+### Device Spatial Reference Update Path and `network.device.updated` Delta Contract (VS6 Step 3)
+Decision: Implement a dedicated device spatial-reference update path and emit `network.device.updated` with strict `changed_fields` delta semantics for topology/digital twin consumers.
+Reason:
+- VS6 Step 3 explicitly requires spatial-reference updates beyond create flow and contract-safe update deltas.
+- Existing `/ws/topology` and topology-consumer update paths already consume `changed_fields`; extending this with `spatial_ref_id` is the minimal compatible increment.
+- Idempotent no-change handling avoids unnecessary event fanout and keeps update semantics deterministic.
+Impact:
+- Added `PATCH /api/v1/networks/{network_id}/devices/{device_id}` request flow for `spatial_ref_id` updates.
+- `DeviceService.update_device_spatial_ref()` now publishes `network.device.updated` payload with `{ "changed_fields": {"spatial_ref_id": ...} }` plus ownership metadata.
+- Topology and websocket consumers continue using existing delta contract; tests now explicitly cover spatial-ref update propagation.
+- No API envelope drift, no schema migration in Step 3, and no C5/C6/runtime fail-open behavior changes.
+Related:
+- `backend/app/api/v1/networks.py`
+- `backend/app/modules/network/schemas.py`
+- `backend/app/modules/network/service.py`
+- `backend/app/modules/network/repository.py`
+- `backend/tests/unit/test_network_service.py`
+- `backend/tests/unit/test_topology_flow.py`
+- `backend/tests/unit/test_ws_push_consumer.py`
+- `backend/tests/integration/test_network_endpoints.py`
+
+## 2026-08-12
 ### Spatial Reference Propagation in Device Added Event and Topology Writes (VS6 Step 2)
 Decision: Include `spatial_ref_id` in `network.device.added` event payload and write it to Neo4j `Device` nodes during topology consumer processing.
 Reason:

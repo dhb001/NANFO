@@ -110,6 +110,14 @@ class TestDeviceEndpoints:
         )
         assert response.status_code == 422
 
+    def test_update_device_missing_spatial_ref_id_returns_422(self, client, headers):
+        response = client.patch(
+            f"/api/v1/networks/{uuid.uuid4()}/devices/{uuid.uuid4()}",
+            json={},
+            headers=headers,
+        )
+        assert response.status_code == 422
+
     def test_add_device_returns_envelope(self, client, headers):
         """POST /networks/{id}/devices must return API_STANDARD.md §2 envelope."""
         from datetime import UTC, datetime
@@ -147,6 +155,65 @@ class TestDeviceEndpoints:
         assert "meta" in body
         assert "errors" in body
         assert body["data"]["spatial_ref_id"] == "campus-a/building-1/floor-2/room-204/rack-3/device-router-01"
+
+    def test_update_device_spatial_ref_returns_envelope(self, client, headers):
+        """PATCH /networks/{id}/devices/{id} must return API_STANDARD.md §2 envelope."""
+        from datetime import UTC, datetime
+
+        network_id = uuid.uuid4()
+        device_id = uuid.uuid4()
+        device_data = {
+            "device_id": str(device_id),
+            "network_id": str(network_id),
+            "hostname": "router-01",
+            "ip_address": "10.0.0.1",
+            "device_type": "router",
+            "vendor": None,
+            "model": None,
+            "location_hint": None,
+            "spatial_ref_id": "campus-a/building-1/floor-2/room-204/rack-3/device-router-01",
+            "status": "active",
+            "created_at": datetime.now(UTC).isoformat(),
+        }
+        from app.modules.network.schemas import DeviceResponse
+
+        with patch(
+            "app.modules.network.service.DeviceService.update_device_spatial_ref",
+            return_value=DeviceResponse(**device_data),
+        ):
+            response = client.patch(
+                f"/api/v1/networks/{network_id}/devices/{device_id}",
+                json={
+                    "spatial_ref_id": "campus-a/building-1/floor-2/room-204/rack-3/device-router-01",
+                },
+                headers=headers,
+            )
+
+        body = response.json()
+        assert response.status_code == 200
+        assert "success" in body
+        assert "data" in body
+        assert "meta" in body
+        assert "errors" in body
+        assert body["data"]["spatial_ref_id"] == "campus-a/building-1/floor-2/room-204/rack-3/device-router-01"
+
+    def test_update_device_spatial_ref_not_found_propagates_404(self, client, headers):
+        from fastapi import HTTPException
+
+        network_id = uuid.uuid4()
+        device_id = uuid.uuid4()
+
+        with patch(
+            "app.modules.network.service.DeviceService.update_device_spatial_ref",
+            side_effect=HTTPException(status_code=404, detail="Device not found."),
+        ):
+            response = client.patch(
+                f"/api/v1/networks/{network_id}/devices/{device_id}",
+                json={"spatial_ref_id": "campus-a/device-404"},
+                headers=headers,
+            )
+
+        assert response.status_code == 404
 
 
 class TestC6DeferredEndpointsAbsent:

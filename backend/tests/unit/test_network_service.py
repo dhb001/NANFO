@@ -11,7 +11,11 @@ import pytest
 from fastapi import HTTPException
 
 from app.modules.network.models import Device, Network
-from app.modules.network.schemas import CreateDeviceRequest, CreateNetworkRequest
+from app.modules.network.schemas import (
+    CreateDeviceRequest,
+    CreateNetworkRequest,
+    UpdateDeviceRequest,
+)
 from app.modules.network.service import DeviceService, NetworkService
 from app.modules.organization.models import Workspace
 
@@ -207,3 +211,94 @@ class TestDeviceService:
         event_type = mock_pub.call_args.kwargs["event_type"]
         parts = event_type.split(".")
         assert len(parts) == 3, f"Event type '{event_type}' does not follow module.entity.action pattern"
+
+    @pytest.mark.asyncio
+    async def test_update_device_spatial_ref_success_publishes_updated_event(self, dev_svc):
+        network = _make_network()
+        current = _make_device(network_id=network.network_id, spatial_ref_id="campus-a/device-old")
+        updated = _make_device(network_id=network.network_id, spatial_ref_id="campus-a/device-new")
+        updated.device_id = current.device_id
+
+        with (
+            patch.object(dev_svc._network_repo, "get_by_id", return_value=network),
+            patch.object(dev_svc._repo, "get_by_id", return_value=current),
+            patch.object(dev_svc._repo, "update_spatial_ref_id", return_value=updated) as mock_update,
+            patch("app.modules.network.service.publish_event", new_callable=AsyncMock) as mock_pub,
+        ):
+            result = await dev_svc.update_device_spatial_ref(
+                network_id=network.network_id,
+                device_id=current.device_id,
+                req=UpdateDeviceRequest(spatial_ref_id="campus-a/device-new"),
+                actor_id="u1",
+                correlation_id=str(uuid.uuid4()),
+            )
+
+        mock_update.assert_awaited_once_with(
+            network_id=network.network_id,
+            device_id=current.device_id,
+            spatial_ref_id="campus-a/device-new",
+        )
+        mock_pub.assert_awaited_once()
+        payload = mock_pub.await_args.kwargs["payload"]
+        assert mock_pub.await_args.kwargs["event_type"] == "network.device.updated"
+        assert payload["workspace_id"] == str(network.workspace_id)
+        assert payload["changed_fields"] == {"spatial_ref_id": "campus-a/device-new"}
+        assert result.device_id == current.device_id
+
+    @pytest.mark.asyncio
+    async def test_update_device_spatial_ref_no_change_skips_event_publish(self, dev_svc):
+        network = _make_network()
+        current = _make_device(network_id=network.network_id, spatial_ref_id="campus-a/device-1")
+
+        with (
+            patch.object(dev_svc._network_repo, "get_by_id", return_value=network),
+            patch.object(dev_svc._repo, "get_by_id", return_value=current),
+            patch.object(dev_svc._repo, "update_spatial_ref_id") as mock_update,
+            patch("app.modules.network.service.publish_event", new_callable=AsyncMock) as mock_pub,
+        ):
+            result = await dev_svc.update_device_spatial_ref(
+                network_id=network.network_id,
+                device_id=current.device_id,
+                req=UpdateDeviceRequest(spatial_ref_id="campus-a/device-1"),
+                actor_id="u1",
+                correlation_id=str(uuid.uuid4()),
+            )
+
+        mock_update.assert_not_called()
+        mock_pub.assert_not_awaited()
+        dev_svc._db.commit.assert_not_awaited()
+        assert result.device_id == current.device_id
+
+    @pytest.mark.asyncio
+    async def test_update_device_spatial_ref_unknown_network_raises_404(self, dev_svc):
+        with (
+            patch.object(dev_svc._network_repo, "get_by_id", return_value=None),
+            pytest.raises(HTTPException) as exc_info,
+        ):
+            await dev_svc.update_device_spatial_ref(
+                network_id=uuid.uuid4(),
+                device_id=uuid.uuid4(),
+                req=UpdateDeviceRequest(spatial_ref_id="campus-a/device-1"),
+                actor_id="u1",
+                correlation_id=str(uuid.uuid4()),
+            )
+
+        assert exc_info.value.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_update_device_spatial_ref_unknown_device_raises_404(self, dev_svc):
+        network = _make_network()
+        with (
+            patch.object(dev_svc._network_repo, "get_by_id", return_value=network),
+            patch.object(dev_svc._repo, "get_by_id", return_value=None),
+            pytest.raises(HTTPException) as exc_info,
+        ):
+            await dev_svc.update_device_spatial_ref(
+                network_id=network.network_id,
+                device_id=uuid.uuid4(),
+                req=UpdateDeviceRequest(spatial_ref_id="campus-a/device-1"),
+                actor_id="u1",
+                correlation_id=str(uuid.uuid4()),
+            )
+
+        assert exc_info.value.status_code == 404

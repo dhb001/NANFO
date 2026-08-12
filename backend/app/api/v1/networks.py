@@ -9,6 +9,7 @@ import time
 import uuid
 from typing import Annotated
 
+import redis.asyncio as aioredis
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -28,6 +29,7 @@ from app.modules.network.schemas import (
     DeviceResponse,
     NetworkListResponse,
     NetworkResponse,
+    UpdateDeviceRequest,
 )
 from app.modules.network.service import DeviceService, NetworkService
 
@@ -42,7 +44,7 @@ async def create_network(
     claims: Annotated[TokenClaims, Depends(get_current_user)],
     meta: Annotated[RequestMeta, Depends(get_request_meta)],
     db: Annotated[AsyncSession, Depends(get_db)],
-    redis=Depends(get_redis),
+    redis: Annotated[aioredis.Redis, Depends(get_redis)],
 ):
     started = time.monotonic()
     svc = NetworkService(db=db, redis=redis)
@@ -56,7 +58,7 @@ async def list_networks(
     claims: Annotated[TokenClaims, Depends(get_current_user)],
     meta: Annotated[RequestMeta, Depends(get_request_meta)],
     db: Annotated[AsyncSession, Depends(get_db)],
-    redis=Depends(get_redis),
+    redis: Annotated[aioredis.Redis, Depends(get_redis)],
     page: int = 1,
     page_size: int = 20,
 ):
@@ -75,7 +77,7 @@ async def add_device(
     claims: Annotated[TokenClaims, Depends(get_current_user)],
     meta: Annotated[RequestMeta, Depends(get_request_meta)],
     db: Annotated[AsyncSession, Depends(get_db)],
-    redis=Depends(get_redis),
+    redis: Annotated[aioredis.Redis, Depends(get_redis)],
 ):
     started = time.monotonic()
     svc = DeviceService(db=db, redis=redis)
@@ -89,11 +91,33 @@ async def list_devices(
     claims: Annotated[TokenClaims, Depends(get_current_user)],
     meta: Annotated[RequestMeta, Depends(get_request_meta)],
     db: Annotated[AsyncSession, Depends(get_db)],
-    redis=Depends(get_redis),
+    redis: Annotated[aioredis.Redis, Depends(get_redis)],
     page: int = 1,
     page_size: int = 20,
 ):
     started = time.monotonic()
     svc = DeviceService(db=db, redis=redis)
     result = await svc.list_devices(network_id=network_id, page=page, page_size=page_size)
+    return success_response(result, meta.request_id, started, meta.timestamp)
+
+
+@router.patch("/{network_id}/devices/{device_id}", response_model=APIResponse[DeviceResponse], status_code=status.HTTP_200_OK)
+async def update_device(
+    network_id: uuid.UUID,
+    device_id: uuid.UUID,
+    req: UpdateDeviceRequest,
+    claims: Annotated[TokenClaims, Depends(get_current_user)],
+    meta: Annotated[RequestMeta, Depends(get_request_meta)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    redis: Annotated[aioredis.Redis, Depends(get_redis)],
+):
+    started = time.monotonic()
+    svc = DeviceService(db=db, redis=redis)
+    result = await svc.update_device_spatial_ref(
+        network_id=network_id,
+        device_id=device_id,
+        req=req,
+        actor_id=claims.user_id,
+        correlation_id=meta.request_id,
+    )
     return success_response(result, meta.request_id, started, meta.timestamp)

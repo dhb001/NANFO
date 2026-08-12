@@ -47,6 +47,35 @@ async def test_topology_consumer_passes_workspace_id_on_device_added():
 
 
 @pytest.mark.asyncio
+async def test_topology_consumer_updates_spatial_ref_id_on_device_updated_event():
+    payload = {
+        "device_id": str(uuid.uuid4()),
+        "changed_fields": {
+            "spatial_ref_id": "campus-a/building-1/floor-2/room-204/rack-3/device-edge-router-01",
+        },
+    }
+    event = {"event_type": "network.device.updated", "payload": payload}
+
+    session = AsyncMock()
+    session_cm = AsyncMock()
+    session_cm.__aenter__.return_value = session
+    session_cm.__aexit__.return_value = None
+
+    driver = MagicMock()
+    driver.session.return_value = session_cm
+
+    with patch("app.events.consumers.topology_consumer.get_neo4j_driver", return_value=driver):
+        await handle_topology_event(event)
+
+    session.run.assert_awaited_once()
+    query = session.run.await_args.args[0]
+    params = session.run.await_args.kwargs
+    assert "SET d.spatial_ref_id = $spatial_ref_id" in query
+    assert params["device_id"] == payload["device_id"]
+    assert params["spatial_ref_id"] == payload["changed_fields"]["spatial_ref_id"]
+
+
+@pytest.mark.asyncio
 async def test_create_device_node_sets_workspace_id_property():
     session = AsyncMock()
     session_cm = AsyncMock()

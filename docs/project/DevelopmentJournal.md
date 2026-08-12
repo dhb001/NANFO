@@ -1,5 +1,14 @@
 # Development Journal
 
+## [2026-08-12] - Vertical Slice 6 Step 3 (Spatial Reference Update Flow + Device Updated Delta Semantics)
+
+- **Implemented:** Added device spatial-reference update flow via `PATCH /api/v1/networks/{network_id}/devices/{device_id}` and wired service-layer update handling for `spatial_ref_id`.
+- **Update/event semantics:** `DeviceService.update_device_spatial_ref()` now publishes `network.device.updated` with `changed_fields` containing only `spatial_ref_id` when the value actually changes; no-change requests are idempotent no-op returns with no event emission.
+- **Repository ownership check:** `DeviceRepository.update_spatial_ref_id()` enforces network/device ownership match before mutating state, preserving module boundary and tenancy safety expectations.
+- **Consumer contract coverage:** Added tests to validate topology and websocket update-delta behavior for `changed_fields.spatial_ref_id` propagation.
+- **Scope guardrails:** No API envelope drift, no C5/C6 boundary changes, no new schema migration, and fail-open runtime semantics unchanged.
+- **Validation:** Scoped Ruff passed; targeted network/topology/ws + network-endpoint tests passed (`65 passed`); full backend regression passed (`275 passed`).
+
 ## [2026-08-12] - Vertical Slice 6 Step 2 (Spatial Reference Event + Topology Node Propagation)
 
 - **Implemented:** Propagated `spatial_ref_id` through `network.device.added` event payloads and into topology node writes for Digital Twin synchronization continuity.

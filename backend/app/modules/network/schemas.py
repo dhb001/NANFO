@@ -50,6 +50,10 @@ class CreateDeviceRequest(BaseModel):
     spatial_ref_id: str | None = None
 
 
+class UpdateDeviceRequest(BaseModel):
+    spatial_ref_id: str | None
+
+
 class DeviceResponse(BaseModel):
     device_id: uuid.UUID
     network_id: uuid.UUID
