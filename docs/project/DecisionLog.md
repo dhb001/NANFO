@@ -3,6 +3,23 @@
 Lightweight chronological notes for decisions that do not require a full ADR.
 
 ## 2026-08-12
+### Digital Twin WS Per-Delta JWT Deny-List Revalidation (VS5 Step 2)
+Decision: Enforce JWT deny-list (`jti`) revalidation in `/ws/digital-twin` manager before every scene-delta push and close revoked sessions with `WS_UNAUTHORIZED` signaling.
+Reason:
+- `docs/features/Authentication.md` defines `jti` deny-list revocation semantics; prior `/ws/digital-twin` runtime behavior checked deny-list only during connection upgrade.
+- This is the smallest production-safe VS5 increment to harden active-session revocation enforcement without introducing endpoint, schema, or event contract changes.
+- Keeps implementation reversible and scoped by attaching `jti` metadata to existing digital twin subscription state.
+Impact:
+- `DigitalTwinWSManager` now tracks per-connection token `jti` and blocks push delivery when `jti:deny:<jti>` exists.
+- Revoked websocket subscribers receive `WS_UNAUTHORIZED` error frame followed by connection close.
+- `/ws/digital-twin` endpoint now passes token `jti` into manager subscription metadata.
+- Fail-open semantics are preserved: deny-list client/check failures are warning-only and do not terminate healthy delivery paths.
+Related:
+- `backend/app/websocket/manager.py`
+- `backend/app/websocket/digital_twin.py`
+- `backend/tests/unit/test_websocket_digital_twin_auth.py`
+
+## 2026-08-12
 ### Digital Twin WS Per-Delta JWT Expiry Revalidation (VS5 Step 1)
 Decision: Enforce JWT expiry (`exp`) revalidation in `/ws/digital-twin` manager before every scene-delta push and close expired sessions with `WS_UNAUTHORIZED` signaling.
 Reason:

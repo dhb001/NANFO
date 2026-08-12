@@ -16,6 +16,7 @@ from datetime import UTC, datetime
 from fastapi import WebSocket
 
 from app.core.logging import get_logger
+from app.db.redis import get_redis_client
 
 logger = get_logger(__name__)
 
@@ -31,6 +32,7 @@ _WS_UNAUTHORIZED_FRAME = json.dumps({
 @dataclass(frozen=True)
 class _DigitalTwinConnectionAuth:
     token_exp: int | None
+    token_jti: str | None
 
 
 def _coerce_token_exp(value: object) -> int | None:
@@ -42,10 +44,42 @@ def _coerce_token_exp(value: object) -> int | None:
         return None
 
 
+def _coerce_token_jti(value: object) -> str | None:
+    if value is None:
+        return None
+    token_jti = str(value).strip()
+    return token_jti or None
+
+
 def _is_token_expired(auth: _DigitalTwinConnectionAuth | None) -> bool:
     if auth is None or auth.token_exp is None:
         return False
     return int(datetime.now(UTC).timestamp()) >= auth.token_exp
+
+
+async def _is_token_revoked(auth: _DigitalTwinConnectionAuth | None) -> bool:
+    if auth is None or auth.token_jti is None:
+        return False
+
+    try:
+        redis = get_redis_client()
+    except RuntimeError as exc:
+        logger.warning(
+            "ws_digital_twin_denylist_client_unavailable",
+            jti=auth.token_jti,
+            error=str(exc),
+        )
+        return False
+
+    try:
+        return bool(await redis.exists(f"jti:deny:{auth.token_jti}"))
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "ws_digital_twin_denylist_check_failed",
+            jti=auth.token_jti,
+            error=str(exc),
+        )
+        return False
 
 
 class TopologyWSManager:
@@ -166,11 +200,13 @@ class DigitalTwinWSManager:
         websocket: WebSocket,
         *,
         token_exp: int | None = None,
+        token_jti: str | None = None,
     ) -> None:
         async with self._lock:
             self._subscriptions[network_id].add(websocket)
             self._connection_auth[websocket] = _DigitalTwinConnectionAuth(
                 token_exp=_coerce_token_exp(token_exp),
+                token_jti=_coerce_token_jti(token_jti),
             )
         logger.info("ws_digital_twin_subscribed", network_id=network_id)
 
@@ -234,6 +270,27 @@ class DigitalTwinWSManager:
                     )
                 dead_connections.append((network_id, ws))
                 continue
+
+            if await _is_token_revoked(auth):
+                try:
+                    await ws.send_text(_WS_UNAUTHORIZED_FRAME)
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug(
+                        "ws_digital_twin_unauthorized_frame_send_failed",
+                        network_id=network_id,
+                        error=str(exc),
+                    )
+                try:
+                    await ws.close()
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug(
+                        "ws_digital_twin_revoked_connection_close_failed",
+                        network_id=network_id,
+                        error=str(exc),
+                    )
+                dead_connections.append((network_id, ws))
+                continue
+
             try:
                 await ws.send_text(message)
             except Exception:  # noqa: BLE001

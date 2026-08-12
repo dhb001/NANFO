@@ -92,6 +92,7 @@ async def digital_twin_websocket(
             network_id,
             websocket,
             token_exp=claims.get("exp"),
+            token_jti=claims.get("jti"),
         )
 
         while True:

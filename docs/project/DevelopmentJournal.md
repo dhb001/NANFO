@@ -1,5 +1,14 @@
 # Development Journal
 
+## [2026-08-12] - Vertical Slice 5 Step 2 (Digital Twin WS Per-Delta JWT Deny-List Revalidation)
+
+- **Implemented:** Added the next minimal VS5 hardening increment by enforcing deny-list (`jti`) revalidation on every `/ws/digital-twin` scene-delta push.
+- **Security behavior:** `DigitalTwinWSManager` now stores per-connection token `jti` metadata and checks `jti:deny:<jti>` before each push; revoked sessions receive `WS_UNAUTHORIZED` and are closed before delivery.
+- **Endpoint wiring:** `/ws/digital-twin` subscribe path now passes token `jti` claim metadata into manager subscription state together with existing expiry metadata.
+- **Fail-open safety:** Redis client acquisition or deny-list lookup failures in push-path checks are warning-only and non-fatal; non-revoked/unknown sessions continue delta delivery.
+- **Scope guardrails:** No schema migration, no REST/API envelope change, no event-name/payload contract drift, no C5/C6 boundary change, and no unrelated refactors.
+- **Validation:** Scoped Ruff passed; targeted digital-twin/simulation/ws tests passed (`24 passed`); full backend regression passed (`259 passed`).
+
 ## [2026-08-12] - Vertical Slice 5 Step 1 (Digital Twin WS Per-Delta JWT Expiry Revalidation)
 
 - **Implemented:** Added the smallest executable VS5 increment by enforcing JWT expiry revalidation on every `/ws/digital-twin` scene-delta push.
