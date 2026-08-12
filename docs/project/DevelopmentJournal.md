@@ -1,5 +1,13 @@
 # Development Journal
 
+## [2026-08-12] - Vertical Slice 7 Step 2 (Simulation Start Persistence + C5 Validation)
+
+- **Implemented:** Refactored `POST /api/v1/simulations/start` to execute through a new `SimulationStartService` that persists simulation handoff records and keeps existing queue fail-open semantics.
+- **C5 boundary enforcement:** Start flow now validates `network_id` existence via `NetworkRepository` and validates workspace through `OrgWorkspaceService.get_active_workspace()` before queue handoff, preserving modular service boundary rules.
+- **Persistence behavior:** On both queued and deferred publish outcomes, simulation lifecycle rows are persisted with queue metadata (`queue_status`, `stream_entry_id`, `warning`) plus validation/provenance snapshots and baseline run-output placeholders.
+- **Fail-open semantics preserved:** Event publish failures still return `202` with `queue_status=deferred` and `warning=event_queue_unavailable`; persistence stores the degraded outcome for traceability.
+- **Validation:** Scoped Ruff passed; targeted simulation unit tests passed (`7 passed`); targeted simulation endpoint integration tests passed (`4 passed`); full backend regression passed (`286 passed`).
+
 ## [2026-08-12] - Vertical Slice 7 Step 1 (Simulation Lifecycle Persistence Baseline)
 
 - **Implemented:** Added the VS7 persistence foundation by introducing a dedicated `simulations` relational table and simulation module persistence layer.

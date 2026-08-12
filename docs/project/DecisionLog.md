@@ -3,6 +3,25 @@
 Lightweight chronological notes for decisions that do not require a full ADR.
 
 ## 2026-08-12
+### Persist `POST /api/v1/simulations/start` Through C5-Safe Validation and Fail-Open Queue Outcomes (VS7 Step 2)
+Decision: Route simulation start through a dedicated `SimulationStartService` that validates network/workspace ownership boundaries and persists start-handoff outcomes while retaining existing fail-open queue behavior.
+Reason:
+- `Simulation.md` requires persisted scenario/run baseline metadata; previous start flow only returned transient handoff payloads.
+- C5 guardrail requires workspace validation through Organization service boundary rather than cross-module joins/direct table coupling.
+- Existing Step-4 fail-open queue semantics are production behavior and must remain unchanged while adding persistence.
+Impact:
+- `POST /api/v1/simulations/start` now validates network existence and active workspace via `OrgWorkspaceService.get_active_workspace()` before queue publication.
+- Start outcomes are persisted in `simulations` for both `queued` and `deferred` paths with queue metadata and provenance snapshots.
+- REST route shape/status/envelope remain unchanged (`202` canonical envelope); deferred behavior (`warning=event_queue_unavailable`) is preserved.
+Assumptions:
+- `run_output` baseline placeholders (`latency_ms`, `loss_pct`, `throughput_mbps` set to `0.0`) are acceptable until lifecycle execution steps populate observed values.
+Related:
+- `backend/app/api/v1/simulation.py`
+- `backend/app/modules/simulation/service.py`
+- `backend/tests/unit/test_simulation_service.py`
+- `backend/tests/integration/test_simulation_endpoints.py`
+
+## 2026-08-12
 ### Simulation Persistence Baseline as Required First VS7 Increment (VS7 Step 1)
 Decision: Introduce a dedicated `simulations` PostgreSQL table with a minimal Simulation module ORM/repository baseline as the required first executable VS7 increment.
 Reason:

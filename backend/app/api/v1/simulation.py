@@ -14,11 +14,13 @@ from app.core.dependencies import (
     RequestMeta,
     TokenClaims,
     get_current_user,
+    get_db,
     get_redis,
     get_request_meta,
 )
 from app.core.responses import APIResponse, success_response
-from app.modules.simulation.service import queue_scenario_validation_handoff
+from app.db.postgres import AsyncSession
+from app.modules.simulation.service import SimulationStartService
 
 router = APIRouter(prefix="/api/v1/simulations", tags=["Simulation"])
 
@@ -63,11 +65,11 @@ async def start_simulation(
     req: StartSimulationRequest,
     claims: Annotated[TokenClaims, Depends(get_current_user)],
     meta: Annotated[RequestMeta, Depends(get_request_meta)],
+    db: Annotated[AsyncSession, Depends(get_db)],
     redis: Annotated[aioredis.Redis, Depends(get_redis)],
 ):
     started = time.monotonic()
-    result = await queue_scenario_validation_handoff(
-        redis=redis,
+    result = await SimulationStartService(db=db, redis=redis).start_simulation(
         network_id=req.network_id,
         scenario_name=req.scenario_name,
         validation_checks=req.validation_checks,

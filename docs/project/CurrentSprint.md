@@ -12,7 +12,7 @@
 ## Subsystem Progress — Vertical Slice 7
 
 - [x] Step 1: Add simulation lifecycle persistence baseline table/model/repository (with required migration)
-- [ ] Step 2: Persist simulation start flow with C5-safe network/workspace validation and fail-open queue semantics
+- [x] Step 2: Persist simulation start flow with C5-safe network/workspace validation and fail-open queue semantics
 - [ ] Step 3: Add `POST /api/v1/simulations/pause` and resume semantics via `POST /api/v1/simulations/start`
 - [ ] Step 4: Add `POST /api/v1/simulations/branch` with draft lineage persistence
 - [ ] Step 5: Add `GET /api/v1/simulations/{id}` read endpoint
