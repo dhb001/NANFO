@@ -11,7 +11,7 @@
 
 - [x] Step 1: Enforce `/ws/digital-twin` JWT expiry revalidation on every scene-delta push with `WS_UNAUTHORIZED` close semantics
 - [x] Step 2: Add `/ws/digital-twin` per-delta deny-list (`jti`) revalidation path before push delivery
-- [ ] Step 3: Add digital twin websocket session-security observability branches/counters for close reasons
+- [x] Step 3: Add digital twin websocket session-security observability branches/counters for close reasons
 - [ ] Step 4: Expand simulation lifecycle event coverage beyond handoff/completion under governed simulation contract updates
 
 ## Subsystem Progress — Vertical Slice 4
@@ -92,4 +92,4 @@
 - Repo-wide Ruff debt outside VS2 Step 8 scope remains and is tracked for later cleanup.
 
 ## Next Sprint Candidates
-- VS5 Step 3: add `/ws/digital-twin` session-security observability branches/counters for close reasons.
+- VS5 Step 4: expand simulation lifecycle event coverage beyond handoff/completion under governed contract updates.

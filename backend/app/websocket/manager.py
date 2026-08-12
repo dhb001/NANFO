@@ -20,6 +20,8 @@ from app.db.redis import get_redis_client
 
 logger = get_logger(__name__)
 
+_DIGITAL_TWIN_WS_SECURITY_CLOSE_COUNTER_PREFIX = "digital_twin:ws:security_close"
+
 _WS_UNAUTHORIZED_FRAME = json.dumps({
     "event": "error",
     "data": {
@@ -80,6 +82,40 @@ async def _is_token_revoked(auth: _DigitalTwinConnectionAuth | None) -> bool:
             error=str(exc),
         )
         return False
+
+
+async def _record_security_close_reason(*, reason: str, network_id: str) -> None:
+    counter_key = f"{_DIGITAL_TWIN_WS_SECURITY_CLOSE_COUNTER_PREFIX}:{reason}"
+
+    try:
+        redis = get_redis_client()
+    except RuntimeError as exc:
+        logger.warning(
+            "ws_digital_twin_security_close_counter_client_unavailable",
+            reason=reason,
+            network_id=network_id,
+            error=str(exc),
+        )
+        return
+
+    try:
+        await redis.incr(counter_key)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "ws_digital_twin_security_close_counter_increment_failed",
+            reason=reason,
+            network_id=network_id,
+            counter_key=counter_key,
+            error=str(exc),
+        )
+        return
+
+    logger.info(
+        "ws_digital_twin_security_close_reason_recorded",
+        reason=reason,
+        network_id=network_id,
+        counter_key=counter_key,
+    )
 
 
 class TopologyWSManager:
@@ -252,6 +288,10 @@ class DigitalTwinWSManager:
 
         for ws, auth in targets.items():
             if _is_token_expired(auth):
+                await _record_security_close_reason(
+                    reason="expired",
+                    network_id=network_id,
+                )
                 try:
                     await ws.send_text(_WS_UNAUTHORIZED_FRAME)
                 except Exception as exc:  # noqa: BLE001
@@ -272,6 +312,10 @@ class DigitalTwinWSManager:
                 continue
 
             if await _is_token_revoked(auth):
+                await _record_security_close_reason(
+                    reason="revoked",
+                    network_id=network_id,
+                )
                 try:
                     await ws.send_text(_WS_UNAUTHORIZED_FRAME)
                 except Exception as exc:  # noqa: BLE001

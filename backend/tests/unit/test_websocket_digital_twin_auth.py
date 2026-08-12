@@ -28,14 +28,22 @@ async def test_digital_twin_push_sends_unauthorized_and_closes_when_token_expire
         token_exp=int((now + timedelta(seconds=60)).timestamp()),
     )
 
-    await manager.push_delta(
-        network_id="network-1",
-        event_type="simulation.started",
-        delta_type="update",
-        scene_object={"id": "simulation-state", "state": "queued"},
-        correlation_id="corr-1",
-        timestamp="2026-08-12T00:00:00+00:00",
-    )
+    with patch("app.websocket.manager.get_redis_client") as mock_get_redis:
+        fake_redis = AsyncMock()
+        fake_redis.exists = AsyncMock(return_value=0)
+        fake_redis.incr = AsyncMock(return_value=1)
+        mock_get_redis.return_value = fake_redis
+
+        await manager.push_delta(
+            network_id="network-1",
+            event_type="simulation.started",
+            delta_type="update",
+            scene_object={"id": "simulation-state", "state": "queued"},
+            correlation_id="corr-1",
+            timestamp="2026-08-12T00:00:00+00:00",
+        )
+
+    fake_redis.incr.assert_awaited_once_with("digital_twin:ws:security_close:expired")
 
     expired_ws.send_text.assert_awaited_once()
     expired_payload = expired_ws.send_text.await_args.args[0]
@@ -80,6 +88,7 @@ async def test_digital_twin_push_sends_unauthorized_and_closes_when_jti_revoked(
     with patch("app.websocket.manager.get_redis_client") as mock_get_redis:
         fake_redis = AsyncMock()
         fake_redis.exists = AsyncMock(return_value=1)
+        fake_redis.incr = AsyncMock(return_value=1)
         mock_get_redis.return_value = fake_redis
 
         await manager.push_delta(
@@ -95,6 +104,7 @@ async def test_digital_twin_push_sends_unauthorized_and_closes_when_jti_revoked(
     revoked_payload = revoked_ws.send_text.await_args.args[0]
     assert "WS_UNAUTHORIZED" in revoked_payload
     revoked_ws.close.assert_awaited_once()
+    fake_redis.incr.assert_awaited_once_with("digital_twin:ws:security_close:revoked")
 
 
 @pytest.mark.asyncio
@@ -123,3 +133,62 @@ async def test_digital_twin_push_with_denylist_unavailable_is_fail_open():
 
     ws.send_text.assert_awaited_once()
     ws.close.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_digital_twin_push_expired_counter_write_failure_is_fail_open():
+    manager = DigitalTwinWSManager()
+    ws = AsyncMock()
+    now = datetime.now(UTC)
+
+    await manager.subscribe(
+        "network-1",
+        ws,
+        token_exp=int((now - timedelta(seconds=1)).timestamp()),
+    )
+
+    with patch("app.websocket.manager.get_redis_client") as mock_get_redis:
+        fake_redis = AsyncMock()
+        fake_redis.incr = AsyncMock(side_effect=RuntimeError("redis write failed"))
+        mock_get_redis.return_value = fake_redis
+
+        await manager.push_delta(
+            network_id="network-1",
+            event_type="simulation.started",
+            delta_type="update",
+            scene_object={"id": "simulation-state", "state": "queued"},
+            correlation_id="corr-5",
+            timestamp="2026-08-12T00:00:04+00:00",
+        )
+
+    ws.send_text.assert_awaited_once()
+    ws.close.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_digital_twin_push_expired_counter_client_unavailable_is_fail_open():
+    manager = DigitalTwinWSManager()
+    ws = AsyncMock()
+    now = datetime.now(UTC)
+
+    await manager.subscribe(
+        "network-1",
+        ws,
+        token_exp=int((now - timedelta(seconds=1)).timestamp()),
+    )
+
+    with patch(
+        "app.websocket.manager.get_redis_client",
+        side_effect=RuntimeError("redis unavailable"),
+    ):
+        await manager.push_delta(
+            network_id="network-1",
+            event_type="simulation.started",
+            delta_type="update",
+            scene_object={"id": "simulation-state", "state": "queued"},
+            correlation_id="corr-6",
+            timestamp="2026-08-12T00:00:05+00:00",
+        )
+
+    ws.send_text.assert_awaited_once()
+    ws.close.assert_awaited_once()

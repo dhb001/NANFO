@@ -1,5 +1,14 @@
 # Development Journal
 
+## [2026-08-12] - Vertical Slice 5 Step 3 (Digital Twin WS Session-Security Close-Reason Observability)
+
+- **Implemented:** Added session-security observability for `/ws/digital-twin` close reasons using deterministic Redis counters plus structured log branches.
+- **Observability behavior:** Security closes triggered by per-delta JWT checks now record reasoned counters under `digital_twin:ws:security_close:<reason>` (`expired`, `revoked`) before unauthorized frame + close.
+- **Fail-open safety:** Counter client acquisition and increment failures are warning-only and do not block security close execution or standard push-path delivery semantics.
+- **Coverage updates:** Unit tests now assert reason counter increments for expired and revoked closes and verify fail-open behavior when counter persistence is unavailable.
+- **Scope guardrails:** No schema migration, no REST/API envelope change, no event-name/payload contract drift, no C5/C6 boundary change, and no unrelated refactors.
+- **Validation:** Scoped Ruff passed; targeted digital-twin/simulation/ws tests passed (`26 passed`); full backend regression passed (`261 passed`).
+
 ## [2026-08-12] - Vertical Slice 5 Step 2 (Digital Twin WS Per-Delta JWT Deny-List Revalidation)
 
 - **Implemented:** Added the next minimal VS5 hardening increment by enforcing deny-list (`jti`) revalidation on every `/ws/digital-twin` scene-delta push.

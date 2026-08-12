@@ -3,6 +3,21 @@
 Lightweight chronological notes for decisions that do not require a full ADR.
 
 ## 2026-08-12
+### Digital Twin WS Session-Security Close-Reason Observability (VS5 Step 3)
+Decision: Record deterministic close-reason observability for `/ws/digital-twin` session-security closures by incrementing Redis counters keyed by reason (`expired`, `revoked`) and emitting structured branch logs.
+Reason:
+- VS5 requires explicit visibility into session-security outcomes; per-delta enforcement from Steps 1-2 lacked low-friction operational counters for closure cause distribution.
+- Reuses existing Redis operational counter patterns with minimal, reversible scope and no contract or schema expansion.
+- Preserves fail-open runtime safety by treating counter persistence failures as warning-only.
+Impact:
+- Added counter contract `digital_twin:ws:security_close:<reason>` in `DigitalTwinWSManager` push-path security branches.
+- Expired and revoked closure branches now emit reason-recorded logs in addition to existing unauthorized frame + close semantics.
+- Counter acquisition/increment failures are isolated to warning branches and do not block session-security closure execution.
+Related:
+- `backend/app/websocket/manager.py`
+- `backend/tests/unit/test_websocket_digital_twin_auth.py`
+
+## 2026-08-12
 ### Digital Twin WS Per-Delta JWT Deny-List Revalidation (VS5 Step 2)
 Decision: Enforce JWT deny-list (`jti`) revalidation in `/ws/digital-twin` manager before every scene-delta push and close revoked sessions with `WS_UNAUTHORIZED` signaling.
 Reason:
