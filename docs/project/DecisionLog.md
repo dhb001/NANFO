@@ -3,6 +3,23 @@
 Lightweight chronological notes for decisions that do not require a full ADR.
 
 ## 2026-08-12
+### Deferred Topology Endpoints Governed Design Start Under C6 (VS4 Step 3)
+Decision: Start VS4 deferred-topology work with a design-first handoff document and expanded C6 non-routability coverage, without enabling deferred routes.
+Reason:
+- Preserve architecture guardrails by separating planning/design from endpoint activation.
+- Reduce accidental deferred route exposure risk while implementation design is prepared.
+- Keep scope minimal/reversible and aligned with existing C6 contract enforcement.
+Impact:
+- Added `docs/project/TopologyDeferredEndpointsDesign-VS4.md` capturing module impact, contract intent, data/event boundaries, risks, and implementation-start exit criteria.
+- Integration tests now assert additional deferred path/method non-routability (`GET /api/v1/topology/reconcile`, `POST /api/v1/topology/impact/{id}`).
+- No REST contract/envelope changes, no schema migrations, and no route registration changes.
+Related:
+- `docs/project/TopologyDeferredEndpointsDesign-VS4.md`
+- `backend/tests/integration/test_network_endpoints.py`
+- `docs/project/CurrentSprint.md`
+- `docs/project/DevelopmentJournal.md`
+
+## 2026-08-12
 ### Runtime Adapter SLO Alerting Operationalization with Runbook Metadata (VS4 Step 2)
 Decision: Emit runtime adapter SLO threshold lifecycle alerts (`alert.generated`/`alert.resolved`) from telemetry health state transitions and attach runbook-backed response metadata in the alert payload.
 Reason:

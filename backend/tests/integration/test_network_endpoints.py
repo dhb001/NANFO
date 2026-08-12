@@ -171,6 +171,14 @@ class TestC6DeferredEndpointsAbsent:
         response = client.post("/api/v1/topology/reconcile/full", headers=headers)
         assert response.status_code == 404
 
+    def test_reconcile_get_method_still_not_routable(self, client, headers):
+        response = client.get("/api/v1/topology/reconcile", headers=headers)
+        assert response.status_code == 404
+
+    def test_impact_path_post_method_still_not_routable(self, client, headers):
+        response = client.post(f"/api/v1/topology/impact/{uuid.uuid4()}", headers=headers)
+        assert response.status_code == 404
+
     def test_topology_graph_endpoint_exists(self, client, headers):
         """Confirm GET /topology/graph IS registered (not blocked by C6)."""
         # Will fail with 500 if Neo4j isn't running — that's expected without infrastructure

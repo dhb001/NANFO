@@ -1,5 +1,13 @@
 # Development Journal
 
+## [2026-08-12] - Vertical Slice 4 Step 3 (Deferred Topology Endpoints Governed Design Start)
+
+- **Implemented:** Started governed implementation design for deferred topology analysis endpoints under C6 by adding a dedicated VS4 design handoff document and expanding non-routability regression coverage.
+- **Design handoff artifact:** Added `docs/project/TopologyDeferredEndpointsDesign-VS4.md` with module impact boundaries, API contract notes, event/data governance notes, risk controls, and explicit implementation-start exit criteria.
+- **C6 enforcement hardening:** Extended deferred endpoint non-routability integration coverage with additional method/path variants (`GET /api/v1/topology/reconcile`, `POST /api/v1/topology/impact/{id}`) to reduce accidental route activation risk.
+- **Scope guardrails:** Design + tests only; no deferred endpoint registration, no API envelope changes, no schema migration, and no C5/C6 contract drift.
+- **Validation:** Scoped Ruff passed; targeted network endpoint integration tests passed; full backend regression passed (`234 passed`).
+
 ## [2026-08-12] - Vertical Slice 4 Step 2 (Runtime Adapter SLO Alerting + Runbook Operationalization)
 
 - **Implemented:** Operationalized runtime adapter SLO posture into alert lifecycle signaling by emitting `alert.generated` and `alert.resolved` on SLO alert-state transitions from telemetry health internals.

@@ -10,7 +10,7 @@
 
 - [x] Step 1: Vendor-facing runtime adapter increment baseline (SNMP/gRPC deterministic modes) behind runtime adapter factory controls
 - [x] Step 2: Operationalize runtime adapter SLO thresholds into alerting signals and runbook-backed response metadata
-- [ ] Step 3: Begin governed implementation design for deferred topology analysis endpoints (`/neighbors`, `/impact`, `/reconcile`) under C6
+- [x] Step 3: Begin governed implementation design for deferred topology analysis endpoints (`/neighbors`, `/impact`, `/reconcile`) under C6
 - [ ] Step 4: Start executable Digital Twin baseline integration with scenario validation pipeline handoff
 
 ## Subsystem Progress — Vertical Slice 3
@@ -84,5 +84,4 @@
 - Repo-wide Ruff debt outside VS2 Step 8 scope remains and is tracked for later cleanup.
 
 ## Next Sprint Candidates
-- VS4: Begin governed implementation design for deferred topology analysis endpoints (`/neighbors`, `/impact`, `/reconcile`) under C6.
 - VS4: Start executable Digital Twin baseline integration with scenario validation pipeline handoff.
