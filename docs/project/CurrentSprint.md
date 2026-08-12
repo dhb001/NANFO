@@ -4,14 +4,14 @@
 - Vertical Slice 1 Implementation: **COMPLETE** — all modules implemented, tested, and migrated.
 - Vertical Slice 2 Implementation: **COMPLETE** — telemetry ingestion/persistence/read APIs and telemetry health counters + `/ws/telemetry` fanout delivered through Step 8.
 - Vertical Slice 3 Implementation: **COMPLETE** — runtime collector reliability, adapter-path advancement beyond stub, backpressure/SLO hardening, and VS3 planning-governance closure delivered through **VS3 Step 28**.
-- Vertical Slice 4 Implementation: **IN PROGRESS** — vendor-facing runtime adapter increment and runtime-adapter SLO alerting/runbook operationalization delivered through **VS4 Step 2**.
+- Vertical Slice 4 Implementation: **COMPLETE** — runtime adapter increment, SLO alerting/runbook operationalization, deferred-topology governed design start, and executable Digital Twin scenario-validation handoff baseline delivered through **VS4 Step 4**.
 
 ## Subsystem Progress — Vertical Slice 4
 
 - [x] Step 1: Vendor-facing runtime adapter increment baseline (SNMP/gRPC deterministic modes) behind runtime adapter factory controls
 - [x] Step 2: Operationalize runtime adapter SLO thresholds into alerting signals and runbook-backed response metadata
 - [x] Step 3: Begin governed implementation design for deferred topology analysis endpoints (`/neighbors`, `/impact`, `/reconcile`) under C6
-- [ ] Step 4: Start executable Digital Twin baseline integration with scenario validation pipeline handoff
+- [x] Step 4: Start executable Digital Twin baseline integration with scenario validation pipeline handoff
 
 ## Subsystem Progress — Vertical Slice 3
 
@@ -84,4 +84,4 @@
 - Repo-wide Ruff debt outside VS2 Step 8 scope remains and is tracked for later cleanup.
 
 ## Next Sprint Candidates
-- VS4: Start executable Digital Twin baseline integration with scenario validation pipeline handoff.
+- M6/M7 follow-on: expand digital twin synchronization and simulation lifecycle beyond the Step 4 handoff baseline.

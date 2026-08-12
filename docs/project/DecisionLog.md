@@ -3,6 +3,31 @@
 Lightweight chronological notes for decisions that do not require a full ADR.
 
 ## 2026-08-12
+### Digital Twin Scenario-Validation Handoff Baseline via Simulation Started Events (VS4 Step 4)
+Decision: Implement VS4 Step 4 with a minimal executable simulation handoff path that queues deterministic `simulation.started` events from `POST /api/v1/simulations/start` and translates `simulation.*` events into `/ws/digital-twin` scene deltas.
+Reason:
+- CurrentSprint Step 4 requires executable Digital Twin baseline integration plus scenario validation handoff, and existing backend already provides event-bus and WS push primitives that can be extended without architectural drift.
+- ADR-008 requires simulation-before-deployment policy gating; handoff payload now carries explicit validation state and policy reference.
+- Minimal/reversible scope is preserved by avoiding schema changes and keeping queue failures fail-open with explicit warning metadata.
+Impact:
+- Added simulation API route `POST /api/v1/simulations/start` returning canonical envelope with deterministic handoff payload and queue status.
+- Added simulation service for deterministic scenario validation handoff shaping and `simulation.started` event publication.
+- Registered `simulation` stream mappings in publisher + consumer group config and routed `simulation.started`/`simulation.completed` to `/ws/digital-twin` scene delta fanout.
+- Added `/ws/digital-twin` endpoint + manager and documented scene delta/routing contracts in API docs.
+- Added digital twin scenario validation runbook for operational response and fail-open queue degradation handling.
+Related:
+- `backend/app/api/v1/simulation.py`
+- `backend/app/modules/simulation/service.py`
+- `backend/app/events/consumers/ws_push_consumer.py`
+- `backend/app/websocket/digital_twin.py`
+- `backend/app/websocket/manager.py`
+- `backend/app/events/publisher.py`
+- `backend/app/events/bus.py`
+- `docs/project/DigitalTwinScenarioValidationRunbook.md`
+- `docs/api/WebSocket.md`
+- `docs/api/EventAPI.md`
+
+## 2026-08-12
 ### Deferred Topology Endpoints Governed Design Start Under C6 (VS4 Step 3)
 Decision: Start VS4 deferred-topology work with a design-first handoff document and expanded C6 non-routability coverage, without enabling deferred routes.
 Reason:

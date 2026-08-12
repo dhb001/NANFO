@@ -1,5 +1,15 @@
 # Development Journal
 
+## [2026-08-12] - Vertical Slice 4 Step 4 (Digital Twin Scenario-Validation Handoff Baseline)
+
+- **Implemented:** Started executable Digital Twin baseline integration by adding a simulation validation handoff API path that queues deterministic `simulation.started` events and feeds `/ws/digital-twin` scene deltas.
+- **Baseline API handoff:** Added `POST /api/v1/simulations/start` (`202 Accepted`) in `backend/app/api/v1/simulation.py`, returning canonical envelope payload with queued handoff state (`simulation_id`, `scenario_id`, `risk_gate`, `validation.pipeline_stage`).
+- **Simulation service layer:** Added `backend/app/modules/simulation/service.py` with deterministic scenario-id derivation, ADR-008 policy metadata (`policy_reference=ADR-008`), required check defaults, and fail-open queue fallback (`queue_status=deferred`, `warning=event_queue_unavailable`).
+- **Event + WS integration:** Registered `simulation` stream in publisher/bus and extended ws push consumer routing (`simulation.started`, `simulation.completed`) to `/ws/digital-twin` scene deltas via new `DigitalTwinWSManager` and `/ws/digital-twin` endpoint wiring.
+- **Operational runbook:** Added `docs/project/DigitalTwinScenarioValidationRunbook.md` for handoff/completion operational checks and updated WebSocket/EventAPI docs with digital twin scene-delta contract examples and routing entries.
+- **Scope guardrails:** No schema migrations, no C5/C6 drift, no envelope drift, and fail-open runtime behavior preserved on queue publish failures.
+- **Validation:** Scoped Ruff passed; targeted unit/integration tests passed; full backend regression passed (`255 passed`).
+
 ## [2026-08-12] - Vertical Slice 4 Step 3 (Deferred Topology Endpoints Governed Design Start)
 
 - **Implemented:** Started governed implementation design for deferred topology analysis endpoints under C6 by adding a dedicated VS4 design handoff document and expanding non-routability regression coverage.
