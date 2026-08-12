@@ -28,10 +28,15 @@ router = APIRouter(prefix="/api/v1/simulations", tags=["Simulation"])
 class StartSimulationRequest(BaseModel):
     network_id: uuid.UUID
     scenario_name: str = Field(min_length=1, max_length=120)
+    simulation_id: uuid.UUID | None = None
     validation_checks: list[str] = Field(
         default_factory=lambda: ["simulation_before_deployment"],
         min_length=1,
     )
+
+
+class PauseSimulationRequest(BaseModel):
+    simulation_id: uuid.UUID
 
 
 class ScenarioValidationState(BaseModel):
@@ -45,6 +50,7 @@ class ScenarioValidationState(BaseModel):
 
 class SimulationValidationHandoffResponse(BaseModel):
     simulation_id: str
+    resumed_from_simulation_id: str | None = None
     scenario_id: str
     network_id: str
     scene_object_id: str
@@ -60,6 +66,17 @@ class SimulationValidationHandoffResponse(BaseModel):
     warning: str | None
 
 
+class PauseSimulationResponse(BaseModel):
+    simulation_id: str
+    network_id: str
+    scene_object_id: str
+    state: str
+    status: str
+    risk_gate: str
+    scenario_id: str
+    correlation_id: str
+
+
 @router.post("/start", response_model=APIResponse[SimulationValidationHandoffResponse], status_code=status.HTTP_202_ACCEPTED)
 async def start_simulation(
     req: StartSimulationRequest,
@@ -72,6 +89,7 @@ async def start_simulation(
     result = await SimulationStartService(db=db, redis=redis).start_simulation(
         network_id=req.network_id,
         scenario_name=req.scenario_name,
+        simulation_id=req.simulation_id,
         validation_checks=req.validation_checks,
         correlation_id=meta.request_id,
         requested_by_user_id=claims.user_id,
@@ -84,4 +102,22 @@ async def start_simulation(
         "warning": result["warning"],
     }
     payload = SimulationValidationHandoffResponse.model_validate(handoff_data)
+    return success_response(payload, meta.request_id, started, meta.timestamp)
+
+
+@router.post("/pause", response_model=APIResponse[PauseSimulationResponse], status_code=status.HTTP_200_OK)
+async def pause_simulation(
+    req: PauseSimulationRequest,
+    claims: Annotated[TokenClaims, Depends(get_current_user)],
+    meta: Annotated[RequestMeta, Depends(get_request_meta)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    redis: Annotated[aioredis.Redis, Depends(get_redis)],
+):
+    started = time.monotonic()
+    result = await SimulationStartService(db=db, redis=redis).pause_simulation(
+        simulation_id=req.simulation_id,
+        correlation_id=meta.request_id,
+        requested_by_user_id=claims.user_id,
+    )
+    payload = PauseSimulationResponse.model_validate(result)
     return success_response(payload, meta.request_id, started, meta.timestamp)

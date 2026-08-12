@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, patch
 
 import fakeredis
 import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from app.core.dependencies import get_db, get_redis
@@ -172,7 +173,7 @@ def test_start_simulation_missing_network_returns_404(client):
 
     with patch(
         "app.modules.simulation.service.SimulationStartService.start_simulation",
-        new=AsyncMock(side_effect=__import__("fastapi").HTTPException(status_code=404, detail="Network not found.")),
+        new=AsyncMock(side_effect=HTTPException(status_code=404, detail="Network not found.")),
     ):
         response = client.post(
             "/api/v1/simulations/start",
@@ -185,3 +186,88 @@ def test_start_simulation_missing_network_returns_404(client):
         )
 
     assert response.status_code == 404
+
+
+def test_pause_simulation_returns_envelope(client):
+    headers = {"Authorization": f"Bearer {_make_token()}"}
+    simulation_id = str(uuid.uuid4())
+    payload = {
+        "simulation_id": simulation_id,
+        "network_id": str(uuid.uuid4()),
+        "scene_object_id": "simulation-state",
+        "state": "paused",
+        "status": "paused",
+        "risk_gate": "required",
+        "scenario_id": str(uuid.uuid4()),
+        "correlation_id": str(uuid.uuid4()),
+    }
+
+    with patch(
+        "app.modules.simulation.service.SimulationStartService.pause_simulation",
+        new=AsyncMock(return_value=payload),
+    ):
+        response = client.post(
+            "/api/v1/simulations/pause",
+            json={"simulation_id": simulation_id},
+            headers=headers,
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["success"] is True
+    assert body["errors"] is None
+    assert body["data"]["simulation_id"] == simulation_id
+    assert body["data"]["state"] == "paused"
+
+
+def test_start_simulation_resume_accepts_simulation_id(client):
+    headers = {"Authorization": f"Bearer {_make_token()}"}
+    simulation_id = str(uuid.uuid4())
+    handoff = {
+        "simulation_id": simulation_id,
+        "resumed_from_simulation_id": simulation_id,
+        "scenario_id": str(uuid.uuid4()),
+        "network_id": str(uuid.uuid4()),
+        "scene_object_id": "simulation-state",
+        "state": "queued",
+        "status": "queued",
+        "risk_gate": "required",
+        "scenario_name": "Resume scenario",
+        "validation": {
+            "pipeline_stage": "handoff_queued",
+            "required_checks": ["simulation_before_deployment"],
+            "policy_reference": "ADR-008",
+            "status": "pending",
+            "queued_at": datetime.now(UTC).isoformat(),
+            "requested_by_user_id": str(uuid.uuid4()),
+        },
+        "requested_at": datetime.now(UTC).isoformat(),
+        "correlation_id": str(uuid.uuid4()),
+    }
+
+    with patch(
+        "app.modules.simulation.service.SimulationStartService.start_simulation",
+        new=AsyncMock(
+            return_value={
+                "handoff": handoff,
+                "queue_status": "queued",
+                "stream_entry_id": "2001-0",
+                "warning": None,
+            }
+        ),
+    ):
+        response = client.post(
+            "/api/v1/simulations/start",
+            json={
+                "network_id": str(uuid.uuid4()),
+                "simulation_id": simulation_id,
+                "scenario_name": "Resume scenario",
+                "validation_checks": ["simulation_before_deployment"],
+            },
+            headers=headers,
+        )
+
+    assert response.status_code == 202
+    body = response.json()
+    assert body["data"]["simulation_id"] == simulation_id
+    assert body["data"]["resumed_from_simulation_id"] == simulation_id

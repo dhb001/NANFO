@@ -1,5 +1,13 @@
 # Development Journal
 
+## [2026-08-12] - Vertical Slice 7 Step 3 (Pause Endpoint + Resume Semantics)
+
+- **Implemented:** Added `POST /api/v1/simulations/pause` and resume support on `POST /api/v1/simulations/start` via optional `simulation_id` while preserving canonical response envelope contracts.
+- **Lifecycle behavior:** Pause now transitions eligible simulations (`queued`/`running`) to `paused`, emits `simulation.paused` under existing fail-open publish behavior, and remains idempotent for already-paused simulations.
+- **Resume behavior:** Start requests with `simulation_id` now resume persisted paused/queued simulations by re-queuing a `simulation.started` handoff against the same simulation record and updating queue outcome metadata (`queued`/`deferred`).
+- **Governance/constraints:** No new endpoint beyond Simulation PRD, no undocumented event-name additions, no schema migration in Step 3, C5 workspace validation preserved via Organization service boundary, and C6 unchanged.
+- **Validation:** Scoped Ruff passed; targeted simulation unit tests passed (`10 passed`); targeted simulation endpoint/ws integration tests passed (`11 passed`); full backend regression passed (`292 passed`).
+
 ## [2026-08-12] - Vertical Slice 7 Step 2 (Simulation Start Persistence + C5 Validation)
 
 - **Implemented:** Refactored `POST /api/v1/simulations/start` to execute through a new `SimulationStartService` that persists simulation handoff records and keeps existing queue fail-open semantics.

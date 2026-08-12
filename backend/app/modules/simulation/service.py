@@ -171,10 +171,18 @@ class SimulationStartService:
         *,
         network_id: uuid.UUID,
         scenario_name: str,
+        simulation_id: uuid.UUID | None,
         validation_checks: list[str],
         correlation_id: str,
         requested_by_user_id: str,
     ) -> dict[str, Any]:
+        if simulation_id is not None:
+            return await self._resume_simulation(
+                simulation_id=simulation_id,
+                correlation_id=correlation_id,
+                requested_by_user_id=requested_by_user_id,
+            )
+
         network = await self._network_repo.get_by_id(network_id)
         if network is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Network not found.")
@@ -223,6 +231,157 @@ class SimulationStartService:
         )
         await self._db.commit()
         return result
+
+    async def _resume_simulation(
+        self,
+        *,
+        simulation_id: uuid.UUID,
+        correlation_id: str,
+        requested_by_user_id: str,
+    ) -> dict[str, Any]:
+        simulation = await self._repo.get_by_id(simulation_id)
+        if simulation is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Simulation not found.")
+
+        if simulation.state not in {"paused", "queued"}:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Simulation is not resumable.",
+            )
+
+        await self._workspace_svc.get_active_workspace(simulation.workspace_id)
+
+        handoff = ScenarioValidationHandoffService().build_handoff_payload(
+            network_id=simulation.network_id,
+            scenario_name=simulation.scenario_name,
+            validation_checks=(
+                simulation.validation.get("required_checks")
+                if isinstance(simulation.validation, dict)
+                else ["simulation_before_deployment"]
+            ),
+            correlation_id=correlation_id,
+            requested_by_user_id=requested_by_user_id,
+        )
+        handoff["simulation_id"] = str(simulation.simulation_id)
+        handoff["scenario_id"] = str(simulation.scenario_id)
+
+        try:
+            stream_entry_id = await SimulationEventService(redis=self._redis).publish_simulation_started_handoff(
+                handoff_payload=handoff,
+                correlation_id=str(handoff["correlation_id"]),
+            )
+            queue_status = "queued"
+            warning = None
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "simulation_resume_queue_failed",
+                simulation_id=str(simulation.simulation_id),
+                correlation_id=str(handoff["correlation_id"]),
+                error=str(exc),
+            )
+            stream_entry_id = None
+            queue_status = "deferred"
+            warning = "event_queue_unavailable"
+
+        await self._repo.update_state(
+            simulation,
+            state="queued",
+            status="queued",
+            risk_gate="required",
+        )
+        await self._repo.update_queue_outcome(
+            simulation,
+            queue_status=queue_status,
+            stream_entry_id=stream_entry_id,
+            warning=warning,
+        )
+        await self._db.commit()
+
+        return {
+            "handoff": {
+                **handoff,
+                "resumed_from_simulation_id": str(simulation.simulation_id),
+            },
+            "queue_status": queue_status,
+            "stream_entry_id": stream_entry_id,
+            "warning": warning,
+        }
+
+    async def pause_simulation(
+        self,
+        *,
+        simulation_id: uuid.UUID,
+        correlation_id: str,
+        requested_by_user_id: str,
+    ) -> dict[str, Any]:
+        simulation = await self._repo.get_by_id(simulation_id)
+        if simulation is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Simulation not found.")
+
+        if simulation.state == "paused":
+            return {
+                "simulation_id": str(simulation.simulation_id),
+                "network_id": str(simulation.network_id),
+                "scene_object_id": _DEFAULT_SIMULATION_OBJECT_ID,
+                "state": "paused",
+                "status": "paused",
+                "risk_gate": str(simulation.risk_gate),
+                "scenario_id": str(simulation.scenario_id),
+                "correlation_id": correlation_id,
+            }
+
+        if simulation.state not in {"queued", "running"}:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Simulation is not pausable.",
+            )
+
+        await self._workspace_svc.get_active_workspace(simulation.workspace_id)
+
+        await self._repo.update_state(
+            simulation,
+            state="paused",
+            status="paused",
+            risk_gate="required",
+        )
+
+        event_payload = {
+            "simulation_id": str(simulation.simulation_id),
+            "scenario_id": str(simulation.scenario_id),
+            "network_id": str(simulation.network_id),
+            "scene_object_id": _DEFAULT_SIMULATION_OBJECT_ID,
+            "state": "paused",
+            "status": "paused",
+            "risk_gate": "required",
+            "validation": simulation.validation,
+        }
+        try:
+            await publish_event(
+                redis=self._redis,
+                event_type="simulation.paused",
+                source="simulation",
+                payload=event_payload,
+                correlation_id=correlation_id,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "simulation_pause_event_publish_failed",
+                simulation_id=str(simulation.simulation_id),
+                correlation_id=correlation_id,
+                error=str(exc),
+            )
+
+        await self._db.commit()
+        return {
+            "simulation_id": str(simulation.simulation_id),
+            "network_id": str(simulation.network_id),
+            "scene_object_id": _DEFAULT_SIMULATION_OBJECT_ID,
+            "state": "paused",
+            "status": "paused",
+            "risk_gate": "required",
+            "scenario_id": str(simulation.scenario_id),
+            "correlation_id": correlation_id,
+        }
 
 
 async def queue_scenario_validation_handoff(

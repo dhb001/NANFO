@@ -139,6 +139,7 @@ async def test_start_simulation_persists_handoff_with_workspace_validation(mock_
         result = await svc.start_simulation(
             network_id=network_id,
             scenario_name="Campus baseline",
+            simulation_id=None,
             validation_checks=["simulation_before_deployment"],
             correlation_id=str(uuid.uuid4()),
             requested_by_user_id=str(uuid.uuid4()),
@@ -205,6 +206,7 @@ async def test_start_simulation_persists_deferred_queue_outcome_fail_open(mock_d
         result = await svc.start_simulation(
             network_id=network_id,
             scenario_name="Campus baseline",
+            simulation_id=None,
             validation_checks=["simulation_before_deployment"],
             correlation_id=str(uuid.uuid4()),
             requested_by_user_id=str(uuid.uuid4()),
@@ -226,6 +228,7 @@ async def test_start_simulation_raises_404_when_network_missing(mock_db, fake_re
             await svc.start_simulation(
                 network_id=uuid.uuid4(),
                 scenario_name="Campus baseline",
+                simulation_id=None,
                 validation_checks=["simulation_before_deployment"],
                 correlation_id=str(uuid.uuid4()),
                 requested_by_user_id=str(uuid.uuid4()),
@@ -254,9 +257,120 @@ async def test_start_simulation_raises_workspace_not_found_via_c5_boundary(mock_
             await svc.start_simulation(
                 network_id=network_id,
                 scenario_name="Campus baseline",
+                simulation_id=None,
                 validation_checks=["simulation_before_deployment"],
                 correlation_id=str(uuid.uuid4()),
                 requested_by_user_id=str(uuid.uuid4()),
             )
 
     assert exc_info.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_start_simulation_resume_uses_existing_simulation_record(mock_db, fake_redis):
+    simulation_id = uuid.uuid4()
+    existing = AsyncMock()
+    existing.simulation_id = simulation_id
+    existing.scenario_id = uuid.uuid4()
+    existing.network_id = uuid.uuid4()
+    existing.workspace_id = uuid.uuid4()
+    existing.scenario_name = "Campus baseline"
+    existing.state = "paused"
+    existing.validation = {"required_checks": ["simulation_before_deployment"]}
+
+    with (
+        patch("app.modules.simulation.service.SimulationRepository.get_by_id", new_callable=AsyncMock) as mock_get,
+        patch("app.modules.simulation.service.OrgWorkspaceService.get_active_workspace", new_callable=AsyncMock) as mock_ws,
+        patch("app.modules.simulation.service.SimulationRepository.update_state", new_callable=AsyncMock) as mock_update_state,
+        patch("app.modules.simulation.service.SimulationRepository.update_queue_outcome", new_callable=AsyncMock) as mock_update_queue,
+        patch("app.modules.simulation.service.publish_event", new_callable=AsyncMock) as mock_publish,
+    ):
+        mock_get.return_value = existing
+        mock_ws.return_value = AsyncMock()
+        mock_publish.return_value = "1300-0"
+
+        svc = SimulationStartService(db=mock_db, redis=fake_redis)
+        result = await svc.start_simulation(
+            network_id=uuid.uuid4(),
+            scenario_name="Ignored on resume",
+            simulation_id=simulation_id,
+            validation_checks=["simulation_before_deployment"],
+            correlation_id=str(uuid.uuid4()),
+            requested_by_user_id=str(uuid.uuid4()),
+        )
+
+    assert result["handoff"]["simulation_id"] == str(simulation_id)
+    assert result["handoff"]["resumed_from_simulation_id"] == str(simulation_id)
+    assert result["queue_status"] == "queued"
+    mock_update_state.assert_awaited_once()
+    mock_update_queue.assert_awaited_once()
+    mock_db.commit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_pause_simulation_updates_state_and_publishes_event(mock_db, fake_redis):
+    simulation_id = uuid.uuid4()
+    existing = AsyncMock()
+    existing.simulation_id = simulation_id
+    existing.scenario_id = uuid.uuid4()
+    existing.network_id = uuid.uuid4()
+    existing.workspace_id = uuid.uuid4()
+    existing.state = "queued"
+    existing.risk_gate = "required"
+    existing.validation = {"pipeline_stage": "handoff_queued"}
+
+    with (
+        patch("app.modules.simulation.service.SimulationRepository.get_by_id", new_callable=AsyncMock) as mock_get,
+        patch("app.modules.simulation.service.OrgWorkspaceService.get_active_workspace", new_callable=AsyncMock) as mock_ws,
+        patch("app.modules.simulation.service.SimulationRepository.update_state", new_callable=AsyncMock) as mock_update,
+        patch("app.modules.simulation.service.publish_event", new_callable=AsyncMock) as mock_publish,
+    ):
+        mock_get.return_value = existing
+        mock_ws.return_value = AsyncMock()
+
+        svc = SimulationStartService(db=mock_db, redis=fake_redis)
+        result = await svc.pause_simulation(
+            simulation_id=simulation_id,
+            correlation_id=str(uuid.uuid4()),
+            requested_by_user_id=str(uuid.uuid4()),
+        )
+
+    assert result["simulation_id"] == str(simulation_id)
+    assert result["state"] == "paused"
+    mock_update.assert_awaited_once()
+    mock_publish.assert_awaited_once()
+    assert mock_publish.await_args.kwargs["event_type"] == "simulation.paused"
+    mock_db.commit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_pause_simulation_event_publish_failure_is_fail_open(mock_db, fake_redis):
+    simulation_id = uuid.uuid4()
+    existing = AsyncMock()
+    existing.simulation_id = simulation_id
+    existing.scenario_id = uuid.uuid4()
+    existing.network_id = uuid.uuid4()
+    existing.workspace_id = uuid.uuid4()
+    existing.state = "running"
+    existing.risk_gate = "required"
+    existing.validation = {}
+
+    with (
+        patch("app.modules.simulation.service.SimulationRepository.get_by_id", new_callable=AsyncMock) as mock_get,
+        patch("app.modules.simulation.service.OrgWorkspaceService.get_active_workspace", new_callable=AsyncMock) as mock_ws,
+        patch("app.modules.simulation.service.SimulationRepository.update_state", new_callable=AsyncMock),
+        patch("app.modules.simulation.service.publish_event", new_callable=AsyncMock) as mock_publish,
+    ):
+        mock_get.return_value = existing
+        mock_ws.return_value = AsyncMock()
+        mock_publish.side_effect = RuntimeError("stream unavailable")
+
+        svc = SimulationStartService(db=mock_db, redis=fake_redis)
+        result = await svc.pause_simulation(
+            simulation_id=simulation_id,
+            correlation_id=str(uuid.uuid4()),
+            requested_by_user_id=str(uuid.uuid4()),
+        )
+
+    assert result["state"] == "paused"
+    mock_db.commit.assert_awaited_once()

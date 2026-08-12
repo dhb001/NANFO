@@ -3,6 +3,27 @@
 Lightweight chronological notes for decisions that do not require a full ADR.
 
 ## 2026-08-12
+### Pause Endpoint and Resume-via-Start Lifecycle Semantics (VS7 Step 3)
+Decision: Implement simulation pause with `POST /api/v1/simulations/pause` and implement resume semantics via optional `simulation_id` on existing `POST /api/v1/simulations/start` rather than introducing any new resume endpoint/event type.
+Reason:
+- `Simulation.md` explicitly includes `/simulations/pause` and lifecycle integrity AC for pause/resume.
+- Reusing `/simulations/start` for resume keeps endpoint surface minimal and avoids undocumented contract expansion.
+- Existing fail-open publication pattern must be preserved for queue availability degradations.
+Impact:
+- Added pause route and service lifecycle transition handling for `queued|running -> paused` with idempotent paused behavior.
+- Resume requests now target existing simulation records and re-queue `simulation.started` handoff with queue outcome persistence (`queued` or `deferred`).
+- `simulation.paused` publication failures are warning-only and non-fatal, preserving fail-open behavior.
+- No schema changes, no C5/C6 drift, and canonical envelope/status behavior preserved.
+Assumptions:
+- Resume eligibility is restricted to persisted simulations in `paused` or `queued` state; non-resumable states return conflict.
+Related:
+- `backend/app/api/v1/simulation.py`
+- `backend/app/modules/simulation/service.py`
+- `backend/app/modules/simulation/repository.py`
+- `backend/tests/unit/test_simulation_service.py`
+- `backend/tests/integration/test_simulation_endpoints.py`
+
+## 2026-08-12
 ### Persist `POST /api/v1/simulations/start` Through C5-Safe Validation and Fail-Open Queue Outcomes (VS7 Step 2)
 Decision: Route simulation start through a dedicated `SimulationStartService` that validates network/workspace ownership boundaries and persists start-handoff outcomes while retaining existing fail-open queue behavior.
 Reason:

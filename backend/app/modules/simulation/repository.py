@@ -85,3 +85,18 @@ class SimulationRepository:
         simulation.warning = warning
         await self._db.flush()
         return simulation
+
+    async def update_state(
+        self,
+        simulation: Simulation,
+        *,
+        state: str,
+        status: str,
+        risk_gate: str | None = None,
+    ) -> Simulation:
+        simulation.state = state
+        simulation.status = status
+        if risk_gate is not None:
+            simulation.risk_gate = risk_gate
+        await self._db.flush()
+        return simulation
