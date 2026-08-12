@@ -1,5 +1,14 @@
 # Development Journal
 
+## [2026-08-12] - Vertical Slice 4 Step 1 (Vendor-Facing Runtime Adapter Increment Baseline)
+
+- **Implemented:** Delivered the first VS4 vendor-facing runtime adapter increment by extending factory-controlled runtime modes with deterministic `snmp` and `grpc` adapter baselines.
+- **Adapter mode expansion:** Added `SNMPRuntimeTelemetryAdapter` and `GRPCRuntimeTelemetryAdapter` plus shared deterministic sample builder wiring so both modes emit canonical telemetry payloads through the existing runtime poll path.
+- **Operational metadata:** SNMP mode now emits deterministic vendor-facing metadata tags (`target`, `oid`) and gRPC mode emits (`endpoint`, `method`) while preserving stable ownership UUID derivation and canonical payload structure.
+- **Startup/config wiring:** Extended runtime adapter environment/settings controls (`TELEMETRY_RUNTIME_ADAPTER_SNMP_*`, `TELEMETRY_RUNTIME_ADAPTER_GRPC_*`) and passed them through lifespan factory construction without changing collector retry/backoff or fail-open startup semantics.
+- **Scope guardrails:** No REST/WebSocket envelope changes, no schema migration changes, no C5/C6 contract drift, and no new event contract surface.
+- **Validation:** Scoped Ruff passed; targeted telemetry scaffold + startup integration tests passed; full backend regression passed (`226 passed`).
+
 ## [2026-08-12] - Vertical Slice 3 Step 28 (Digital Twin Planning Closure + VS3 Completion)
 
 - **Implemented:** Closed remaining VS3 planning work by finalizing Digital Twin baseline integration/scenario planning handoff for next slice and marking VS3 complete in sprint tracking.

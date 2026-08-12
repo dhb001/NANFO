@@ -104,6 +104,36 @@ class RuntimeTelemetryAdapter(ABC):
         """Collect a batch of raw telemetry samples from the runtime adapter."""
 
 
+def _build_deterministic_runtime_sample(
+    *,
+    sample_key: str,
+    metric: str,
+    value: float,
+    unit: str,
+    source: str,
+    adapter_mode: str,
+    extra_tags: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    tags = {
+        "adapter_mode": adapter_mode,
+        "sample_key": sample_key,
+    }
+    if extra_tags:
+        tags.update(extra_tags)
+
+    return {
+        "device_id": str(uuid.uuid5(uuid.NAMESPACE_URL, f"{sample_key}:device")),
+        "network_id": str(uuid.uuid5(uuid.NAMESPACE_URL, f"{sample_key}:network")),
+        "workspace_id": str(uuid.uuid5(uuid.NAMESPACE_URL, f"{sample_key}:workspace")),
+        "metric": metric,
+        "value": value,
+        "unit": unit,
+        "source": source,
+        "observed_at": datetime.now(UTC).isoformat(),
+        "tags": tags,
+    }
+
+
 class ProductionTelemetryAdapterStub(RuntimeTelemetryAdapter):
     """Minimal production adapter stub for runtime poll-action wiring.
 
@@ -137,20 +167,96 @@ class SeededRuntimeTelemetryAdapter(RuntimeTelemetryAdapter):
         self._source = str(source).strip() or "runtime_seeded"
 
     async def poll(self) -> list[dict[str, Any]]:
-        sample = {
-            "device_id": str(uuid.uuid5(uuid.NAMESPACE_URL, f"{self._sample_key}:device")),
-            "network_id": str(uuid.uuid5(uuid.NAMESPACE_URL, f"{self._sample_key}:network")),
-            "workspace_id": str(uuid.uuid5(uuid.NAMESPACE_URL, f"{self._sample_key}:workspace")),
-            "metric": self._metric,
-            "value": self._value,
-            "unit": self._unit,
-            "source": self._source,
-            "observed_at": datetime.now(UTC).isoformat(),
-            "tags": {
-                "adapter_mode": "seeded",
-                "sample_key": self._sample_key,
+        sample = _build_deterministic_runtime_sample(
+            sample_key=self._sample_key,
+            metric=self._metric,
+            value=self._value,
+            unit=self._unit,
+            source=self._source,
+            adapter_mode="seeded",
+        )
+        return [sample]
+
+
+class SNMPRuntimeTelemetryAdapter(RuntimeTelemetryAdapter):
+    """Deterministic SNMP-shaped runtime adapter baseline."""
+
+    def __init__(
+        self,
+        *,
+        target: str,
+        oid: str,
+        sample_key: str,
+        metric: str,
+        value: float,
+        unit: str,
+        source: str,
+    ):
+        self._target = str(target).strip() or "127.0.0.1"
+        self._oid = str(oid).strip() or "1.3.6.1.2.1.1.3.0"
+        self._sample_key = str(sample_key).strip() or "nanfo-snmp-runtime"
+        self._metric = str(metric).strip() or "runtime_adapter_snmp_poll_latency_ms"
+        try:
+            self._value = float(value)
+        except (TypeError, ValueError):
+            self._value = 0.0
+        self._unit = str(unit).strip() or "ms"
+        self._source = str(source).strip() or "runtime_snmp"
+
+    async def poll(self) -> list[dict[str, Any]]:
+        sample = _build_deterministic_runtime_sample(
+            sample_key=self._sample_key,
+            metric=self._metric,
+            value=self._value,
+            unit=self._unit,
+            source=self._source,
+            adapter_mode="snmp",
+            extra_tags={
+                "target": self._target,
+                "oid": self._oid,
             },
-        }
+        )
+        return [sample]
+
+
+class GRPCRuntimeTelemetryAdapter(RuntimeTelemetryAdapter):
+    """Deterministic gRPC-shaped runtime adapter baseline."""
+
+    def __init__(
+        self,
+        *,
+        endpoint: str,
+        method: str,
+        sample_key: str,
+        metric: str,
+        value: float,
+        unit: str,
+        source: str,
+    ):
+        self._endpoint = str(endpoint).strip() or "localhost:50051"
+        self._method = str(method).strip() or "TelemetryService/Poll"
+        self._sample_key = str(sample_key).strip() or "nanfo-grpc-runtime"
+        self._metric = str(metric).strip() or "runtime_adapter_grpc_poll_latency_ms"
+        try:
+            self._value = float(value)
+        except (TypeError, ValueError):
+            self._value = 0.0
+        self._unit = str(unit).strip() or "ms"
+        self._source = str(source).strip() or "runtime_grpc"
+
+    async def poll(self) -> list[dict[str, Any]]:
+        sample = _build_deterministic_runtime_sample(
+            sample_key=self._sample_key,
+            metric=self._metric,
+            value=self._value,
+            unit=self._unit,
+            source=self._source,
+            adapter_mode="grpc",
+            extra_tags={
+                "endpoint": self._endpoint,
+                "method": self._method,
+            },
+        )
         return [sample]
 
 
@@ -162,6 +268,20 @@ def build_production_runtime_adapter(
     seeded_value: float,
     seeded_unit: str,
     seeded_source: str,
+    snmp_target: str = "127.0.0.1",
+    snmp_oid: str = "1.3.6.1.2.1.1.3.0",
+    snmp_sample_key: str = "nanfo-snmp-runtime",
+    snmp_metric: str = "runtime_adapter_snmp_poll_latency_ms",
+    snmp_value: float = 1.0,
+    snmp_unit: str = "ms",
+    snmp_source: str = "runtime_snmp",
+    grpc_endpoint: str = "localhost:50051",
+    grpc_method: str = "TelemetryService/Poll",
+    grpc_sample_key: str = "nanfo-grpc-runtime",
+    grpc_metric: str = "runtime_adapter_grpc_poll_latency_ms",
+    grpc_value: float = 1.0,
+    grpc_unit: str = "ms",
+    grpc_source: str = "runtime_grpc",
 ) -> RuntimeTelemetryAdapter:
     normalized_mode = str(mode).strip().lower()
     if normalized_mode == "seeded":
@@ -171,6 +291,28 @@ def build_production_runtime_adapter(
             value=seeded_value,
             unit=seeded_unit,
             source=seeded_source,
+        )
+
+    if normalized_mode == "snmp":
+        return SNMPRuntimeTelemetryAdapter(
+            target=snmp_target,
+            oid=snmp_oid,
+            sample_key=snmp_sample_key,
+            metric=snmp_metric,
+            value=snmp_value,
+            unit=snmp_unit,
+            source=snmp_source,
+        )
+
+    if normalized_mode == "grpc":
+        return GRPCRuntimeTelemetryAdapter(
+            endpoint=grpc_endpoint,
+            method=grpc_method,
+            sample_key=grpc_sample_key,
+            metric=grpc_metric,
+            value=grpc_value,
+            unit=grpc_unit,
+            source=grpc_source,
         )
 
     if normalized_mode != "stub":

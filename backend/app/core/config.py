@@ -56,6 +56,20 @@ class Settings(BaseSettings):
     TELEMETRY_RUNTIME_ADAPTER_SEEDED_VALUE: float = 1.0
     TELEMETRY_RUNTIME_ADAPTER_SEEDED_UNIT: str = "count"
     TELEMETRY_RUNTIME_ADAPTER_SEEDED_SOURCE: str = "runtime_seeded"
+    TELEMETRY_RUNTIME_ADAPTER_SNMP_TARGET: str = "127.0.0.1"
+    TELEMETRY_RUNTIME_ADAPTER_SNMP_OID: str = "1.3.6.1.2.1.1.3.0"
+    TELEMETRY_RUNTIME_ADAPTER_SNMP_SAMPLE_KEY: str = "nanfo-snmp-runtime"
+    TELEMETRY_RUNTIME_ADAPTER_SNMP_METRIC: str = "runtime_adapter_snmp_poll_latency_ms"
+    TELEMETRY_RUNTIME_ADAPTER_SNMP_VALUE: float = 1.0
+    TELEMETRY_RUNTIME_ADAPTER_SNMP_UNIT: str = "ms"
+    TELEMETRY_RUNTIME_ADAPTER_SNMP_SOURCE: str = "runtime_snmp"
+    TELEMETRY_RUNTIME_ADAPTER_GRPC_ENDPOINT: str = "localhost:50051"
+    TELEMETRY_RUNTIME_ADAPTER_GRPC_METHOD: str = "TelemetryService/Poll"
+    TELEMETRY_RUNTIME_ADAPTER_GRPC_SAMPLE_KEY: str = "nanfo-grpc-runtime"
+    TELEMETRY_RUNTIME_ADAPTER_GRPC_METRIC: str = "runtime_adapter_grpc_poll_latency_ms"
+    TELEMETRY_RUNTIME_ADAPTER_GRPC_VALUE: float = 1.0
+    TELEMETRY_RUNTIME_ADAPTER_GRPC_UNIT: str = "ms"
+    TELEMETRY_RUNTIME_ADAPTER_GRPC_SOURCE: str = "runtime_grpc"
 
     @computed_field  # type: ignore[misc]
     @property

@@ -8,8 +8,10 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 from app.modules.telemetry.service import (
+    GRPCRuntimeTelemetryAdapter,
     ProductionTelemetryAdapterStub,
     SeededRuntimeTelemetryAdapter,
+    SNMPRuntimeTelemetryAdapter,
     TelemetryCollectorRunner,
     TelemetryIngestionService,
     build_production_runtime_adapter,
@@ -146,6 +148,46 @@ def test_build_production_runtime_adapter_returns_seeded_mode_adapter():
     assert isinstance(adapter, SeededRuntimeTelemetryAdapter)
 
 
+def test_build_production_runtime_adapter_returns_snmp_mode_adapter():
+    adapter = build_production_runtime_adapter(
+        mode="snmp",
+        seeded_sample_key="site-1",
+        seeded_metric="latency_ms",
+        seeded_value=12.0,
+        seeded_unit="ms",
+        seeded_source="runtime_seeded",
+        snmp_target="10.0.0.11",
+        snmp_oid="1.3.6.1.2.1.31.1.1.1.6.1",
+        snmp_sample_key="snmp-site-a",
+        snmp_metric="if_in_octets_rate",
+        snmp_value=22.5,
+        snmp_unit="kbps",
+        snmp_source="runtime_snmp",
+    )
+
+    assert isinstance(adapter, SNMPRuntimeTelemetryAdapter)
+
+
+def test_build_production_runtime_adapter_returns_grpc_mode_adapter():
+    adapter = build_production_runtime_adapter(
+        mode="grpc",
+        seeded_sample_key="site-1",
+        seeded_metric="latency_ms",
+        seeded_value=12.0,
+        seeded_unit="ms",
+        seeded_source="runtime_seeded",
+        grpc_endpoint="collector.example:8443",
+        grpc_method="Telemetry/Poll",
+        grpc_sample_key="grpc-site-a",
+        grpc_metric="packet_loss_ratio",
+        grpc_value=0.03,
+        grpc_unit="ratio",
+        grpc_source="runtime_grpc",
+    )
+
+    assert isinstance(adapter, GRPCRuntimeTelemetryAdapter)
+
+
 def test_build_production_runtime_adapter_falls_back_to_stub_for_invalid_mode():
     with patch("app.modules.telemetry.service.logger.warning") as mock_warning:
         adapter = build_production_runtime_adapter(
@@ -164,6 +206,72 @@ def test_build_production_runtime_adapter_falls_back_to_stub_for_invalid_mode():
         if call.args and call.args[0] == "telemetry_runtime_adapter_mode_invalid"
     ]
     assert len(invalid_mode_logs) == 1
+
+
+@pytest.mark.asyncio
+async def test_snmp_runtime_adapter_poll_emits_snmp_tags(fake_redis):
+    _ = TelemetryIngestionService(redis=fake_redis)
+    adapter = SNMPRuntimeTelemetryAdapter(
+        target="10.0.0.11",
+        oid="1.3.6.1.2.1.31.1.1.1.6.1",
+        sample_key="snmp-site-a",
+        metric="if_in_octets_rate",
+        value=22.5,
+        unit="kbps",
+        source="runtime_snmp",
+    )
+
+    first = await adapter.poll()
+    second = await adapter.poll()
+
+    assert len(first) == 1
+    assert len(second) == 1
+    first_sample = first[0]
+    second_sample = second[0]
+    assert first_sample["device_id"] == second_sample["device_id"]
+    assert first_sample["network_id"] == second_sample["network_id"]
+    assert first_sample["workspace_id"] == second_sample["workspace_id"]
+    assert first_sample["metric"] == "if_in_octets_rate"
+    assert first_sample["value"] == 22.5
+    assert first_sample["unit"] == "kbps"
+    assert first_sample["source"] == "runtime_snmp"
+    assert first_sample["tags"]["adapter_mode"] == "snmp"
+    assert first_sample["tags"]["sample_key"] == "snmp-site-a"
+    assert first_sample["tags"]["target"] == "10.0.0.11"
+    assert first_sample["tags"]["oid"] == "1.3.6.1.2.1.31.1.1.1.6.1"
+
+
+@pytest.mark.asyncio
+async def test_grpc_runtime_adapter_poll_emits_grpc_tags(fake_redis):
+    _ = TelemetryIngestionService(redis=fake_redis)
+    adapter = GRPCRuntimeTelemetryAdapter(
+        endpoint="collector.example:8443",
+        method="Telemetry/Poll",
+        sample_key="grpc-site-a",
+        metric="packet_loss_ratio",
+        value=0.03,
+        unit="ratio",
+        source="runtime_grpc",
+    )
+
+    first = await adapter.poll()
+    second = await adapter.poll()
+
+    assert len(first) == 1
+    assert len(second) == 1
+    first_sample = first[0]
+    second_sample = second[0]
+    assert first_sample["device_id"] == second_sample["device_id"]
+    assert first_sample["network_id"] == second_sample["network_id"]
+    assert first_sample["workspace_id"] == second_sample["workspace_id"]
+    assert first_sample["metric"] == "packet_loss_ratio"
+    assert first_sample["value"] == 0.03
+    assert first_sample["unit"] == "ratio"
+    assert first_sample["source"] == "runtime_grpc"
+    assert first_sample["tags"]["adapter_mode"] == "grpc"
+    assert first_sample["tags"]["sample_key"] == "grpc-site-a"
+    assert first_sample["tags"]["endpoint"] == "collector.example:8443"
+    assert first_sample["tags"]["method"] == "Telemetry/Poll"
 
 
 @pytest.mark.asyncio

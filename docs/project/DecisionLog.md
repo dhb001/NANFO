@@ -3,6 +3,26 @@
 Lightweight chronological notes for decisions that do not require a full ADR.
 
 ## 2026-08-12
+### Vendor-Facing Runtime Adapter Increment Baseline (VS4 Step 1)
+Decision: Extend the existing runtime adapter mode factory with deterministic vendor-facing `snmp` and `grpc` modes while preserving the established `stub`/`seeded` fail-open semantics.
+Reason:
+- Execute the first VS4 runtime adapter increment behind already-governed factory controls with minimal, reversible scope.
+- Preserve architecture guardrails by avoiding direct vendor command execution and keeping runtime adapter changes inside telemetry module boundaries.
+- Keep reliability behavior unchanged by reusing existing runtime poll/retry/backpressure instrumentation path.
+Impact:
+- Added `SNMPRuntimeTelemetryAdapter` and `GRPCRuntimeTelemetryAdapter` deterministic poll baselines that emit canonical telemetry records with stable ownership UUID derivation.
+- Added SNMP (`target`, `oid`) and gRPC (`endpoint`, `method`) metadata tags for operational traceability without introducing new REST/WebSocket/event contracts.
+- Startup wiring now passes new runtime adapter settings (`TELEMETRY_RUNTIME_ADAPTER_SNMP_*`, `TELEMETRY_RUNTIME_ADAPTER_GRPC_*`) through `build_production_runtime_adapter(...)`.
+- Invalid mode handling remains fail-open to `stub` with warning-only diagnostics; no schema migrations or C5/C6 contract drift.
+Related:
+- `backend/app/modules/telemetry/service.py`
+- `backend/app/core/config.py`
+- `backend/app/main.py`
+- `backend/.env.example`
+- `backend/tests/unit/test_telemetry_scaffold.py`
+- `backend/tests/integration/test_startup_telemetry.py`
+
+## 2026-08-12
 ### VS3 Completion Gate and VS4 Handoff Baseline (VS3 Step 28)
 Decision: Mark VS3 complete after closing remaining planning/governance tasks and carry unresolved execution scope into explicit VS4 candidates.
 Reason:
