@@ -88,7 +88,11 @@ async def digital_twin_websocket(
         })
         await websocket.send_text(ack)
 
-        await digital_twin_ws_manager.subscribe(network_id, websocket)
+        await digital_twin_ws_manager.subscribe(
+            network_id,
+            websocket,
+            token_exp=claims.get("exp"),
+        )
 
         while True:
             await websocket.receive_text()

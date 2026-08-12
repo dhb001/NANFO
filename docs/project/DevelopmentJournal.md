@@ -1,5 +1,13 @@
 # Development Journal
 
+## [2026-08-12] - Vertical Slice 5 Step 1 (Digital Twin WS Per-Delta JWT Expiry Revalidation)
+
+- **Implemented:** Added the smallest executable VS5 increment by enforcing JWT expiry revalidation on every `/ws/digital-twin` scene-delta push.
+- **Security behavior:** `DigitalTwinWSManager` now stores connection token expiry (`exp`) at subscribe time and checks it before each push; expired sessions receive `WS_UNAUTHORIZED` and are closed before delivery.
+- **Endpoint wiring:** `/ws/digital-twin` subscribe path now passes token `exp` claim metadata into manager subscription state.
+- **Scope guardrails:** No schema migration, no REST/API envelope change, no event-name/payload contract drift, no C5/C6 boundary change, and fail-open delivery semantics for non-expired sessions preserved.
+- **Validation:** Scoped Ruff passed; targeted digital-twin/simulation/ws tests passed; full backend regression passed.
+
 ## [2026-08-12] - Vertical Slice 4 Step 4 (Digital Twin Scenario-Validation Handoff Baseline)
 
 - **Implemented:** Started executable Digital Twin baseline integration by adding a simulation validation handoff API path that queues deterministic `simulation.started` events and feeds `/ws/digital-twin` scene deltas.

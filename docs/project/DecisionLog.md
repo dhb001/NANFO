@@ -3,6 +3,23 @@
 Lightweight chronological notes for decisions that do not require a full ADR.
 
 ## 2026-08-12
+### Digital Twin WS Per-Delta JWT Expiry Revalidation (VS5 Step 1)
+Decision: Enforce JWT expiry (`exp`) revalidation in `/ws/digital-twin` manager before every scene-delta push and close expired sessions with `WS_UNAUTHORIZED` signaling.
+Reason:
+- `docs/api/WebSocket.md` requires token expiry revalidation before every delta push; prior behavior validated JWT only at connection upgrade.
+- This is the smallest production-safe M6/VS5 increment that hardens session security without introducing new endpoints, schema changes, or event contract drift.
+- Keeps implementation reversible and scoped by attaching expiry metadata to existing digital twin subscriptions only.
+Impact:
+- `DigitalTwinWSManager` now tracks per-connection token expiry and blocks push delivery to expired sessions.
+- Expired websocket subscribers receive `WS_UNAUTHORIZED` error frame followed by connection close.
+- `/ws/digital-twin` endpoint now passes token `exp` into manager subscription metadata.
+- Non-expired sessions continue to receive standard scene deltas; no API envelope changes and no C5/C6 scope impact.
+Related:
+- `backend/app/websocket/manager.py`
+- `backend/app/websocket/digital_twin.py`
+- `backend/tests/unit/test_websocket_digital_twin_auth.py`
+
+## 2026-08-12
 ### Digital Twin Scenario-Validation Handoff Baseline via Simulation Started Events (VS4 Step 4)
 Decision: Implement VS4 Step 4 with a minimal executable simulation handoff path that queues deterministic `simulation.started` events from `POST /api/v1/simulations/start` and translates `simulation.*` events into `/ws/digital-twin` scene deltas.
 Reason:

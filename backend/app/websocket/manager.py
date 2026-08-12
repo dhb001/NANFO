@@ -10,12 +10,42 @@ from __future__ import annotations
 import asyncio
 import json
 from collections import defaultdict
+from dataclasses import dataclass
+from datetime import UTC, datetime
 
 from fastapi import WebSocket
 
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
+
+_WS_UNAUTHORIZED_FRAME = json.dumps({
+    "event": "error",
+    "data": {
+        "code": "WS_UNAUTHORIZED",
+        "message": "Token expired. Reconnect with a valid token.",
+    },
+})
+
+
+@dataclass(frozen=True)
+class _DigitalTwinConnectionAuth:
+    token_exp: int | None
+
+
+def _coerce_token_exp(value: object) -> int | None:
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _is_token_expired(auth: _DigitalTwinConnectionAuth | None) -> bool:
+    if auth is None or auth.token_exp is None:
+        return False
+    return int(datetime.now(UTC).timestamp()) >= auth.token_exp
 
 
 class TopologyWSManager:
@@ -127,11 +157,21 @@ class DigitalTwinWSManager:
 
     def __init__(self):
         self._subscriptions: dict[str, set[WebSocket]] = defaultdict(set)
+        self._connection_auth: dict[WebSocket, _DigitalTwinConnectionAuth] = {}
         self._lock = asyncio.Lock()
 
-    async def subscribe(self, network_id: str, websocket: WebSocket) -> None:
+    async def subscribe(
+        self,
+        network_id: str,
+        websocket: WebSocket,
+        *,
+        token_exp: int | None = None,
+    ) -> None:
         async with self._lock:
             self._subscriptions[network_id].add(websocket)
+            self._connection_auth[websocket] = _DigitalTwinConnectionAuth(
+                token_exp=_coerce_token_exp(token_exp),
+            )
         logger.info("ws_digital_twin_subscribed", network_id=network_id)
 
     async def unsubscribe(self, network_id: str, websocket: WebSocket) -> None:
@@ -139,6 +179,11 @@ class DigitalTwinWSManager:
             self._subscriptions[network_id].discard(websocket)
             if not self._subscriptions[network_id]:
                 del self._subscriptions[network_id]
+            has_other_subscriptions = any(
+                websocket in sockets for sockets in self._subscriptions.values()
+            )
+            if not has_other_subscriptions:
+                self._connection_auth.pop(websocket, None)
         logger.info("ws_digital_twin_unsubscribed", network_id=network_id)
 
     async def push_delta(
@@ -164,9 +209,31 @@ class DigitalTwinWSManager:
 
         dead_connections: list[tuple[str, WebSocket]] = []
         async with self._lock:
-            targets = set(self._subscriptions.get(network_id, set()))
+            targets = {
+                ws: self._connection_auth.get(ws)
+                for ws in self._subscriptions.get(network_id, set())
+            }
 
-        for ws in targets:
+        for ws, auth in targets.items():
+            if _is_token_expired(auth):
+                try:
+                    await ws.send_text(_WS_UNAUTHORIZED_FRAME)
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug(
+                        "ws_digital_twin_unauthorized_frame_send_failed",
+                        network_id=network_id,
+                        error=str(exc),
+                    )
+                try:
+                    await ws.close()
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug(
+                        "ws_digital_twin_expired_connection_close_failed",
+                        network_id=network_id,
+                        error=str(exc),
+                    )
+                dead_connections.append((network_id, ws))
+                continue
             try:
                 await ws.send_text(message)
             except Exception:  # noqa: BLE001
