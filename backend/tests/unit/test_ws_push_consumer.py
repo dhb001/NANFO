@@ -11,6 +11,7 @@ import pytest
 from app.events.consumers.ws_push_consumer import (
     WS_PUSH_HANDLERS,
     handle_ws_alert_event,
+    handle_ws_digital_twin_event,
 )
 
 
@@ -157,3 +158,86 @@ def test_ws_push_handlers_include_alert_lifecycle_events():
     assert "alert.resolved" in WS_PUSH_HANDLERS
     assert WS_PUSH_HANDLERS["alert.generated"] is handle_ws_alert_event
     assert WS_PUSH_HANDLERS["alert.resolved"] is handle_ws_alert_event
+
+
+def _simulation_event(
+    event_type: str = "simulation.started",
+    payload: object | None = None,
+) -> dict:
+    return {
+        "event_id": str(uuid.uuid4()),
+        "event_type": event_type,
+        "correlation_id": str(uuid.uuid4()),
+        "timestamp": datetime.now(UTC).isoformat(),
+        "source": "simulation",
+        "payload": payload
+        if payload is not None
+        else {
+            "network_id": str(uuid.uuid4()),
+            "simulation_id": str(uuid.uuid4()),
+            "scenario_id": str(uuid.uuid4()),
+            "scene_object_id": "simulation-state",
+            "state": "queued",
+            "status": "queued",
+            "risk_gate": "required",
+        },
+    }
+
+
+@pytest.mark.asyncio
+async def test_ws_digital_twin_consumer_pushes_simulation_started_delta():
+    event = _simulation_event("simulation.started")
+
+    with patch("app.events.consumers.ws_push_consumer.digital_twin_ws_manager") as mock_digital_twin_ws_manager:
+        mock_digital_twin_ws_manager.push_delta = AsyncMock()
+        await handle_ws_digital_twin_event(event)
+
+    mock_digital_twin_ws_manager.push_delta.assert_awaited_once()
+    kwargs = mock_digital_twin_ws_manager.push_delta.await_args.kwargs
+    assert kwargs["network_id"] == event["payload"]["network_id"]
+    assert kwargs["event_type"] == "simulation.started"
+    assert kwargs["delta_type"] == "update"
+    assert kwargs["scene_object"]["object_type"] == "simulation_state"
+    assert kwargs["scene_object"]["simulation_id"] == event["payload"]["simulation_id"]
+
+
+@pytest.mark.asyncio
+async def test_ws_digital_twin_consumer_pushes_simulation_completed_delta():
+    event = _simulation_event("simulation.completed")
+
+    with patch("app.events.consumers.ws_push_consumer.digital_twin_ws_manager") as mock_digital_twin_ws_manager:
+        mock_digital_twin_ws_manager.push_delta = AsyncMock()
+        await handle_ws_digital_twin_event(event)
+
+    kwargs = mock_digital_twin_ws_manager.push_delta.await_args.kwargs
+    assert kwargs["event_type"] == "simulation.completed"
+    assert kwargs["delta_type"] == "update"
+
+
+@pytest.mark.asyncio
+async def test_ws_digital_twin_consumer_unmapped_event_is_noop():
+    event = _simulation_event("simulation.paused")
+
+    with patch("app.events.consumers.ws_push_consumer.digital_twin_ws_manager") as mock_digital_twin_ws_manager:
+        mock_digital_twin_ws_manager.push_delta = AsyncMock()
+        await handle_ws_digital_twin_event(event)
+
+    mock_digital_twin_ws_manager.push_delta.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_ws_digital_twin_consumer_missing_network_id_is_noop():
+    event = _simulation_event(payload={"simulation_id": str(uuid.uuid4())})
+
+    with patch("app.events.consumers.ws_push_consumer.digital_twin_ws_manager") as mock_digital_twin_ws_manager:
+        mock_digital_twin_ws_manager.push_delta = AsyncMock()
+        await handle_ws_digital_twin_event(event)
+
+    mock_digital_twin_ws_manager.push_delta.assert_not_awaited()
+
+
+def test_ws_push_handlers_include_simulation_events_for_digital_twin():
+    assert "simulation.started" in WS_PUSH_HANDLERS
+    assert "simulation.completed" in WS_PUSH_HANDLERS
+    assert WS_PUSH_HANDLERS["simulation.started"] is handle_ws_digital_twin_event
+    assert WS_PUSH_HANDLERS["simulation.completed"] is handle_ws_digital_twin_event

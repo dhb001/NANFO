@@ -126,6 +126,36 @@ For `remove` deltas:
 }
 ```
 
+### 4.2 Digital Twin Scene Delta (channel: `/ws/digital-twin`)
+
+```json
+{
+  "event": "simulation.started",
+  "correlation_id": "uuid",
+  "timestamp": "ISO8601",
+  "data": {
+    "delta_type": "update",
+    "scene_object": {
+      "id": "simulation-state",
+      "object_type": "simulation_state",
+      "state": "queued",
+      "simulation_id": "uuid",
+      "scenario_id": "uuid",
+      "risk_gate": "required",
+      "status": "queued",
+      "changed_fields": {
+        "state": "queued",
+        "status": "queued",
+        "risk_gate": "required",
+        "scenario_id": "uuid"
+      }
+    }
+  }
+}
+```
+
+`simulation.completed` reuses the same shape with updated `state`, `status`, and `risk_gate` values.
+
 ---
 
 ## 5. Backpressure and Error Signaling

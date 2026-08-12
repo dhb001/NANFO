@@ -78,6 +78,8 @@ When an event is consumed by a WebSocket push subscriber, it is translated into 
 | `network.device.added` | `/ws/topology` | `add` |
 | `network.device.updated` | `/ws/topology` | `update` |
 | `network.device.deleted` | `/ws/topology` | `remove` |
+| `simulation.started` | `/ws/digital-twin` | scene delta (`update`) |
+| `simulation.completed` | `/ws/digital-twin` | scene delta (`update`) |
 | `telemetry.*` | `/ws/telemetry` | metric delta |
 | `alert.*` | `/ws/alerts` | alert delta |
 

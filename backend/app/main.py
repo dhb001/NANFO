@@ -28,6 +28,7 @@ from app.api.v1.audit import router as audit_router
 from app.api.v1.auth import router as auth_router
 from app.api.v1.networks import router as network_router
 from app.api.v1.organizations import router as org_router
+from app.api.v1.simulation import router as simulation_router
 from app.api.v1.telemetry import router as telemetry_router
 from app.api.v1.topology import router as topology_router
 from app.core.config import get_settings
@@ -48,6 +49,7 @@ from app.modules.telemetry.service import (
     build_runtime_poll_action,
 )
 from app.websocket.alerts import router as alerts_ws_router
+from app.websocket.digital_twin import router as digital_twin_ws_router
 from app.websocket.telemetry import router as telemetry_ws_router
 from app.websocket.topology import router as ws_router
 
@@ -305,9 +307,11 @@ app.include_router(org_router)
 app.include_router(network_router)
 app.include_router(topology_router)
 app.include_router(telemetry_router)
+app.include_router(simulation_router)
 app.include_router(audit_router)
 app.include_router(ws_router)
 app.include_router(telemetry_ws_router)
+app.include_router(digital_twin_ws_router)
 app.include_router(alerts_ws_router)
 
 

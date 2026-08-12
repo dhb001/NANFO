@@ -10,3 +10,11 @@ def test_alert_module_stream_is_registered_for_event_publishing():
 
 def test_alert_stream_has_consumer_group_registration():
     assert STREAM_GROUPS["stream:alert"] == "nanfo-consumers"
+
+
+def test_simulation_module_stream_is_registered_for_event_publishing():
+    assert _STREAM_KEYS["simulation"] == "stream:simulation"
+
+
+def test_simulation_stream_has_consumer_group_registration():
+    assert STREAM_GROUPS["stream:simulation"] == "nanfo-consumers"

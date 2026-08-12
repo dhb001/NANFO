@@ -2,7 +2,8 @@
 
 Consumes network.device.* events from Redis Stream and pushes topology deltas
 to subscribed WebSocket clients via channel managers.
-Routes `network.device.*` -> `/ws/topology` and `alert.*` -> `/ws/alerts`.
+Routes `network.device.*` -> `/ws/topology`, `alert.*` -> `/ws/alerts`, and
+`simulation.*` -> `/ws/digital-twin` scene deltas.
 """
 
 from __future__ import annotations
@@ -11,7 +12,11 @@ from datetime import UTC, datetime
 
 from app.core.logging import get_logger
 from app.db.redis import get_redis_client
-from app.websocket.manager import alerts_ws_manager, topology_ws_manager
+from app.websocket.manager import (
+    alerts_ws_manager,
+    digital_twin_ws_manager,
+    topology_ws_manager,
+)
 
 logger = get_logger(__name__)
 
@@ -32,6 +37,11 @@ _ALERT_EVENT_TO_COUNTER_LABEL: dict[str, str] = {
 }
 
 _ALERT_WS_COUNTER_PREFIX = "alerts:ws:fanout"
+
+_SIMULATION_EVENT_TO_DELTA: dict[str, str] = {
+    "simulation.started": "update",
+    "simulation.completed": "update",
+}
 
 
 def _get_alert_counter_client():
@@ -160,10 +170,69 @@ async def handle_ws_alert_event(event: dict) -> None:
         )
 
 
+async def handle_ws_digital_twin_event(event: dict) -> None:
+    """Translate a simulation.* event into a /ws/digital-twin scene delta push."""
+    event_type = str(event.get("event_type", ""))
+    delta_type = _SIMULATION_EVENT_TO_DELTA.get(event_type)
+    if delta_type is None:
+        return
+
+    payload_raw = event.get("payload")
+    payload = payload_raw if isinstance(payload_raw, dict) else {}
+
+    network_id = str(payload.get("network_id", "")).strip()
+    if not network_id:
+        logger.warning("ws_digital_twin_missing_network_id", event_type=event_type)
+        return
+
+    scene_object_id = str(payload.get("scene_object_id", "")).strip() or "simulation-state"
+    state = str(payload.get("state", "unknown")).strip() or "unknown"
+    simulation_id = str(payload.get("simulation_id", "")).strip()
+    scenario_id = str(payload.get("scenario_id", "")).strip()
+    risk_gate = str(payload.get("risk_gate", "pending")).strip() or "pending"
+    status = str(payload.get("status", "pending")).strip() or "pending"
+
+    scene_object = {
+        "id": scene_object_id,
+        "object_type": "simulation_state",
+        "state": state,
+        "simulation_id": simulation_id,
+        "scenario_id": scenario_id,
+        "risk_gate": risk_gate,
+        "status": status,
+        "changed_fields": {
+            "state": state,
+            "status": status,
+            "risk_gate": risk_gate,
+            "scenario_id": scenario_id,
+        },
+    }
+
+    await digital_twin_ws_manager.push_delta(
+        network_id=network_id,
+        event_type=event_type,
+        delta_type=delta_type,
+        scene_object=scene_object,
+        correlation_id=str(event.get("correlation_id", "")),
+        timestamp=str(event.get("timestamp", datetime.now(UTC).isoformat())),
+    )
+    logger.info(
+        "ws_digital_twin_delta_pushed",
+        event_type=event_type,
+        network_id=network_id,
+        scene_object_id=scene_object_id,
+        simulation_id=simulation_id,
+        scenario_id=scenario_id,
+        delta_type=delta_type,
+    )
+
+
 WS_PUSH_HANDLERS: dict[str, object] = {
     "network.device.added": handle_ws_push_event,
     "network.device.updated": handle_ws_push_event,
     "network.device.deleted": handle_ws_push_event,
     "alert.generated": handle_ws_alert_event,
     "alert.resolved": handle_ws_alert_event,
+    "simulation.started": handle_ws_digital_twin_event,
+    "simulation.completed": handle_ws_digital_twin_event,
 }

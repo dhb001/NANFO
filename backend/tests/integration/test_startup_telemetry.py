@@ -2,9 +2,10 @@
 
 from unittest.mock import AsyncMock, patch
 
+from fastapi.testclient import TestClient
+
 import app.main as main_module
 from app.main import app
-from fastapi.testclient import TestClient
 
 
 def test_startup_starts_and_stops_telemetry_collector():
@@ -131,3 +132,26 @@ def test_startup_shutdown_repeats_without_runtime_loop_lifecycle_regression():
     assert collector.stop.await_count == 3
     assert mock_build_adapter.call_count == 3
     assert mock_build_poll.call_count == 3
+
+
+def test_startup_simulation_stream_is_provisioned_for_consumer_groups():
+    collector = AsyncMock()
+    collector.start = AsyncMock()
+    collector.start_with_retry = AsyncMock(return_value=False)
+    collector.start_runtime_loop = AsyncMock()
+    collector.stop = AsyncMock()
+
+    with (
+        patch("app.main.TelemetryCollectorRunner", return_value=collector),
+        patch("app.main.TelemetryIngestionService") as _svc,
+        patch("app.main.ensure_consumer_groups", new=AsyncMock()) as mock_ensure_consumer_groups,
+        TestClient(app, raise_server_exceptions=False) as client,
+    ):
+        response = client.get("/health")
+
+    assert response.status_code == 200
+    mock_ensure_consumer_groups.assert_awaited_once()
+
+    from app.events.bus import STREAM_GROUPS
+
+    assert "stream:simulation" in STREAM_GROUPS

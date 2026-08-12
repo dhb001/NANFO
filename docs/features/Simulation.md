@@ -17,6 +17,20 @@ All endpoints must follow `docs/api/API_STANDARD.md`.
 - `GET /api/v1/simulations/{id}`
 - `GET /api/v1/simulations/{id}/compare/{baselineId}`
 
+## 3.1 Event Contracts (Baseline)
+- `simulation.started` — emitted when a scenario validation handoff is queued for simulation-before-deployment processing.
+- `simulation.completed` — emitted when a scenario run reaches completed state and final state deltas can be propagated.
+
+Baseline payload fields for digital twin synchronization:
+- `simulation_id`
+- `scenario_id`
+- `network_id`
+- `scene_object_id`
+- `state`
+- `status`
+- `risk_gate`
+- `validation` (object with pipeline stage and required checks)
+
 ## 4. Data Model Notes
 - Simulation metadata in PostgreSQL.
 - Time-series outputs in TimescaleDB.
