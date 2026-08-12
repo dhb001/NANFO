@@ -6,7 +6,7 @@
 - Vertical Slice 3 Implementation: **COMPLETE** — runtime collector reliability, adapter-path advancement beyond stub, backpressure/SLO hardening, and VS3 planning-governance closure delivered through **VS3 Step 28**.
 - Vertical Slice 4 Implementation: **COMPLETE** — runtime adapter increment, SLO alerting/runbook operationalization, deferred-topology governed design start, and executable Digital Twin scenario-validation handoff baseline delivered through **VS4 Step 4**.
 - Vertical Slice 5 Implementation: **COMPLETE** — digital twin websocket session-security hardening and governed simulation lifecycle event coverage delivered through **VS5 Step 4**, with closure regression gate complete.
-- Vertical Slice 6 Implementation: **IN PROGRESS** — Digital Twin spatial-reference execution advanced through **VS6 Step 5** (governed topology read-path exposure).
+- Vertical Slice 6 Implementation: **COMPLETE** — Digital Twin spatial-reference execution delivered through **VS6 Step 5** with closure regression gate complete.
 
 ## Subsystem Progress — Vertical Slice 6
 
@@ -15,7 +15,7 @@
 - [x] Step 3: Add update flow for `spatial_ref_id` and `network.device.updated` delta semantics
 - [x] Step 4: Extend digital twin payload mapping with spatial reference metadata where available
 - [x] Step 5: Expose spatial reference on governed topology read paths where contracts allow
-- [ ] Closure Gate: Final full backend regression pass + VS6 project tracking finalized
+- [x] Closure Gate: Final full backend regression pass + VS6 project tracking finalized
 
 ## Subsystem Progress — Vertical Slice 5
 

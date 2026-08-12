@@ -1,5 +1,12 @@
 # Development Journal
 
+## [2026-08-12] - Vertical Slice 6 Closure (Remaining Scope Complete)
+
+- **Completed:** Closed all remaining VS6 steps (3-5) after Step 1-2 baseline with update-path delta semantics, digital twin spatial-metadata mapping, and governed topology read-path spatial-reference exposure.
+- **Contract closure:** Device update flow now emits deterministic `network.device.updated` `changed_fields` deltas for `spatial_ref_id`; digital twin scene-delta mapping now carries optional spatial metadata; topology read paths now expose nullable `spatial_ref_id` where available.
+- **Governance/constraints:** No API envelope drift, no C5/C6 boundary drift, no deferred endpoint activation, and no additional schema migration beyond Step 1 baseline.
+- **Validation closure:** Required scoped Ruff + targeted tests passed for Steps 4-5/closure scope; final backend full regression gate passed (`279 passed`).
+
 ## [2026-08-12] - Vertical Slice 6 Step 5 (Governed Topology Read-Path Spatial Reference Exposure)
 
 - **Implemented:** Exposed `spatial_ref_id` on governed topology read paths by extending topology graph/node response payload models and Neo4j read queries.

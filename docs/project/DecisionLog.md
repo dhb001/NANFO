@@ -3,6 +3,22 @@
 Lightweight chronological notes for decisions that do not require a full ADR.
 
 ## 2026-08-12
+### VS6 Closure: Remaining Scope Complete and Tracking Finalized
+Decision: Mark VS6 complete after delivering Steps 3-5 with full validation gates and closure tracking updates.
+Reason:
+- All VS6 checklist items in sprint tracking are complete and validated with full backend regression.
+- Spatial-reference objectives for update semantics, digital twin mapping, and governed topology read exposure are now delivered without architecture/contract drift.
+- Closure entry provides a single governance checkpoint before opening next-slice planning.
+Impact:
+- VS6 now closes with end-to-end spatial-reference continuity across create/update events, digital twin scene-delta mapping, and topology read contracts.
+- Project tracking reflects completed closure gate and finished VS6 state.
+- No additional runtime/API/schema changes introduced by closure itself.
+Related:
+- `docs/project/CurrentSprint.md`
+- `docs/project/DevelopmentJournal.md`
+- `docs/project/DecisionLog.md`
+
+## 2026-08-12
 ### Topology Read-Path Spatial Reference Exposure Under Existing Contracts (VS6 Step 5)
 Decision: Extend governed topology read-path payloads (`/api/v1/topology/graph`, `/api/v1/topology/nodes/{device_id}`) to include optional `spatial_ref_id` where available.
 Reason:
