@@ -193,6 +193,27 @@ async def handle_ws_digital_twin_event(event: dict) -> None:
     scenario_id = str(payload.get("scenario_id", "")).strip()
     risk_gate = str(payload.get("risk_gate", "pending")).strip() or "pending"
     status = str(payload.get("status", "pending")).strip() or "pending"
+    spatial_ref_present = "spatial_ref_id" in payload
+    spatial_ref_id = None
+    if spatial_ref_present:
+        raw_spatial_ref = payload.get("spatial_ref_id")
+        if raw_spatial_ref is not None:
+            normalized_spatial_ref = str(raw_spatial_ref).strip()
+            spatial_ref_id = normalized_spatial_ref or None
+
+    spatial_metadata_raw = payload.get("spatial_metadata")
+    has_spatial_metadata = isinstance(spatial_metadata_raw, dict)
+
+    changed_fields = {
+        "state": state,
+        "status": status,
+        "risk_gate": risk_gate,
+        "scenario_id": scenario_id,
+    }
+    if spatial_ref_present:
+        changed_fields["spatial_ref_id"] = spatial_ref_id
+    if has_spatial_metadata:
+        changed_fields["spatial_metadata"] = spatial_metadata_raw
 
     scene_object = {
         "id": scene_object_id,
@@ -202,13 +223,12 @@ async def handle_ws_digital_twin_event(event: dict) -> None:
         "scenario_id": scenario_id,
         "risk_gate": risk_gate,
         "status": status,
-        "changed_fields": {
-            "state": state,
-            "status": status,
-            "risk_gate": risk_gate,
-            "scenario_id": scenario_id,
-        },
+        "changed_fields": changed_fields,
     }
+    if spatial_ref_present:
+        scene_object["spatial_ref_id"] = spatial_ref_id
+    if has_spatial_metadata:
+        scene_object["spatial_metadata"] = spatial_metadata_raw
 
     await digital_twin_ws_manager.push_delta(
         network_id=network_id,

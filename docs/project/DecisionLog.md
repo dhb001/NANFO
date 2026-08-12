@@ -3,6 +3,23 @@
 Lightweight chronological notes for decisions that do not require a full ADR.
 
 ## 2026-08-12
+### Optional Spatial Metadata Mapping in Digital Twin Scene Deltas (VS6 Step 4)
+Decision: Extend simulation websocket delta translation to include optional spatial fields (`spatial_ref_id`, `spatial_metadata`) when provided by simulation event payloads.
+Reason:
+- VS6 Step 4 requires digital twin payload mapping to carry spatial reference metadata where available.
+- Existing `scene_object` + `changed_fields` contract supports additive optional fields without breaking current consumers.
+- Keeping mapping optional preserves compatibility for existing simulation events that do not yet provide spatial metadata.
+Impact:
+- `handle_ws_digital_twin_event()` now conditionally maps spatial fields into `scene_object` and `scene_object.changed_fields`.
+- Baseline mapping for non-spatial simulation events remains unchanged.
+- Added unit/integration coverage for both spatial-present and spatial-absent event payloads.
+- No API envelope/schema changes and no C5/C6/runtime fail-open semantics drift.
+Related:
+- `backend/app/events/consumers/ws_push_consumer.py`
+- `backend/tests/unit/test_ws_push_consumer.py`
+- `backend/tests/integration/test_simulation_event_ws_flow.py`
+
+## 2026-08-12
 ### Device Spatial Reference Update Path and `network.device.updated` Delta Contract (VS6 Step 3)
 Decision: Implement a dedicated device spatial-reference update path and emit `network.device.updated` with strict `changed_fields` delta semantics for topology/digital twin consumers.
 Reason:

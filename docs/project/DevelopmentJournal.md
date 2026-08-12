@@ -1,5 +1,14 @@
 # Development Journal
 
+## [2026-08-12] - Vertical Slice 6 Step 4 (Digital Twin Spatial Metadata Payload Mapping)
+
+- **Implemented:** Extended simulation-to-digital-twin websocket payload mapping to include optional spatial metadata in scene deltas when present.
+- **Mapping behavior:** `handle_ws_digital_twin_event()` now conditionally maps `spatial_ref_id` and `spatial_metadata` from simulation event payloads into `scene_object` plus `scene_object.changed_fields`.
+- **Contract safety:** Baseline scene-delta contract for events without spatial fields remains unchanged; spatial additions are optional and additive only.
+- **Coverage updates:** Added unit and integration tests to verify both positive mapping (spatial fields present) and omission behavior (spatial fields absent).
+- **Scope guardrails:** No schema migration, no REST envelope drift, no C5/C6 boundary changes, and fail-open event-routing behavior unchanged.
+- **Validation:** Scoped Ruff passed; targeted ws-push + simulation-event tests passed (`23 passed`); full backend regression passed (`278 passed`).
+
 ## [2026-08-12] - Vertical Slice 6 Step 3 (Spatial Reference Update Flow + Device Updated Delta Semantics)
 
 - **Implemented:** Added device spatial-reference update flow via `PATCH /api/v1/networks/{network_id}/devices/{device_id}` and wired service-layer update handling for `spatial_ref_id`.

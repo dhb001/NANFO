@@ -324,6 +324,66 @@ async def test_ws_digital_twin_consumer_pushes_simulation_cancelled_delta():
     assert kwargs["scene_object"]["status"] == "cancelled"
 
 
+@pytest.mark.asyncio
+async def test_ws_digital_twin_consumer_includes_spatial_ref_metadata_when_present():
+    event = _simulation_event(
+        "simulation.completed",
+        payload={
+            "network_id": str(uuid.uuid4()),
+            "simulation_id": str(uuid.uuid4()),
+            "scenario_id": str(uuid.uuid4()),
+            "scene_object_id": "simulation-state",
+            "state": "completed",
+            "status": "completed",
+            "risk_gate": "passed",
+            "spatial_ref_id": "campus-a/building-1/floor-2/room-204/rack-3/device-router-01",
+            "spatial_metadata": {
+                "campus_id": "campus-a",
+                "building_id": "building-1",
+                "floor_id": "floor-2",
+            },
+        },
+    )
+
+    with patch("app.events.consumers.ws_push_consumer.digital_twin_ws_manager") as mock_digital_twin_ws_manager:
+        mock_digital_twin_ws_manager.push_delta = AsyncMock()
+        await handle_ws_digital_twin_event(event)
+
+    kwargs = mock_digital_twin_ws_manager.push_delta.await_args.kwargs
+    scene_object = kwargs["scene_object"]
+    assert scene_object["spatial_ref_id"] == "campus-a/building-1/floor-2/room-204/rack-3/device-router-01"
+    assert scene_object["spatial_metadata"]["campus_id"] == "campus-a"
+    assert scene_object["changed_fields"]["spatial_ref_id"] == "campus-a/building-1/floor-2/room-204/rack-3/device-router-01"
+    assert scene_object["changed_fields"]["spatial_metadata"]["floor_id"] == "floor-2"
+
+
+@pytest.mark.asyncio
+async def test_ws_digital_twin_consumer_omits_spatial_fields_when_absent():
+    event = _simulation_event(
+        "simulation.started",
+        payload={
+            "network_id": str(uuid.uuid4()),
+            "simulation_id": str(uuid.uuid4()),
+            "scenario_id": str(uuid.uuid4()),
+            "scene_object_id": "simulation-state",
+            "state": "queued",
+            "status": "queued",
+            "risk_gate": "required",
+        },
+    )
+
+    with patch("app.events.consumers.ws_push_consumer.digital_twin_ws_manager") as mock_digital_twin_ws_manager:
+        mock_digital_twin_ws_manager.push_delta = AsyncMock()
+        await handle_ws_digital_twin_event(event)
+
+    kwargs = mock_digital_twin_ws_manager.push_delta.await_args.kwargs
+    scene_object = kwargs["scene_object"]
+    assert "spatial_ref_id" not in scene_object
+    assert "spatial_metadata" not in scene_object
+    assert "spatial_ref_id" not in scene_object["changed_fields"]
+    assert "spatial_metadata" not in scene_object["changed_fields"]
+
+
 def test_ws_push_handlers_include_simulation_events_for_digital_twin():
     assert "simulation.started" in WS_PUSH_HANDLERS
     assert "simulation.completed" in WS_PUSH_HANDLERS
