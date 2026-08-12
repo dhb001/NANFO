@@ -41,6 +41,8 @@ _ALERT_WS_COUNTER_PREFIX = "alerts:ws:fanout"
 _SIMULATION_EVENT_TO_DELTA: dict[str, str] = {
     "simulation.started": "update",
     "simulation.completed": "update",
+    "simulation.paused": "update",
+    "simulation.cancelled": "update",
 }
 
 
@@ -235,4 +237,6 @@ WS_PUSH_HANDLERS: dict[str, object] = {
     "alert.resolved": handle_ws_alert_event,
     "simulation.started": handle_ws_digital_twin_event,
     "simulation.completed": handle_ws_digital_twin_event,
+    "simulation.paused": handle_ws_digital_twin_event,
+    "simulation.cancelled": handle_ws_digital_twin_event,
 }

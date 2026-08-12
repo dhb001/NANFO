@@ -3,6 +3,22 @@
 Lightweight chronological notes for decisions that do not require a full ADR.
 
 ## 2026-08-12
+### Simulation Lifecycle WS Coverage Expansion for Digital Twin (VS5 Step 4)
+Decision: Extend digital twin WebSocket event translation coverage to include `simulation.paused` and `simulation.cancelled` using the existing scene-delta `update` contract.
+Reason:
+- VS5 Step 4 requires lifecycle coverage beyond `simulation.started`/`simulation.completed` while preserving governed event and payload contracts.
+- Existing simulation payload shape already carries state/status/risk gate fields needed for paused/cancelled lifecycle representation.
+- Minimal/reversible scope is preserved by extending only event-to-handler mappings and test coverage.
+Impact:
+- `ws_push_consumer` now routes `simulation.paused` and `simulation.cancelled` to `/ws/digital-twin` with unchanged scene-object envelope.
+- Unit/integration coverage now validates paused/cancelled translation and registration.
+- No schema/API route changes, no envelope drift, and fail-open malformed/unmapped event handling remains unchanged.
+Related:
+- `backend/app/events/consumers/ws_push_consumer.py`
+- `backend/tests/unit/test_ws_push_consumer.py`
+- `backend/tests/integration/test_simulation_event_ws_flow.py`
+
+## 2026-08-12
 ### Digital Twin WS Session-Security Close-Reason Observability (VS5 Step 3)
 Decision: Record deterministic close-reason observability for `/ws/digital-twin` session-security closures by incrementing Redis counters keyed by reason (`expired`, `revoked`) and emitting structured branch logs.
 Reason:

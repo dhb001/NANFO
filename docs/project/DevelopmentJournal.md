@@ -1,5 +1,13 @@
 # Development Journal
 
+## [2026-08-12] - Vertical Slice 5 Step 4 (Simulation Lifecycle WS Coverage Expansion)
+
+- **Implemented:** Expanded governed simulation lifecycle fanout coverage for `/ws/digital-twin` beyond handoff/completion by wiring `simulation.paused` and `simulation.cancelled` through existing scene-delta translation flow.
+- **Routing behavior:** `ws_push_consumer` now maps `simulation.paused`/`simulation.cancelled` to digital twin `update` deltas using the existing scene-object payload contract (no envelope or payload shape drift).
+- **Coverage updates:** Unit and integration tests now verify paused/cancelled event translation, handler registration, and unchanged fail-open behavior for malformed/unmapped events.
+- **Scope guardrails:** No schema migration, no new API endpoints, no API envelope drift, no C5/C6 boundary change, and no unrelated refactors.
+- **Validation:** Scoped Ruff passed; targeted ws-push + simulation-event tests passed (`19 passed`); full backend regression passed (`265 passed`).
+
 ## [2026-08-12] - Vertical Slice 5 Step 3 (Digital Twin WS Session-Security Close-Reason Observability)
 
 - **Implemented:** Added session-security observability for `/ws/digital-twin` close reasons using deterministic Redis counters plus structured log branches.

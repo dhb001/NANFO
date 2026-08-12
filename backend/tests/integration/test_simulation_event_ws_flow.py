@@ -96,3 +96,91 @@ async def test_simulation_completed_event_payload_is_translated_to_scene_delta()
     assert decoded["data"]["scene_object"]["state"] == "completed"
     assert decoded["data"]["scene_object"]["status"] == "completed"
     assert decoded["data"]["scene_object"]["risk_gate"] == "passed"
+
+
+@pytest.mark.asyncio
+async def test_simulation_paused_event_payload_is_translated_to_scene_delta():
+    payload = {
+        "network_id": str(uuid.uuid4()),
+        "simulation_id": str(uuid.uuid4()),
+        "scenario_id": str(uuid.uuid4()),
+        "scene_object_id": "simulation-state",
+        "state": "paused",
+        "status": "paused",
+        "risk_gate": "required",
+    }
+    event = {
+        "event_id": str(uuid.uuid4()),
+        "event_type": "simulation.paused",
+        "timestamp": datetime.now(UTC).isoformat(),
+        "source": "simulation",
+        "correlation_id": str(uuid.uuid4()),
+        "version": "1",
+        "payload": payload,
+    }
+
+    with patch("app.events.consumers.ws_push_consumer.digital_twin_ws_manager") as mock_digital_twin_ws_manager:
+        mock_digital_twin_ws_manager.push_delta = AsyncMock()
+        await handle_ws_digital_twin_event(event)
+
+    kwargs = mock_digital_twin_ws_manager.push_delta.await_args.kwargs
+    wire_payload = {
+        "event": kwargs["event_type"],
+        "correlation_id": kwargs["correlation_id"],
+        "timestamp": kwargs["timestamp"],
+        "data": {
+            "delta_type": kwargs["delta_type"],
+            "scene_object": kwargs["scene_object"],
+        },
+    }
+    encoded = json.dumps(wire_payload)
+    decoded = json.loads(encoded)
+
+    assert decoded["event"] == "simulation.paused"
+    assert decoded["data"]["delta_type"] == "update"
+    assert decoded["data"]["scene_object"]["state"] == "paused"
+    assert decoded["data"]["scene_object"]["status"] == "paused"
+
+
+@pytest.mark.asyncio
+async def test_simulation_cancelled_event_payload_is_translated_to_scene_delta():
+    payload = {
+        "network_id": str(uuid.uuid4()),
+        "simulation_id": str(uuid.uuid4()),
+        "scenario_id": str(uuid.uuid4()),
+        "scene_object_id": "simulation-state",
+        "state": "cancelled",
+        "status": "cancelled",
+        "risk_gate": "blocked",
+    }
+    event = {
+        "event_id": str(uuid.uuid4()),
+        "event_type": "simulation.cancelled",
+        "timestamp": datetime.now(UTC).isoformat(),
+        "source": "simulation",
+        "correlation_id": str(uuid.uuid4()),
+        "version": "1",
+        "payload": payload,
+    }
+
+    with patch("app.events.consumers.ws_push_consumer.digital_twin_ws_manager") as mock_digital_twin_ws_manager:
+        mock_digital_twin_ws_manager.push_delta = AsyncMock()
+        await handle_ws_digital_twin_event(event)
+
+    kwargs = mock_digital_twin_ws_manager.push_delta.await_args.kwargs
+    wire_payload = {
+        "event": kwargs["event_type"],
+        "correlation_id": kwargs["correlation_id"],
+        "timestamp": kwargs["timestamp"],
+        "data": {
+            "delta_type": kwargs["delta_type"],
+            "scene_object": kwargs["scene_object"],
+        },
+    }
+    encoded = json.dumps(wire_payload)
+    decoded = json.loads(encoded)
+
+    assert decoded["event"] == "simulation.cancelled"
+    assert decoded["data"]["delta_type"] == "update"
+    assert decoded["data"]["scene_object"]["state"] == "cancelled"
+    assert decoded["data"]["scene_object"]["status"] == "cancelled"

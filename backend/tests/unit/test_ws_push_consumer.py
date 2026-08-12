@@ -216,7 +216,7 @@ async def test_ws_digital_twin_consumer_pushes_simulation_completed_delta():
 
 @pytest.mark.asyncio
 async def test_ws_digital_twin_consumer_unmapped_event_is_noop():
-    event = _simulation_event("simulation.paused")
+    event = _simulation_event("simulation.branch_created")
 
     with patch("app.events.consumers.ws_push_consumer.digital_twin_ws_manager") as mock_digital_twin_ws_manager:
         mock_digital_twin_ws_manager.push_delta = AsyncMock()
@@ -236,8 +236,64 @@ async def test_ws_digital_twin_consumer_missing_network_id_is_noop():
     mock_digital_twin_ws_manager.push_delta.assert_not_awaited()
 
 
+@pytest.mark.asyncio
+async def test_ws_digital_twin_consumer_pushes_simulation_paused_delta():
+    event = _simulation_event(
+        "simulation.paused",
+        payload={
+            "network_id": str(uuid.uuid4()),
+            "simulation_id": str(uuid.uuid4()),
+            "scenario_id": str(uuid.uuid4()),
+            "scene_object_id": "simulation-state",
+            "state": "paused",
+            "status": "paused",
+            "risk_gate": "required",
+        },
+    )
+
+    with patch("app.events.consumers.ws_push_consumer.digital_twin_ws_manager") as mock_digital_twin_ws_manager:
+        mock_digital_twin_ws_manager.push_delta = AsyncMock()
+        await handle_ws_digital_twin_event(event)
+
+    kwargs = mock_digital_twin_ws_manager.push_delta.await_args.kwargs
+    assert kwargs["event_type"] == "simulation.paused"
+    assert kwargs["delta_type"] == "update"
+    assert kwargs["scene_object"]["state"] == "paused"
+    assert kwargs["scene_object"]["status"] == "paused"
+
+
+@pytest.mark.asyncio
+async def test_ws_digital_twin_consumer_pushes_simulation_cancelled_delta():
+    event = _simulation_event(
+        "simulation.cancelled",
+        payload={
+            "network_id": str(uuid.uuid4()),
+            "simulation_id": str(uuid.uuid4()),
+            "scenario_id": str(uuid.uuid4()),
+            "scene_object_id": "simulation-state",
+            "state": "cancelled",
+            "status": "cancelled",
+            "risk_gate": "blocked",
+        },
+    )
+
+    with patch("app.events.consumers.ws_push_consumer.digital_twin_ws_manager") as mock_digital_twin_ws_manager:
+        mock_digital_twin_ws_manager.push_delta = AsyncMock()
+        await handle_ws_digital_twin_event(event)
+
+    kwargs = mock_digital_twin_ws_manager.push_delta.await_args.kwargs
+    assert kwargs["event_type"] == "simulation.cancelled"
+    assert kwargs["delta_type"] == "update"
+    assert kwargs["scene_object"]["state"] == "cancelled"
+    assert kwargs["scene_object"]["status"] == "cancelled"
+
+
 def test_ws_push_handlers_include_simulation_events_for_digital_twin():
     assert "simulation.started" in WS_PUSH_HANDLERS
     assert "simulation.completed" in WS_PUSH_HANDLERS
+    assert "simulation.paused" in WS_PUSH_HANDLERS
+    assert "simulation.cancelled" in WS_PUSH_HANDLERS
     assert WS_PUSH_HANDLERS["simulation.started"] is handle_ws_digital_twin_event
     assert WS_PUSH_HANDLERS["simulation.completed"] is handle_ws_digital_twin_event
+    assert WS_PUSH_HANDLERS["simulation.paused"] is handle_ws_digital_twin_event
+    assert WS_PUSH_HANDLERS["simulation.cancelled"] is handle_ws_digital_twin_event
