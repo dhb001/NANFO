@@ -66,6 +66,19 @@ _RUNTIME_ADAPTER_SLO_COOLDOWN_CORRELATION_PHASE_SEQUENCE = (
     _RUNTIME_ADAPTER_SLO_COOLDOWN_CORRELATION_PHASE_EXPIRED_REEMIT,
     _RUNTIME_ADAPTER_SLO_COOLDOWN_CORRELATION_PHASE_CLEARED_RECOVERY,
 )
+_RUNTIME_ADAPTER_SLO_ALERT_GENERATED_EVENT_TYPE = "alert.generated"
+_RUNTIME_ADAPTER_SLO_ALERT_RESOLVED_EVENT_TYPE = "alert.resolved"
+_RUNTIME_ADAPTER_SLO_RUNBOOK_REFERENCE = (
+    "docs/project/TelemetryRuntimeAdapterRunbook.md"
+    "#runtime-adapter-slo-threshold-response"
+)
+_RUNTIME_ADAPTER_SLO_RUNBOOK_VERSION = "1.0"
+_RUNTIME_ADAPTER_SLO_PLAYBOOK_COMBINED_THRESHOLD = "runtime_adapter_slo_combined_threshold_response"
+_RUNTIME_ADAPTER_SLO_PLAYBOOK_REASON_THRESHOLD = "runtime_adapter_slo_reason_threshold_response"
+_RUNTIME_ADAPTER_SLO_PLAYBOOK_TRANSITION_THRESHOLD = (
+    "runtime_adapter_slo_transition_threshold_response"
+)
+_RUNTIME_ADAPTER_SLO_PLAYBOOK_RECOVERY = "runtime_adapter_slo_recovery_validation"
 
 
 def compute_bounded_backoff_seconds(
@@ -987,9 +1000,11 @@ class TelemetryQueryService:
         self,
         db: AsyncSession,
         counter_service: TelemetryHealthCounterService | None = None,
+        event_redis: aioredis.Redis | None = None,
     ):
         self._repo = TelemetryRecordRepository(db)
         self._counter_service = counter_service
+        self._event_redis = event_redis
         self._runtime_adapter_slo_trend_window: deque[dict[str, Any]] = deque(
             maxlen=_RUNTIME_ADAPTER_SLO_TREND_WINDOW_MAX_SIZE
         )
@@ -1132,6 +1147,7 @@ class TelemetryQueryService:
         dropped_events = counters["dropped_events"]
         runtime_sustained_failure_active = counters.get("runtime_sustained_failure_active", 0) > 0
         status = "degraded" if runtime_sustained_failure_active else "ok"
+        runtime_adapter_slo_alert_active = counters.get("runtime_adapter_slo_alert_active", 0) > 0
         runtime_adapter_anomaly_streak = self._coerce_non_negative_counter(
             counters.get("runtime_adapter_anomaly_streak", 0),
             counter_name="runtime_adapter_anomaly_streak",
@@ -1141,6 +1157,7 @@ class TelemetryQueryService:
             runtime_adapter_slo_snapshot=runtime_adapter_slo_snapshot,
             runtime_adapter_anomaly_streak=runtime_adapter_anomaly_streak,
             runtime_sustained_failure_active=runtime_sustained_failure_active,
+            runtime_adapter_slo_alert_active=runtime_adapter_slo_alert_active,
             status=status,
             dropped_events=dropped_events,
         )
@@ -1216,6 +1233,7 @@ class TelemetryQueryService:
         runtime_adapter_slo_snapshot: dict[str, int],
         runtime_adapter_anomaly_streak: int,
         runtime_sustained_failure_active: bool,
+        runtime_adapter_slo_alert_active: bool,
         status: str,
         dropped_events: int,
     ) -> None:
@@ -1237,7 +1255,7 @@ class TelemetryQueryService:
                 anomaly_reason_flags=anomaly_reason_flags,
                 runtime_adapter_anomaly_streak=runtime_adapter_anomaly_streak,
             )
-            rollup_severity, _ = self._log_runtime_adapter_slo_health_rollup(
+            rollup_severity, rollup_severity_reason = self._log_runtime_adapter_slo_health_rollup(
                 runtime_adapter_slo_snapshot=runtime_adapter_slo_snapshot,
                 runtime_adapter_anomaly_streak=current_anomaly_streak,
                 runtime_sustained_failure_active=runtime_sustained_failure_active,
@@ -1246,6 +1264,17 @@ class TelemetryQueryService:
             self._safe_log_runtime_adapter_slo_trend_window_summary(
                 severity=rollup_severity,
                 anomaly_reason_flags=anomaly_reason_flags,
+            )
+            current_alert_active = self._resolve_runtime_adapter_slo_alert_active(
+                rollup_severity=rollup_severity
+            )
+            await self._safe_handle_runtime_adapter_slo_alert_state_transition(
+                previous_alert_active=runtime_adapter_slo_alert_active,
+                current_alert_active=current_alert_active,
+                runtime_adapter_slo_snapshot=runtime_adapter_slo_snapshot,
+                anomaly_reason_flags=anomaly_reason_flags,
+                rollup_severity=rollup_severity,
+                rollup_severity_reason=rollup_severity_reason,
             )
         except Exception as exc:  # noqa: BLE001
             logger.warning(
@@ -1334,6 +1363,7 @@ class TelemetryQueryService:
             return
 
         updated_cooldown_state = threshold_evaluation["cooldown_state"]
+        latest_threshold_trigger_state = threshold_evaluation["latest_threshold_trigger_state"]
 
         try:
             self._write_runtime_adapter_slo_threshold_cooldown_state(
@@ -1358,7 +1388,7 @@ class TelemetryQueryService:
 
         self._safe_log_runtime_adapter_slo_trend_threshold_correlation_snapshot(
             trend_window_summary=trend_window_summary,
-            latest_threshold_trigger_state=threshold_evaluation["latest_threshold_trigger_state"],
+            latest_threshold_trigger_state=latest_threshold_trigger_state,
             cooldown_transition_phase=threshold_evaluation["cooldown_transition_phase"],
             cooldown_summary=cooldown_summary,
         )
@@ -2093,6 +2123,158 @@ class TelemetryQueryService:
             "anomaly_reason_frequency": dict(sorted(anomaly_reason_frequency.items())),
         }
 
+    @staticmethod
+    def _resolve_runtime_adapter_slo_alert_active(*, rollup_severity: str) -> bool:
+        return str(rollup_severity).strip().lower() != "ok"
+
+    async def _safe_handle_runtime_adapter_slo_alert_state_transition(
+        self,
+        *,
+        previous_alert_active: bool,
+        current_alert_active: bool,
+        runtime_adapter_slo_snapshot: dict[str, int],
+        anomaly_reason_flags: list[str],
+        rollup_severity: str,
+        rollup_severity_reason: str,
+    ) -> None:
+        await self._persist_runtime_adapter_slo_alert_active(active=current_alert_active)
+
+        if previous_alert_active == current_alert_active:
+            return
+
+        event_type = (
+            _RUNTIME_ADAPTER_SLO_ALERT_GENERATED_EVENT_TYPE
+            if current_alert_active
+            else _RUNTIME_ADAPTER_SLO_ALERT_RESOLVED_EVENT_TYPE
+        )
+        runbook_playbook = self._select_runtime_adapter_slo_runbook_playbook(
+            event_type=event_type,
+            anomaly_reason_flags=anomaly_reason_flags,
+            rollup_severity_reason=rollup_severity_reason,
+        )
+        payload = self._build_runtime_adapter_slo_alert_payload(
+            event_type=event_type,
+            previous_alert_active=previous_alert_active,
+            current_alert_active=current_alert_active,
+            runtime_adapter_slo_snapshot=runtime_adapter_slo_snapshot,
+            anomaly_reason_flags=anomaly_reason_flags,
+            rollup_severity=rollup_severity,
+            rollup_severity_reason=rollup_severity_reason,
+            runbook_playbook=runbook_playbook,
+        )
+
+        if self._event_redis is None:
+            logger.warning(
+                "telemetry_health_runtime_adapter_slo_alert_publish_skipped",
+                event_type=event_type,
+                reason="event_redis_unavailable",
+                previous_alert_active=previous_alert_active,
+                current_alert_active=current_alert_active,
+            )
+            return
+
+        correlation_id = str(uuid.uuid4())
+        try:
+            stream_entry_id = await publish_event(
+                redis=self._event_redis,
+                event_type=event_type,
+                source="telemetry",
+                payload=payload,
+                correlation_id=correlation_id,
+            )
+            logger.info(
+                "telemetry_health_runtime_adapter_slo_alert_published",
+                event_type=event_type,
+                correlation_id=correlation_id,
+                stream_entry_id=stream_entry_id,
+                runbook_reference=payload["runbook_reference"],
+                runbook_playbook=payload["runbook_playbook"],
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "telemetry_health_runtime_adapter_slo_alert_publish_failed",
+                event_type=event_type,
+                correlation_id=correlation_id,
+                error=str(exc),
+            )
+
+    async def _persist_runtime_adapter_slo_alert_active(self, *, active: bool) -> None:
+        if self._counter_service is None:
+            return
+        try:
+            await self._counter_service.set_runtime_adapter_slo_alert_active(active)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "telemetry_health_runtime_adapter_slo_alert_state_persist_failed",
+                runtime_adapter_slo_alert_active=active,
+                error=str(exc),
+            )
+
+    @staticmethod
+    def _select_runtime_adapter_slo_runbook_playbook(
+        *,
+        event_type: str,
+        anomaly_reason_flags: list[str],
+        rollup_severity_reason: str,
+    ) -> str:
+        if event_type == _RUNTIME_ADAPTER_SLO_ALERT_RESOLVED_EVENT_TYPE:
+            return _RUNTIME_ADAPTER_SLO_PLAYBOOK_RECOVERY
+
+        anomaly_reason_set = set(anomaly_reason_flags)
+        has_reason_threshold = bool(anomaly_reason_set)
+        has_transition_threshold = rollup_severity_reason in {
+            "anomaly_streak_threshold_exceeded",
+            "runtime_sustained_failure_active",
+        }
+
+        if has_transition_threshold and has_reason_threshold:
+            return _RUNTIME_ADAPTER_SLO_PLAYBOOK_COMBINED_THRESHOLD
+        if has_transition_threshold:
+            return _RUNTIME_ADAPTER_SLO_PLAYBOOK_TRANSITION_THRESHOLD
+        if has_reason_threshold:
+            return _RUNTIME_ADAPTER_SLO_PLAYBOOK_REASON_THRESHOLD
+        return _RUNTIME_ADAPTER_SLO_PLAYBOOK_COMBINED_THRESHOLD
+
+    @staticmethod
+    def _build_runtime_adapter_slo_alert_payload(
+        *,
+        event_type: str,
+        previous_alert_active: bool,
+        current_alert_active: bool,
+        runtime_adapter_slo_snapshot: dict[str, int],
+        anomaly_reason_flags: list[str],
+        rollup_severity: str,
+        rollup_severity_reason: str,
+        runbook_playbook: str,
+    ) -> dict[str, Any]:
+        return {
+            "alert_key": "telemetry_runtime_adapter_slo_threshold_breach",
+            "event_type": event_type,
+            "severity": rollup_severity,
+            "severity_reason": rollup_severity_reason,
+            "runtime_adapter_slo_alert_active": current_alert_active,
+            "previous_runtime_adapter_slo_alert_active": previous_alert_active,
+            "anomaly_reason_flags": sorted(set(anomaly_reason_flags)),
+            "runtime_adapter_slo_snapshot": {
+                "last_batch_size": runtime_adapter_slo_snapshot["last_batch_size"],
+                "invalid_samples": runtime_adapter_slo_snapshot["invalid_samples"],
+                "dropped_samples": runtime_adapter_slo_snapshot["dropped_samples"],
+                "ingest_attempts": runtime_adapter_slo_snapshot["ingest_attempts"],
+                "ingest_failures": runtime_adapter_slo_snapshot["ingest_failures"],
+            },
+            "thresholds": {
+                "invalid_sample_ratio_warn_threshold": _RUNTIME_ADAPTER_INVALID_SAMPLE_RATIO_WARN_THRESHOLD,
+                "anomaly_streak_critical_threshold": _RUNTIME_ADAPTER_ANOMALY_STREAK_CRITICAL_THRESHOLD,
+                "transition_frequency_alert_threshold": _RUNTIME_ADAPTER_SLO_TRANSITION_FREQUENCY_ALERT_THRESHOLD,
+                "reason_frequency_alert_threshold": _RUNTIME_ADAPTER_SLO_REASON_FREQUENCY_ALERT_THRESHOLD,
+                "threshold_cross_cooldown_reads": _RUNTIME_ADAPTER_SLO_THRESHOLD_CROSS_COOLDOWN_READS,
+            },
+            "runbook_reference": _RUNTIME_ADAPTER_SLO_RUNBOOK_REFERENCE,
+            "runbook_version": _RUNTIME_ADAPTER_SLO_RUNBOOK_VERSION,
+            "runbook_playbook": runbook_playbook,
+            "observed_at": datetime.now(UTC).isoformat(),
+        }
+
     def _log_runtime_adapter_slo_health_rollup(
         self,
         *,
@@ -2293,9 +2475,11 @@ class TelemetryQueryService:
                 "runtime_sustained_failure_active": 0,
                 "runtime_adapter_last_batch_size": 0,
                 "runtime_adapter_invalid_samples": 0,
+                "runtime_adapter_dropped_samples": 0,
                 "runtime_adapter_ingest_attempts": 0,
                 "runtime_adapter_ingest_failures": 0,
                 "runtime_adapter_anomaly_streak": 0,
+                "runtime_adapter_slo_alert_active": 0,
             }
         try:
             return await self._counter_service.get_snapshot()
@@ -2312,7 +2496,9 @@ class TelemetryQueryService:
                 "runtime_sustained_failure_active": 0,
                 "runtime_adapter_last_batch_size": 0,
                 "runtime_adapter_invalid_samples": 0,
+                "runtime_adapter_dropped_samples": 0,
                 "runtime_adapter_ingest_attempts": 0,
                 "runtime_adapter_ingest_failures": 0,
                 "runtime_adapter_anomaly_streak": 0,
+                "runtime_adapter_slo_alert_active": 0,
             }

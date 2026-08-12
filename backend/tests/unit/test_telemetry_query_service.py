@@ -2404,15 +2404,21 @@ async def test_get_health_uses_counter_snapshot_streak_for_cross_instance_contin
         }
     )
     counter_service.set_runtime_adapter_anomaly_streak = AsyncMock(return_value=8)
+    counter_service.set_runtime_adapter_slo_alert_active = AsyncMock(return_value=1)
     svc = TelemetryQueryService(db=mock_db, counter_service=counter_service)
     svc._repo.get_latest_observed_at = AsyncMock(return_value=None)
     svc._repo.count_all = AsyncMock(return_value=0)
+
+    event_redis = AsyncMock()
+    event_redis.xadd = AsyncMock(return_value="31-0")
+    svc._event_redis = event_redis
 
     with patch("app.modules.telemetry.service.logger.warning") as mock_warning:
         result = await svc.get_health()
 
     assert result.status == "ok"
     counter_service.set_runtime_adapter_anomaly_streak.assert_awaited_once_with(8)
+    counter_service.set_runtime_adapter_slo_alert_active.assert_awaited_once_with(True)
     streak_logs = [
         call
         for call in mock_warning.call_args_list
@@ -2428,3 +2434,250 @@ async def test_get_health_uses_counter_snapshot_streak_for_cross_instance_contin
     assert transition_log.kwargs["previous_streak"] == 7
     assert transition_log.kwargs["current_streak"] == 8
     assert transition_log.kwargs["anomaly_reason_flags"] == ["ingest_failures_detected"]
+
+
+@pytest.mark.asyncio
+async def test_get_health_runtime_adapter_slo_alert_activation_publishes_alert_generated(mock_db):
+    counter_service = AsyncMock()
+    counter_service.get_snapshot = AsyncMock(
+        return_value={
+            "ingested_events": 0,
+            "persisted_events": 0,
+            "fanout_events": 0,
+            "dropped_events": 0,
+            "runtime_exhausted_cycles": 0,
+            "runtime_exhausted_streak": 0,
+            "runtime_sustained_failure_windows": 0,
+            "runtime_sustained_failure_active": 0,
+            "runtime_adapter_last_batch_size": 0,
+            "runtime_adapter_invalid_samples": 0,
+            "runtime_adapter_dropped_samples": 0,
+            "runtime_adapter_ingest_attempts": 0,
+            "runtime_adapter_ingest_failures": 1,
+            "runtime_adapter_anomaly_streak": 0,
+            "runtime_adapter_slo_alert_active": 0,
+        }
+    )
+    counter_service.set_runtime_adapter_anomaly_streak = AsyncMock(return_value=1)
+    counter_service.set_runtime_adapter_slo_alert_active = AsyncMock(return_value=1)
+
+    event_redis = AsyncMock()
+    event_redis.xadd = AsyncMock(return_value="41-0")
+
+    svc = TelemetryQueryService(db=mock_db, counter_service=counter_service, event_redis=event_redis)
+    svc._repo.get_latest_observed_at = AsyncMock(return_value=None)
+    svc._repo.count_all = AsyncMock(return_value=0)
+
+    with patch("app.modules.telemetry.service.publish_event", new_callable=AsyncMock) as mock_publish:
+        mock_publish.return_value = "41-0"
+        result = await svc.get_health()
+
+    assert result.status == "ok"
+    counter_service.set_runtime_adapter_slo_alert_active.assert_awaited_once_with(True)
+    mock_publish.assert_awaited_once()
+    publish_kwargs = mock_publish.await_args.kwargs
+    assert publish_kwargs["event_type"] == "alert.generated"
+    assert publish_kwargs["source"] == "telemetry"
+    payload = publish_kwargs["payload"]
+    assert payload["runbook_reference"] == (
+        "docs/project/TelemetryRuntimeAdapterRunbook.md"
+        "#runtime-adapter-slo-threshold-response"
+    )
+    assert payload["runbook_playbook"] == "runtime_adapter_slo_reason_threshold_response"
+    assert payload["runtime_adapter_slo_alert_active"] is True
+    assert payload["previous_runtime_adapter_slo_alert_active"] is False
+    assert payload["severity"] == "degraded"
+    assert payload["severity_reason"] == "runtime_adapter_anomaly_detected"
+    assert payload["anomaly_reason_flags"] == ["ingest_failures_detected"]
+    assert payload["runtime_adapter_slo_snapshot"]["ingest_failures"] == 1
+
+
+@pytest.mark.asyncio
+async def test_get_health_runtime_adapter_slo_alert_recovery_publishes_alert_resolved(mock_db):
+    counter_service = AsyncMock()
+    counter_service.get_snapshot = AsyncMock(
+        return_value={
+            "ingested_events": 0,
+            "persisted_events": 0,
+            "fanout_events": 0,
+            "dropped_events": 0,
+            "runtime_exhausted_cycles": 0,
+            "runtime_exhausted_streak": 0,
+            "runtime_sustained_failure_windows": 0,
+            "runtime_sustained_failure_active": 0,
+            "runtime_adapter_last_batch_size": 4,
+            "runtime_adapter_invalid_samples": 0,
+            "runtime_adapter_dropped_samples": 0,
+            "runtime_adapter_ingest_attempts": 4,
+            "runtime_adapter_ingest_failures": 0,
+            "runtime_adapter_anomaly_streak": 0,
+            "runtime_adapter_slo_alert_active": 1,
+        }
+    )
+    counter_service.set_runtime_adapter_slo_alert_active = AsyncMock(return_value=0)
+
+    event_redis = AsyncMock()
+    event_redis.xadd = AsyncMock(return_value="42-0")
+
+    svc = TelemetryQueryService(db=mock_db, counter_service=counter_service, event_redis=event_redis)
+    svc._repo.get_latest_observed_at = AsyncMock(return_value=None)
+    svc._repo.count_all = AsyncMock(return_value=0)
+
+    with patch("app.modules.telemetry.service.publish_event", new_callable=AsyncMock) as mock_publish:
+        mock_publish.return_value = "42-0"
+        result = await svc.get_health()
+
+    assert result.status == "ok"
+    counter_service.set_runtime_adapter_slo_alert_active.assert_awaited_once_with(False)
+    mock_publish.assert_awaited_once()
+    publish_kwargs = mock_publish.await_args.kwargs
+    assert publish_kwargs["event_type"] == "alert.resolved"
+    payload = publish_kwargs["payload"]
+    assert payload["runbook_playbook"] == "runtime_adapter_slo_recovery_validation"
+    assert payload["runtime_adapter_slo_alert_active"] is False
+    assert payload["previous_runtime_adapter_slo_alert_active"] is True
+    assert payload["severity"] == "ok"
+    assert payload["severity_reason"] == "runtime_adapter_healthy"
+    assert payload["anomaly_reason_flags"] == []
+
+
+@pytest.mark.asyncio
+async def test_get_health_runtime_adapter_slo_alert_persist_failure_is_fail_open(mock_db):
+    counter_service = AsyncMock()
+    counter_service.get_snapshot = AsyncMock(
+        return_value={
+            "ingested_events": 0,
+            "persisted_events": 0,
+            "fanout_events": 0,
+            "dropped_events": 0,
+            "runtime_exhausted_cycles": 0,
+            "runtime_exhausted_streak": 0,
+            "runtime_sustained_failure_windows": 0,
+            "runtime_sustained_failure_active": 0,
+            "runtime_adapter_last_batch_size": 0,
+            "runtime_adapter_invalid_samples": 0,
+            "runtime_adapter_dropped_samples": 0,
+            "runtime_adapter_ingest_attempts": 0,
+            "runtime_adapter_ingest_failures": 1,
+            "runtime_adapter_anomaly_streak": 0,
+            "runtime_adapter_slo_alert_active": 0,
+        }
+    )
+    counter_service.set_runtime_adapter_anomaly_streak = AsyncMock(return_value=1)
+    counter_service.set_runtime_adapter_slo_alert_active = AsyncMock(
+        side_effect=RuntimeError("redis write failed")
+    )
+
+    event_redis = AsyncMock()
+    event_redis.xadd = AsyncMock(return_value="43-0")
+
+    svc = TelemetryQueryService(db=mock_db, counter_service=counter_service, event_redis=event_redis)
+    svc._repo.get_latest_observed_at = AsyncMock(return_value=None)
+    svc._repo.count_all = AsyncMock(return_value=0)
+
+    with (
+        patch("app.modules.telemetry.service.publish_event", new_callable=AsyncMock) as mock_publish,
+        patch("app.modules.telemetry.service.logger.warning") as mock_warning,
+    ):
+        mock_publish.return_value = "43-0"
+        result = await svc.get_health()
+
+    assert result.status == "ok"
+    mock_publish.assert_awaited_once()
+    persist_failed_logs = _event_calls(
+        mock_warning, "telemetry_health_runtime_adapter_slo_alert_state_persist_failed"
+    )
+    assert len(persist_failed_logs) == 1
+
+
+@pytest.mark.asyncio
+async def test_get_health_runtime_adapter_slo_alert_publish_skipped_without_event_redis(mock_db):
+    counter_service = AsyncMock()
+    counter_service.get_snapshot = AsyncMock(
+        return_value={
+            "ingested_events": 0,
+            "persisted_events": 0,
+            "fanout_events": 0,
+            "dropped_events": 0,
+            "runtime_exhausted_cycles": 0,
+            "runtime_exhausted_streak": 0,
+            "runtime_sustained_failure_windows": 0,
+            "runtime_sustained_failure_active": 0,
+            "runtime_adapter_last_batch_size": 0,
+            "runtime_adapter_invalid_samples": 0,
+            "runtime_adapter_dropped_samples": 0,
+            "runtime_adapter_ingest_attempts": 0,
+            "runtime_adapter_ingest_failures": 1,
+            "runtime_adapter_anomaly_streak": 0,
+            "runtime_adapter_slo_alert_active": 0,
+        }
+    )
+    counter_service.set_runtime_adapter_anomaly_streak = AsyncMock(return_value=1)
+    counter_service.set_runtime_adapter_slo_alert_active = AsyncMock(return_value=1)
+
+    svc = TelemetryQueryService(db=mock_db, counter_service=counter_service)
+    svc._repo.get_latest_observed_at = AsyncMock(return_value=None)
+    svc._repo.count_all = AsyncMock(return_value=0)
+
+    with (
+        patch("app.modules.telemetry.service.publish_event", new_callable=AsyncMock) as mock_publish,
+        patch("app.modules.telemetry.service.logger.warning") as mock_warning,
+    ):
+        result = await svc.get_health()
+
+    assert result.status == "ok"
+    mock_publish.assert_not_awaited()
+    skipped_logs = _event_calls(
+        mock_warning, "telemetry_health_runtime_adapter_slo_alert_publish_skipped"
+    )
+    assert len(skipped_logs) == 1
+
+
+@pytest.mark.asyncio
+async def test_get_health_runtime_adapter_slo_alert_publish_failure_is_fail_open(mock_db):
+    counter_service = AsyncMock()
+    counter_service.get_snapshot = AsyncMock(
+        return_value={
+            "ingested_events": 0,
+            "persisted_events": 0,
+            "fanout_events": 0,
+            "dropped_events": 0,
+            "runtime_exhausted_cycles": 0,
+            "runtime_exhausted_streak": 0,
+            "runtime_sustained_failure_windows": 0,
+            "runtime_sustained_failure_active": 0,
+            "runtime_adapter_last_batch_size": 0,
+            "runtime_adapter_invalid_samples": 0,
+            "runtime_adapter_dropped_samples": 0,
+            "runtime_adapter_ingest_attempts": 0,
+            "runtime_adapter_ingest_failures": 1,
+            "runtime_adapter_anomaly_streak": 0,
+            "runtime_adapter_slo_alert_active": 0,
+        }
+    )
+    counter_service.set_runtime_adapter_anomaly_streak = AsyncMock(return_value=1)
+    counter_service.set_runtime_adapter_slo_alert_active = AsyncMock(return_value=1)
+
+    event_redis = AsyncMock()
+    event_redis.xadd = AsyncMock(return_value="44-0")
+
+    svc = TelemetryQueryService(db=mock_db, counter_service=counter_service, event_redis=event_redis)
+    svc._repo.get_latest_observed_at = AsyncMock(return_value=None)
+    svc._repo.count_all = AsyncMock(return_value=0)
+
+    with (
+        patch(
+            "app.modules.telemetry.service.publish_event",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("publish failed"),
+        ) as mock_publish,
+        patch("app.modules.telemetry.service.logger.warning") as mock_warning,
+    ):
+        result = await svc.get_health()
+
+    assert result.status == "ok"
+    mock_publish.assert_awaited_once()
+    publish_failed_logs = _event_calls(
+        mock_warning, "telemetry_health_runtime_adapter_slo_alert_publish_failed"
+    )
+    assert len(publish_failed_logs) == 1

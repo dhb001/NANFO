@@ -1,5 +1,15 @@
 # Development Journal
 
+## [2026-08-12] - Vertical Slice 4 Step 2 (Runtime Adapter SLO Alerting + Runbook Operationalization)
+
+- **Implemented:** Operationalized runtime adapter SLO posture into alert lifecycle signaling by emitting `alert.generated` and `alert.resolved` on SLO alert-state transitions from telemetry health internals.
+- **State handling:** Added persisted counter state `runtime_adapter_slo_alert_active` to prevent duplicate alert emission and to ensure deterministic activation/recovery transition behavior.
+- **Alert payload/runbook metadata:** Alert payload now carries severity/reason, anomaly flags, snapshot counters, threshold constants, and runbook metadata (`runbook_reference`, `runbook_version`, `runbook_playbook`) for operator response linkage.
+- **Runbook delivery:** Added `docs/project/TelemetryRuntimeAdapterRunbook.md` with playbooks for combined threshold pressure, reason-frequency pressure, transition-frequency pressure, and recovery validation.
+- **Fail-open safety:** Counter state persistence and alert publish failures remain warning-only; telemetry health response and existing runtime reliability semantics remain unchanged.
+- **Scope guardrails:** No REST/WebSocket envelope drift, no schema migration changes, no C5/C6 scope drift, and no new endpoint additions.
+- **Validation:** Scoped Ruff passed; targeted telemetry counters/query/endpoints tests passed; full backend regression passed (`234 passed`).
+
 ## [2026-08-12] - Vertical Slice 4 Step 1 (Vendor-Facing Runtime Adapter Increment Baseline)
 
 - **Implemented:** Delivered the first VS4 vendor-facing runtime adapter increment by extending factory-controlled runtime modes with deterministic `snmp` and `grpc` adapter baselines.

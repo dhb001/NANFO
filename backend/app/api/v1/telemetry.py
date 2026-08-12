@@ -83,6 +83,6 @@ async def get_telemetry_health(
 ):
     started = time.monotonic()
     counter_service = TelemetryHealthCounterService(redis)
-    svc = TelemetryQueryService(db=db, counter_service=counter_service)
+    svc = TelemetryQueryService(db=db, counter_service=counter_service, event_redis=redis)
     result = await svc.get_health()
     return success_response(result, meta.request_id, started, meta.timestamp)

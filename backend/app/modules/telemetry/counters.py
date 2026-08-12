@@ -18,6 +18,7 @@ COUNTER_RUNTIME_ADAPTER_DROPPED_SAMPLES = "telemetry:health:runtime_adapter_drop
 COUNTER_RUNTIME_ADAPTER_INGEST_ATTEMPTS = "telemetry:health:runtime_adapter_ingest_attempts"
 COUNTER_RUNTIME_ADAPTER_INGEST_FAILURES = "telemetry:health:runtime_adapter_ingest_failures"
 COUNTER_RUNTIME_ADAPTER_ANOMALY_STREAK = "telemetry:health:runtime_adapter_anomaly_streak"
+COUNTER_RUNTIME_ADAPTER_SLO_ALERT_ACTIVE = "telemetry:health:runtime_adapter_slo_alert_active"
 
 
 class TelemetryHealthCounterService:
@@ -76,6 +77,11 @@ class TelemetryHealthCounterService:
         await self._redis.set(COUNTER_RUNTIME_ADAPTER_ANOMALY_STREAK, value)
         return value
 
+    async def set_runtime_adapter_slo_alert_active(self, active: bool) -> int:
+        value = 1 if active else 0
+        await self._redis.set(COUNTER_RUNTIME_ADAPTER_SLO_ALERT_ACTIVE, value)
+        return value
+
     async def get_snapshot(self) -> dict[str, int]:
         (
             ingested,
@@ -92,6 +98,7 @@ class TelemetryHealthCounterService:
             runtime_adapter_ingest_attempts,
             runtime_adapter_ingest_failures,
             runtime_adapter_anomaly_streak,
+            runtime_adapter_slo_alert_active,
         ) = await self._redis.mget(
             COUNTER_INGESTED_EVENTS,
             COUNTER_PERSISTED_EVENTS,
@@ -107,6 +114,7 @@ class TelemetryHealthCounterService:
             COUNTER_RUNTIME_ADAPTER_INGEST_ATTEMPTS,
             COUNTER_RUNTIME_ADAPTER_INGEST_FAILURES,
             COUNTER_RUNTIME_ADAPTER_ANOMALY_STREAK,
+            COUNTER_RUNTIME_ADAPTER_SLO_ALERT_ACTIVE,
         )
         return {
             "ingested_events": self._to_int(ingested),
@@ -123,6 +131,7 @@ class TelemetryHealthCounterService:
             "runtime_adapter_ingest_attempts": self._to_int(runtime_adapter_ingest_attempts),
             "runtime_adapter_ingest_failures": self._to_int(runtime_adapter_ingest_failures),
             "runtime_adapter_anomaly_streak": self._to_int(runtime_adapter_anomaly_streak),
+            "runtime_adapter_slo_alert_active": self._to_int(runtime_adapter_slo_alert_active),
         }
 
     @staticmethod

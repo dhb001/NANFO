@@ -4,12 +4,12 @@
 - Vertical Slice 1 Implementation: **COMPLETE** — all modules implemented, tested, and migrated.
 - Vertical Slice 2 Implementation: **COMPLETE** — telemetry ingestion/persistence/read APIs and telemetry health counters + `/ws/telemetry` fanout delivered through Step 8.
 - Vertical Slice 3 Implementation: **COMPLETE** — runtime collector reliability, adapter-path advancement beyond stub, backpressure/SLO hardening, and VS3 planning-governance closure delivered through **VS3 Step 28**.
-- Vertical Slice 4 Implementation: **IN PROGRESS** — first vendor-facing runtime adapter increment delivered through **VS4 Step 1** (SNMP/gRPC deterministic mode baselines behind existing factory controls).
+- Vertical Slice 4 Implementation: **IN PROGRESS** — vendor-facing runtime adapter increment and runtime-adapter SLO alerting/runbook operationalization delivered through **VS4 Step 2**.
 
 ## Subsystem Progress — Vertical Slice 4
 
 - [x] Step 1: Vendor-facing runtime adapter increment baseline (SNMP/gRPC deterministic modes) behind runtime adapter factory controls
-- [ ] Step 2: Operationalize runtime adapter SLO thresholds into alerting signals and runbook-backed response metadata
+- [x] Step 2: Operationalize runtime adapter SLO thresholds into alerting signals and runbook-backed response metadata
 - [ ] Step 3: Begin governed implementation design for deferred topology analysis endpoints (`/neighbors`, `/impact`, `/reconcile`) under C6
 - [ ] Step 4: Start executable Digital Twin baseline integration with scenario validation pipeline handoff
 
@@ -84,6 +84,5 @@
 - Repo-wide Ruff debt outside VS2 Step 8 scope remains and is tracked for later cleanup.
 
 ## Next Sprint Candidates
-- VS4: Operationalize runtime adapter SLOs into alerting thresholds and runbook-backed response playbooks.
 - VS4: Begin governed implementation design for deferred topology analysis endpoints (`/neighbors`, `/impact`, `/reconcile`) under C6.
 - VS4: Start executable Digital Twin baseline integration with scenario validation pipeline handoff.

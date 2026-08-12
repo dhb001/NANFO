@@ -3,6 +3,27 @@
 Lightweight chronological notes for decisions that do not require a full ADR.
 
 ## 2026-08-12
+### Runtime Adapter SLO Alerting Operationalization with Runbook Metadata (VS4 Step 2)
+Decision: Emit runtime adapter SLO threshold lifecycle alerts (`alert.generated`/`alert.resolved`) from telemetry health state transitions and attach runbook-backed response metadata in the alert payload.
+Reason:
+- Convert existing internal SLO severity/reason observability into actionable alerting without introducing API or schema drift.
+- Ensure deterministic alert lifecycle behavior by persisting `runtime_adapter_slo_alert_active` state in telemetry health counters.
+- Provide operator-ready guidance linkage by attaching explicit runbook playbook identifiers in emitted alert payloads.
+Impact:
+- Telemetry health read-path now publishes SLO alert events only on state transition (inactive->active, active->inactive), preventing duplicate re-emits on unchanged state.
+- Alert payloads include severity context, anomaly reason flags, SLO snapshot fields, threshold constants, and runbook references (`runbook_reference`, `runbook_version`, `runbook_playbook`).
+- Added `docs/project/TelemetryRuntimeAdapterRunbook.md` as the operational source for response playbooks consumed by alert metadata.
+- Fail-open behavior preserved: state persistence and publish failures remain warning-only and do not change health response contracts.
+Related:
+- `backend/app/modules/telemetry/service.py`
+- `backend/app/modules/telemetry/counters.py`
+- `backend/app/api/v1/telemetry.py`
+- `backend/tests/unit/test_telemetry_query_service.py`
+- `backend/tests/unit/test_telemetry_counters.py`
+- `backend/tests/integration/test_telemetry_endpoints.py`
+- `docs/project/TelemetryRuntimeAdapterRunbook.md`
+
+## 2026-08-12
 ### Vendor-Facing Runtime Adapter Increment Baseline (VS4 Step 1)
 Decision: Extend the existing runtime adapter mode factory with deterministic vendor-facing `snmp` and `grpc` modes while preserving the established `stub`/`seeded` fail-open semantics.
 Reason:

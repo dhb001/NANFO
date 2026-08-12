@@ -7,8 +7,6 @@ from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from fastapi.testclient import TestClient
-
 from app.core.dependencies import get_db, get_redis
 from app.core.security import create_access_token
 from app.main import app
@@ -18,6 +16,7 @@ from app.modules.telemetry.schemas import (
     TelemetryHistoryResponse,
     TelemetryRecordResponse,
 )
+from fastapi.testclient import TestClient
 
 
 def _make_token() -> str:
@@ -167,6 +166,28 @@ def test_get_telemetry_health_reads_dropped_counter_snapshot(client, headers):
     assert body["success"] is True
     assert body["data"]["status"] == "degraded"
     assert body["data"]["dropped_events"] == 3
+
+
+def test_get_telemetry_health_passes_event_redis_for_slo_alerting(client, headers):
+    with patch("app.api.v1.telemetry.TelemetryQueryService") as mock_query_service_cls:
+        mock_svc = AsyncMock()
+        mock_svc.get_health = AsyncMock(
+            return_value=TelemetryHealthResponse(
+                status="ok",
+                ingest_lag_ms=0,
+                dropped_events=0,
+                latest_observed_at=None,
+                total_records=0,
+            )
+        )
+        mock_query_service_cls.return_value = mock_svc
+
+        response = client.get("/api/v1/telemetry/health", headers=headers)
+
+    assert response.status_code == 200
+    call_kwargs = mock_query_service_cls.call_args.kwargs
+    assert "event_redis" in call_kwargs
+    assert call_kwargs["event_redis"] is not None
 
 
 def test_telemetry_endpoints_require_auth(client):
