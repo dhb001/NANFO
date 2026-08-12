@@ -3,6 +3,22 @@
 Lightweight chronological notes for decisions that do not require a full ADR.
 
 ## 2026-08-12
+### VS5 Closure: Remaining Scope Complete and Tracking Finalized
+Decision: Mark VS5 complete after delivering Steps 2-4 with full validation gates and final tracking closure, then roll planning forward to VS6 Step 1.
+Reason:
+- All VS5 checklist items in sprint tracking are complete and validated with full backend regression.
+- Security and lifecycle contract goals were achieved without violating architecture, schema, or envelope guardrails.
+- Closure entry provides a single governance checkpoint before opening the next vertical slice.
+Impact:
+- VS5 now closes with per-delta expiry + deny-list enforcement, close-reason observability, and paused/cancelled simulation lifecycle fanout coverage.
+- Project tracking reflects completed closure gate and future planning handoff to VS6.
+- No additional runtime/API/schema changes introduced by closure itself.
+Related:
+- `docs/project/CurrentSprint.md`
+- `docs/project/DevelopmentJournal.md`
+- `docs/project/DecisionLog.md`
+
+## 2026-08-12
 ### Simulation Lifecycle WS Coverage Expansion for Digital Twin (VS5 Step 4)
 Decision: Extend digital twin WebSocket event translation coverage to include `simulation.paused` and `simulation.cancelled` using the existing scene-delta `update` contract.
 Reason:

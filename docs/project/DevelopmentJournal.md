@@ -1,5 +1,13 @@
 # Development Journal
 
+## [2026-08-12] - Vertical Slice 5 Closure (Remaining Scope Complete)
+
+- **Completed:** Closed all remaining VS5 steps (2-4) after Step 1 baseline with per-delta deny-list revalidation, session-security close-reason observability, and expanded simulation lifecycle WS coverage.
+- **Security closure:** `/ws/digital-twin` now enforces both per-delta expiry and deny-list checks; revoked/expired sessions receive `WS_UNAUTHORIZED` then close, with close-reason counters for `expired` and `revoked`.
+- **Lifecycle coverage closure:** `simulation.paused` and `simulation.cancelled` now route to digital twin scene-delta updates under the existing governed payload contract.
+- **Governance/constraints:** No schema migrations, no API envelope drift, no C5/C6 boundary changes, and fail-open behavior preserved for Redis lookup/counter failures.
+- **Validation closure:** Required scoped Ruff + targeted tests passed for each step; final backend full regression gate passed (`265 passed`).
+
 ## [2026-08-12] - Vertical Slice 5 Step 4 (Simulation Lifecycle WS Coverage Expansion)
 
 - **Implemented:** Expanded governed simulation lifecycle fanout coverage for `/ws/digital-twin` beyond handoff/completion by wiring `simulation.paused` and `simulation.cancelled` through existing scene-delta translation flow.

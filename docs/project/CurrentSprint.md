@@ -5,7 +5,7 @@
 - Vertical Slice 2 Implementation: **COMPLETE** — telemetry ingestion/persistence/read APIs and telemetry health counters + `/ws/telemetry` fanout delivered through Step 8.
 - Vertical Slice 3 Implementation: **COMPLETE** — runtime collector reliability, adapter-path advancement beyond stub, backpressure/SLO hardening, and VS3 planning-governance closure delivered through **VS3 Step 28**.
 - Vertical Slice 4 Implementation: **COMPLETE** — runtime adapter increment, SLO alerting/runbook operationalization, deferred-topology governed design start, and executable Digital Twin scenario-validation handoff baseline delivered through **VS4 Step 4**.
-- Vertical Slice 5 Implementation: **COMPLETE** — digital twin websocket session-security hardening and governed simulation lifecycle event coverage delivered through **VS5 Step 4**.
+- Vertical Slice 5 Implementation: **COMPLETE** — digital twin websocket session-security hardening and governed simulation lifecycle event coverage delivered through **VS5 Step 4**, with closure regression gate complete.
 
 ## Subsystem Progress — Vertical Slice 5
 
@@ -13,6 +13,7 @@
 - [x] Step 2: Add `/ws/digital-twin` per-delta deny-list (`jti`) revalidation path before push delivery
 - [x] Step 3: Add digital twin websocket session-security observability branches/counters for close reasons
 - [x] Step 4: Expand simulation lifecycle event coverage beyond handoff/completion under governed simulation contract updates
+- [x] Closure Gate: Final full backend regression pass + VS5 project tracking finalized
 
 ## Subsystem Progress — Vertical Slice 4
 
