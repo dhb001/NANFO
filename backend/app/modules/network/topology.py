@@ -174,6 +174,7 @@ class TopologyQueryService:
         workspace_id: str,
         hostname: str,
         device_type: str,
+        spatial_ref_id: str | None = None,
         status: str = "active",
     ) -> None:
         """Create or merge a Device node in Neo4j.
@@ -186,6 +187,7 @@ class TopologyQueryService:
             d.workspace_id = $workspace_id,
             d.hostname = $hostname,
             d.device_type = $device_type,
+            d.spatial_ref_id = $spatial_ref_id,
             d.status = $status
         """
         async with self._driver.session() as session:
@@ -196,6 +198,7 @@ class TopologyQueryService:
                 workspace_id=workspace_id,
                 hostname=hostname,
                 device_type=device_type,
+                spatial_ref_id=spatial_ref_id,
                 status=status,
             )
         logger.info("topology_node_created", device_id=device_id, network_id=network_id)

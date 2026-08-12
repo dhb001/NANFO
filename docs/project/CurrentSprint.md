@@ -11,7 +11,7 @@
 ## Subsystem Progress — Vertical Slice 6
 
 - [x] Step 1: Add `spatial_ref_id` to Device model + API schemas + create-device flow (with required migration)
-- [ ] Step 2: Propagate `spatial_ref_id` through `network.device.added` event and topology node writes
+- [x] Step 2: Propagate `spatial_ref_id` through `network.device.added` event and topology node writes
 - [ ] Step 3: Add update flow for `spatial_ref_id` and `network.device.updated` delta semantics
 - [ ] Step 4: Extend digital twin payload mapping with spatial reference metadata where available
 - [ ] Step 5: Expose spatial reference on governed topology read paths where contracts allow

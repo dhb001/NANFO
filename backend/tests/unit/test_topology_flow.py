@@ -22,6 +22,7 @@ async def test_topology_consumer_passes_workspace_id_on_device_added():
         "workspace_id": str(uuid.uuid4()),
         "hostname": "edge-router-01",
         "device_type": "router",
+        "spatial_ref_id": "campus-a/building-1/floor-2/room-204/rack-3/device-edge-router-01",
     }
     event = {"event_type": "network.device.added", "payload": payload}
 
@@ -40,6 +41,7 @@ async def test_topology_consumer_passes_workspace_id_on_device_added():
         workspace_id=payload["workspace_id"],
         hostname=payload["hostname"],
         device_type=payload["device_type"],
+        spatial_ref_id=payload["spatial_ref_id"],
         status="active",
     )
 
@@ -61,6 +63,7 @@ async def test_create_device_node_sets_workspace_id_property():
         workspace_id=str(uuid.uuid4()),
         hostname="core-switch-01",
         device_type="switch",
+        spatial_ref_id="campus-a/device-core-switch-01",
     )
 
     session.run.assert_awaited_once()
@@ -68,7 +71,9 @@ async def test_create_device_node_sets_workspace_id_property():
     params = session.run.await_args.kwargs
 
     assert "d.workspace_id = $workspace_id" in query
+    assert "d.spatial_ref_id = $spatial_ref_id" in query
     assert params["workspace_id"]
+    assert params["spatial_ref_id"] == "campus-a/device-core-switch-01"
 
 
 @pytest.mark.asyncio

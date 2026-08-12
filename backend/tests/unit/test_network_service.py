@@ -27,7 +27,7 @@ def _make_network(workspace_id: uuid.UUID | None = None) -> Network:
     return n
 
 
-def _make_device(network_id: uuid.UUID | None = None) -> Device:
+def _make_device(network_id: uuid.UUID | None = None, spatial_ref_id: str | None = None) -> Device:
     d = MagicMock(spec=Device)
     d.device_id = uuid.uuid4()
     d.network_id = network_id or uuid.uuid4()
@@ -37,7 +37,7 @@ def _make_device(network_id: uuid.UUID | None = None) -> Device:
     d.vendor = "Cisco"
     d.model = "C9300"
     d.location_hint = None
-    d.spatial_ref_id = None
+    d.spatial_ref_id = spatial_ref_id
     d.status = "active"
     d.created_at = MagicMock()
     return d
@@ -124,7 +124,10 @@ class TestDeviceService:
     async def test_add_device_success_publishes_event(self, dev_svc):
         """Adding a device must publish network.device.added to the event bus."""
         network = _make_network()
-        device = _make_device(network_id=network.network_id)
+        device = _make_device(
+            network_id=network.network_id,
+            spatial_ref_id="campus-a/building-1/floor-2/room-204/rack-3/device-router-01",
+        )
         with (
             patch.object(dev_svc._network_repo, "get_by_id", return_value=network),
             patch.object(dev_svc._repo, "create", return_value=device),
@@ -145,6 +148,7 @@ class TestDeviceService:
         call_kwargs = mock_pub.call_args.kwargs
         assert call_kwargs["event_type"] == "network.device.added"
         assert call_kwargs["payload"]["workspace_id"] == str(network.workspace_id)
+        assert call_kwargs["payload"]["spatial_ref_id"] == "campus-a/building-1/floor-2/room-204/rack-3/device-router-01"
         assert result.device_id == device.device_id
 
     @pytest.mark.asyncio

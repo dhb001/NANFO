@@ -1,5 +1,14 @@
 # Development Journal
 
+## [2026-08-12] - Vertical Slice 6 Step 2 (Spatial Reference Event + Topology Node Propagation)
+
+- **Implemented:** Propagated `spatial_ref_id` through `network.device.added` event payloads and into topology node writes for Digital Twin synchronization continuity.
+- **Event flow update:** Device creation now includes `spatial_ref_id` in `network.device.added` publish payload without changing envelope or event naming.
+- **Topology write update:** Topology consumer and `TopologyQueryService.create_device_node()` now persist `spatial_ref_id` on Neo4j `Device` nodes.
+- **Coverage updates:** Unit tests now assert event payload propagation and topology consumer/query spatial-ref write semantics.
+- **Scope guardrails:** No new schema changes, no API envelope drift, no C5/C6 boundary change, and fail-open runtime semantics unchanged.
+- **Validation:** Scoped Ruff passed; targeted network/topology unit+integration tests passed (`41 passed`); full backend regression passed (`266 passed`).
+
 ## [2026-08-12] - Vertical Slice 6 Step 1 (Device Spatial Reference Baseline)
 
 - **Implemented:** Started M6/VS6 spatial-reference objective by introducing optional `spatial_ref_id` on network `Device` model and threading it through create-device request/response flow.

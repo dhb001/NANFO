@@ -3,6 +3,24 @@
 Lightweight chronological notes for decisions that do not require a full ADR.
 
 ## 2026-08-12
+### Spatial Reference Propagation in Device Added Event and Topology Writes (VS6 Step 2)
+Decision: Include `spatial_ref_id` in `network.device.added` event payload and write it to Neo4j `Device` nodes during topology consumer processing.
+Reason:
+- VS6 Step 1 introduced persistence/API baseline; without event propagation, Digital Twin synchronization paths remain spatially incomplete.
+- Existing event consumer topology path is the minimal in-boundary integration point for spatial-reference continuity.
+- Change stays contract-safe by extending payload fields non-breakingly and preserving event naming/version semantics.
+Impact:
+- `DeviceService.add_device()` now publishes `spatial_ref_id` in `network.device.added` payload.
+- `TopologyQueryService.create_device_node()` and topology consumer now store `spatial_ref_id` on Neo4j nodes.
+- No envelope drift, no schema migration in Step 2, and no C5/C6/runtime fail-open semantic changes.
+Related:
+- `backend/app/modules/network/service.py`
+- `backend/app/modules/network/topology.py`
+- `backend/app/events/consumers/topology_consumer.py`
+- `backend/tests/unit/test_network_service.py`
+- `backend/tests/unit/test_topology_flow.py`
+
+## 2026-08-12
 ### Device Spatial Reference Baseline for M6/VS6 (VS6 Step 1)
 Decision: Introduce optional `spatial_ref_id` on Network `Device` persistence and API create/read contracts as the first executable M6 spatial-reference increment.
 Reason:

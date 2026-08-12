@@ -144,6 +144,7 @@ class DeviceService:
                 "hostname": device.hostname,
                 "ip_address": device.ip_address,
                 "device_type": device.device_type,
+                "spatial_ref_id": device.spatial_ref_id,
                 "actor_id": actor_id,
             },
             correlation_id=correlation_id,

@@ -28,6 +28,7 @@ async def handle_topology_event(event: dict) -> None:
             workspace_id=payload["workspace_id"],
             hostname=payload["hostname"],
             device_type=payload["device_type"],
+            spatial_ref_id=payload.get("spatial_ref_id"),
             status="active",
         )
         logger.info("topology_node_added", device_id=payload["device_id"])
