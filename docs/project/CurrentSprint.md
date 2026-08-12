@@ -7,6 +7,18 @@
 - Vertical Slice 4 Implementation: **COMPLETE** — runtime adapter increment, SLO alerting/runbook operationalization, deferred-topology governed design start, and executable Digital Twin scenario-validation handoff baseline delivered through **VS4 Step 4**.
 - Vertical Slice 5 Implementation: **COMPLETE** — digital twin websocket session-security hardening and governed simulation lifecycle event coverage delivered through **VS5 Step 4**, with closure regression gate complete.
 - Vertical Slice 6 Implementation: **COMPLETE** — Digital Twin spatial-reference execution delivered through **VS6 Step 5** with closure regression gate complete.
+- Vertical Slice 7 Implementation: **IN PROGRESS** — Simulation lifecycle baseline execution started with persistence foundation delivered through **VS7 Step 1**.
+
+## Subsystem Progress — Vertical Slice 7
+
+- [x] Step 1: Add simulation lifecycle persistence baseline table/model/repository (with required migration)
+- [ ] Step 2: Persist simulation start flow with C5-safe network/workspace validation and fail-open queue semantics
+- [ ] Step 3: Add `POST /api/v1/simulations/pause` and resume semantics via `POST /api/v1/simulations/start`
+- [ ] Step 4: Add `POST /api/v1/simulations/branch` with draft lineage persistence
+- [ ] Step 5: Add `GET /api/v1/simulations/{id}` read endpoint
+- [ ] Step 6: Add `GET /api/v1/simulations/{id}/compare/{baselineId}` deterministic compare deltas
+- [ ] Step 7: Add simulation lifecycle audit coverage and contract alignment updates
+- [ ] Closure Gate: Final full backend regression pass + VS7 project tracking finalized
 
 ## Subsystem Progress — Vertical Slice 6
 
@@ -103,4 +115,4 @@
 - Repo-wide Ruff debt outside VS2 Step 8 scope remains and is tracked for later cleanup.
 
 ## Next Sprint Candidates
-- VS6 Step 1: define and implement the next minimal Digital Twin execution increment after VS5 closure.
+- VS7 Step 2: persist simulation start flow with C5-safe validation and fail-open queue semantics.

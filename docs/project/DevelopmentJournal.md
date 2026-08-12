@@ -1,5 +1,13 @@
 # Development Journal
 
+## [2026-08-12] - Vertical Slice 7 Step 1 (Simulation Lifecycle Persistence Baseline)
+
+- **Implemented:** Added the VS7 persistence foundation by introducing a dedicated `simulations` relational table and simulation module persistence layer.
+- **Schema/model updates:** Added Alembic migration `0004_simulation_lifecycle_baseline` plus new Simulation ORM/repository support for lifecycle state, validation metadata, run outputs, model versions, audit provenance, queue outcome metadata, and branch parent linkage.
+- **Repository baseline:** Added `SimulationRepository` create/read/queue-outcome update primitives with deterministic unit coverage.
+- **Governance/constraints:** Required migration delivered with explicit downgrade path; no API envelope changes, no C5/C6 boundary drift, no new endpoint surface, and fail-open runtime semantics unchanged.
+- **Validation:** Scoped Ruff passed; targeted unit test (`test_simulation_repository`) passed; targeted integration smoke (`test_simulation_endpoints -k start`) passed; migration upgrade/downgrade/upgrade gate passed; full backend regression passed (`282 passed`).
+
 ## [2026-08-12] - Vertical Slice 6 Closure (Remaining Scope Complete)
 
 - **Completed:** Closed all remaining VS6 steps (3-5) after Step 1-2 baseline with update-path delta semantics, digital twin spatial-metadata mapping, and governed topology read-path spatial-reference exposure.

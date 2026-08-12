@@ -3,6 +3,25 @@
 Lightweight chronological notes for decisions that do not require a full ADR.
 
 ## 2026-08-12
+### Simulation Persistence Baseline as Required First VS7 Increment (VS7 Step 1)
+Decision: Introduce a dedicated `simulations` PostgreSQL table with a minimal Simulation module ORM/repository baseline as the required first executable VS7 increment.
+Reason:
+- `docs/features/Simulation.md` requires persisted scenario metadata, run outputs, and baseline deltas; current code only produced transient handoff payloads.
+- A required migration-first step keeps VS7 finite, reversible, and aligned with database ownership guardrails before adding additional lifecycle endpoints.
+- Keeping the change persistence-only avoids premature contract expansion and preserves existing `POST /api/v1/simulations/start` fail-open publish behavior.
+Impact:
+- Added Alembic migration `0004_simulation_lifecycle_baseline` with reversible downgrade and indexes for network/workspace/scenario/state lookups.
+- Added `Simulation` ORM model and `SimulationRepository` create/read/queue-outcome update primitives.
+- No REST/WebSocket route additions in Step 1, no API envelope drift, and no C5/C6 contract changes.
+Assumptions:
+- `simulations` is treated as the single authoritative baseline table for VS7 before any optional split into supplemental run-output tables.
+Related:
+- `backend/alembic/versions/0004_simulation_lifecycle_baseline.py`
+- `backend/app/modules/simulation/models.py`
+- `backend/app/modules/simulation/repository.py`
+- `backend/tests/unit/test_simulation_repository.py`
+
+## 2026-08-12
 ### VS6 Closure: Remaining Scope Complete and Tracking Finalized
 Decision: Mark VS6 complete after delivering Steps 3-5 with full validation gates and closure tracking updates.
 Reason:
