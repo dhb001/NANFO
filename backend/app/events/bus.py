@@ -24,6 +24,7 @@ logger = get_logger(__name__)
 # Stream → consumer group mappings
 STREAM_GROUPS: dict[str, str] = {
     "stream:auth": "nanfo-consumers",
+    "stream:intent": "nanfo-consumers",
     "stream:network": "nanfo-consumers",
     "stream:org": "nanfo-consumers",
     "stream:telemetry": "nanfo-consumers",

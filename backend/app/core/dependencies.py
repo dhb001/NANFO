@@ -14,12 +14,12 @@ import uuid
 from datetime import UTC, datetime
 from typing import Annotated
 
+import redis.asyncio as aioredis
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.core.security import decode_token
 from app.db.postgres import AsyncSessionLocal
@@ -50,9 +50,10 @@ async def get_redis():  # type: ignore[misc]
 class RequestMeta:
     """Holds request_id and timestamp for envelope construction."""
 
-    def __init__(self, request_id: str, timestamp: str):
+    def __init__(self, request_id: str, timestamp: str, request: Request):
         self.request_id = request_id
         self.timestamp = timestamp
+        self.request = request
 
 
 async def get_request_meta(request: Request) -> RequestMeta:
@@ -62,7 +63,7 @@ async def get_request_meta(request: Request) -> RequestMeta:
     """
     request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
     timestamp = datetime.now(UTC).isoformat()
-    return RequestMeta(request_id=request_id, timestamp=timestamp)
+    return RequestMeta(request_id=request_id, timestamp=timestamp, request=request)
 
 
 # ── JWT / Auth ────────────────────────────────────────────────────────────────
@@ -83,7 +84,7 @@ class TokenClaims:
 
 async def get_current_user(
     credentials: Annotated[HTTPAuthorizationCredentials, Depends(_bearer)],
-    redis=Depends(get_redis),
+    redis: Annotated[aioredis.Redis, Depends(get_redis)],
 ) -> TokenClaims:
     """Validate JWT, check jti deny-list, return TokenClaims.
 

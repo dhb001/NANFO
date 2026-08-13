@@ -26,6 +26,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from app.api.v1.audit import router as audit_router
 from app.api.v1.auth import router as auth_router
+from app.api.v1.intents import router as intent_router
 from app.api.v1.networks import router as network_router
 from app.api.v1.organizations import router as org_router
 from app.api.v1.simulation import router as simulation_router
@@ -308,6 +309,7 @@ app.include_router(network_router)
 app.include_router(topology_router)
 app.include_router(telemetry_router)
 app.include_router(simulation_router)
+app.include_router(intent_router)
 app.include_router(audit_router)
 app.include_router(ws_router)
 app.include_router(telemetry_ws_router)

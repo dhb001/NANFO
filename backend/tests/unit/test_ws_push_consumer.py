@@ -12,6 +12,7 @@ from app.events.consumers.ws_push_consumer import (
     WS_PUSH_HANDLERS,
     handle_ws_alert_event,
     handle_ws_digital_twin_event,
+    handle_ws_intent_event,
     handle_ws_push_event,
 )
 
@@ -421,3 +422,75 @@ def test_ws_push_handlers_include_simulation_events_for_digital_twin():
     assert WS_PUSH_HANDLERS["simulation.paused"] is handle_ws_digital_twin_event
     assert WS_PUSH_HANDLERS["simulation.cancelled"] is handle_ws_digital_twin_event
     assert WS_PUSH_HANDLERS["simulation.branch_created"] is handle_ws_digital_twin_event
+
+
+def _intent_event(
+    event_type: str = "intent.execution_started",
+    payload: object | None = None,
+) -> dict:
+    return {
+        "event_id": str(uuid.uuid4()),
+        "event_type": event_type,
+        "correlation_id": str(uuid.uuid4()),
+        "timestamp": datetime.now(UTC).isoformat(),
+        "source": "intent",
+        "payload": payload
+        if payload is not None
+        else {
+            "intent_id": str(uuid.uuid4()),
+            "network_id": str(uuid.uuid4()),
+            "intent_kind": "reroute_path",
+            "status": "execution_started",
+            "confidence": {
+                "score": 0.84,
+                "band": "80-94",
+                "approval_required": True,
+            },
+        },
+    }
+
+
+@pytest.mark.asyncio
+async def test_ws_intent_consumer_pushes_execution_started_delta():
+    event = _intent_event("intent.execution_started")
+
+    with patch("app.events.consumers.ws_push_consumer.digital_twin_ws_manager") as mock_digital_twin_ws_manager:
+        mock_digital_twin_ws_manager.push_delta = AsyncMock()
+        await handle_ws_intent_event(event)
+
+    mock_digital_twin_ws_manager.push_delta.assert_awaited_once()
+    kwargs = mock_digital_twin_ws_manager.push_delta.await_args.kwargs
+    assert kwargs["event_type"] == "intent.execution_started"
+    assert kwargs["delta_type"] == "update"
+    assert kwargs["scene_object"]["object_type"] == "intent_state"
+    assert kwargs["scene_object"]["status"] == "execution_started"
+
+
+@pytest.mark.asyncio
+async def test_ws_intent_consumer_missing_network_id_is_noop():
+    event = _intent_event(payload={"intent_id": str(uuid.uuid4()), "status": "validated"})
+
+    with patch("app.events.consumers.ws_push_consumer.digital_twin_ws_manager") as mock_digital_twin_ws_manager:
+        mock_digital_twin_ws_manager.push_delta = AsyncMock()
+        await handle_ws_intent_event(event)
+
+    mock_digital_twin_ws_manager.push_delta.assert_not_awaited()
+
+
+def test_ws_push_handlers_include_intent_events_for_digital_twin():
+    assert "intent.validated" in WS_PUSH_HANDLERS
+    assert "intent.execution_started" in WS_PUSH_HANDLERS
+    assert "intent.execution_completed" in WS_PUSH_HANDLERS
+    assert "intent.execution_failed" in WS_PUSH_HANDLERS
+    assert WS_PUSH_HANDLERS["intent.validated"] is handle_ws_intent_event
+
+
+@pytest.mark.asyncio
+async def test_ws_intent_consumer_invalid_network_id_is_noop():
+    event = _intent_event(payload={"intent_id": str(uuid.uuid4()), "network_id": "not-a-uuid", "status": "validated"})
+
+    with patch("app.events.consumers.ws_push_consumer.digital_twin_ws_manager") as mock_digital_twin_ws_manager:
+        mock_digital_twin_ws_manager.push_delta = AsyncMock()
+        await handle_ws_intent_event(event)
+
+    mock_digital_twin_ws_manager.push_delta.assert_not_awaited()

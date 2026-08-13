@@ -3,6 +3,76 @@
 Lightweight chronological notes for decisions that do not require a full ADR.
 
 ## 2026-08-13
+### Intent Execute/Detail Baseline with Partial Lifecycle Producer Completion (VS8 Steps 4-6 Progress)
+Decision: Implement `POST /api/v1/intents/execute` + `GET /api/v1/intents/{id}` and advance Step 6 by publishing `intent.validated` and `intent.execution_started` with fail-open queue semantics, while deferring producer emission of `intent.execution_completed`/`intent.execution_failed` to a subsequent bounded transition source.
+Reason:
+- `docs/features/IntentEngine.md` requires execute + detail endpoints and governed lifecycle events; VS8 baseline can safely produce validated/start events without introducing M9 hypervisor side effects.
+- Execute path needed idempotent replay/conflict semantics and persisted provenance updates before broader lifecycle transition expansion.
+- Existing consumer architecture can carry full intent lifecycle mapping now, even while producer transitions for terminal states remain pending.
+Impact:
+- Added execute/detail API contracts and service flows for lifecycle execution-start + read behavior.
+- Validation flow now publishes `intent.validated` with persisted queue metadata (`queue_status`, `stream_entry_id`, `warning`) and fail-open degradation on publish failure.
+- Execute flow publishes `intent.execution_started` with the same fail-open semantics.
+- Audit and ws push consumers/tests now include the full intent lifecycle event set, and intent stream registration is wired in event publisher/bus.
+- Remaining Step 6 scope is narrowed to adding bounded producer transition sources for `intent.execution_completed` and `intent.execution_failed`.
+Assumptions:
+- VS8 baseline remains lifecycle/provenance oriented; terminal execution outcomes are modeled as future bounded transitions until M9 execution integration exists.
+Related:
+- `backend/app/api/v1/intents.py`
+- `backend/app/modules/intent/service.py`
+- `backend/app/modules/intent/repository.py`
+- `backend/app/events/publisher.py`
+- `backend/app/events/bus.py`
+- `backend/app/events/consumers/audit_consumer.py`
+- `backend/app/events/consumers/ws_push_consumer.py`
+- `backend/tests/unit/test_intent_execution_service.py`
+- `backend/tests/unit/test_intent_service.py`
+- `backend/tests/integration/test_intent_endpoints.py`
+- `backend/tests/integration/test_intent_event_ws_flow.py`
+
+## 2026-08-13
+### Intent Validate Endpoint Contract with Persisted Explicit Reasons (VS8 Step 3)
+Decision: Implement `POST /api/v1/intents/validate` with explicit reason-coded validation outcomes persisted to the Intent baseline table and returned through canonical envelope response models.
+Reason:
+- `docs/features/IntentEngine.md` requires invalid intents to fail with explicit reasons.
+- VS8 Step 3 needs a minimal, reversible baseline that validates UNIL action/scope/constraints semantics and preserves C5 boundary checks without introducing execution side effects.
+- Persisting validation + explainability metadata in Step 3 supports later execution/read/event steps without contract churn.
+Impact:
+- Added `/api/v1/intents/validate` route with typed request/response schemas and canonical envelope response.
+- Added `IntentValidationService` baseline checks for supported action map, scope/constraints shape, network existence/workspace boundary, and deterministic reason-code outputs.
+- Added baseline explainability/confidence posture fields in validation output (`summary`, `evidence`, `alternatives_considered`, `policy_reference`, `score`, `band`, `approval_required`).
+- No execution endpoint behavior introduced, no new event publication introduced, no websocket channel change, and no C5/C6 drift.
+Assumptions:
+- Step 3 confidence scoring remains baseline heuristic (`0.84` validated, `0.0` rejected) until richer recommendation scoring is implemented in later VS8 explainability steps.
+Related:
+- `backend/app/api/v1/intents.py`
+- `backend/app/modules/intent/schemas.py`
+- `backend/app/modules/intent/service.py`
+- `backend/app/main.py`
+- `backend/tests/unit/test_intent_service.py`
+- `backend/tests/integration/test_intent_endpoints.py`
+
+## 2026-08-13
+### Intent Persistence Baseline as Required First VS8 Executable Increment (VS8 Step 2)
+Decision: Introduce a dedicated `intents` PostgreSQL table and minimal Intent module ORM/repository baseline as the required first executable persistence increment for VS8.
+Reason:
+- `docs/features/IntentEngine.md` requires intent records, lifecycle status transitions, and execution provenance before endpoint lifecycle behavior can be implemented safely.
+- A migration-first baseline keeps VS8 finite, reversible, and aligned with database ownership guardrails.
+- Capturing explainability/confidence placeholders in baseline persistence avoids ad-hoc schema drift in later VS8 steps.
+Impact:
+- Added Alembic migration `0005_intent_lifecycle_baseline` with reversible downgrade and lifecycle/read indexes.
+- Added `Intent` ORM model and `IntentRepository` create/read/idempotency lookup/status-update primitives.
+- No REST/WebSocket route additions in Step 2, no event contract additions yet, and no C5/C6 boundary changes.
+Assumptions:
+- Baseline table can carry both lifecycle state and explainability/confidence metadata for VS8; optional split tables (MIG-8.3) remain deferred unless required by later steps.
+Related:
+- `backend/alembic/versions/0005_intent_lifecycle_baseline.py`
+- `backend/alembic/env.py`
+- `backend/app/modules/intent/models.py`
+- `backend/app/modules/intent/repository.py`
+- `backend/tests/unit/test_intent_repository.py`
+
+## 2026-08-13
 ### VS7 Closure Gate Completion and Simulation Lifecycle Baseline Finalization
 Decision: Mark VS7 complete after delivering Steps 4-7 with full backend regression and tracking closure.
 Reason:

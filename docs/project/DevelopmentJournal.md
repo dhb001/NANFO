@@ -1,5 +1,31 @@
 # Development Journal
 
+## [2026-08-13] - Vertical Slice 8 Steps 4-5 Complete + Step 6 In Progress (Execute/Detail + Lifecycle Event Baseline)
+
+- **Implemented (Step 4):** Added `POST /api/v1/intents/execute` (`202`) with idempotent replay behavior, idempotency-key conflict semantics, executable-state conflict checks, and persisted execution lifecycle provenance updates.
+- **Implemented (Step 5):** Added `GET /api/v1/intents/{id}` lifecycle/provenance read endpoint with canonical envelope typing and C5-safe workspace boundary validation.
+- **Event baseline progress (Step 6):** Intent lifecycle publication now includes `intent.validated` (from validate flow) and `intent.execution_started` (from execute flow) with fail-open queue degradation semantics (`queue_status=deferred`, `warning=event_queue_unavailable`).
+- **Consumer coverage:** Intent stream registration (`stream:intent`) is wired in publisher/consumer-group config; audit + `/ws/digital-twin` consumer mappings/tests now cover the full governed intent lifecycle event set (`validated`, `execution_started`, `execution_completed`, `execution_failed`).
+- **Open scope (Step 6):** Producer transition sources for `intent.execution_completed` and `intent.execution_failed` remain pending because VS8 baseline currently stops at execution-started lifecycle (hypervisor execution/rollback remains out of VS8 scope).
+- **Validation:** Scoped Ruff passed; targeted intent/audit/ws unit+integration suite passed (`61 passed`); migration gate re-verified with `POSTGRES_PASSWORD=CHANGE_ME`; full backend regression passed (`349 passed`).
+
+## [2026-08-13] - Vertical Slice 8 Step 3 (Intent Validate Endpoint Baseline)
+
+- **Implemented:** Added `POST /api/v1/intents/validate` under canonical envelope with explicit validation-reason contracts and persisted validation lifecycle metadata.
+- **Validation behavior:** Baseline UNIL validation now enforces action support, non-empty scope, optional-constraints object typing, and C5-safe network/workspace boundary checks before producing `validated` or `rejected` outcomes.
+- **Explainability/confidence baseline:** Validation responses now include baseline explainability fields (`summary`, `evidence`, `alternatives_considered`, `policy_reference`) plus confidence posture (`score`, `band`, `approval_required`) aligned to AIOS safety thresholds.
+- **Persistence flow:** Validation endpoint writes intent lifecycle records through the Intent repository baseline (`status`, `validation_result`, `execution_provenance`, `explainability`, confidence metadata) with migration-backed schema from Step 2.
+- **Governance/constraints:** Endpoint/event scope remains locked to `IntentEngine.md` (no `/api/v1/ai/*` additions), canonical API envelope preserved, no new websocket channels, no cross-module SQL joins, and C6 deferred topology non-routability remains unchanged.
+- **Validation:** Scoped Ruff passed; targeted intent unit/integration suite passed (`9 passed`); migration gate re-verified with `POSTGRES_PASSWORD=CHANGE_ME`; full backend regression passed (`322 passed`).
+
+## [2026-08-13] - Vertical Slice 8 Step 2 (Intent Lifecycle Persistence Baseline)
+
+- **Implemented:** Added VS8 persistence foundation with a dedicated `intents` relational table and new Intent module ORM/repository baseline.
+- **Schema/model updates:** Added Alembic migration `0005_intent_lifecycle_baseline` plus `Intent` model fields for lifecycle state, validation/execution provenance, explainability metadata, confidence posture, queue outcome, idempotency key, and request timestamps.
+- **Repository baseline:** Added `IntentRepository` create/read/idempotency lookup/status-update primitives with deterministic unit coverage.
+- **Governance/constraints:** Required migration (MIG-8.1) delivered with downgrade path; no REST/WebSocket endpoint additions in Step 2, no undocumented event names, no C5/C6 contract drift, and no cross-module SQL join introduction.
+- **Validation:** Scoped Ruff passed; targeted unit suite passed (`4 passed`); migration gate passed with `POSTGRES_PASSWORD=CHANGE_ME` (upgrade/downgrade/upgrade); full backend regression passed (`317 passed`).
+
 ## [2026-08-13] - Vertical Slice 7 Closure (Simulation Lifecycle Baseline Complete)
 
 - **Completed:** Closed remaining VS7 scope (Steps 4-7) with branch creation, simulation detail read, deterministic compare deltas, and lifecycle audit/contract alignment.

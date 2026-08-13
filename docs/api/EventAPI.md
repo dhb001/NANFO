@@ -83,6 +83,10 @@ When an event is consumed by a WebSocket push subscriber, it is translated into 
 | `simulation.paused` | `/ws/digital-twin` | scene delta (`update`) |
 | `simulation.cancelled` | `/ws/digital-twin` | scene delta (`update`) |
 | `simulation.branch_created` | `/ws/digital-twin` | scene delta (`update`) |
+| `intent.validated` | `/ws/digital-twin` | scene delta (`update`) |
+| `intent.execution_started` | `/ws/digital-twin` | scene delta (`update`) |
+| `intent.execution_completed` | `/ws/digital-twin` | scene delta (`update`) |
+| `intent.execution_failed` | `/ws/digital-twin` | scene delta (`update`) |
 | `telemetry.*` | `/ws/telemetry` | metric delta |
 | `alert.*` | `/ws/alerts` | alert delta |
 

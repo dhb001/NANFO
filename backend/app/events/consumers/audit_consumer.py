@@ -22,6 +22,10 @@ _AUDIT_MAP: dict[str, dict] = {
     "auth.user.login_failed": {"resource_type": "user"},
     "auth.user.logged_out":   {"resource_type": "user"},
     "auth.token.refreshed":   {"resource_type": "user"},
+    "intent.validated":        {"resource_type": "intent"},
+    "intent.execution_started": {"resource_type": "intent"},
+    "intent.execution_completed": {"resource_type": "intent"},
+    "intent.execution_failed": {"resource_type": "intent"},
     "network.network.created": {"resource_type": "network"},
     "simulation.started":       {"resource_type": "simulation"},
     "simulation.completed":     {"resource_type": "simulation"},
@@ -62,7 +66,8 @@ async def handle_audit_event(event: dict) -> None:
         actor_id = None
 
     resource_id_raw = (
-        payload.get("simulation_id")
+        payload.get("intent_id")
+        or payload.get("simulation_id")
         or payload.get("parent_simulation_id")
         or payload.get("device_id")
         or payload.get("network_id")

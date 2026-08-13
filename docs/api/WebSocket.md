@@ -156,6 +156,8 @@ For `remove` deltas:
 
 `simulation.completed`, `simulation.paused`, `simulation.cancelled`, and `simulation.branch_created` reuse the same shape with updated lifecycle `state`, `status`, and `risk_gate` values.
 
+`intent.validated`, `intent.execution_started`, `intent.execution_completed`, and `intent.execution_failed` are translated to `/ws/digital-twin` `scene_object` deltas using `object_type="intent_state"` with lifecycle fields (`intent_id`, `status`, `intent_kind`) and optional confidence metadata in `changed_fields`.
+
 ---
 
 ## 5. Backpressure and Error Signaling

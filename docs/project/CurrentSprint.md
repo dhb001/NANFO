@@ -8,6 +8,18 @@
 - Vertical Slice 5 Implementation: **COMPLETE** — digital twin websocket session-security hardening and governed simulation lifecycle event coverage delivered through **VS5 Step 4**, with closure regression gate complete.
 - Vertical Slice 6 Implementation: **COMPLETE** — Digital Twin spatial-reference execution delivered through **VS6 Step 5** with closure regression gate complete.
 - Vertical Slice 7 Implementation: **COMPLETE** — Simulation lifecycle baseline execution delivered through **VS7 Step 7** with branch/read/compare endpoints, lifecycle audit/contract alignment, and closure regression gate complete.
+- Vertical Slice 8 Implementation: **IN PROGRESS** — Intent Engine recommendation/explainability baseline advanced through VS8 Step 5 with execute/detail endpoints delivered; Step 6 lifecycle event publication/consumer baseline is in progress.
+
+## Subsystem Progress — Vertical Slice 8
+
+- [x] Step 1: Lock VS8 contract scope and execution scaffold (IntentEngine endpoint/event set, migration classification, validation matrix, and risk register) in `docs/project/IntentEngineExecutionPlan-VS8.md`
+- [x] Step 2: Add intent lifecycle persistence baseline table/model/repository (required migration MIG-8.1)
+- [x] Step 3: Add `POST /api/v1/intents/validate` with explicit validation reason contracts
+- [x] Step 4: Add `POST /api/v1/intents/execute` lifecycle baseline with idempotent workflow semantics
+- [x] Step 5: Add `GET /api/v1/intents/{id}` lifecycle/provenance read endpoint
+- [ ] Step 6: Add governed intent lifecycle event publication + consumer coverage (`intent.validated`, `intent.execution_started`, `intent.execution_completed`, `intent.execution_failed`) — baseline in place (`intent.validated` + `intent.execution_started` publication, audit/ws consumer coverage for full set); producer transition sources for `intent.execution_completed`/`intent.execution_failed` remain open
+- [ ] Step 7: Add explainability/confidence metadata baseline and focused coverage — baseline fields are present in validate/execute/detail contracts; finalize focused fallback/contract coverage and closure notes
+- [ ] Closure Gate: Final full backend regression pass + VS8 project tracking finalized
 
 ## Subsystem Progress — Vertical Slice 7
 

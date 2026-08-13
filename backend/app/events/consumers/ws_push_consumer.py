@@ -8,6 +8,7 @@ Routes `network.device.*` -> `/ws/topology`, `alert.*` -> `/ws/alerts`, and
 
 from __future__ import annotations
 
+import uuid
 from datetime import UTC, datetime
 
 from app.core.logging import get_logger
@@ -46,6 +47,13 @@ _SIMULATION_EVENT_TO_DELTA: dict[str, str] = {
     "simulation.branch_created": "update",
 }
 
+_INTENT_EVENT_TO_DELTA: dict[str, str] = {
+    "intent.validated": "update",
+    "intent.execution_started": "update",
+    "intent.execution_completed": "update",
+    "intent.execution_failed": "update",
+}
+
 
 def _get_alert_counter_client():
     try:
@@ -53,6 +61,21 @@ def _get_alert_counter_client():
     except RuntimeError as exc:
         logger.warning("ws_alert_counter_client_unavailable", error=str(exc))
         return None
+
+
+def _extract_uuid_text(payload: dict, *keys: str) -> str | None:
+    for key in keys:
+        raw = payload.get(key)
+        if raw is None:
+            continue
+        text = str(raw).strip()
+        if not text:
+            continue
+        try:
+            return str(uuid.UUID(text))
+        except (TypeError, ValueError, AttributeError):
+            continue
+    return None
 
 
 async def _safe_increment_alert_counter(
@@ -183,7 +206,7 @@ async def handle_ws_digital_twin_event(event: dict) -> None:
     payload_raw = event.get("payload")
     payload = payload_raw if isinstance(payload_raw, dict) else {}
 
-    network_id = str(payload.get("network_id", "")).strip()
+    network_id = _extract_uuid_text(payload, "network_id") or ""
     if not network_id:
         logger.warning("ws_digital_twin_missing_network_id", event_type=event_type)
         return
@@ -250,6 +273,55 @@ async def handle_ws_digital_twin_event(event: dict) -> None:
     )
 
 
+async def handle_ws_intent_event(event: dict) -> None:
+    """Translate intent.* events into /ws/digital-twin baseline intent state deltas."""
+    event_type = str(event.get("event_type", ""))
+    delta_type = _INTENT_EVENT_TO_DELTA.get(event_type)
+    if delta_type is None:
+        return
+
+    payload_raw = event.get("payload")
+    payload = payload_raw if isinstance(payload_raw, dict) else {}
+
+    network_id = _extract_uuid_text(payload, "network_id") or ""
+    if not network_id:
+        logger.warning("ws_intent_missing_network_id", event_type=event_type)
+        return
+
+    intent_id = _extract_uuid_text(payload, "intent_id") or ""
+    status = str(payload.get("status", "unknown")).strip() or "unknown"
+    scene_object_id = f"intent-{intent_id}" if intent_id else "intent-state"
+
+    scene_object = {
+        "id": scene_object_id,
+        "object_type": "intent_state",
+        "intent_id": intent_id,
+        "status": status,
+        "changed_fields": {
+            "status": status,
+            "intent_kind": str(payload.get("intent_kind", "")).strip(),
+            "confidence": payload.get("confidence") if isinstance(payload.get("confidence"), dict) else {},
+        },
+    }
+
+    await digital_twin_ws_manager.push_delta(
+        network_id=network_id,
+        event_type=event_type,
+        delta_type=delta_type,
+        scene_object=scene_object,
+        correlation_id=str(event.get("correlation_id", "")),
+        timestamp=str(event.get("timestamp", datetime.now(UTC).isoformat())),
+    )
+    logger.info(
+        "ws_intent_delta_pushed",
+        event_type=event_type,
+        network_id=network_id,
+        scene_object_id=scene_object_id,
+        intent_id=intent_id,
+        delta_type=delta_type,
+    )
+
+
 WS_PUSH_HANDLERS: dict[str, object] = {
     "network.device.added": handle_ws_push_event,
     "network.device.updated": handle_ws_push_event,
@@ -261,4 +333,8 @@ WS_PUSH_HANDLERS: dict[str, object] = {
     "simulation.paused": handle_ws_digital_twin_event,
     "simulation.cancelled": handle_ws_digital_twin_event,
     "simulation.branch_created": handle_ws_digital_twin_event,
+    "intent.validated": handle_ws_intent_event,
+    "intent.execution_started": handle_ws_intent_event,
+    "intent.execution_completed": handle_ws_intent_event,
+    "intent.execution_failed": handle_ws_intent_event,
 }

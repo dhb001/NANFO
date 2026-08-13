@@ -22,6 +22,7 @@ logger = get_logger(__name__)
 # Stream key mapping — one stream per owning module (matches design_package §5.5)
 _STREAM_KEYS: dict[str, str] = {
     "auth": "stream:auth",
+    "intent": "stream:intent",
     "network": "stream:network",
     "org": "stream:org",
     "telemetry": "stream:telemetry",
