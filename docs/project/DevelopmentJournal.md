@@ -1,5 +1,14 @@
 # Development Journal
 
+## [2026-08-14] - Vertical Slice 15 Step 1 (Synthetic Telemetry Burst Backend Baseline)
+
+- **Implemented (VS15 step scope):** Added backend integration coverage for a deterministic synthetic telemetry burst campaign to validate ingest -> persist -> websocket fanout continuity under macro-batch volume.
+- **Load campaign behavior:** New test seeds `120` telemetry samples into `stream:telemetry`, then consumes each event through `handle_telemetry_event(...)` with patched DB/session + WS fanout mocks to preserve existing runtime semantics while stressing event-flow counters.
+- **Counter integrity assertions:** Burst run now verifies `ingested_events`, `persisted_events`, and `fanout_events` all converge to batch size with `dropped_events == 0`, plus commit-path coverage for every processed entry.
+- **Files touched:** `backend/tests/integration/test_telemetry_synthetic_load.py`, `docs/project/CurrentSprint.md`.
+- **Validation:** Scoped Ruff passed (`poetry run ruff check tests/integration/test_telemetry_synthetic_load.py`), targeted VS15 suite passed (`poetry run pytest tests/integration/test_telemetry_synthetic_load.py -q`, `1 passed`), full backend regression passed (`poetry run pytest tests -q`, `456 passed`).
+- **Scope/governance:** Test-only increment; no API/event/channel/schema changes, no C5/C6 drift, and fail-open behavior remains unchanged.
+
 ## [2026-08-14] - Vertical Slice 14 Closure Gate Complete
 
 - **Completed:** Closed VS14 and finalized M10 production-readiness gate with full backend/frontend validation evidence and release-tracking sign-off.

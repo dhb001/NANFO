@@ -3,6 +3,25 @@
 Lightweight chronological notes for decisions that do not require a full ADR.
 
 ## 2026-08-14
+### VS15 Step 1: Activate Post-M10 Synthetic Telemetry Load Campaign as Test-Only Burst Coverage
+Decision: Implement the first VS15 executable increment as integration-test-only synthetic telemetry burst coverage that validates ingest/persist/fanout counter continuity at macro batch size without changing runtime contracts.
+Reason:
+- `CurrentSprint.md` explicitly deferred macro-scale synthetic load work beyond VS14 and left the next slice undefined; VS15 must begin by converting that deferred item into executable evidence.
+- Existing telemetry module already provides deterministic event flow and health counters, enabling bounded load simulation through tests without production code churn.
+- A test-only first step minimizes risk while preserving API envelope stability, C5/C6 constraints, and fail-open runtime behavior.
+Impact:
+- Added `backend/tests/integration/test_telemetry_synthetic_load.py` to drive a `120`-event synthetic burst through `TelemetryIngestionService` + `handle_telemetry_event(...)` and assert counter integrity (`ingested/persisted/fanout`) with zero drops.
+- Updated `CurrentSprint.md` to define VS15 scope boundaries, acceptance criteria, checklist, and status progression (`IN PROGRESS`, Step 1 complete).
+- Recorded validation evidence for scoped Ruff, targeted VS15 test, and full backend regression.
+Assumptions:
+- VS15 Step 1 focuses on deterministic backend synthetic burst evidence only; frontend burst-resilience coverage remains Step 2 scope.
+- Burst-scale validation is performed in integration harness (fakeredis + patched session/ws manager), not by introducing new external load tooling in this increment.
+Related:
+- `backend/tests/integration/test_telemetry_synthetic_load.py`
+- `docs/project/CurrentSprint.md`
+- `docs/project/DevelopmentJournal.md`
+
+## 2026-08-14
 ### VS14 Closure Gate: Accept Completion After Scoped Hardening Remediation and Full Green Regression Evidence
 Decision: Mark VS14 complete once a bounded hardening-only remediation pass resolves gate-discovered lint debt and all required backend/frontend production-readiness validation commands are green in one evidence set.
 Reason:
