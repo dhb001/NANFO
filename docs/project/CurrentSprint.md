@@ -16,7 +16,7 @@
 - Vertical Slice 13 Implementation: **COMPLETE** — Reporting async generation/status baseline and frontend reporting lifecycle parity are delivered through VS13 closure gate with full backend/frontend validation evidence.
 - Vertical Slice 14 Implementation: **COMPLETE** — Production-readiness closure gate completed with backend/frontend hardening verification, regression evidence, and release-tracking sign-off.
 - Vertical Slice 15 Implementation: **COMPLETE** — Post-M10 synthetic load campaign baseline and frontend burst-resilience continuity hardening are delivered through VS15 closure gate with full backend/frontend validation evidence.
-- Vertical Slice 16 Implementation: **IN PROGRESS** — Follow-on optimization slice planning and deferred external load-tooling expansion governance kickoff are active.
+- Vertical Slice 16 Implementation: **COMPLETE** — Follow-on optimization planning and deferred external load-tooling expansion governance are delivered through VS16 closure gate with required backend validation evidence.
 
 ## Subsystem Progress — Vertical Slice 8
 
@@ -214,7 +214,7 @@
 - [x] Closure Gate: Final scoped/frontend/backend validation pass and VS15 tracking finalization (`poetry run ruff check tests/integration/test_telemetry_synthetic_load.py` ✅, VS15 targeted backend suite `1 passed` ✅, backend regression `poetry run pytest tests -q` `456 passed` ✅, frontend `npm run lint` ✅, `npm run typecheck` ✅, `npm run test` `68 passed` ✅, `npm run test:e2e` `16/16 passed` ✅ after one immediate transient rerun, `npm run build` ✅, `npm run perf:bundle` ✅).
 
 ### VS16 — Follow-On Optimization Planning + External Load-Tooling Expansion Governance
-- Status: **IN PROGRESS**.
+- Status: **COMPLETE**.
 - Objective: Convert post-VS15 optimization/deferred-load continuity notes into an authoritative and finite plan for follow-on slices without changing product runtime contracts during VS16.
 - Scope boundaries: Planning and governance artifacts only; no net-new REST/WebSocket/event/channel/schema changes, no API envelope drift, no C5/C6 relaxations, and no fail-open runtime/event behavior changes.
 - Acceptance criteria: VS16 checklist is finite and step-scoped, follow-on optimization slices are ordered with explicit boundaries and validation gates, and deferred external load-tooling assumptions/risks are documented.
@@ -226,7 +226,7 @@
 
 - [x] Step 1: Lock VS16 planning-only charter, non-negotiable constraints, and finite step checklist in `CurrentSprint.md` as authoritative scope baseline.
 - [x] Step 2: Publish ordered follow-on optimization + deferred external load-tooling expansion plan (assumptions, risks, and validation matrix) in `docs/project/OptimizationContinuityPlan-VS16.md` and align continuity docs (`Roadmap.md`, `Milestones.md`).
-- [ ] Closure Gate: Final VS16 validation pass and tracking finalization.
+- [x] Closure Gate: Final VS16 backend validation pass and tracking finalization (`poetry run ruff check tests/integration/test_telemetry_synthetic_load.py` ✅, `poetry run pytest tests/integration/test_telemetry_synthetic_load.py -q` `1 passed` ✅, `poetry run pytest tests -q` `456 passed` ✅; frontend gates not required because no frontend files changed in VS16).
 
 ## Post-VS16 Plan (Authoritative Remaining VS Plan)
 
@@ -282,7 +282,7 @@
 - [x] VS13 closure complete (reporting async generation/status baseline delivered).
 - [x] VS14 closure complete (M10 production readiness gate and release evidence finalized).
 - [x] VS15 closure complete (post-M10 synthetic load campaign + performance continuity evidence refresh finalized).
-- [ ] VS16 closure pending (follow-on optimization planning + deferred external load-tooling expansion governance).
+- [x] VS16 closure complete (follow-on optimization planning + deferred external load-tooling expansion governance finalized).
 - [ ] VS17 pending (external load-tooling execution baseline).
 - [ ] VS18 pending (backend performance continuity hardening).
 - [ ] VS19 pending (frontend performance continuity hardening).
@@ -390,8 +390,8 @@
 
 ## Blocked / Deferred
 - Digital Twin spatial references — deferred to M6
-- Macro-scale synthetic load campaign baseline is delivered in VS15; external load-tooling execution remains deferred pending VS16 planning completion.
+- Macro-scale synthetic load campaign baseline is delivered in VS15; external load-tooling execution remains deferred pending VS17 execution-baseline delivery.
 - Repo-wide Ruff debt outside VS2 Step 8 scope remains and is tracked for later cleanup.
 
 ## Next Sprint Candidates
-- VS16 closure gate execution and tracking finalization.
+- VS17 Step 1 kickoff focused on external load-tooling execution baseline.

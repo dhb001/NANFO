@@ -3,6 +3,26 @@
 Lightweight chronological notes for decisions that do not require a full ADR.
 
 ## 2026-08-14
+### VS16 Closure Gate: Accept Completion as Planning-Only Slice with Full Required Backend Validation Evidence
+Decision: Mark VS16 complete after Step 1 + Step 2 planning/governance deliverables and a final green closure-gate run for required backend checks, without running frontend full-gate commands because no frontend files changed.
+Reason:
+- VS16 scope in `CurrentSprint.md` was explicitly planning/governance only with no runtime product-surface changes.
+- Mandatory constraints (API envelope stability, C5/C6 preservation, fail-open runtime continuity) are satisfied by docs-only execution.
+- Required per-step validation model is preserved by running scoped Ruff, targeted VS16 backend test baseline, and full backend regression for closure evidence.
+Impact:
+- `CurrentSprint.md` now marks VS16 `COMPLETE`, checks VS16 closure gate, and advances remaining work to VS17-VS20.
+- `DevelopmentJournal.md` records closure evidence and confirms frontend gate non-applicability for this slice.
+- `DecisionLog.md` now carries closure rationale and acceptance basis for future continuity audits.
+Assumptions:
+- VS17 becomes the first executable post-VS16 slice and will activate external load-tooling baseline within documented no-contract-expansion boundaries.
+- Existing frontend `three` warning remains planned follow-up within VS19 scope unless earlier slices require minimal documented remediation.
+Related:
+- `docs/project/CurrentSprint.md`
+- `docs/project/DevelopmentJournal.md`
+- `docs/project/DecisionLog.md`
+- `docs/project/OptimizationContinuityPlan-VS16.md`
+
+## 2026-08-14
 ### VS16 Step 2: Adopt Post-VS16 Optimization Sequence (VS17-VS20) as Continuity Baseline
 Decision: Publish and adopt a finite follow-on optimization sequence (`VS17`-`VS20`) in a dedicated VS16 plan artifact, and align `CurrentSprint`/`Roadmap`/`Milestones` to that same sequence.
 Reason:
