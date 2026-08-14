@@ -24,6 +24,7 @@ from jose import JWTError
 from neo4j.exceptions import Neo4jError
 from sqlalchemy.exc import SQLAlchemyError
 
+from app.api.v1.alerts import router as alerts_router
 from app.api.v1.audit import router as audit_router
 from app.api.v1.auth import router as auth_router
 from app.api.v1.intents import router as intent_router
@@ -38,6 +39,7 @@ from app.db.neo4j import close_neo4j, get_neo4j_driver, init_neo4j
 from app.db.postgres import AsyncSessionLocal
 from app.db.redis import close_redis, get_redis_client, init_redis
 from app.events.bus import STREAM_GROUPS, ensure_consumer_groups, run_consumer_loop
+from app.events.consumers.alert_consumer import ALERT_HANDLERS
 from app.events.consumers.audit_consumer import AUDIT_HANDLERS
 from app.events.consumers.telemetry_consumer import TELEMETRY_HANDLERS
 from app.events.consumers.topology_consumer import TOPOLOGY_HANDLERS
@@ -186,7 +188,13 @@ async def lifespan(app: FastAPI):
         )
 
     # Merge all handlers — network events go to audit + topology + ws_push consumers
-    all_handlers = _merge_handlers(AUDIT_HANDLERS, TOPOLOGY_HANDLERS, WS_PUSH_HANDLERS, TELEMETRY_HANDLERS)
+    all_handlers = _merge_handlers(
+        AUDIT_HANDLERS,
+        TOPOLOGY_HANDLERS,
+        WS_PUSH_HANDLERS,
+        TELEMETRY_HANDLERS,
+        ALERT_HANDLERS,
+    )
 
     # Start one consumer loop per stream
     for stream_key, group in STREAM_GROUPS.items():
@@ -310,6 +318,7 @@ app.include_router(topology_router)
 app.include_router(telemetry_router)
 app.include_router(simulation_router)
 app.include_router(intent_router)
+app.include_router(alerts_router)
 app.include_router(audit_router)
 app.include_router(ws_router)
 app.include_router(telemetry_ws_router)

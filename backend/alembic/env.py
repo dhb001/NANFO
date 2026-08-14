@@ -11,6 +11,7 @@ from sqlalchemy import engine_from_config, pool
 from alembic import context
 from app.core.config import get_settings
 from app.db.postgres import Base
+from app.modules.alert.models import AlertRecord  # noqa: F401
 
 # Import all models to register metadata — must come before Base import
 from app.modules.identity.models import (  # noqa: F401

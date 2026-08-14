@@ -44,6 +44,9 @@ _AUDIT_MAP: dict[str, dict] = {
     "org.member.removed":       {"resource_type": "org_member"},
     "telemetry.collector.sustained_failure_activated": {"resource_type": "telemetry_collector"},
     "telemetry.collector.sustained_failure_recovered": {"resource_type": "telemetry_collector"},
+    "alert.generated": {"resource_type": "alert"},
+    "alert.acknowledged": {"resource_type": "alert"},
+    "alert.resolved": {"resource_type": "alert"},
 }
 
 
@@ -62,14 +65,22 @@ async def handle_audit_event(event: dict) -> None:
     except (ValueError, TypeError, AttributeError):
         correlation_id = uuid.uuid4()
 
-    actor_id_raw = payload.get("user_id") or payload.get("actor_id")
+    actor_id_raw = (
+        payload.get("user_id")
+        or payload.get("actor_id")
+        or payload.get("requested_by_user_id")
+        or payload.get("acknowledged_by_user_id")
+        or payload.get("resolved_by_user_id")
+    )
     try:
         actor_id = uuid.UUID(str(actor_id_raw)) if actor_id_raw else None
     except (ValueError, TypeError, AttributeError):
         actor_id = None
 
     resource_id_raw = (
-        payload.get("intent_id")
+        payload.get("alert_id")
+        or payload.get("alertId")
+        or payload.get("intent_id")
         or payload.get("simulation_id")
         or payload.get("parent_simulation_id")
         or payload.get("device_id")

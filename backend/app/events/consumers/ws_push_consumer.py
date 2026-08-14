@@ -29,11 +29,13 @@ _EVENT_TO_DELTA: dict[str, str] = {
 
 _ALERT_EVENT_TO_DELTA: dict[str, str] = {
     "alert.generated": "add",
+    "alert.acknowledged": "ack",
     "alert.resolved": "resolve",
 }
 
 _ALERT_EVENT_TO_COUNTER_LABEL: dict[str, str] = {
     "alert.generated": "generated",
+    "alert.acknowledged": "acknowledged",
     "alert.resolved": "resolved",
 }
 
@@ -356,6 +358,7 @@ WS_PUSH_HANDLERS: dict[str, object] = {
     "network.device.updated": handle_ws_push_event,
     "network.device.deleted": handle_ws_push_event,
     "alert.generated": handle_ws_alert_event,
+    "alert.acknowledged": handle_ws_alert_event,
     "alert.resolved": handle_ws_alert_event,
     "simulation.started": handle_ws_digital_twin_event,
     "simulation.completed": handle_ws_digital_twin_event,

@@ -103,14 +103,23 @@ async def test_ws_alert_consumer_falls_back_to_empty_payload_for_malformed_event
 
 
 @pytest.mark.asyncio
-async def test_ws_alert_consumer_unmapped_event_is_noop():
-    event = _alert_event("alert.acknowledged")
+async def test_ws_alert_consumer_pushes_acknowledged_event_to_alerts_channel():
+    event = _alert_event("alert.acknowledged", payload={"severity": "warning", "message": "acknowledged"})
 
-    with patch("app.events.consumers.ws_push_consumer.alerts_ws_manager") as mock_alerts_ws_manager:
+    with (
+        patch("app.events.consumers.ws_push_consumer.alerts_ws_manager") as mock_alerts_ws_manager,
+        patch("app.events.consumers.ws_push_consumer.get_redis_client") as mock_get_redis,
+    ):
+        fake_redis = AsyncMock()
+        fake_redis.incr = AsyncMock(return_value=1)
+        mock_get_redis.return_value = fake_redis
         mock_alerts_ws_manager.push_delta = AsyncMock()
         await handle_ws_alert_event(event)
 
-    mock_alerts_ws_manager.push_delta.assert_not_awaited()
+    kwargs = mock_alerts_ws_manager.push_delta.await_args.kwargs
+    assert kwargs["event_type"] == "alert.acknowledged"
+    assert kwargs["delta_type"] == "ack"
+    fake_redis.incr.assert_awaited_once_with("alerts:ws:fanout:acknowledged:success")
 
 
 @pytest.mark.asyncio
@@ -192,8 +201,10 @@ async def test_ws_topology_update_delta_includes_changed_fields_for_spatial_ref_
 
 def test_ws_push_handlers_include_alert_lifecycle_events():
     assert "alert.generated" in WS_PUSH_HANDLERS
+    assert "alert.acknowledged" in WS_PUSH_HANDLERS
     assert "alert.resolved" in WS_PUSH_HANDLERS
     assert WS_PUSH_HANDLERS["alert.generated"] is handle_ws_alert_event
+    assert WS_PUSH_HANDLERS["alert.acknowledged"] is handle_ws_alert_event
     assert WS_PUSH_HANDLERS["alert.resolved"] is handle_ws_alert_event
 
 

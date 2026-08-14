@@ -291,3 +291,49 @@ def test_audit_handlers_include_topology_reconcile_events():
     assert "network.topology.reconcile_requested" in AUDIT_HANDLERS
     assert "network.topology.reconcile_completed" in AUDIT_HANDLERS
     assert "network.topology.reconcile_failed" in AUDIT_HANDLERS
+
+
+@pytest.mark.asyncio
+async def test_audit_consumer_writes_alert_acknowledged_event_with_actor_and_resource_id():
+    db = AsyncMock()
+    db.commit = AsyncMock()
+
+    actor_id = str(uuid.uuid4())
+    alert_id = str(uuid.uuid4())
+    correlation_id = str(uuid.uuid4())
+    payload = {
+        "alert_id": alert_id,
+        "acknowledged_by_user_id": actor_id,
+        "status": "acknowledged",
+    }
+    event = {
+        "event_type": "alert.acknowledged",
+        "correlation_id": correlation_id,
+        "payload": payload,
+    }
+
+    repo = MagicMock()
+    repo.append = AsyncMock()
+
+    with (
+        patch(
+            "app.events.consumers.audit_consumer.AsyncSessionLocal",
+            return_value=_session_context_manager(db),
+        ),
+        patch("app.events.consumers.audit_consumer.AuditLogRepository", return_value=repo),
+    ):
+        await handle_audit_event(event)
+
+    append_kwargs = repo.append.await_args.kwargs
+    assert append_kwargs["event_type"] == "alert.acknowledged"
+    assert append_kwargs["resource_type"] == "alert"
+    assert append_kwargs["actor_id"] == uuid.UUID(actor_id)
+    assert append_kwargs["resource_id"] == uuid.UUID(alert_id)
+    assert append_kwargs["correlation_id"] == uuid.UUID(correlation_id)
+    db.commit.assert_awaited_once()
+
+
+def test_audit_handlers_include_alert_lifecycle_events():
+    assert "alert.generated" in AUDIT_HANDLERS
+    assert "alert.acknowledged" in AUDIT_HANDLERS
+    assert "alert.resolved" in AUDIT_HANDLERS
