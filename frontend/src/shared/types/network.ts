@@ -64,3 +64,39 @@ export interface TopologyNodeWithNeighbours {
     }
   >;
 }
+
+export interface TopologyNeighbourEdge extends TopologyNode {
+  edge_type: string;
+  edge_metadata: Record<string, unknown>;
+  direction: string;
+  hop_depth: number;
+}
+
+export interface TopologyDeviceNeighbours {
+  device: TopologyNode;
+  neighbours: TopologyNeighbourEdge[];
+  depth: number;
+  total: number;
+}
+
+export interface TopologyImpactNode extends TopologyNode {
+  hop_depth: number;
+}
+
+export interface TopologyImpact {
+  device: TopologyNode;
+  impacts: TopologyImpactNode[];
+  max_hops: number;
+  total: number;
+}
+
+export interface TopologyReconcileResult {
+  reconcile_id: string;
+  network_id: string;
+  status: string;
+  checked_nodes: number;
+  checked_edges: number;
+  missing_workspace_nodes: number;
+  workspace_backfilled_nodes: number;
+  warning: string | null;
+}

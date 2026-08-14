@@ -3,6 +3,7 @@ import { lazy } from "react";
 export const LoginPage = lazy(() => import("@/features/auth/LoginPage").then((module) => ({ default: module.LoginPage })));
 export const OverviewPage = lazy(() => import("@/features/overview/OverviewPage").then((module) => ({ default: module.OverviewPage })));
 export const TenancyPage = lazy(() => import("@/features/organizations/TenancyPage").then((module) => ({ default: module.TenancyPage })));
+export const TopologyAnalysisPage = lazy(() => import("@/features/topology/TopologyAnalysisPage").then((module) => ({ default: module.TopologyAnalysisPage })));
 export const TelemetryPage = lazy(() => import("@/features/telemetry/TelemetryPage").then((module) => ({ default: module.TelemetryPage })));
 export const ReliabilityPage = lazy(() => import("@/features/reliability/ReliabilityPage").then((module) => ({ default: module.ReliabilityPage })));
 export const TwinPage = lazy(() => import("@/features/digitalTwin/TwinPage").then((module) => ({ default: module.TwinPage })));

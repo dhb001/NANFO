@@ -12,6 +12,7 @@ import {
   SimulationPage,
   TenancyPage,
   TelemetryPage,
+  TopologyAnalysisPage,
   TwinPage,
 } from "./routes";
 import { AsyncState } from "@/shared/ui/AsyncState";
@@ -49,6 +50,7 @@ export function App() {
             <Route index element={<Navigate to="overview" replace />} />
             <Route path="overview" element={<OverviewPage />} />
             <Route path="tenancy" element={<TenancyPage />} />
+            <Route path="topology-analysis" element={<TopologyAnalysisPage />} />
             <Route path="telemetry" element={<TelemetryPage />} />
             <Route path="reliability" element={<ReliabilityPage />} />
             <Route path="digital-twin" element={<TwinPage />} />

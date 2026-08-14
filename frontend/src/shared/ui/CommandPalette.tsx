@@ -14,6 +14,7 @@ interface CommandEntry {
 const commands: CommandEntry[] = [
   { id: "go-overview", label: "Go to Overview", hint: "G O", path: "/ops/overview", group: "Navigation" },
   { id: "go-tenancy", label: "Go to Tenancy", hint: "G W", path: "/ops/tenancy", group: "Navigation" },
+  { id: "go-topology-analysis", label: "Go to Topology Analysis", hint: "G P", path: "/ops/topology-analysis", group: "Navigation" },
   { id: "go-telemetry", label: "Go to Telemetry", hint: "G T", path: "/ops/telemetry", group: "Navigation" },
   { id: "go-reliability", label: "Go to Reliability", hint: "G R", path: "/ops/reliability", group: "Navigation" },
   { id: "go-twin", label: "Go to Digital Twin", hint: "G D", path: "/ops/digital-twin", group: "Navigation" },

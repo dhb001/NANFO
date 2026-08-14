@@ -1,5 +1,15 @@
 # Development Journal
 
+## [2026-08-14] - Vertical Slice 10 Step 2 (Frontend Topology Analysis Parity)
+
+- **Implemented (VS10 frontend parity):** Added a dedicated topology analysis workspace route (`/ops/topology-analysis`) with neighbours and impact tabs, reconcile action/status rendering, and deterministic analysis summaries aligned to VS10 endpoint contracts.
+- **Navigation/runtime wiring:** Added route/nav command affordances across App shell, command palette, and keyboard chords (`p`, `g p`) so operators can reach topology analysis from existing navigation paths.
+- **Client/hook contract alignment:** Extended topology API client and React Query hooks to cover `GET /topology/device/{id}/neighbors`, `GET /topology/impact/{id}`, and `POST /topology/reconcile` with typed payloads and topology cache invalidation on reconcile success.
+- **Realtime stale-data handling:** Topology analysis now watches `/ws/topology` device-delta fingerprints and triggers neighbour/impact refetch for the selected device with deduplicated fingerprint guard; depth/max-hop inputs are range-sanitized to bounded query values.
+- **Coverage updates:** Added VS10-specific unit tests (topology logic + hotkey mapping), component tests for neighbour/impact/reconcile/realtime refresh behavior, and a new Playwright e2e spec for success and empty-state analysis flows.
+- **Validation:** Backend regression gate passed (`poetry run pytest tests -q`, `375 passed`); frontend full gate passed (`npm run lint`, `npm run typecheck`, `npm run test` `11 files, 35 tests`, `npm run test:e2e` `10/10`, `npm run build`, `npm run perf:bundle`).
+- **Scope/governance:** No backend API/event/channel changes in Step 2, no envelope drift, no C5/C6 boundary relaxation, and no schema migration required.
+
 ## [2026-08-14] - Vertical Slice 10 Step 1 (Deferred Topology Analysis Endpoints Backend Baseline)
 
 - **Implemented (VS10 backend):** Enabled deferred topology analysis routes `GET /api/v1/topology/device/{id}/neighbors`, `GET /api/v1/topology/impact/{id}`, and `POST /api/v1/topology/reconcile` in the existing topology router with canonical `{success,data,meta,errors}` envelope responses.

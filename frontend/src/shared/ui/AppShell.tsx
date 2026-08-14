@@ -8,6 +8,7 @@ import { useIsNarrowViewport } from "@/shared/lib/viewport";
 const navItems = [
   { to: "/ops/overview", label: "Overview", keyHint: "G O" },
   { to: "/ops/tenancy", label: "Tenancy", keyHint: "G W" },
+  { to: "/ops/topology-analysis", label: "Topology", keyHint: "G P" },
   { to: "/ops/telemetry", label: "Telemetry", keyHint: "G T" },
   { to: "/ops/reliability", label: "Reliability", keyHint: "G R" },
   { to: "/ops/digital-twin", label: "Digital Twin", keyHint: "G D" },

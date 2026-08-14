@@ -3,6 +3,33 @@
 Lightweight chronological notes for decisions that do not require a full ADR.
 
 ## 2026-08-14
+### VS10 Step 2: Frontend Topology Analysis Parity on Existing Endpoint Contract
+Decision: Implement VS10 frontend parity as a dedicated `/ops/topology-analysis` experience wired to existing VS10 topology endpoints, including deterministic neighbour/impact views, reconcile action feedback, and topology WebSocket-driven stale-result invalidation.
+Reason:
+- VS10 closure governance requires frontend acceptance criteria (UI states, realtime behavior, tests) in addition to backend endpoint delivery.
+- Existing backend Step 1 already delivered the approved endpoint set; frontend parity can be completed without API/event/channel expansion.
+- Bounded query normalization (`depth`, `max_hops`) and deterministic list summaries reduce operator ambiguity while preserving documented contract semantics.
+Impact:
+- Added route/nav/hotkey/command integration for topology analysis entry points (`/ops/topology-analysis`, `p`, `g p`).
+- Added typed API client + React Query hooks for neighbors/impact/reconcile contracts and reconcile-triggered topology cache invalidation.
+- Added realtime fingerprint-based refetch behavior for neighbour/impact queries on `/ws/topology` structural deltas.
+- Added VS10 frontend coverage across unit/component/e2e layers and recorded full frontend gate evidence.
+Assumptions:
+- Reconcile lifecycle event progress beyond immediate response remains backend/audit-observed in this slice; frontend Step 2 shows latest available reconcile result from API mutation response and topology refresh semantics.
+- Existing bundle-size warning for `three` remains accepted baseline and is deferred to later production-readiness optimization scope.
+Related:
+- `frontend/src/features/topology/TopologyAnalysisPage.tsx`
+- `frontend/src/features/topology/api.ts`
+- `frontend/src/features/topology/hooks.ts`
+- `frontend/src/features/topology/logic.ts`
+- `frontend/tests/e2e/vs10-topology-analysis.spec.ts`
+- `frontend/src/shared/ui/AppShell.tsx`
+- `frontend/src/shared/ui/CommandPalette.tsx`
+- `frontend/src/shared/lib/hotkeys.ts`
+- `docs/project/CurrentSprint.md`
+- `docs/project/DevelopmentJournal.md`
+
+## 2026-08-14
 ### VS10 Step 1: Deferred Topology Endpoints Activation with Deterministic Graph Semantics
 Decision: Activate VS10 deferred topology endpoint set by implementing `GET /api/v1/topology/device/{id}/neighbors`, `GET /api/v1/topology/impact/{id}`, and `POST /api/v1/topology/reconcile` in the existing topology module, with deterministic ordering, bounded traversal depth, and reconcile lifecycle audit events.
 Reason:

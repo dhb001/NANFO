@@ -10,7 +10,7 @@
 - Vertical Slice 7 Implementation: **COMPLETE** — Simulation lifecycle baseline execution delivered through **VS7 Step 7** with branch/read/compare endpoints, lifecycle audit/contract alignment, and closure regression gate complete.
 - Vertical Slice 8 Implementation: **COMPLETE** — Intent Engine recommendation/explainability baseline and frontend parity are delivered through VS8 closure gate with validated intent UX/realtime reconciliation, tenancy management parity, and full frontend quality gates.
 - Vertical Slice 9 Implementation: **COMPLETE** — Hypervisor execution + rollback baseline and frontend execution-monitoring parity are delivered through VS9 closure gate with full backend/frontend validation evidence.
-- Vertical Slice 10 Implementation: **IN PROGRESS** — Deferred topology analysis endpoint implementation has started with backend route/service/test delivery for neighbors, impact, and reconcile baseline.
+- Vertical Slice 10 Implementation: **IN PROGRESS** — Backend and frontend topology-analysis parity are implemented; final closure gate evidence and tracking finalization remain.
 
 ## Subsystem Progress — Vertical Slice 8
 
@@ -79,11 +79,13 @@
   - Accessibility/responsiveness acceptance criteria: Keyboard and screen-reader access for graph/list alternatives, touch-safe controls for reconcile actions, and responsive panel collapse/stack behavior across viewport sizes.
   - Frontend tests required (`unit`, `component`, `e2e`): Unit tests for query parameter/state normalization; component tests for neighbour/impact/reconcile states; e2e tests for successful analysis, empty analysis, and retry-on-error flows.
   - API and WebSocket dependencies: `GET /api/v1/topology/device/{id}/neighbors`, `GET /api/v1/topology/impact/{id}`, `POST /api/v1/topology/reconcile`, `/ws/topology`.
+  - Current blocker: none.
+  - Latest frontend full-gate evidence (2026-08-14): `npm run lint` PASS, `npm run typecheck` PASS, `npm run test` PASS (`11 files, 35 tests`), `npm run test:e2e` PASS (`10/10`), `npm run build` PASS, `npm run perf:bundle` PASS.
 
 ## Subsystem Progress — Vertical Slice 10
 
 - [x] Step 1: Add backend deferred-topology endpoints (`GET /topology/device/{id}/neighbors`, `GET /topology/impact/{id}`, `POST /topology/reconcile`) with deterministic ordering, edge metadata/hop-depth semantics, and auditable reconcile lifecycle events under canonical envelope contracts.
-- [ ] Step 2: Add VS10 frontend topology-analysis parity (neighbors + impact + reconcile UI, async state coverage, realtime topology-delta invalidation behavior, and required unit/component/e2e updates).
+- [x] Step 2: Add VS10 frontend topology-analysis parity (neighbors + impact + reconcile UI, async state coverage, realtime topology-delta invalidation behavior, and required unit/component/e2e updates) with navigation/hotkey/command wiring and validated test coverage.
 - [ ] Closure Gate: Final scoped/frontend/backend validation pass and VS10 tracking finalization.
 
 ### VS11 — Alerts API Lifecycle Completion

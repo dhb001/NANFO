@@ -6,6 +6,7 @@ export interface ChordNavigationResult {
 const singleKeyNavigation: Record<string, string> = {
   o: "/ops/overview",
   w: "/ops/tenancy",
+  p: "/ops/topology-analysis",
   t: "/ops/telemetry",
   r: "/ops/reliability",
   d: "/ops/digital-twin",
@@ -17,6 +18,7 @@ const singleKeyNavigation: Record<string, string> = {
 const prefixedNavigation: Record<string, string> = {
   go: "/ops/overview",
   gw: "/ops/tenancy",
+  gp: "/ops/topology-analysis",
   gt: "/ops/telemetry",
   gr: "/ops/reliability",
   gd: "/ops/digital-twin",
