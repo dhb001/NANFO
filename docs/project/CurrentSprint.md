@@ -17,7 +17,7 @@
 - Vertical Slice 14 Implementation: **COMPLETE** — Production-readiness closure gate completed with backend/frontend hardening verification, regression evidence, and release-tracking sign-off.
 - Vertical Slice 15 Implementation: **COMPLETE** — Post-M10 synthetic load campaign baseline and frontend burst-resilience continuity hardening are delivered through VS15 closure gate with full backend/frontend validation evidence.
 - Vertical Slice 16 Implementation: **COMPLETE** — Follow-on optimization planning and deferred external load-tooling expansion governance are delivered through VS16 closure gate with required backend validation evidence.
-- Vertical Slice 17 Implementation: **IN PROGRESS** — External load-tooling execution baseline is active through VS17 Step 2 (tooling harness + evidence artifact delivery) with closure gate pending.
+- Vertical Slice 17 Implementation: **COMPLETE** — External load-tooling execution baseline is delivered through VS17 closure gate with deterministic `k6` (Docker fallback) evidence artifacts and full required backend validation.
 
 ## Subsystem Progress — Vertical Slice 8
 
@@ -238,7 +238,7 @@
 - Post-M10 optimization continuity evidence is complete and release-tracking ready for the next roadmap phase.
 
 ### VS17 — External Load-Tooling Execution Baseline
-- Status: **IN PROGRESS**.
+- Status: **COMPLETE**.
 - Objective: Activate one approved external load-tooling execution path for telemetry/streaming stress validation while preserving existing product/runtime contracts.
 - Scope boundaries: Tooling/harness/fixtures/runbook scope only; no net-new REST/WebSocket/event/channel/schema contracts.
 - Acceptance criteria: Deterministic load profiles execute in local/staging, produce stable ingest/persist/fanout/error evidence, and include documented rollback/failure handling.
@@ -250,7 +250,7 @@
 
 - [x] Step 1: Lock VS17 execution charter with a finite and non-overlapping checklist, approving one external load-tooling path (k6 with Docker fallback), deterministic local/staging profile matrix, evidence artifact schema, and rollback/failure-handling documentation requirements.
 - [x] Step 2: Implement VS17 external load-tooling execution baseline (k6 profile + orchestration harness + deterministic synthetic telemetry fixture pump + evidence artifact writer), add docker user-mapping + writable artifact-directory fallback, and extend focused unit coverage for profile/command/evidence and k6 summary metric extraction semantics.
-- [ ] Closure Gate: Final VS17 validation pass and tracking finalization (`poetry run ruff check` scoped VS17 backend files, VS17 targeted backend suite, `poetry run pytest tests -q`; frontend full gate only if frontend files are touched).
+- [x] Closure Gate: Final VS17 validation pass and tracking finalization (`poetry run ruff check app/modules/telemetry/load_tooling.py scripts/run_vs17_external_load.py tests/unit/test_vs17_load_tooling.py` ✅, VS17 targeted backend suite `poetry run pytest tests/unit/test_vs17_load_tooling.py -q` `28 passed` ✅, backend regression `poetry run pytest tests -q` `484 passed` ✅; local-smoke evidence run `poetry run python scripts/run_vs17_external_load.py --profile local-smoke --base-url http://127.0.0.1:8000` produced `status=success` with counter delta `ingested=120 persisted=120 fanout=120 dropped=0` and k6 metrics in `/tmp/opencode/vs17-artifacts-20260814T205740Z/20260814T205740Z_local_smoke.json`; frontend full gate not required because no frontend files were touched in VS17).
 
 ### VS18 — Backend Performance Continuity Hardening
 - Status: **PLANNED**.
@@ -290,7 +290,7 @@
 - [x] VS14 closure complete (M10 production readiness gate and release evidence finalized).
 - [x] VS15 closure complete (post-M10 synthetic load campaign + performance continuity evidence refresh finalized).
 - [x] VS16 closure complete (follow-on optimization planning + deferred external load-tooling expansion governance finalized).
-- [ ] VS17 in progress (external load-tooling execution baseline).
+- [x] VS17 closure complete (external load-tooling execution baseline with deterministic evidence artifacts).
 - [ ] VS18 pending (backend performance continuity hardening).
 - [ ] VS19 pending (frontend performance continuity hardening).
 - [ ] VS20 pending (optimization program closure gate).
@@ -397,8 +397,8 @@
 
 ## Blocked / Deferred
 - Digital Twin spatial references — deferred to M6
-- Macro-scale synthetic load campaign baseline is delivered in VS15; backend continuity threshold hardening from VS17 external-load evidence is deferred pending VS17 closure.
+- Macro-scale synthetic load campaign baseline is delivered in VS15; backend continuity threshold hardening from VS17 external-load evidence is deferred to VS18.
 - Repo-wide Ruff debt outside VS2 Step 8 scope remains and is tracked for later cleanup.
 
 ## Next Sprint Candidates
-- VS17 closure gate finalization (validation evidence lock + tracking completion) before starting VS18.
+- VS18 Step 1 implementation focused on backend performance continuity hardening from VS17 evidence artifacts.

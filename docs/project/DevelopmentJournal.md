@@ -1,5 +1,14 @@
 # Development Journal
 
+## [2026-08-14] - Vertical Slice 17 Closure Gate Complete
+
+- **Completed:** Closed VS17 after delivering the external load-tooling execution baseline and recording deterministic local-smoke evidence with full required backend validation gates.
+- **Closure evidence (execution):** `poetry run python scripts/run_vs17_external_load.py --profile local-smoke --base-url http://127.0.0.1:8000` produced `status=success` with counter delta `ingested=120 persisted=120 fanout=120 dropped=0` and k6 metrics (`http_req_failed_rate=0.0`, `http_req_duration_p95_ms=2.1907872`, `http_reqs_count=495.0`) in `/tmp/opencode/vs17-artifacts-20260814T205740Z/20260814T205740Z_local_smoke.json`.
+- **Closure evidence (validation):** Scoped Ruff passed (`poetry run ruff check app/modules/telemetry/load_tooling.py scripts/run_vs17_external_load.py tests/unit/test_vs17_load_tooling.py`), VS17-targeted suite passed (`poetry run pytest tests/unit/test_vs17_load_tooling.py -q`, `28 passed`), and full backend regression passed (`poetry run pytest tests -q`, `484 passed`).
+- **Frontend gate applicability:** Frontend full-gate command chain remained not required for VS17 closure because no frontend files were touched.
+- **Operational hardening outcome:** Writable artifact-directory fallback and Docker user mapping eliminated prior permission dead-end behavior for root-owned local artifact paths while preserving append-only per-run evidence behavior.
+- **Scope/governance confirmation:** No REST/WebSocket/event/channel/schema contract changes, no API envelope drift, no C5/C6 boundary changes, and fail-open runtime/event behavior remained unchanged.
+
 ## [2026-08-14] - Vertical Slice 17 Step 2 (External Load-Tooling Baseline Implementation)
 
 - **Implemented (VS17 step scope):** Delivered the bounded VS17 execution baseline across telemetry load-tooling helpers, k6 orchestration script, deterministic k6 profile script, focused unit coverage, and operator runbook guidance.

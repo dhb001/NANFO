@@ -3,6 +3,26 @@
 Lightweight chronological notes for decisions that do not require a full ADR.
 
 ## 2026-08-14
+### VS17 Closure Gate: Accept Completion with Docker-Backed Local-Smoke Evidence and Full Required Backend Validation
+Decision: Mark VS17 complete after the closure gate shows a successful deterministic local-smoke external-load run and all required backend validation gates pass, without running frontend full-gate commands because no frontend files changed.
+Reason:
+- VS17 scope boundaries are tooling/harness/runbook only and closure requires deterministic evidence plus scoped/backend validation, not frontend gates when frontend is untouched.
+- The final evidence run demonstrates approved runner behavior (`k6` with Docker fallback), stable ingest/persist/fanout counters, and artifact capture despite unwritable default artifact directory.
+- Validation evidence (`ruff` scoped files, VS17 targeted unit suite, full backend regression) is fully green in the same closure cycle.
+Impact:
+- `CurrentSprint.md` marks VS17 as `COMPLETE`, checks Step 2 and closure checklist items, and advances next-slice execution targeting VS18.
+- `DevelopmentJournal.md` records closure-gate execution/validation evidence and confirms frontend gate non-applicability.
+- `DecisionLog.md` now preserves closure acceptance rationale and evidence basis for continuity audits.
+Assumptions:
+- VS17 evidence may be persisted under `/tmp/opencode/vs17-artifacts-<run_id>` when repository artifact path ownership is not writable, and this remains acceptable for continuity tracking.
+- VS18 will convert VS17 load outputs into backend continuity assertions/thresholds without product contract expansion.
+Related:
+- `docs/project/CurrentSprint.md`
+- `docs/project/DevelopmentJournal.md`
+- `docs/project/DecisionLog.md`
+- `docs/project/VS17ExternalLoadToolingRunbook.md`
+
+## 2026-08-14
 ### VS17 Step 2: Use Docker k6 Fallback with User-Mapped Artifacts and Writable Output-Dir Fallback
 Decision: Implement VS17 external load-tooling baseline with a single k6 execution path that auto-resolves host vs Docker runner, enforces Docker user mapping, and falls back to `/tmp/opencode/vs17-artifacts-<run_id>` when the preferred artifact directory is not writable.
 Reason:
