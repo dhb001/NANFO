@@ -10,7 +10,7 @@
 - Vertical Slice 7 Implementation: **COMPLETE** — Simulation lifecycle baseline execution delivered through **VS7 Step 7** with branch/read/compare endpoints, lifecycle audit/contract alignment, and closure regression gate complete.
 - Vertical Slice 8 Implementation: **COMPLETE** — Intent Engine recommendation/explainability baseline and frontend parity are delivered through VS8 closure gate with validated intent UX/realtime reconciliation, tenancy management parity, and full frontend quality gates.
 - Vertical Slice 9 Implementation: **COMPLETE** — Hypervisor execution + rollback baseline and frontend execution-monitoring parity are delivered through VS9 closure gate with full backend/frontend validation evidence.
-- Vertical Slice 10 Implementation: **IN PROGRESS** — Backend and frontend topology-analysis parity are implemented; final closure gate evidence and tracking finalization remain.
+- Vertical Slice 10 Implementation: **COMPLETE** — Deferred topology analysis endpoints and frontend parity are delivered through VS10 closure gate with full backend/frontend validation evidence.
 
 ## Subsystem Progress — Vertical Slice 8
 
@@ -65,7 +65,7 @@
 - [x] Closure Gate: Final scoped/frontend/backend validation pass and VS9 tracking finalization (`poetry run ruff check` scoped intent files ✅, VS9 targeted backend suite `63 passed` ✅, backend regression `poetry run pytest tests -q` `360 passed` ✅, frontend `npm run lint` ✅, `npm run typecheck` ✅, `npm run test` `28 passed` ✅, `npm run test:e2e` `8/8 passed` ✅, `npm run build` ✅, `npm run perf:bundle` ✅).
 
 ### VS10 — Deferred Topology Analysis Endpoints
-- Status: **IN PROGRESS**.
+- Status: **COMPLETE**.
 - Objective: Deliver deferred topology analysis endpoints under C6 with deterministic query semantics.
 - Scope boundaries: Implement only `GET /api/v1/topology/device/{id}/neighbors`, `GET /api/v1/topology/impact/{id}`, and `POST /api/v1/topology/reconcile`; no unapproved endpoint expansion.
 - Acceptance criteria: Neighbor query returns deterministic ordering + edge metadata, impact query returns reachable dependency set with hop depth, and reconcile flow emits auditable lifecycle events.
@@ -86,7 +86,7 @@
 
 - [x] Step 1: Add backend deferred-topology endpoints (`GET /topology/device/{id}/neighbors`, `GET /topology/impact/{id}`, `POST /topology/reconcile`) with deterministic ordering, edge metadata/hop-depth semantics, and auditable reconcile lifecycle events under canonical envelope contracts.
 - [x] Step 2: Add VS10 frontend topology-analysis parity (neighbors + impact + reconcile UI, async state coverage, realtime topology-delta invalidation behavior, and required unit/component/e2e updates) with navigation/hotkey/command wiring and validated test coverage.
-- [ ] Closure Gate: Final scoped/frontend/backend validation pass and VS10 tracking finalization.
+- [x] Closure Gate: Final scoped/frontend/backend validation pass and VS10 tracking finalization (`poetry run ruff check` scoped topology/audit files ✅, VS10 targeted backend suite `62 passed` ✅, backend regression `poetry run pytest tests -q` `375 passed` ✅, frontend `npm run lint` ✅, `npm run typecheck` ✅, `npm run test` `35 passed` ✅, `npm run test:e2e` `10/10 passed` ✅, `npm run build` ✅, `npm run perf:bundle` ✅).
 
 ### VS11 — Alerts API Lifecycle Completion
 - Status: **PLANNED**.
@@ -156,7 +156,7 @@
 
 - [x] VS8 closure complete (frontend parity workstream + final closure tracking evidence recorded).
 - [x] VS9 closure complete (hypervisor execution + rollback baseline with terminal intent lifecycle outcomes).
-- [ ] VS10 closure complete (deferred topology analysis endpoint set delivered under C6 governance).
+- [x] VS10 closure complete (deferred topology analysis endpoint set delivered under C6 governance).
 - [ ] VS11 closure complete (alerts API lifecycle + event parity delivered).
 - [ ] VS12 closure complete (plugin lifecycle + sandbox safety baseline delivered).
 - [ ] VS13 closure complete (reporting async generation/status baseline delivered).

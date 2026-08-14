@@ -3,6 +3,25 @@
 Lightweight chronological notes for decisions that do not require a full ADR.
 
 ## 2026-08-14
+### VS10 Closure Gate: Accept Completion After Full Backend + Frontend Green Validation Suite
+Decision: Mark VS10 complete once the full closure gate passes across scoped topology checks, full backend regression, and full frontend quality gates, with evidence recorded in sprint tracking.
+Reason:
+- Slice-completion governance in project docs requires backend and frontend acceptance criteria to pass before closure.
+- VS10 Step 1 and Step 2 implementation scope is complete; remaining requirement is authoritative validation evidence and tracking finalization.
+- Re-running closure commands post-Step 2 commit confirms no regressions and validates C6-governed endpoint set remains bounded.
+Impact:
+- `CurrentSprint.md` now marks VS10 status as `COMPLETE`, closes VS10 checklist items, and records command-level closure evidence.
+- `DevelopmentJournal.md` includes a dedicated VS10 closure entry with backend/frontend gate outcomes.
+- Remaining-work checklist advances to VS11 as the next planned unfinished slice.
+Assumptions:
+- Existing large `three` chunk warning remains accepted baseline for this milestone and is deferred to later production-readiness/performance slices.
+- Closure acceptance uses the latest all-green run outputs as authoritative evidence.
+Related:
+- `docs/project/CurrentSprint.md`
+- `docs/project/DevelopmentJournal.md`
+- `docs/project/DecisionLog.md`
+
+## 2026-08-14
 ### VS10 Step 2: Frontend Topology Analysis Parity on Existing Endpoint Contract
 Decision: Implement VS10 frontend parity as a dedicated `/ops/topology-analysis` experience wired to existing VS10 topology endpoints, including deterministic neighbour/impact views, reconcile action feedback, and topology WebSocket-driven stale-result invalidation.
 Reason:
