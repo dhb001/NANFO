@@ -225,8 +225,52 @@
 ## Subsystem Progress — Vertical Slice 16
 
 - [x] Step 1: Lock VS16 planning-only charter, non-negotiable constraints, and finite step checklist in `CurrentSprint.md` as authoritative scope baseline.
-- [ ] Step 2: Publish ordered follow-on optimization + deferred external load-tooling expansion plan (assumptions, risks, and validation matrix) and align continuity docs.
+- [x] Step 2: Publish ordered follow-on optimization + deferred external load-tooling expansion plan (assumptions, risks, and validation matrix) in `docs/project/OptimizationContinuityPlan-VS16.md` and align continuity docs (`Roadmap.md`, `Milestones.md`).
 - [ ] Closure Gate: Final VS16 validation pass and tracking finalization.
+
+## Post-VS16 Plan (Authoritative Remaining VS Plan)
+
+### End-State (After Final Planned Optimization Slice)
+- External load-tooling execution is governed, reproducible, and regression-repeatable across backend/frontend quality gates.
+- Existing API/event/channel/schema contracts remain stable and envelope-compliant.
+- C5 workspace/org boundary and C6 deferred-topology constraints remain intact.
+- Post-M10 optimization continuity evidence is complete and release-tracking ready for the next roadmap phase.
+
+### VS17 — External Load-Tooling Execution Baseline
+- Status: **PLANNED**.
+- Objective: Activate one approved external load-tooling execution path for telemetry/streaming stress validation while preserving existing product/runtime contracts.
+- Scope boundaries: Tooling/harness/fixtures/runbook scope only; no net-new REST/WebSocket/event/channel/schema contracts.
+- Acceptance criteria: Deterministic load profiles execute in local/staging, produce stable ingest/persist/fanout/error evidence, and include documented rollback/failure handling.
+- Risks: Environment variance, runner nondeterminism, and long-running validation loops.
+- Dependencies: VS16 closure, existing synthetic burst harness, and current telemetry health counter coverage.
+- Closure gate: Scoped Ruff + targeted load-harness tests + full backend regression (`poetry run pytest tests -q`), plus frontend full gate when frontend files are touched.
+
+### VS18 — Backend Performance Continuity Hardening
+- Status: **PLANNED**.
+- Objective: Convert VS17 load signals into deterministic backend continuity assertions/threshold evidence without contract expansion.
+- Scope boundaries: Backend tests/instrumentation/docs only; no API/event/channel/schema additions.
+- Acceptance criteria: Targeted suites enforce bounded latency/error/drop posture; fail-open degraded branches remain covered; threshold assumptions are documented.
+- Risks: Over-tuned thresholds causing noisy regressions and environment-sensitivity false negatives.
+- Dependencies: VS17 evidence artifacts and existing telemetry/reliability harness continuity.
+- Closure gate: Scoped Ruff + targeted backend continuity tests + full backend regression (`poetry run pytest tests -q`).
+
+### VS19 — Frontend Performance Continuity Hardening
+- Status: **PLANNED**.
+- Objective: Close deferred frontend continuity follow-up (including existing large `three` chunk warning track) with deterministic quality-gate evidence.
+- Scope boundaries: Frontend perf/build/test hardening only; no backend contract changes.
+- Acceptance criteria: Bundle/perf outputs are trend-tracked and bounded; realtime operator flows remain responsive under elevated fixture volumes; accessibility baselines remain intact.
+- Risks: Optimization-induced route/state regressions and flaky e2e under high-volume fixtures.
+- Dependencies: VS17/VS18 continuity evidence and existing frontend perf/e2e baselines.
+- Closure gate: Frontend full gate (`lint`, `typecheck`, `test`, `test:e2e`, `build`, `perf:bundle`) + full backend regression (`poetry run pytest tests -q`).
+
+### VS20 — Optimization Program Closure Gate
+- Status: **PLANNED**.
+- Objective: Finalize post-VS16 optimization sequence with consolidated validation evidence and governance sign-off.
+- Scope boundaries: Verification/sign-off only; no net-new product-surface changes unless defect remediation requires minimal documented adjustments.
+- Acceptance criteria: VS17-VS19 are complete with green gates; tracking docs are finalized; deferred carryover risks are explicitly recorded for next roadmap phase.
+- Risks: Hidden cross-slice regressions and evidence drift between command runs and tracking entries.
+- Dependencies: VS17-VS19 closure evidence.
+- Closure gate: Full backend regression + frontend full gate when frontend is touched + continuity-doc sign-off in CurrentSprint/DevelopmentJournal/DecisionLog.
 
 ## Remaining Work Master Checklist (Authoritative, Ordered, Non-Overlapping)
 
@@ -239,6 +283,10 @@
 - [x] VS14 closure complete (M10 production readiness gate and release evidence finalized).
 - [x] VS15 closure complete (post-M10 synthetic load campaign + performance continuity evidence refresh finalized).
 - [ ] VS16 closure pending (follow-on optimization planning + deferred external load-tooling expansion governance).
+- [ ] VS17 pending (external load-tooling execution baseline).
+- [ ] VS18 pending (backend performance continuity hardening).
+- [ ] VS19 pending (frontend performance continuity hardening).
+- [ ] VS20 pending (optimization program closure gate).
 
 ## Subsystem Progress — Vertical Slice 7
 
@@ -346,4 +394,4 @@
 - Repo-wide Ruff debt outside VS2 Step 8 scope remains and is tracked for later cleanup.
 
 ## Next Sprint Candidates
-- VS16 Step 2 completion focused on ordered follow-on optimization planning and continuity-doc alignment.
+- VS16 closure gate execution and tracking finalization.

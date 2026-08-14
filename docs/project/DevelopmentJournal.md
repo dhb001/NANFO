@@ -1,5 +1,14 @@
 # Development Journal
 
+## [2026-08-14] - Vertical Slice 16 Step 2 (Optimization Continuity Plan + Cross-Doc Alignment)
+
+- **Implemented (VS16 step scope):** Published the ordered post-VS16 optimization sequence and deferred external load-tooling governance baseline in `docs/project/OptimizationContinuityPlan-VS16.md`.
+- **Plan content delivered:** Added finite slices (`VS17` through `VS20`) with objective/scope boundaries/acceptance criteria/risks/dependencies/closure gates, plus explicit assumptions register and transient e2e handling rule continuity.
+- **Tracking alignment:** Updated `CurrentSprint.md` to mark VS16 Step 2 complete, added authoritative `Post-VS16 Plan` section, and extended the remaining-work checklist with VS17-VS20 pending entries.
+- **Continuity docs parity:** Updated `Roadmap.md` and `Milestones.md` to reflect completed VS9-VS15 history and planned VS16-VS20 optimization sequence under the same source-of-truth pointer.
+- **Validation:** Ran required gates in this step run: scoped Ruff (`poetry run ruff check tests/integration/test_telemetry_synthetic_load.py`), VS16-targeted backend test baseline (`poetry run pytest tests/integration/test_telemetry_synthetic_load.py -q`, `1 passed`), and full backend regression (`poetry run pytest tests -q`, `456 passed`).
+- **Scope guardrails:** Docs-only planning increment; no runtime/API/event/channel/schema changes, no C5/C6 drift, and fail-open behavior unchanged.
+
 ## [2026-08-14] - Vertical Slice 16 Step 1 (Planning Charter + Finite Checklist Lock)
 
 - **Implemented (VS16 step scope):** Established VS16 as a planning-only vertical slice and locked a finite per-step checklist in `CurrentSprint.md` before any implementation expansion.

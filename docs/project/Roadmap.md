@@ -30,17 +30,23 @@
 ## Milestone 10 - Production Readiness
 - Hardening, observability, security posture, and controlled release criteria.
 
-## Vertical Slice Sequence (Post-VS8)
-- VS9 (planned): Hypervisor execution + rollback baseline via existing intent contracts.
-- VS10 (planned): Deferred topology analysis endpoint set (`neighbors`, `impact`, `reconcile`) under C6 governance.
-- VS11 (planned): Alerts lifecycle API completion (`list`, `ack`, `resolve`) with event/audit parity.
-- VS12 (planned): Plugin registry lifecycle + sandbox safety baseline.
-- VS13 (planned): Reporting async generation/status + artifact lifecycle baseline.
-- VS14 (planned): M10 production-readiness closure gate (hardening, validation evidence, release criteria).
+## Vertical Slice Sequence (Execution History + Remaining)
+- VS9 (complete): Hypervisor execution + rollback baseline via existing intent contracts.
+- VS10 (complete): Deferred topology analysis endpoint set (`neighbors`, `impact`, `reconcile`) under C6 governance.
+- VS11 (complete): Alerts lifecycle API completion (`list`, `ack`, `resolve`) with event/audit parity.
+- VS12 (complete): Plugin registry lifecycle + sandbox safety baseline.
+- VS13 (complete): Reporting async generation/status + artifact lifecycle baseline.
+- VS14 (complete): M10 production-readiness closure gate (hardening, validation evidence, release criteria).
+- VS15 (complete): Post-M10 synthetic load campaign baseline + frontend burst-resilience continuity evidence refresh.
+- VS16 (in progress): Follow-on optimization planning and deferred external load-tooling expansion governance.
+- VS17 (planned): External load-tooling execution baseline.
+- VS18 (planned): Backend performance continuity hardening.
+- VS19 (planned): Frontend performance continuity hardening.
+- VS20 (planned): Optimization program closure gate.
 
 Completion rule for all planned slices: backend and frontend acceptance criteria must both pass before a slice is marked complete.
 
-Source of truth for ordered remaining work and slice closure criteria: `docs/project/CurrentSprint.md` (`Post-VS8 Plan`).
+Source of truth for ordered remaining work and closure criteria: `docs/project/CurrentSprint.md` (`Post-VS16 Plan` + `Remaining Work Master Checklist`).
 
 ## First Vertical Slice
 - User logs in.

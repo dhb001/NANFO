@@ -36,11 +36,22 @@
 ## M10
 - Production readiness criteria met.
 
-- Planned implementation slices:
+- Delivered implementation slices:
   - VS10: deferred topology analysis endpoints (`neighbors`, `impact`, `reconcile`).
   - VS11: alerts lifecycle API completion (`list`, `ack`, `resolve`).
   - VS12: plugins lifecycle + sandbox safety baseline.
   - VS13: reporting async generation/status baseline.
   - VS14: production-readiness closure gate and release evidence finalization.
 
-Authoritative ordered checklist and closure criteria live in `docs/project/CurrentSprint.md` (`Post-VS8 Plan`).
+## M11 (Planned)
+- Post-M10 optimization continuity and governed external load-tooling expansion.
+
+- Slice sequence:
+  - VS15 (complete): synthetic load baseline + frontend burst-resilience continuity.
+  - VS16 (in progress): optimization planning/governance lock.
+  - VS17 (planned): external load-tooling execution baseline.
+  - VS18 (planned): backend performance continuity hardening.
+  - VS19 (planned): frontend performance continuity hardening.
+  - VS20 (planned): optimization program closure gate.
+
+Authoritative ordered checklist and closure criteria live in `docs/project/CurrentSprint.md` (`Post-VS16 Plan`).

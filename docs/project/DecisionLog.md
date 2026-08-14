@@ -3,6 +3,27 @@
 Lightweight chronological notes for decisions that do not require a full ADR.
 
 ## 2026-08-14
+### VS16 Step 2: Adopt Post-VS16 Optimization Sequence (VS17-VS20) as Continuity Baseline
+Decision: Publish and adopt a finite follow-on optimization sequence (`VS17`-`VS20`) in a dedicated VS16 plan artifact, and align `CurrentSprint`/`Roadmap`/`Milestones` to that same sequence.
+Reason:
+- VS16 Step 2 requires turning deferred optimization/external load-tooling notes into executable, non-overlapping planning with explicit closure gates.
+- A dedicated plan artifact reduces ambiguity and prevents drift between sprint tracking and milestone/roadmap continuity documents.
+- Explicitly repeating no-surface-expansion boundaries preserves envelope stability, C5/C6 constraints, and fail-open runtime posture while planning proceeds.
+Impact:
+- Added `docs/project/OptimizationContinuityPlan-VS16.md` with ordered slices, assumptions, risks, and validation matrix.
+- Updated `CurrentSprint.md` with `Post-VS16 Plan`, Step 2 completion, and remaining-work entries for VS17-VS20.
+- Updated `Roadmap.md` and `Milestones.md` so project continuity docs reference the same post-VS16 ordering and source-of-truth pointer.
+Assumptions:
+- VS17 external load-tooling activation remains tooling/test/runbook scope only unless a future slice explicitly requires documented contract changes.
+- Existing frontend `three` chunk warning remains a continuity-follow-up item addressed by planned optimization slices, not by VS16 planning itself.
+Related:
+- `docs/project/OptimizationContinuityPlan-VS16.md`
+- `docs/project/CurrentSprint.md`
+- `docs/project/Roadmap.md`
+- `docs/project/Milestones.md`
+- `docs/project/DevelopmentJournal.md`
+
+## 2026-08-14
 ### VS16 Step 1: Treat VS16 as Planning-Only Slice and Lock Finite Checklist Before Execution
 Decision: Execute VS16 as a planning/governance-only slice first, with a finite checklist locked in `CurrentSprint.md` before any follow-on optimization implementation work.
 Reason:
