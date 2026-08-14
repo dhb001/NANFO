@@ -209,7 +209,7 @@
 ## Subsystem Progress — Vertical Slice 15
 
 - [x] Step 1: Add backend synthetic telemetry burst campaign coverage to validate ingest->persist->fanout counter integrity at macro batch size without contract or fail-open behavior changes.
-- [ ] Step 2: Add frontend realtime burst resilience regression coverage for alert-stream retention/order behavior and reliability-journey stability.
+- [x] Step 2: Add frontend realtime burst resilience regression coverage for alert-stream retention/order behavior and reliability-journey stability.
 - [ ] Closure Gate: Final scoped/frontend/backend validation pass and VS15 tracking finalization.
 
 ## Remaining Work Master Checklist (Authoritative, Ordered, Non-Overlapping)

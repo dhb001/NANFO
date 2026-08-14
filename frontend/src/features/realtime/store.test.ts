@@ -89,4 +89,56 @@ describe("realtime store", () => {
     expect(alerts).toHaveLength(1);
     expect(alerts[0].event_type).toBe("alert.acknowledged");
   });
+
+  it("caps retained alerts at 200 and keeps newest-first deterministic ordering", () => {
+    useLiveStore.setState({
+      topologyByDeviceId: {},
+      telemetryByDeviceMetric: {},
+      sceneObjects: {},
+      alerts: [],
+      topologyStatus: "closed",
+      telemetryStatus: "closed",
+      alertsStatus: "closed",
+      digitalTwinStatus: "closed",
+    });
+
+    for (let index = 0; index < 250; index += 1) {
+      useLiveStore.getState().applyAlertDelta(
+        {
+          delta_type: "add",
+          alert: {
+            event_id: `evt-${index}`,
+            event_type: "alert.generated",
+            source: "telemetry",
+            payload: { severity: "high", sequence: index },
+          },
+        },
+        { correlation_id: `corr-${index}`, timestamp: `2026-08-14T00:${String(index % 60).padStart(2, "0")}:00Z` },
+      );
+    }
+
+    const afterBurst = useLiveStore.getState().alerts;
+    expect(afterBurst).toHaveLength(200);
+    expect(afterBurst[0].event_id).toBe("evt-249");
+    expect(afterBurst[199].event_id).toBe("evt-50");
+
+    useLiveStore.getState().applyAlertDelta(
+      {
+        delta_type: "resolve",
+        alert: {
+          event_id: "evt-100",
+          event_type: "alert.resolved",
+          source: "telemetry",
+          payload: { severity: "low", sequence: 100 },
+        },
+      },
+      { correlation_id: "corr-100b", timestamp: "2026-08-14T03:00:00Z" },
+    );
+
+    const afterUpdate = useLiveStore.getState().alerts;
+    expect(afterUpdate).toHaveLength(200);
+    expect(afterUpdate[0].event_id).toBe("evt-100");
+    expect(afterUpdate[0].event_type).toBe("alert.resolved");
+    expect(afterUpdate.filter((item) => item.event_id === "evt-100")).toHaveLength(1);
+  });
 });

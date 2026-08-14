@@ -3,6 +3,26 @@
 Lightweight chronological notes for decisions that do not require a full ADR.
 
 ## 2026-08-14
+### VS15 Step 2: Frontend Burst-Resilience Coverage via Deterministic Store + Reliability E2E Tests
+Decision: Implement VS15 Step 2 as frontend test-surface hardening only by extending realtime-store unit coverage and reliability e2e high-volume fixtures, without altering application contracts or runtime behavior.
+Reason:
+- VS15 scope requires post-M10 synthetic-load continuity evidence across both backend and frontend while preserving API/channel stability.
+- Existing realtime store and reliability route already own alert-burst behavior, so extending tests in-place avoids architecture drift and refactor risk.
+- Deterministic retention/order assertions at store level plus high-volume operator-flow e2e coverage provides bounded confidence for burst handling.
+Impact:
+- Updated `frontend/src/features/realtime/store.test.ts` with `250`-delta burst assertions for `200`-item cap, newest-first ordering, and deduplicated in-place update semantics.
+- Updated `frontend/tests/e2e/vs3-reliability.spec.ts` with a `180`-alert fixture scenario validating filter precision, status-segment transitions, and action-control states under heavy alert volume.
+- Recorded full validation evidence across frontend gates and backend regression to keep VS15 step-level quality requirements intact.
+Assumptions:
+- Burst-resilience confidence for VS15 Step 2 is satisfied by deterministic unit + e2e coverage expansion without introducing external load generators in frontend scope.
+- Existing large `three` chunk warning remains accepted baseline and is tracked as ongoing optimization continuity, not a VS15 blocker.
+Related:
+- `frontend/src/features/realtime/store.test.ts`
+- `frontend/tests/e2e/vs3-reliability.spec.ts`
+- `docs/project/CurrentSprint.md`
+- `docs/project/DevelopmentJournal.md`
+
+## 2026-08-14
 ### VS15 Step 1: Activate Post-M10 Synthetic Telemetry Load Campaign as Test-Only Burst Coverage
 Decision: Implement the first VS15 executable increment as integration-test-only synthetic telemetry burst coverage that validates ingest/persist/fanout counter continuity at macro batch size without changing runtime contracts.
 Reason:

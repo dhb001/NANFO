@@ -1,5 +1,14 @@
 # Development Journal
 
+## [2026-08-14] - Vertical Slice 15 Step 2 (Frontend Burst Resilience Regression Coverage)
+
+- **Implemented (VS15 step scope):** Added frontend burst-resilience regression coverage for realtime alert retention/ordering and high-volume reliability-page behavior without changing backend contracts or UI state semantics.
+- **Realtime store coverage:** Extended `frontend/src/features/realtime/store.test.ts` with deterministic high-volume alert ingestion assertions (`250` deltas) to verify bounded retention (`200`), newest-first ordering, and idempotent update replacement under repeated event IDs.
+- **High-volume reliability e2e:** Extended `frontend/tests/e2e/vs3-reliability.spec.ts` with a large alert-fixture scenario (`180` records) that validates reliability route usability, exact-match filtering, status-segment switching, and action-control behavior on resolved vs active alert cards.
+- **Validation:** Frontend gate sequence passed (`npm run lint`, `npm run typecheck`, `npm run test` `68 passed`, `npm run test:e2e` `16/16 passed`, `npm run build`, `npm run perf:bundle`) plus required full backend regression (`poetry run pytest tests -q`, `456 passed`).
+- **Stability note:** During first e2e run, one VS2 inspector-option timeout reproduced and cleared on the framework retry, while a new VS15 spec selector/assertion mismatch failed deterministically; after tightening locator assertions, rerun passed fully (`16/16`) with no further code changes required.
+- **Scope/governance:** No API/event/channel/schema changes, no C5/C6 drift, and fail-open runtime behavior preserved.
+
 ## [2026-08-14] - Vertical Slice 15 Step 1 (Synthetic Telemetry Burst Backend Baseline)
 
 - **Implemented (VS15 step scope):** Added backend integration coverage for a deterministic synthetic telemetry burst campaign to validate ingest -> persist -> websocket fanout continuity under macro-batch volume.
