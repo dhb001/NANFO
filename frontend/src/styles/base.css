@@ -1,0 +1,24 @@
+body {
+  font-family: var(--font-ui);
+  color: var(--ink-1);
+  background:
+    radial-gradient(circle at 18% 18%, rgba(79, 203, 143, 0.25), transparent 28%),
+    radial-gradient(circle at 84% 12%, rgba(43, 112, 200, 0.18), transparent 36%),
+    linear-gradient(165deg, var(--surface-0), var(--surface-1));
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+button,
+input,
+textarea,
+select {
+  outline-color: var(--brand);
+}
+
+.mono {
+  font-family: var(--font-mono);
+}

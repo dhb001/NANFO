@@ -1,5 +1,55 @@
 # Development Journal
 
+## [2026-08-14] - Frontend Full Quality Gate Pass + Evidence Refresh
+
+- **Implemented (frontend-scope hardening):** Finalized Playwright stability fixes by removing strict-mode ambiguous locators in VS2/VS7 and making session network mocks query-tolerant + workspace-aware for tenancy flows.
+- **Frontend files touched for stabilization:** `frontend/tests/e2e/vs2-telemetry.spec.ts`, `frontend/tests/e2e/vs7-branch-compare.spec.ts`, `frontend/tests/e2e/support/session.ts`.
+- **Validation evidence (full gate rerun):** `npm run lint` ✅, `npm run typecheck` ✅, `npm run test` ✅ (`9 files, 25 tests`), `npm run test:e2e` ✅ (`8 passed`), `npm run build` ✅, `npm run perf:bundle` ✅.
+- **Scope/governance compliance:** No backend refactors, no API contract changes, and no C5/C6 scope drift; work remained inside frontend test hardening and project evidence docs.
+- **Performance note:** Build + perf bundle remain green with existing large `three` chunk warning unchanged from prior baseline.
+
+## [2026-08-13] - Vertical Slice 8 Frontend Parity + Closure Gate Complete
+
+- **Implemented (VS8 frontend parity):** Added a dedicated tenancy management surface (`/ops/tenancy`) covering organization/workspace/member create/select/remove flows with explicit loading/empty/error/retry/success behavior and keyboard-operable controls.
+- **Intent UX hardening:** Improved VS8 intent validate/execute form safety with JSON-object validation, idempotency-conflict handling (`INTENT_IDEMPOTENCY_CONFLICT`), terminal-state execute guard, and clearer operator feedback via toasts + inline async states.
+- **Realtime reconciliation:** Added deterministic detail refetch logic when `/ws/digital-twin` intent deltas move lifecycle status, ensuring pushed state and `GET /api/v1/intents/{id}` stay synchronized.
+- **Runtime robustness updates:** Hardened websocket hook subscription stability (callback refs + stable filter key) and added explicit no-content request helper for `DELETE` org-member flow while keeping canonical envelope behavior for envelope-backed endpoints.
+- **Frontend test delivery:** Added VS8-targeted test coverage across layers — unit logic (`intent/tenancy`), component behavior (`IntentPage`), and e2e flow (`validate -> execute -> retry -> terminal status`) with Playwright web-server orchestration.
+- **Validation evidence (frontend gates):** `npm run lint` ✅, `npm run typecheck` ✅, `npm run test` ✅ (`13 passed`), `npm run test:e2e` ✅ (`1 passed`), `npm run build` ✅, `npm run perf:bundle` ✅.
+- **Performance note:** Bundle build remains successful but emits large-chunk warning for the `three` chunk (expected with current Digital Twin dependency footprint); no contract/runtime regressions observed.
+
+## [2026-08-13] - Vertical Slice 8 Step 7 Focused Explainability/Confidence Coverage Closure
+
+- **Implemented (Step 7 closure):** Finalized focused explainability/confidence fallback coverage for execute replay/detail serialization paths while preserving existing baseline contract fields.
+- **Coverage additions:** Added unit assertions for idempotent replay confidence-band fallback derivation from score when persisted band is absent, and detail-read fallback normalization for non-dict lifecycle metadata (`validation_result`, `execution_provenance`, `explainability`) plus confidence defaults.
+- **Contract behavior preserved:** No API surface changes; explainability/confidence payload fields remain baseline-compatible and envelope-compliant for validate/execute/detail endpoints.
+- **Validation:** Scoped Ruff passed; targeted intent/audit/ws unit+integration suite passed (`59 passed`); full backend regression gate passed (`351 passed`).
+- **Open blocker:** VS8 frontend parity remains blocked in this workspace because the frontend implementation repository/path is not present.
+
+## [2026-08-13] - Vertical Slice 8 Step 6 Producer Closure (Intent Terminal Lifecycle Events)
+
+- **Implemented (Step 6 closure):** Completed producer-side lifecycle publication for the full governed intent event set by adding terminal execute-flow transition sources for `intent.execution_completed` and `intent.execution_failed`.
+- **Execution transition behavior:** `POST /api/v1/intents/execute` now persists and emits `intent.execution_started`, then performs a bounded terminal transition in the same flow (`execution_completed` on queued handoff record, `execution_failed` on degraded handoff) with updated provenance/explainability metadata.
+- **Fail-open handling:** Terminal event publish failures are warning-only and non-fatal (`intent_terminal_event_publish_failed`), preserving API availability and commit completion while retaining persisted lifecycle state.
+- **Coverage updates:** Expanded unit coverage for execute lifecycle expectations to assert started + terminal publish paths and degraded terminal failure behavior.
+- **Validation:** Scoped Ruff passed; targeted intent/audit/ws unit+integration suite passed (`57 passed`); full backend regression gate passed (`349 passed`).
+- **Open blocker:** VS8 frontend parity remains blocked in this workspace because the frontend implementation repository/path is not present.
+
+## [2026-08-13] - Frontend Completion Criteria Added to Remaining Slice Plan (Planning)
+
+- **Planned:** Added explicit frontend implementation criteria to every remaining slice (`VS8` onward) so closure means full application completion, not backend-only status.
+- **Scope update:** Each remaining slice now includes a frontend workstream covering UI scope, required UI states (`loading`, `empty`, `error`, `retry`, `success`), realtime behavior expectations, accessibility/responsiveness acceptance, frontend test requirements (`unit`, `component`, `e2e`), and API/WebSocket dependencies.
+- **Governance update:** Recorded an authoritative completion rule in `DecisionLog.md` that a slice cannot be marked complete unless frontend acceptance criteria also pass.
+- **Constraints preserved:** Docs-only update; no backend/frontend feature code changes; existing C5/C6 and API/WebSocket contract guardrails unchanged.
+
+## [2026-08-13] - Post-VS8 Planning Baseline (VS9-VS14)
+
+- **Planned:** Defined a finite post-VS8 vertical-slice sequence (`VS9` through `VS14`) with explicit end-state, per-slice objective/scope boundaries/acceptance criteria/risks/dependencies/closure gates, and an authoritative remaining-work checklist.
+- **Tracking alignment:** Added a new `Post-VS8 Plan` section and ordered master checklist in `docs/project/CurrentSprint.md`; aligned roadmap and milestone docs to reflect the same VS sequence and closure progression.
+- **Governance continuity:** Planning assumptions preserve C5/C6 constraints, canonical API envelope expectations, documented event naming, and modular ownership boundaries; no implementation commitments were marked as done.
+- **Assumption handling:** Where PRDs define outcomes but not detailed rollout internals (notably hypervisor execution/rollback and production-readiness gate composition), assumptions were made explicit and recorded in `DecisionLog.md`.
+- **Validation pass:** Performed docs-only consistency checks for heading structure, status language (`PLANNED`), and cross-file reference parity (`CurrentSprint`/`Roadmap`/`Milestones`/`AGENTS`).
+
 ## [2026-08-13] - Vertical Slice 8 Steps 4-5 Complete + Step 6 In Progress (Execute/Detail + Lifecycle Event Baseline)
 
 - **Implemented (Step 4):** Added `POST /api/v1/intents/execute` (`202`) with idempotent replay behavior, idempotency-key conflict semantics, executable-state conflict checks, and persisted execution lifecycle provenance updates.

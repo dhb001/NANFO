@@ -2,6 +2,156 @@
 
 Lightweight chronological notes for decisions that do not require a full ADR.
 
+## 2026-08-14
+### Frontend Full-Gate Revalidation and Evidence-First Closure Update
+Decision: After E2E suite expansion and stability fixes, require a fresh full frontend quality gate run (`lint`, `typecheck`, `test`, `test:e2e`, `build`, `perf:bundle`) and record results in sprint/journal evidence before closure commit.
+Reason:
+- Recent VS2/VS7 Playwright strict-locator failures showed evidence drift risk after test-suite growth.
+- Closure governance requires current, command-level proof rather than relying on prior green runs.
+- Frontend-only fix scope avoids backend/API contract churn while restoring deterministic quality signal.
+Impact:
+- Applied frontend-scope test hardening only: selector disambiguation in VS2/VS7 specs and query-tolerant workspace-aware network mocks in shared E2E session support.
+- Re-ran full frontend gate and captured all-green outcomes in project tracking docs.
+- Maintained no-backend-change posture and preserved canonical API envelope/event/channel contracts.
+Assumptions:
+- Existing `three` chunk warning in build/perf output remains acceptable at this stage and is tracked as performance optimization follow-up, not a release blocker for this gate.
+Related:
+- `frontend/tests/e2e/vs2-telemetry.spec.ts`
+- `frontend/tests/e2e/vs7-branch-compare.spec.ts`
+- `frontend/tests/e2e/support/session.ts`
+- `docs/project/CurrentSprint.md`
+- `docs/project/DevelopmentJournal.md`
+
+## 2026-08-13
+### VS8 Frontend Parity Closure Scope and Validation Gate Decision
+Decision: Close VS8 by delivering a bounded frontend parity increment that focuses on documented intent lifecycle UX requirements and missing tenancy-management operator flows, then require full frontend quality-gate evidence in the same closure step.
+Reason:
+- `CurrentSprint` defined VS8 closure as blocked on frontend parity; backend lifecycle/event scope was already complete.
+- Existing frontend baseline lacked complete org/workspace/member management affordances and did not fully harden intent validate/execute error/retry/terminal state handling.
+- A bounded parity pass with explicit tests and gates minimizes risk while satisfying completion-governance rules.
+Impact:
+- Added `/ops/tenancy` surface with organization/workspace/member create/select/remove flows and explicit async states.
+- Hardened `IntentPage` with JSON validation guards, idempotency-conflict operator handling, terminal execute guard, and realtime-to-detail reconciliation triggers.
+- Added frontend tests across required layers: unit (`intent/tenancy logic`), component (`IntentPage`), and e2e (`validate -> execute -> retry -> terminal state`).
+- Ran and recorded full frontend closure gate commands (`lint`, `typecheck`, `test`, `test:e2e`, `build`, `perf:bundle`) with green results.
+Assumptions:
+- Member role values remain free-form per current backend contract; UI restricts role choices to practical defaults without changing API schema.
+- Bundle-size warning from the `three` chunk is acceptable for VS8 closure and is deferred to production-readiness optimization slices.
+Related:
+- `frontend/src/features/organizations/TenancyPage.tsx`
+- `frontend/src/features/intent/IntentPage.tsx`
+- `frontend/src/features/intent/logic.ts`
+- `frontend/tests/e2e/intent-parity.spec.ts`
+- `docs/project/CurrentSprint.md`
+- `docs/project/DevelopmentJournal.md`
+
+## 2026-08-13
+### VS8 Step 7 Explainability/Confidence Fallback Coverage Closure
+Decision: Close VS8 Step 7 by adding focused fallback assertions for explainability/confidence serialization paths in execute replay and detail-read flows, without expanding API/event contracts.
+Reason:
+- VS8 Step 7 requires contract presence plus fallback safety, and existing baseline metadata fields were already in place.
+- Targeted tests reduce risk of null/shape drift in persisted lifecycle metadata while keeping scope minimal.
+- No additional schema/event changes are required for this closure increment.
+Impact:
+- Added tests validating confidence band fallback derivation for idempotent replay when stored band is absent.
+- Added tests validating detail-read normalization fallback for non-dict metadata fields and default confidence posture.
+- Backend explainability/confidence contract behavior remains unchanged externally; closure gain is regression safety on fallback semantics.
+Assumptions:
+- Current baseline confidence posture (`approval_required` default behavior and score-band thresholds) remains authoritative for VS8; richer policy gates remain future-slice scope.
+- VS8 overall closure still requires frontend parity evidence per project completion governance.
+Related:
+- `backend/tests/unit/test_intent_execution_service.py`
+- `backend/app/modules/intent/service.py`
+- `docs/project/CurrentSprint.md`
+- `docs/project/DevelopmentJournal.md`
+
+## 2026-08-13
+### VS8 Step 6 Terminal Intent Lifecycle Producer Source in Execute Flow
+Decision: Close VS8 Step 6 by producing `intent.execution_completed` and `intent.execution_failed` from a bounded terminal transition immediately after `intent.execution_started` publication in the existing execute lifecycle flow.
+Reason:
+- VS8 contract requires all four governed intent lifecycle events to be producer-emitted and consumer-covered.
+- Hypervisor integration remains VS9 scope, so terminal lifecycle signaling in VS8 must remain lifecycle/provenance-oriented and avoid real execution side effects.
+- A bounded same-flow terminal transition preserves finite VS8 scope while satisfying event contract closure.
+Impact:
+- `IntentExecutionService.execute_intent(...)` now updates persisted terminal status/provenance/explainability and publishes terminal intent event payloads.
+- Successful queue-handoff path records/publishes `execution_completed`; degraded publish path records/publishes `execution_failed` with fail-open warning metadata.
+- Terminal publish failures are warning-only (`intent_terminal_event_publish_failed`) and do not fail the API request/transaction.
+- Unit coverage for execute lifecycle now asserts started + terminal publication behavior and degraded terminal-state handling.
+Assumptions:
+- VS8 terminal lifecycle outcomes remain baseline intent-state transitions and do not represent VS9 hypervisor dispatch/rollback completion semantics.
+- Frontend parity validation for VS8 remains required for slice closure but is blocked until frontend repository/path is available.
+Related:
+- `backend/app/modules/intent/service.py`
+- `backend/tests/unit/test_intent_execution_service.py`
+- `docs/project/CurrentSprint.md`
+- `docs/project/DevelopmentJournal.md`
+
+## 2026-08-13
+### Authoritative Slice Completion Rule Includes Frontend Acceptance (Planning)
+Decision: A vertical slice cannot be marked complete unless both backend and frontend acceptance criteria pass, including UI state behavior, realtime integration expectations, accessibility/responsiveness checks, and required frontend tests.
+Reason:
+- Remaining slices include end-user application surfaces where backend-only completion leaves the product operationally incomplete.
+- Current project tracking required stronger completion governance so "done" reflects full application readiness.
+- Enforcing frontend parity at slice closure reduces late-stage integration debt and production-readiness risk.
+Impact:
+- Added explicit frontend workstream requirements to VS8-VS14 planning in `CurrentSprint.md`.
+- Slice closure interpretation now requires frontend acceptance evidence in addition to backend validation gates.
+- Future implementation and closure updates must record frontend test outcomes (`unit`, `component`, `e2e`) alongside backend regressions.
+Assumptions:
+- Frontend workstream uses existing documented REST/WebSocket contracts; no undocumented channel/API expansion is implied by this rule.
+- If a slice has no documented realtime channel dependency, polling/refresh behavior can satisfy "realtime behavior expectations" for that slice.
+Related:
+- `docs/project/CurrentSprint.md`
+- `docs/project/DevelopmentJournal.md`
+- `docs/project/Roadmap.md`
+
+## 2026-08-13
+### Post-VS8 Vertical Slice Sequencing and Remaining-Work Authority (Planning)
+Decision: Treat `docs/project/CurrentSprint.md` (`Post-VS8 Plan` + `Remaining Work Master Checklist`) as the authoritative source for all remaining implementation slices after VS8, with the planned sequence `VS9` through `VS14`.
+Reason:
+- Future sessions need a single unambiguous pointer for "what remains" to prevent overlap and planning drift.
+- Existing project docs (`Roadmap.md`, `Milestones.md`) are milestone-oriented and were not sufficiently explicit on ordered post-VS8 implementation slices.
+- A finite sequence with closure gates preserves design-before-implementation discipline and reduces scope creep.
+Impact:
+- Added explicit post-VS8 slices and end-state criteria into `CurrentSprint.md`.
+- Added ordered, non-overlapping remaining-work checklist to drive session continuity.
+- Added cross-doc alignment updates in `Roadmap.md` and `Milestones.md` to match the same sequence.
+- Added AGENTS entry-point pointer so future agent sessions load this authoritative plan before coding.
+Assumptions:
+- VS8 must close before VS9 implementation starts, except planning/docs updates.
+- Production-readiness work remains a distinct final slice (`VS14`) to consolidate hardening and release evidence.
+- `OPENCODE.md` Vertical Slice Continuity note is treated as historical/stale for sequencing; authoritative remaining-work order is `docs/project/CurrentSprint.md` (`Post-VS8 Plan`).
+Related:
+- `docs/project/CurrentSprint.md`
+- `docs/project/Roadmap.md`
+- `docs/project/Milestones.md`
+- `AGENTS.md`
+
+## 2026-08-13
+### Post-VS8 Scope Assumptions for Hypervisor, Deferred Topology, Alerts, Plugins, Reporting, and M10 Closure (Planning)
+Decision: Encode post-VS8 slice boundaries directly from PRDs and ADRs, and explicitly mark unresolved rollout details as assumptions rather than commitments.
+Reason:
+- `IntentEngine.md`, `Topology.md`, `Alerts.md`, `Plugins.md`, and `Reporting.md` define target surfaces but not full execution-order details.
+- ADR guardrails require avoiding invented contracts while still enabling finite execution planning.
+- Explicit assumptions reduce ambiguity for first implementation sessions in each future slice.
+Impact:
+- VS9 scope is constrained to hypervisor execution/rollback baseline through existing intent contracts and documented intent events.
+- VS10 scope is constrained to deferred topology endpoints already named in `Topology.md`, preserving C6 governance.
+- VS11-VS13 scopes map exactly to PRD-listed API/event contracts for alerts/plugins/reporting.
+- VS14 is designated as a no-net-new-surface hardening and release-readiness closure gate unless defect remediation requires minimal documented changes.
+Assumptions:
+- Hypervisor terminal lifecycle outcomes (`intent.execution_completed`/`intent.execution_failed`) are produced in VS9 without adding `/api/v1/ai/*` routes.
+- No new WebSocket channels are required for VS11-VS13 beyond those already documented.
+- Any additional schema/index work remains migration-gated and only added when required by measured query or lifecycle behavior.
+Related:
+- `docs/features/IntentEngine.md`
+- `docs/features/Topology.md`
+- `docs/features/Alerts.md`
+- `docs/features/Plugins.md`
+- `docs/features/Reporting.md`
+- `docs/adr/ADR-006-event-bus-internal-communication.md`
+- `docs/adr/ADR-008-simulation-before-deployment.md`
+
 ## 2026-08-13
 ### Intent Execute/Detail Baseline with Partial Lifecycle Producer Completion (VS8 Steps 4-6 Progress)
 Decision: Implement `POST /api/v1/intents/execute` + `GET /api/v1/intents/{id}` and advance Step 6 by publishing `intent.validated` and `intent.execution_started` with fail-open queue semantics, while deferring producer emission of `intent.execution_completed`/`intent.execution_failed` to a subsequent bounded transition source.
