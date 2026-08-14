@@ -1,5 +1,34 @@
 # Development Journal
 
+## [2026-08-14] - Vertical Slice 11 Closure Gate Complete
+
+- **Completed:** Closed VS11 after finishing both backend alerts lifecycle API delivery and frontend reliability alerts lifecycle parity.
+- **Backend closure validation:** Scoped Ruff on VS11 alerts/audit/ws files passed; VS11 targeted alerts suite passed (`58` tests); final backend regression gate passed (`poetry run pytest tests -q`, `398 passed`).
+- **Frontend closure validation:** Full frontend quality gate passed (`npm run lint`, `npm run typecheck`, `npm run test` with `42` tests, `npm run test:e2e` with `11/11` specs, `npm run build`, `npm run perf:bundle`).
+- **Stability note:** Earlier intermittent `vs4-simulation` e2e timeout did not reproduce on closure rerun; final evidence uses the all-green `11/11` run.
+- **Scope/governance confirmation:** No endpoint expansion beyond VS11-approved alerts routes, no REST envelope drift, no C5/C6 boundary relaxation, no undocumented event/channel additions, and `/ws/alerts` reuse preserved (no new websocket channels).
+- **Performance note:** Build/perf gates remain green with existing large `three` chunk warning unchanged from prior baseline.
+
+## [2026-08-14] - Vertical Slice 11 Step 2 (Frontend Alerts Lifecycle Parity)
+
+- **Implemented (VS11 frontend parity):** Reworked the reliability surface to consume `/api/v1/alerts` lifecycle data directly, including actionable alert cards with acknowledge/resolve controls, status filtering, and correlation/search affordances.
+- **Client/hook contract alignment:** Added typed alerts REST client + React Query hooks for `GET /alerts`, `POST /alerts/{id}/ack`, and `POST /alerts/{id}/resolve`, preserving canonical envelope consumption and action-level queue metadata handling.
+- **Realtime parity update:** Added `/ws/alerts` acknowledged lifecycle delta support (`delta_type: ack`) and deterministic UI status normalization (`ack` -> `acknowledged`) for merged realtime/list reconciliation.
+- **Navigation/accessibility parity:** Added reliability aliases across hotkeys (`l`, `g l`), app-shell hints, and command-palette command (`Go to Alerts Lifecycle`) to keep keyboard-first operator navigation consistent.
+- **Coverage updates:** Added/expanded VS11 frontend unit/component tests for reliability API/page actions, alert helpers, realtime alert ack acceptance, hotkey alias mapping, command palette alias filtering, and VS11 e2e lifecycle flow (`list -> ack -> resolve`).
+- **Validation:** Frontend quality gates passed (`npm run lint`, `npm run typecheck`, `npm run test` `13 files, 42 tests`, `npm run test:e2e` `11/11`, `npm run build`, `npm run perf:bundle`).
+- **Scope/governance:** No backend API/event/channel changes in Step 2 and no contract/envelope drift.
+
+## [2026-08-14] - Vertical Slice 11 Step 1 (Alerts API Lifecycle Backend Baseline)
+
+- **Implemented (VS11 backend):** Added alerts lifecycle API endpoints `GET /api/v1/alerts`, `POST /api/v1/alerts/{id}/ack`, and `POST /api/v1/alerts/{id}/resolve` under canonical `{success,data,meta,errors}` envelope responses.
+- **Persistence baseline:** Added migration `0006_alert_lifecycle_baseline` and Alert module ORM/repository/service foundation for lifecycle state, deduplication, status filtering/search, and auditable acknowledge/resolve transitions.
+- **Event/audit/ws parity:** Added dedicated alert lifecycle consumer wiring, extended audit mapping for `alert.generated|alert.acknowledged|alert.resolved` (with actor/resource resolution), and extended `/ws/alerts` fanout parity for `alert.acknowledged` (`delta_type=ack`) plus success counters.
+- **Fail-open behavior:** Alert lifecycle publish failures remain warning-only (`queue_status=deferred`, `warning=event_queue_unavailable`) with persisted state continuity and non-fatal API responses.
+- **Coverage updates:** Added alert service + consumer unit suites, alert endpoint integration suite, and parity assertions in existing ws/audit unit suites for acknowledged lifecycle handling.
+- **Validation:** Scoped Ruff passed; VS11 targeted backend suite passed (`58 passed`); full backend regression gate passed (`398 passed`).
+- **Scope/governance:** No unapproved API/channel additions, no cross-module SQL join drift, and no C5/C6 boundary relaxations.
+
 ## [2026-08-14] - Vertical Slice 10 Closure Gate Complete
 
 - **Completed:** Closed VS10 after finishing both backend deferred endpoint activation and frontend topology analysis parity.

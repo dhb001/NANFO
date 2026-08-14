@@ -11,6 +11,7 @@
 - Vertical Slice 8 Implementation: **COMPLETE** — Intent Engine recommendation/explainability baseline and frontend parity are delivered through VS8 closure gate with validated intent UX/realtime reconciliation, tenancy management parity, and full frontend quality gates.
 - Vertical Slice 9 Implementation: **COMPLETE** — Hypervisor execution + rollback baseline and frontend execution-monitoring parity are delivered through VS9 closure gate with full backend/frontend validation evidence.
 - Vertical Slice 10 Implementation: **COMPLETE** — Deferred topology analysis endpoints and frontend parity are delivered through VS10 closure gate with full backend/frontend validation evidence.
+- Vertical Slice 11 Implementation: **COMPLETE** — Alerts lifecycle API completion and frontend parity are delivered through VS11 closure gate with full backend/frontend validation evidence.
 
 ## Subsystem Progress — Vertical Slice 8
 
@@ -89,7 +90,7 @@
 - [x] Closure Gate: Final scoped/frontend/backend validation pass and VS10 tracking finalization (`poetry run ruff check` scoped topology/audit files ✅, VS10 targeted backend suite `62 passed` ✅, backend regression `poetry run pytest tests -q` `375 passed` ✅, frontend `npm run lint` ✅, `npm run typecheck` ✅, `npm run test` `35 passed` ✅, `npm run test:e2e` `10/10 passed` ✅, `npm run build` ✅, `npm run perf:bundle` ✅).
 
 ### VS11 — Alerts API Lifecycle Completion
-- Status: **PLANNED**.
+- Status: **COMPLETE**.
 - Objective: Complete Alerts PRD API lifecycle and event parity for acknowledge/resolve workflows.
 - Scope boundaries: Implement only `GET /api/v1/alerts`, `POST /api/v1/alerts/{id}/ack`, `POST /api/v1/alerts/{id}/resolve`; reuse existing `/ws/alerts` channel (no new channels).
 - Acceptance criteria: Alerts list/read returns canonical envelope data, ack/resolve transitions are auditable with correlation IDs, and `alert.acknowledged` contract coverage is added with fail-open event handling preserved.
@@ -103,6 +104,14 @@
   - Accessibility/responsiveness acceptance criteria: Accessible tabular/list semantics, keyboard-triggered ack/resolve actions with clear focus retention, readable severity indicators, and mobile-friendly alert action layout.
   - Frontend tests required (`unit`, `component`, `e2e`): Unit tests for severity/dedup/filter logic; component tests for alert list/action states; e2e tests for list -> ack -> resolve lifecycle with realtime updates.
   - API and WebSocket dependencies: `GET /api/v1/alerts`, `POST /api/v1/alerts/{id}/ack`, `POST /api/v1/alerts/{id}/resolve`, `/ws/alerts`.
+  - Current blocker: none.
+  - Latest frontend full-gate evidence (2026-08-14): `npm run lint` PASS, `npm run typecheck` PASS, `npm run test` PASS (`13 files, 42 tests`), `npm run test:e2e` PASS (`11/11`), `npm run build` PASS, `npm run perf:bundle` PASS.
+
+## Subsystem Progress — Vertical Slice 11
+
+- [x] Step 1: Add backend alerts lifecycle baseline (`GET /api/v1/alerts`, `POST /api/v1/alerts/{id}/ack`, `POST /api/v1/alerts/{id}/resolve`) with migration-backed alert persistence, audit parity for `alert.generated|acknowledged|resolved`, and `/ws/alerts` `alert.acknowledged` fanout parity while preserving fail-open event publication behavior.
+- [x] Step 2: Add VS11 frontend alerts lifecycle parity (typed alerts API/hook layer, reliability lifecycle action UX, realtime ack-state reconciliation, navigation aliases, and required unit/component/e2e updates).
+- [x] Closure Gate: Final scoped/frontend/backend validation pass and VS11 tracking finalization (`poetry run ruff check` scoped alerts files ✅, VS11 targeted backend suite `58 passed` ✅, backend regression `poetry run pytest tests -q` `398 passed` ✅, frontend `npm run lint` ✅, `npm run typecheck` ✅, `npm run test` `42 passed` ✅, `npm run test:e2e` `11/11 passed` ✅, `npm run build` ✅, `npm run perf:bundle` ✅).
 
 ### VS12 — Plugin Runtime Safety Baseline
 - Status: **PLANNED**.
@@ -157,7 +166,7 @@
 - [x] VS8 closure complete (frontend parity workstream + final closure tracking evidence recorded).
 - [x] VS9 closure complete (hypervisor execution + rollback baseline with terminal intent lifecycle outcomes).
 - [x] VS10 closure complete (deferred topology analysis endpoint set delivered under C6 governance).
-- [ ] VS11 closure complete (alerts API lifecycle + event parity delivered).
+- [x] VS11 closure complete (alerts API lifecycle + event parity delivered).
 - [ ] VS12 closure complete (plugin lifecycle + sandbox safety baseline delivered).
 - [ ] VS13 closure complete (reporting async generation/status baseline delivered).
 - [ ] VS14 closure complete (M10 production readiness gate and release evidence finalized).

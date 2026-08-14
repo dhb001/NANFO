@@ -3,6 +3,78 @@
 Lightweight chronological notes for decisions that do not require a full ADR.
 
 ## 2026-08-14
+### VS11 Closure Gate: Accept Completion After Full Backend + Frontend Green Validation Suite
+Decision: Mark VS11 complete once scoped alerts backend validation, full backend regression, and full frontend quality gates all pass in a single closure evidence set.
+Reason:
+- Slice-completion governance requires both backend and frontend acceptance criteria to pass before closure.
+- VS11 Step 1 and Step 2 implementation scope is complete; remaining requirement is authoritative validation evidence and tracking finalization.
+- Final rerun produced all-green frontend e2e (`11/11`) and cleared earlier transient flake uncertainty for closure evidence.
+Impact:
+- `CurrentSprint.md` now marks VS11 status as `COMPLETE`, closes VS11 checklist items, and records command-level closure evidence.
+- `DevelopmentJournal.md` includes dedicated VS11 Step 1, Step 2, and closure entries with backend/frontend gate outcomes.
+- Remaining-work checklist advances to VS12 as the next planned unfinished slice.
+Assumptions:
+- Existing large `three` chunk warning remains accepted baseline for this milestone and is deferred to later production-readiness/performance slices.
+- Closure acceptance uses the latest all-green run outputs as authoritative evidence.
+Related:
+- `docs/project/CurrentSprint.md`
+- `docs/project/DevelopmentJournal.md`
+- `docs/project/DecisionLog.md`
+
+## 2026-08-14
+### VS11 Step 2: Frontend Alerts Lifecycle Parity on Existing Contracts
+Decision: Implement VS11 frontend parity by driving reliability alerts lifecycle UX from existing alerts REST contracts and `/ws/alerts` parity, including acknowledge/resolve actions, deterministic status filters, and keyboard-navigation aliases.
+Reason:
+- VS11 closure governance requires frontend acceptance criteria (UI states, realtime behavior, tests) in addition to backend endpoint delivery.
+- Existing backend Step 1 already delivered the approved endpoint set; frontend parity can be completed without API/event/channel expansion.
+- Adding explicit alerts navigation aliases (`l`, `g l`, command palette alias) improves operator discoverability while preserving established app navigation patterns.
+Impact:
+- Added typed alerts API client and React Query hooks for list/ack/resolve flows.
+- Reworked reliability page alert lifecycle rendering/actions and action-level queue-status operator feedback.
+- Extended websocket alert delta typing/store acceptance for `ack` lifecycle transitions and status normalization.
+- Added VS11 frontend coverage across unit/component/e2e layers and recorded full frontend gate evidence.
+Assumptions:
+- Reliability view remains the canonical VS11 operator surface for alerts lifecycle actions; no separate alerts route is required in this slice.
+- Existing bundle-size warning for `three` remains accepted baseline and is deferred to later production-readiness optimization scope.
+Related:
+- `frontend/src/features/reliability/ReliabilityPage.tsx`
+- `frontend/src/features/reliability/api.ts`
+- `frontend/src/features/reliability/hooks.ts`
+- `frontend/src/shared/types/alerts.ts`
+- `frontend/src/shared/types/ws.ts`
+- `frontend/tests/e2e/vs11-alerts-lifecycle.spec.ts`
+- `docs/project/CurrentSprint.md`
+- `docs/project/DevelopmentJournal.md`
+
+## 2026-08-14
+### VS11 Step 1: Alerts API Lifecycle Activation with Event/Audit/WebSocket Parity
+Decision: Activate VS11 alerts lifecycle scope by adding the PRD-approved alerts endpoint set (`GET /api/v1/alerts`, `POST /api/v1/alerts/{id}/ack`, `POST /api/v1/alerts/{id}/resolve`), migration-backed persistence, and parity handling for `alert.acknowledged` across audit and `/ws/alerts` consumers.
+Reason:
+- CurrentSprint VS11 scope explicitly enables these three alerts endpoints while prohibiting route-surface expansion and new websocket channels.
+- Alerts PRD acceptance requires auditable acknowledge/resolve transitions and event parity with deterministic lifecycle status handling.
+- Existing modular monolith event-bus patterns and fail-open publish semantics support bounded implementation without architecture drift.
+Impact:
+- Added Alert module persistence/service stack and Alembic migration `0006_alert_lifecycle_baseline` for lifecycle records.
+- Added alerts router wiring and consumer registration for generated/acknowledged/resolved ingestion.
+- Extended audit consumer actor/resource resolution and `/ws/alerts` delta mapping/counters for `alert.acknowledged` parity.
+- Added targeted unit/integration coverage for endpoints, service lifecycle behavior, and consumer parity.
+Assumptions:
+- Alert list endpoint is read-focused (`GET /api/v1/alerts`) and intentionally excludes new detail/create endpoints in VS11.
+- Queue publication degradation remains warning-only/non-fatal (`queue_status=deferred`) to preserve existing fail-open operational posture.
+Related:
+- `backend/app/api/v1/alerts.py`
+- `backend/app/modules/alert/service.py`
+- `backend/app/modules/alert/repository.py`
+- `backend/app/events/consumers/alert_consumer.py`
+- `backend/app/events/consumers/audit_consumer.py`
+- `backend/app/events/consumers/ws_push_consumer.py`
+- `backend/alembic/versions/0006_alert_lifecycle_baseline.py`
+- `backend/tests/integration/test_alerts_endpoints.py`
+- `backend/tests/unit/test_alert_service.py`
+- `docs/project/CurrentSprint.md`
+- `docs/project/DevelopmentJournal.md`
+
+## 2026-08-14
 ### VS10 Closure Gate: Accept Completion After Full Backend + Frontend Green Validation Suite
 Decision: Mark VS10 complete once the full closure gate passes across scoped topology checks, full backend regression, and full frontend quality gates, with evidence recorded in sprint tracking.
 Reason:
