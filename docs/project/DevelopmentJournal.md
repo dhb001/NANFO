@@ -1,5 +1,22 @@
 # Development Journal
 
+## [2026-08-14] - Vertical Slice 14 Closure Gate Complete
+
+- **Completed:** Closed VS14 and finalized M10 production-readiness gate with full backend/frontend validation evidence and release-tracking sign-off.
+- **Backend closure validation:** Scoped Ruff for VS14 hardening scope passed after minimal test-hygiene remediation (`tests/unit/test_security.py`, `tests/unit/test_telemetry_scaffold.py`); targeted VS14 readiness suite passed (`80` tests); focused security/realtime auth regression suite passed (`26` tests); final backend regression gate passed (`poetry run pytest tests -q`, `455 passed`).
+- **Frontend closure validation:** Full frontend quality gate passed (`npm run lint`, `npm run typecheck`, `npm run test` with `67` tests, `npm run test:e2e` with `15/15` specs, `npm run build`, `npm run perf:bundle`).
+- **Release-readiness confirmation:** No net-new API/event/WebSocket surface, no REST envelope drift, no schema migration, C5/C6 constraints unchanged, and existing fail-open behavior preserved.
+- **Operational hardening evidence:** Runbook references remain current and aligned to active production flows (`docs/project/TelemetryRuntimeAdapterRunbook.md`, `docs/project/DigitalTwinScenarioValidationRunbook.md`); realtime reconnect/burst/degraded-path journeys remained green in the cross-slice e2e regression suite.
+- **Performance note:** Build/perf gates remained green with the existing large `three` chunk warning unchanged from prior accepted baseline.
+
+## [2026-08-14] - Vertical Slice 14 Step 2 (Scoped Backend Hardening Remediation)
+
+- **Issue discovered during VS14 gate:** Scoped Ruff on production-readiness verification targets failed due deterministic test-hygiene debt in security and telemetry scaffold unit tests.
+- **Remediation applied:** Removed unused imports, simplified bcrypt-prefix assertion style, marked intentionally unused `jti` token return, and normalized import grouping for telemetry scaffold tests.
+- **Files touched:** `backend/tests/unit/test_security.py`, `backend/tests/unit/test_telemetry_scaffold.py`.
+- **Validation:** Rerun of scoped Ruff for touched backend test files passed (`All checks passed!`) before proceeding to full VS14 backend/frontend closure gates.
+- **Scope/governance:** Test-only hardening fix; no runtime behavior/API/event/persistence contract changes and no fail-open/C5/C6 drift.
+
 ## [2026-08-14] - Vertical Slice 13 Closure Gate Complete
 
 - **Completed:** Closed VS13 after finishing backend reporting async lifecycle delivery and frontend reporting parity.

@@ -3,6 +3,28 @@
 Lightweight chronological notes for decisions that do not require a full ADR.
 
 ## 2026-08-14
+### VS14 Closure Gate: Accept Completion After Scoped Hardening Remediation and Full Green Regression Evidence
+Decision: Mark VS14 complete once a bounded hardening-only remediation pass resolves gate-discovered lint debt and all required backend/frontend production-readiness validation commands are green in one evidence set.
+Reason:
+- VS14 scope in CurrentSprint is explicitly hardening/verification only with no net-new product API/event surface unless defect remediation requires it.
+- Initial VS14 backend scoped Ruff gate surfaced existing test-hygiene defects that blocked release-readiness verification despite no runtime contract issues.
+- A minimal test-only remediation plus full gate rerun satisfies production-readiness evidence without introducing architectural or contract drift.
+Impact:
+- Applied bounded backend hardening updates only in `backend/tests/unit/test_security.py` and `backend/tests/unit/test_telemetry_scaffold.py`.
+- Completed required validation sequence: scoped Ruff, targeted VS14 backend readiness suite, full backend regression (`455 passed`), and full frontend gate (`lint`, `typecheck`, `test` `67`, `test:e2e` `15/15`, `build`, `perf:bundle`).
+- `CurrentSprint.md` now marks VS14 status as `COMPLETE`, adds VS14 subsystem closure steps/evidence, and closes the remaining-work master checklist.
+- `DevelopmentJournal.md` now records VS14 Step 2 remediation and closure-gate evidence including runbook currency and performance baseline notes.
+Assumptions:
+- Existing large `three` chunk warning remains accepted baseline at VS14 closure and is deferred as post-M10 optimization work, not a release blocker.
+- Current targeted load/performance readiness signal is satisfied by runtime-threshold regression coverage and green frontend build/perf gates; no additional synthetic load harness is introduced in VS14 scope.
+Related:
+- `backend/tests/unit/test_security.py`
+- `backend/tests/unit/test_telemetry_scaffold.py`
+- `docs/project/CurrentSprint.md`
+- `docs/project/DevelopmentJournal.md`
+- `docs/project/DecisionLog.md`
+
+## 2026-08-14
 ### VS13 Closure Gate: Accept Completion After Full Backend + Frontend Green Validation Suite
 Decision: Mark VS13 complete once scoped reporting backend validation, full backend regression, and full frontend quality gates all pass in a single closure evidence set.
 Reason:

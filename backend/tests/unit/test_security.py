@@ -4,12 +4,11 @@ Tests JWT creation, decoding, password hashing, and revocation TTL calculation.
 No external dependencies — pure algorithmic tests.
 """
 
-import time
 import uuid
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from jose import JWTError, jwt
+from jose import JWTError
 
 from app.core.security import (
     create_access_token,
@@ -24,7 +23,7 @@ from app.core.security import (
 class TestPasswordHashing:
     def test_hash_produces_bcrypt_hash(self):
         h = hash_password("secret")
-        assert h.startswith("$2b$") or h.startswith("$2a$")
+        assert h.startswith(("$2b$", "$2a$"))
 
     def test_verify_correct_password(self):
         h = hash_password("correct")
@@ -56,7 +55,7 @@ class TestJWTAccessToken:
 
     def test_decoded_contains_required_claims(self):
         """All required claims from Authentication.md §8.1 must be present."""
-        token, jti = create_access_token(
+        token, _jti = create_access_token(
             user_id="u1",
             email="a@b.com",
             roles=["Operator"],

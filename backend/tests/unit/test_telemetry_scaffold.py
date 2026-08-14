@@ -7,6 +7,7 @@ import uuid
 from unittest.mock import AsyncMock, patch
 
 import pytest
+
 from app.modules.telemetry.service import (
     GRPCRuntimeTelemetryAdapter,
     ProductionTelemetryAdapterStub,
