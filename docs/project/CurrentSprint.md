@@ -15,7 +15,7 @@
 - Vertical Slice 12 Implementation: **COMPLETE** — Plugin runtime safety baseline and frontend plugin lifecycle parity are delivered through VS12 closure gate with full backend/frontend validation evidence.
 - Vertical Slice 13 Implementation: **COMPLETE** — Reporting async generation/status baseline and frontend reporting lifecycle parity are delivered through VS13 closure gate with full backend/frontend validation evidence.
 - Vertical Slice 14 Implementation: **COMPLETE** — Production-readiness closure gate completed with backend/frontend hardening verification, regression evidence, and release-tracking sign-off.
-- Vertical Slice 15 Implementation: **IN PROGRESS** — Post-M10 synthetic load campaign and performance continuity hardening are underway through VS15 Step 1.
+- Vertical Slice 15 Implementation: **COMPLETE** — Post-M10 synthetic load campaign baseline and frontend burst-resilience continuity hardening are delivered through VS15 closure gate with full backend/frontend validation evidence.
 
 ## Subsystem Progress — Vertical Slice 8
 
@@ -191,7 +191,7 @@
 - [x] Step 5: Confirm production-readiness runbooks remain current (`docs/project/TelemetryRuntimeAdapterRunbook.md`, `docs/project/DigitalTwinScenarioValidationRunbook.md`) and finalize release-evidence tracking in CurrentSprint/DevelopmentJournal/DecisionLog.
 
 ### VS15 — Post-M10 Synthetic Load Campaign + Performance Continuity
-- Status: **IN PROGRESS**.
+- Status: **COMPLETE**.
 - Objective: Operationalize the deferred post-M10 synthetic load campaign with deterministic backend and frontend quality signals while preserving existing product contracts.
 - Scope boundaries: No net-new REST/WebSocket channels, no API envelope drift, no schema migration, no C5/C6 relaxations, and fail-open runtime/event behavior remains unchanged.
 - Acceptance criteria: Telemetry synthetic-burst campaign demonstrates stable ingest->persist->fanout counters, frontend burst-handling regressions are covered, and full backend/frontend validation evidence is recorded.
@@ -210,7 +210,7 @@
 
 - [x] Step 1: Add backend synthetic telemetry burst campaign coverage to validate ingest->persist->fanout counter integrity at macro batch size without contract or fail-open behavior changes.
 - [x] Step 2: Add frontend realtime burst resilience regression coverage for alert-stream retention/order behavior and reliability-journey stability.
-- [ ] Closure Gate: Final scoped/frontend/backend validation pass and VS15 tracking finalization.
+- [x] Closure Gate: Final scoped/frontend/backend validation pass and VS15 tracking finalization (`poetry run ruff check tests/integration/test_telemetry_synthetic_load.py` ✅, VS15 targeted backend suite `1 passed` ✅, backend regression `poetry run pytest tests -q` `456 passed` ✅, frontend `npm run lint` ✅, `npm run typecheck` ✅, `npm run test` `68 passed` ✅, `npm run test:e2e` `16/16 passed` ✅ after one immediate transient rerun, `npm run build` ✅, `npm run perf:bundle` ✅).
 
 ## Remaining Work Master Checklist (Authoritative, Ordered, Non-Overlapping)
 
@@ -221,7 +221,7 @@
 - [x] VS12 closure complete (plugin lifecycle + sandbox safety baseline delivered).
 - [x] VS13 closure complete (reporting async generation/status baseline delivered).
 - [x] VS14 closure complete (M10 production readiness gate and release evidence finalized).
-- [ ] VS15 closure in progress (post-M10 synthetic load campaign + performance continuity evidence refresh).
+- [x] VS15 closure complete (post-M10 synthetic load campaign + performance continuity evidence refresh finalized).
 
 ## Subsystem Progress — Vertical Slice 7
 
@@ -325,8 +325,8 @@
 
 ## Blocked / Deferred
 - Digital Twin spatial references — deferred to M6
-- Macro-scale synthetic load campaign deferred from VS14 is now actively tracked/executed in VS15.
+- Macro-scale synthetic load campaign baseline is delivered in VS15; broader external load-tooling expansion remains deferred to future optimization planning.
 - Repo-wide Ruff debt outside VS2 Step 8 scope remains and is tracked for later cleanup.
 
 ## Next Sprint Candidates
-- VS16 planning kickoff after VS15 closure gate completion.
+- VS16 planning kickoff focused on follow-on optimization slices and deferred external load-tooling expansion.

@@ -3,6 +3,25 @@
 Lightweight chronological notes for decisions that do not require a full ADR.
 
 ## 2026-08-14
+### VS15 Closure Gate: Accept Completion with Immediate E2E Rerun Transient Handling and Full Green Evidence
+Decision: Mark VS15 complete after all required scoped/targeted/full gates are green, accepting one transient frontend e2e timeout that passed on immediate rerun without code changes and then remained green on a full rerun.
+Reason:
+- VS15 completion rules require backend + frontend validation evidence while preserving contract stability and fail-open behavior.
+- The observed `vs2-telemetry` timeout matched prior known intermittent behavior and cleared immediately under the prescribed transient-failure rule.
+- Closure confidence is established by the final all-green evidence set, including a clean rerun of `npm run test:e2e` (`16/16`) and full backend regression (`456 passed`).
+Impact:
+- `CurrentSprint.md` now marks VS15 status as `COMPLETE`, checks VS15 closure gate, and records full command-level evidence.
+- `DevelopmentJournal.md` now includes VS15 closure entry with transient rerun evidence and final green-gate outputs.
+- Remaining-work checklist now includes VS15 as complete; no VS16 implementation is started in this run.
+Assumptions:
+- Existing `three` bundle chunk warning remains accepted baseline and is deferred to follow-on optimization planning.
+- External load-tooling introduction remains future scope; VS15 closure is satisfied by bounded in-repo synthetic burst + resilience regression evidence.
+Related:
+- `docs/project/CurrentSprint.md`
+- `docs/project/DevelopmentJournal.md`
+- `docs/project/DecisionLog.md`
+
+## 2026-08-14
 ### VS15 Step 2: Frontend Burst-Resilience Coverage via Deterministic Store + Reliability E2E Tests
 Decision: Implement VS15 Step 2 as frontend test-surface hardening only by extending realtime-store unit coverage and reliability e2e high-volume fixtures, without altering application contracts or runtime behavior.
 Reason:
