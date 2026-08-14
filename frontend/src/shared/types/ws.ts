@@ -40,7 +40,7 @@ export interface TelemetryDeltaData {
 }
 
 export interface AlertDeltaData {
-  delta_type: "add" | "resolve";
+  delta_type: "add" | "ack" | "resolve";
   alert: {
     event_id: string;
     event_type: string;

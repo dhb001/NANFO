@@ -59,4 +59,34 @@ describe("realtime store", () => {
     expect(alerts[1].event_id).toBe("evt-1");
     expect(alerts[1].event_type).toBe("alert.resolved");
   });
+
+  it("accepts acknowledged alert deltas", () => {
+    useLiveStore.setState({
+      topologyByDeviceId: {},
+      telemetryByDeviceMetric: {},
+      sceneObjects: {},
+      alerts: [],
+      topologyStatus: "closed",
+      telemetryStatus: "closed",
+      alertsStatus: "closed",
+      digitalTwinStatus: "closed",
+    });
+
+    useLiveStore.getState().applyAlertDelta(
+      {
+        delta_type: "ack",
+        alert: {
+          event_id: "evt-ack-1",
+          event_type: "alert.acknowledged",
+          source: "alert",
+          payload: { status: "acknowledged" },
+        },
+      },
+      { correlation_id: "corr-ack-1", timestamp: "2026-08-14T00:00:00Z" },
+    );
+
+    const alerts = useLiveStore.getState().alerts;
+    expect(alerts).toHaveLength(1);
+    expect(alerts[0].event_type).toBe("alert.acknowledged");
+  });
 });

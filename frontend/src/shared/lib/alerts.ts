@@ -26,6 +26,10 @@ export function isResolvedAlert(alert: LiveAlertItem): boolean {
   return alert.event_type === "alert.resolved";
 }
 
+export function isAcknowledgedAlert(alert: LiveAlertItem): boolean {
+  return alert.event_type === "alert.acknowledged";
+}
+
 export function normalizeAlertStatus(status: string): string {
   const normalized = status.trim().toLowerCase();
   if (normalized === "ack") {

@@ -29,4 +29,24 @@ describe("CommandPalette", () => {
     await user.keyboard("{Escape}");
     expect(useUiStore.getState().commandPaletteOpen).toBe(false);
   });
+
+  it("includes alerts lifecycle navigation alias", async () => {
+    const user = userEvent.setup();
+
+    useUiStore.setState({
+      commandPaletteOpen: true,
+      toasts: [],
+    });
+
+    render(
+      <MemoryRouter>
+        <CommandPalette />
+      </MemoryRouter>,
+    );
+
+    const search = screen.getByLabelText("Search commands");
+    await user.type(search, "alerts");
+
+    expect(screen.getByText("Go to Alerts Lifecycle")).toBeInTheDocument();
+  });
 });

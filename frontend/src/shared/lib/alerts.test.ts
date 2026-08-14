@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   alertSeverityWeight,
+  isAcknowledgedAlert,
   isResolvedAlert,
   normalizeAlertStatus,
   summarizeAlertSource,
@@ -37,6 +38,8 @@ describe("alerts helpers", () => {
   it("normalizes and resolves status semantics", () => {
     expect(normalizeAlertStatus("ack")).toBe("acknowledged");
     expect(normalizeAlertStatus("resolved")).toBe("resolved");
+    expect(isAcknowledgedAlert(createAlert({ event_type: "alert.acknowledged" }))).toBe(true);
+    expect(isAcknowledgedAlert(createAlert({ event_type: "alert.generated" }))).toBe(false);
     expect(isResolvedAlert(createAlert({ event_type: "alert.resolved" }))).toBe(true);
     expect(isResolvedAlert(createAlert({ event_type: "alert.generated" }))).toBe(false);
   });

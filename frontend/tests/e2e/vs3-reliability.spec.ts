@@ -8,6 +8,29 @@ import {
 test.describe("VS3 reliability", () => {
   test("reliability dashboard renders health and filter controls", async ({ page }) => {
     const state = createDefaultSessionState();
+    state.alerts = [
+      {
+        alert_id: "00000000-0000-0000-0000-00000000cc01",
+        alert_key: "telemetry_runtime_adapter_slo_threshold_breach",
+        source: "telemetry",
+        status: "active",
+        severity: "critical",
+        correlation_id: "00000000-0000-0000-0000-00000000dd01",
+        payload: {
+          alert_id: "00000000-0000-0000-0000-00000000cc01",
+          alert_key: "telemetry_runtime_adapter_slo_threshold_breach",
+          status: "active",
+          severity: "critical",
+          severity_reason: "ingest_failures_detected",
+        },
+        acknowledged_by_user_id: null,
+        resolved_by_user_id: null,
+        acknowledged_at: null,
+        resolved_at: null,
+        created_at: "2026-08-13T10:30:00Z",
+        updated_at: "2026-08-13T10:35:00Z",
+      },
+    ];
     await installSessionMocks(page, state);
 
     await page.route("**/api/v1/telemetry/health", async (route) => {
@@ -38,8 +61,9 @@ test.describe("VS3 reliability", () => {
     await expect(page.getByText("Collector Status")).toBeVisible();
     await expect(page.getByText("DEGRADED")).toBeVisible();
 
-    await page.getByLabel("Filter alerts").fill("critical");
+    await page.getByLabel("Filter alerts").fill("threshold");
     await page.getByRole("button", { name: "Active" }).click();
-    await expect(page.getByText("No reliability alerts observed yet.")).toBeVisible();
+    await expect(page.getByText("telemetry_runtime_adapter_slo_threshold_breach")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Acknowledge" })).toBeVisible();
   });
 });

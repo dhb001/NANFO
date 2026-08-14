@@ -17,6 +17,7 @@ const commands: CommandEntry[] = [
   { id: "go-topology-analysis", label: "Go to Topology Analysis", hint: "G P", path: "/ops/topology-analysis", group: "Navigation" },
   { id: "go-telemetry", label: "Go to Telemetry", hint: "G T", path: "/ops/telemetry", group: "Navigation" },
   { id: "go-reliability", label: "Go to Reliability", hint: "G R", path: "/ops/reliability", group: "Navigation" },
+  { id: "go-alerts", label: "Go to Alerts Lifecycle", hint: "G L", path: "/ops/reliability", group: "Navigation" },
   { id: "go-twin", label: "Go to Digital Twin", hint: "G D", path: "/ops/digital-twin", group: "Navigation" },
   { id: "go-simulation", label: "Go to Simulation", hint: "G S", path: "/ops/simulation", group: "Navigation" },
   { id: "go-intent", label: "Go to Intent", hint: "G I", path: "/ops/intent", group: "Navigation" },
