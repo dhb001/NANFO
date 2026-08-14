@@ -3,6 +3,25 @@
 Lightweight chronological notes for decisions that do not require a full ADR.
 
 ## 2026-08-14
+### VS16 Step 1: Treat VS16 as Planning-Only Slice and Lock Finite Checklist Before Execution
+Decision: Execute VS16 as a planning/governance-only slice first, with a finite checklist locked in `CurrentSprint.md` before any follow-on optimization implementation work.
+Reason:
+- The authoritative remaining-work pointer in `CurrentSprint.md` only defines a VS16 kickoff focused on optimization planning + deferred external load-tooling expansion, not executable product-surface changes.
+- Preserving API envelope stability, C5/C6 constraints, and fail-open behavior is explicitly mandatory for this run; a planning-first Step 1 minimizes risk of accidental contract drift.
+- A finite step checklist is required for deterministic continuity and atomic per-step commits in the same run.
+Impact:
+- `CurrentSprint.md` now marks VS16 `IN PROGRESS`, defines VS16 objective/scope/acceptance/closure gate, and adds `Subsystem Progress — Vertical Slice 16` with bounded Step 1/Step 2/Closure items.
+- Remaining-work checklist now includes VS16 as the only pending slice, and next-sprint candidate wording points to VS16 Step 2 completion scope.
+- Validation evidence for Step 1 is recorded via scoped Ruff + targeted backend test baseline + full backend regression.
+Assumptions:
+- VS16 Step 1 is docs-only governance setup; no runtime/API/event/schema implementation is required in this step.
+- Existing frontend `three` chunk warning remains accepted baseline and is handled through follow-on optimization planning, not Step 1 code changes.
+Related:
+- `docs/project/CurrentSprint.md`
+- `docs/project/DevelopmentJournal.md`
+- `docs/project/DecisionLog.md`
+
+## 2026-08-14
 ### VS15 Closure Gate: Accept Completion with Immediate E2E Rerun Transient Handling and Full Green Evidence
 Decision: Mark VS15 complete after all required scoped/targeted/full gates are green, accepting one transient frontend e2e timeout that passed on immediate rerun without code changes and then remained green on a full rerun.
 Reason:

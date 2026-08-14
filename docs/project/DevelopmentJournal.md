@@ -1,5 +1,14 @@
 # Development Journal
 
+## [2026-08-14] - Vertical Slice 16 Step 1 (Planning Charter + Finite Checklist Lock)
+
+- **Implemented (VS16 step scope):** Established VS16 as a planning-only vertical slice and locked a finite per-step checklist in `CurrentSprint.md` before any implementation expansion.
+- **Scope/governance baseline:** Added explicit non-negotiables for VS16 (`no API/event/channel/schema changes`, preserve canonical envelope, preserve C5/C6, preserve fail-open runtime/event semantics).
+- **Checklist baseline:** Added `Subsystem Progress — Vertical Slice 16` with a bounded sequence (`Step 1` charter lock, `Step 2` follow-on optimization/external load-tooling plan publication, `Closure Gate`).
+- **Tracking alignment:** Updated remaining-work checklist and next-sprint candidate wording so VS16 is now the active unfinished slice with Step 2 as the next executable increment.
+- **Validation:** Ran required gates in this step run: scoped Ruff (`poetry run ruff check tests/integration/test_telemetry_synthetic_load.py`), VS16-targeted backend test baseline (`poetry run pytest tests/integration/test_telemetry_synthetic_load.py -q`, `1 passed`), and full backend regression (`poetry run pytest tests -q`, `456 passed`).
+- **Scope guardrails:** Docs-only change; no backend/frontend runtime code touched and no contract or behavior drift introduced.
+
 ## [2026-08-14] - Vertical Slice 15 Closure Gate Complete
 
 - **Completed:** Closed VS15 after delivering backend synthetic telemetry burst evidence and frontend burst-resilience regression coverage with full validation gates.
