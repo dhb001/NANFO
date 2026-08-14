@@ -71,6 +71,15 @@ class Settings(BaseSettings):
     TELEMETRY_RUNTIME_ADAPTER_GRPC_UNIT: str = "ms"
     TELEMETRY_RUNTIME_ADAPTER_GRPC_SOURCE: str = "runtime_grpc"
 
+    # Plugin runtime safety baseline
+    PLUGIN_PLATFORM_VERSION: str = "0.1.0"
+    PLUGIN_TRUSTED_SIGNERS: str = "nanfo-labs,partner-signed"
+    PLUGIN_SIGNATURE_PREFIX: str = "sig:"
+    PLUGIN_SIGNATURE_MIN_LENGTH: int = 16
+    PLUGIN_MAX_DEPENDENCY_COUNT: int = 25
+    PLUGIN_ALLOWED_ISOLATION_MODES: str = "process,container"
+    PLUGIN_ALLOWED_PERMISSIONS: str = "read:telemetry,read:topology,read:alerts"
+
     @computed_field  # type: ignore[misc]
     @property
     def POSTGRES_DSN(self) -> str:

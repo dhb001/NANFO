@@ -337,3 +337,48 @@ def test_audit_handlers_include_alert_lifecycle_events():
     assert "alert.generated" in AUDIT_HANDLERS
     assert "alert.acknowledged" in AUDIT_HANDLERS
     assert "alert.resolved" in AUDIT_HANDLERS
+
+
+@pytest.mark.asyncio
+async def test_audit_consumer_writes_plugin_enabled_event():
+    db = AsyncMock()
+    db.commit = AsyncMock()
+
+    plugin_id = str(uuid.uuid4())
+    correlation_id = str(uuid.uuid4())
+    payload = {
+        "plugin_id": plugin_id,
+        "plugin_key": "safe-plugin",
+        "status": "enabled",
+    }
+    event = {
+        "event_type": "plugin.enabled",
+        "correlation_id": correlation_id,
+        "payload": payload,
+    }
+
+    repo = MagicMock()
+    repo.append = AsyncMock()
+
+    with (
+        patch(
+            "app.events.consumers.audit_consumer.AsyncSessionLocal",
+            return_value=_session_context_manager(db),
+        ),
+        patch("app.events.consumers.audit_consumer.AuditLogRepository", return_value=repo),
+    ):
+        await handle_audit_event(event)
+
+    append_kwargs = repo.append.await_args.kwargs
+    assert append_kwargs["event_type"] == "plugin.enabled"
+    assert append_kwargs["resource_type"] == "plugin"
+    assert append_kwargs["resource_id"] == uuid.UUID(plugin_id)
+    assert append_kwargs["correlation_id"] == uuid.UUID(correlation_id)
+    db.commit.assert_awaited_once()
+
+
+def test_audit_handlers_include_plugin_lifecycle_events():
+    assert "plugin.installed" in AUDIT_HANDLERS
+    assert "plugin.enabled" in AUDIT_HANDLERS
+    assert "plugin.disabled" in AUDIT_HANDLERS
+    assert "plugin.failed" in AUDIT_HANDLERS

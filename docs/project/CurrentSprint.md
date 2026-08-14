@@ -12,6 +12,7 @@
 - Vertical Slice 9 Implementation: **COMPLETE** — Hypervisor execution + rollback baseline and frontend execution-monitoring parity are delivered through VS9 closure gate with full backend/frontend validation evidence.
 - Vertical Slice 10 Implementation: **COMPLETE** — Deferred topology analysis endpoints and frontend parity are delivered through VS10 closure gate with full backend/frontend validation evidence.
 - Vertical Slice 11 Implementation: **COMPLETE** — Alerts lifecycle API completion and frontend parity are delivered through VS11 closure gate with full backend/frontend validation evidence.
+- Vertical Slice 12 Implementation: **COMPLETE** — Plugin runtime safety baseline and frontend plugin lifecycle parity are delivered through VS12 closure gate with full backend/frontend validation evidence.
 
 ## Subsystem Progress — Vertical Slice 8
 
@@ -114,7 +115,7 @@
 - [x] Closure Gate: Final scoped/frontend/backend validation pass and VS11 tracking finalization (`poetry run ruff check` scoped alerts files ✅, VS11 targeted backend suite `58 passed` ✅, backend regression `poetry run pytest tests -q` `398 passed` ✅, frontend `npm run lint` ✅, `npm run typecheck` ✅, `npm run test` `42 passed` ✅, `npm run test:e2e` `11/11 passed` ✅, `npm run build` ✅, `npm run perf:bundle` ✅).
 
 ### VS12 — Plugin Runtime Safety Baseline
-- Status: **PLANNED**.
+- Status: **COMPLETE**.
 - Objective: Deliver plugin registry lifecycle with signature/dependency checks and fault isolation.
 - Scope boundaries: Implement only PRD-listed plugin APIs (`list/install/enable/disable`) and lifecycle events; no unrestricted runtime execution path.
 - Acceptance criteria: Invalid signatures are rejected, dependency incompatibility is explicit, and plugin failures do not crash core runtime paths.
@@ -128,6 +129,14 @@
   - Accessibility/responsiveness acceptance criteria: Keyboard-operable lifecycle controls, assistive-readable safety warnings, non-color-only status indicators, and responsive card/table rendering.
   - Frontend tests required (`unit`, `component`, `e2e`): Unit tests for plugin status/safety mapping; component tests for lifecycle controls and failure states; e2e tests for install/enable/disable success and failure/retry flows.
   - API and WebSocket dependencies: `GET /api/v1/plugins`, `POST /api/v1/plugins/install`, `POST /api/v1/plugins/{id}/enable`, `POST /api/v1/plugins/{id}/disable`; WebSocket dependency: none documented for this slice.
+  - Current blocker: none.
+  - Latest frontend full-gate evidence (2026-08-14): `npm run lint` PASS, `npm run typecheck` PASS, `npm run test` PASS (`16 files, 56 tests`), `npm run test:e2e` PASS (`13/13`), `npm run build` PASS, `npm run perf:bundle` PASS.
+
+## Subsystem Progress — Vertical Slice 12
+
+- [x] Step 1: Add backend plugin runtime safety baseline (`GET /api/v1/plugins`, `POST /api/v1/plugins/install`, `POST /api/v1/plugins/{id}/enable`, `POST /api/v1/plugins/{id}/disable`) with migration-backed plugin registry persistence, signature/dependency/sandbox validation gates, event publication for `plugin.installed|enabled|disabled|failed`, audit parity, and fail-open queue degradation behavior.
+- [x] Step 2: Add VS12 frontend plugin lifecycle parity (typed plugin API/hooks, plugin registry/runtime safety page, install/enable/disable UX, navigation/hotkey/command palette wiring, and unit/component/e2e coverage including failure/retry states).
+- [x] Closure Gate: Final scoped/frontend/backend validation pass and VS12 tracking finalization (`poetry run ruff check` scoped plugin files ✅, VS12 targeted backend suite `51 passed` ✅, backend regression `poetry run pytest tests -q` `427 passed` ✅, frontend `npm run lint` ✅, `npm run typecheck` ✅, `npm run test` `56 passed` ✅, `npm run test:e2e` `13/13 passed` ✅, `npm run build` ✅, `npm run perf:bundle` ✅).
 
 ### VS13 — Reporting Async Pipeline Baseline
 - Status: **PLANNED**.
@@ -167,7 +176,7 @@
 - [x] VS9 closure complete (hypervisor execution + rollback baseline with terminal intent lifecycle outcomes).
 - [x] VS10 closure complete (deferred topology analysis endpoint set delivered under C6 governance).
 - [x] VS11 closure complete (alerts API lifecycle + event parity delivered).
-- [ ] VS12 closure complete (plugin lifecycle + sandbox safety baseline delivered).
+- [x] VS12 closure complete (plugin lifecycle + sandbox safety baseline delivered).
 - [ ] VS13 closure complete (reporting async generation/status baseline delivered).
 - [ ] VS14 closure complete (M10 production readiness gate and release evidence finalized).
 

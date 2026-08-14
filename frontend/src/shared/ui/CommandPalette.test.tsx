@@ -49,4 +49,24 @@ describe("CommandPalette", () => {
 
     expect(screen.getByText("Go to Alerts Lifecycle")).toBeInTheDocument();
   });
+
+  it("includes plugins navigation command", async () => {
+    const user = userEvent.setup();
+
+    useUiStore.setState({
+      commandPaletteOpen: true,
+      toasts: [],
+    });
+
+    render(
+      <MemoryRouter>
+        <CommandPalette />
+      </MemoryRouter>,
+    );
+
+    const search = screen.getByLabelText("Search commands");
+    await user.type(search, "plugins");
+
+    expect(screen.getByText("Go to Plugins")).toBeInTheDocument();
+  });
 });

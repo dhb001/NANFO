@@ -1,5 +1,33 @@
 # Development Journal
 
+## [2026-08-14] - Vertical Slice 12 Closure Gate Complete
+
+- **Completed:** Closed VS12 after finishing backend plugin runtime safety delivery and frontend plugin lifecycle parity.
+- **Backend closure validation:** Scoped Ruff on VS12 plugin/event/audit files passed; VS12 targeted backend suite passed (`51` tests); final backend regression gate passed (`poetry run pytest tests -q`, `427 passed`).
+- **Frontend closure validation:** Full frontend quality gate passed (`npm run lint`, `npm run typecheck`, `npm run test` with `56` tests, `npm run test:e2e` with `13/13` specs, `npm run build`, `npm run perf:bundle`).
+- **Scope/governance confirmation:** No endpoint expansion beyond VS12-approved plugin routes, no REST envelope drift, no C5/C6 boundary relaxation, no undocumented event/channel additions, and no new websocket channels for this slice.
+- **Performance note:** Build/perf gates remain green with existing large `three` chunk warning unchanged from prior baseline.
+
+## [2026-08-14] - Vertical Slice 12 Step 2 (Frontend Plugin Lifecycle Parity)
+
+- **Implemented (VS12 frontend parity):** Added a dedicated plugins runtime safety surface (`/ops/plugins`) with install form, registry list, enable/disable controls, safety badges, and explicit failure/warning messaging.
+- **Client/hook contract alignment:** Added typed plugins REST client + React Query hooks for `GET /plugins`, `POST /plugins/install`, `POST /plugins/{id}/enable`, and `POST /plugins/{id}/disable`, preserving canonical envelope consumption and queue metadata handling.
+- **Navigation/accessibility parity:** Added plugins navigation across app shell, command palette, and keyboard shortcuts (`u`, `g u`) to preserve keyboard-first operator flows.
+- **Failure-path parity:** Added install permission pre-validation UX and action-level handling for signature/dependency/sandbox denial responses with retry-safe operator feedback.
+- **Coverage updates:** Added VS12 frontend API/unit/component coverage and new Playwright lifecycle spec (`install -> enable -> disable` plus failure/retry paths); expanded shared e2e session mocks for plugin APIs and safety failure semantics.
+- **Validation:** Frontend quality gates passed (`npm run lint`, `npm run typecheck`, `npm run test` `16 files, 56 tests`, `npm run test:e2e` `13/13`, `npm run build`, `npm run perf:bundle`).
+- **Scope/governance:** No backend API/event/channel changes in Step 2 and no contract/envelope drift.
+
+## [2026-08-14] - Vertical Slice 12 Step 1 (Plugin Runtime Safety Backend Baseline)
+
+- **Implemented (VS12 backend):** Added plugin lifecycle API endpoints `GET /api/v1/plugins`, `POST /api/v1/plugins/install`, `POST /api/v1/plugins/{id}/enable`, and `POST /api/v1/plugins/{id}/disable` under canonical `{success,data,meta,errors}` envelope responses.
+- **Persistence baseline:** Added migration `0007_plugin_lifecycle_baseline` and Plugin module ORM/repository/service foundation for lifecycle state, signature/dependency/sandbox validation, idempotent lifecycle semantics, and registry query filtering.
+- **Event/audit parity:** Added plugin stream routing, consumer-group registration, and audit mapping coverage for `plugin.installed|plugin.enabled|plugin.disabled|plugin.failed` events.
+- **Fail-open behavior:** Plugin lifecycle publish failures remain warning-only (`queue_status=deferred`, `warning=event_queue_unavailable`) with persisted lifecycle continuity and non-fatal API responses.
+- **Coverage updates:** Added plugin service unit suite, plugin endpoint integration suite, and parity assertions in existing event-contract/audit/startup registration tests.
+- **Validation:** Scoped Ruff passed; VS12 targeted backend suite passed (`51 passed`); full backend regression gate passed (`427 passed`).
+- **Scope/governance:** No unapproved API/channel additions, no cross-module SQL join drift, and no C5/C6 boundary relaxations.
+
 ## [2026-08-14] - Vertical Slice 11 Closure Gate Complete
 
 - **Completed:** Closed VS11 after finishing both backend alerts lifecycle API delivery and frontend reliability alerts lifecycle parity.

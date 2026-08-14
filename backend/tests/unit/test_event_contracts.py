@@ -18,3 +18,11 @@ def test_simulation_module_stream_is_registered_for_event_publishing():
 
 def test_simulation_stream_has_consumer_group_registration():
     assert STREAM_GROUPS["stream:simulation"] == "nanfo-consumers"
+
+
+def test_plugin_module_stream_is_registered_for_event_publishing():
+    assert _STREAM_KEYS["plugin"] == "stream:plugin"
+
+
+def test_plugin_stream_has_consumer_group_registration():
+    assert STREAM_GROUPS["stream:plugin"] == "nanfo-consumers"

@@ -39,6 +39,25 @@ export interface MockAlertRecord {
   updated_at: string;
 }
 
+export interface MockPluginRecord {
+  plugin_id: string;
+  plugin_key: string;
+  name: string;
+  version: string;
+  manifest: Record<string, unknown>;
+  signature_status: string;
+  dependency_status: string;
+  sandbox_status: string;
+  status: "installed" | "enabled" | "disabled" | "failed";
+  enabled: boolean;
+  failure_reason: string | null;
+  queue_status: "queued" | "replayed" | "deferred";
+  stream_entry_id: string | null;
+  warning: string | null;
+  installed_at: string;
+  updated_at: string;
+}
+
 export interface SessionMockState {
   userId: string;
   email: string;
@@ -47,6 +66,7 @@ export interface SessionMockState {
   networks: MockNetwork[];
   devicesByNetwork: Record<string, MockDevice[]>;
   alerts: MockAlertRecord[];
+  plugins: MockPluginRecord[];
 }
 
 export function createDefaultSessionState(): SessionMockState {
@@ -87,6 +107,7 @@ export function createDefaultSessionState(): SessionMockState {
       ],
     },
     alerts: [],
+    plugins: [],
   };
 }
 
@@ -121,6 +142,180 @@ function buildAlertActionPayload(alert: MockAlertRecord, queueStatus: "queued" |
     warning: null,
     idempotent_replay: queueStatus === "replayed",
   };
+}
+
+const TRUSTED_PLUGIN_SIGNERS = new Set(["nanfo-labs", "partner-signed"]);
+const ALLOWED_PLUGIN_ISOLATION = new Set(["process", "container"]);
+const ALLOWED_PLUGIN_PERMISSIONS = new Set([
+  "read:telemetry",
+  "read:topology",
+  "read:alerts",
+]);
+
+function normalizePluginStatus(value: string): "installed" | "enabled" | "disabled" | "failed" {
+  const normalized = String(value).trim().toLowerCase();
+  if (normalized === "enabled" || normalized === "disabled" || normalized === "failed") {
+    return normalized;
+  }
+  return "installed";
+}
+
+function computePluginStatusCounts(items: MockPluginRecord[]): Record<string, number> {
+  const counts = {
+    installed: 0,
+    enabled: 0,
+    disabled: 0,
+    failed: 0,
+  };
+  for (const item of items) {
+    const status = normalizePluginStatus(item.status);
+    counts[status] += 1;
+  }
+  return counts;
+}
+
+function buildPluginActionPayload(plugin: MockPluginRecord, queueStatus: "queued" | "replayed" | "deferred") {
+  return {
+    ...plugin,
+    queue_status: queueStatus,
+    stream_entry_id: queueStatus === "queued" ? `plugin-${Date.now()}` : null,
+    warning: queueStatus === "deferred" ? "event_queue_unavailable" : null,
+    idempotent_replay: queueStatus === "replayed",
+  };
+}
+
+function nextPluginId(state: SessionMockState): string {
+  const serial = String(state.plugins.length + 901).padStart(12, "0");
+  return `00000000-0000-0000-0000-${serial}`;
+}
+
+function parsePluginManifest(payload: unknown): {
+  pluginKey: string;
+  name: string;
+  version: string;
+  signer: string;
+  signature: string;
+  dependencies: Record<string, unknown>;
+  sandbox: Record<string, unknown>;
+  metadata: Record<string, unknown>;
+} {
+  const body = typeof payload === "object" && payload !== null
+    ? payload as Record<string, unknown>
+    : {};
+  const dependencies = typeof body.dependencies === "object" && body.dependencies !== null
+    ? body.dependencies as Record<string, unknown>
+    : {};
+  const sandbox = typeof body.sandbox === "object" && body.sandbox !== null
+    ? body.sandbox as Record<string, unknown>
+    : {};
+  const metadata = typeof body.metadata === "object" && body.metadata !== null
+    ? body.metadata as Record<string, unknown>
+    : {};
+
+  return {
+    pluginKey: String(body.plugin_key ?? "").trim().toLowerCase(),
+    name: String(body.name ?? "").trim(),
+    version: String(body.version ?? "").trim(),
+    signer: String(body.signer ?? "").trim(),
+    signature: String(body.signature ?? "").trim(),
+    dependencies,
+    sandbox,
+    metadata,
+  };
+}
+
+function validatePluginSignature(signer: string, signature: string): { code: string; message: string; status: number } | null {
+  const normalizedSigner = signer.trim().toLowerCase();
+  if (!normalizedSigner || !TRUSTED_PLUGIN_SIGNERS.has(normalizedSigner)) {
+    return {
+      code: "PLUGIN_SIGNATURE_INVALID",
+      message: "Plugin signer is not trusted.",
+      status: 400,
+    };
+  }
+  if (!signature.startsWith("sig:")) {
+    return {
+      code: "PLUGIN_SIGNATURE_INVALID",
+      message: "Plugin signature format is invalid.",
+      status: 400,
+    };
+  }
+  if (signature.length < 16) {
+    return {
+      code: "PLUGIN_SIGNATURE_INVALID",
+      message: "Plugin signature is too short.",
+      status: 400,
+    };
+  }
+  return null;
+}
+
+function validatePluginDependencies(dependencies: Record<string, unknown>): { code: string; message: string; status: number } | null {
+  const platformVersion = String(
+    dependencies.platform_version
+      ?? dependencies.requires_platform
+      ?? "",
+  ).trim();
+  if (platformVersion && platformVersion !== "0.1.0") {
+    return {
+      code: "PLUGIN_DEPENDENCY_INCOMPATIBLE",
+      message: "Plugin dependency requirements are incompatible with this runtime.",
+      status: 409,
+    };
+  }
+
+  const requires = dependencies.requires;
+  if (requires !== undefined && !Array.isArray(requires)) {
+    return {
+      code: "PLUGIN_DEPENDENCY_INVALID",
+      message: "Plugin requires must be a list when provided.",
+      status: 400,
+    };
+  }
+
+  if (Array.isArray(requires) && requires.length > 25) {
+    return {
+      code: "PLUGIN_DEPENDENCY_INVALID",
+      message: "Plugin declares too many dependencies.",
+      status: 400,
+    };
+  }
+
+  return null;
+}
+
+function validatePluginSandbox(sandbox: Record<string, unknown>): { code: string; message: string; status: number } | null {
+  const isolationMode = String(sandbox.isolation_mode ?? "process").trim().toLowerCase();
+  if (!ALLOWED_PLUGIN_ISOLATION.has(isolationMode)) {
+    return {
+      code: "PLUGIN_SANDBOX_INVALID",
+      message: "Plugin isolation mode is not allowed.",
+      status: 400,
+    };
+  }
+
+  const permissions = sandbox.permissions;
+  if (permissions !== undefined && !Array.isArray(permissions)) {
+    return {
+      code: "PLUGIN_SANDBOX_INVALID",
+      message: "Plugin sandbox permissions must be a list.",
+      status: 400,
+    };
+  }
+
+  const requestedPermissions = Array.isArray(permissions)
+    ? permissions.map((value) => String(value).trim().toLowerCase()).filter(Boolean)
+    : [];
+  const hasInvalidPermission = requestedPermissions.some((permission) => !ALLOWED_PLUGIN_PERMISSIONS.has(permission));
+  if (hasInvalidPermission) {
+    return {
+      code: "PLUGIN_PERMISSION_SCOPE_INVALID",
+      message: "Plugin requests sandbox permissions outside the allowed safety scope.",
+      status: 403,
+    };
+  }
+
+  return null;
 }
 
 export async function installSessionMocks(page: Page, state: SessionMockState): Promise<void> {
@@ -479,6 +674,396 @@ export async function installSessionMocks(page: Page, state: SessionMockState): 
           success: true,
           data: buildAlertActionPayload(target, "queued"),
           meta: { request_id: "req-alert-resolve", timestamp: now },
+          errors: null,
+        }),
+      });
+      return;
+    }
+
+    await route.continue();
+  });
+
+  await page.route("**/api/v1/plugins**", async (route) => {
+    const request = route.request();
+    const requestUrl = new URL(request.url());
+    const method = request.method();
+    const pathname = requestUrl.pathname;
+
+    if (method === "GET" && pathname === "/api/v1/plugins") {
+      const statusFilter = requestUrl.searchParams.get("status")?.trim().toLowerCase() ?? "";
+      const enabledFilter = requestUrl.searchParams.get("enabled")?.trim().toLowerCase() ?? "";
+      const searchFilter = requestUrl.searchParams.get("search")?.trim().toLowerCase() ?? "";
+      const limitRaw = Number(requestUrl.searchParams.get("limit") ?? "200");
+      const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 500) : 200;
+
+      if (statusFilter && !["installed", "enabled", "disabled", "failed"].includes(statusFilter)) {
+        await route.fulfill({
+          status: 400,
+          contentType: "application/json",
+          body: JSON.stringify({
+            success: false,
+            data: null,
+            meta: { request_id: "req-plugins-list-400", timestamp: "2026-08-14T12:00:00Z" },
+            errors: {
+              code: "PLUGIN_STATUS_INVALID",
+              message: "status must be one of: installed, enabled, disabled, failed.",
+            },
+          }),
+        });
+        return;
+      }
+
+      let enabledPredicate: boolean | null = null;
+      if (enabledFilter) {
+        if (["1", "true", "yes", "y"].includes(enabledFilter)) {
+          enabledPredicate = true;
+        } else if (["0", "false", "no", "n"].includes(enabledFilter)) {
+          enabledPredicate = false;
+        } else {
+          await route.fulfill({
+            status: 400,
+            contentType: "application/json",
+            body: JSON.stringify({
+              success: false,
+              data: null,
+              meta: { request_id: "req-plugins-enabled-400", timestamp: "2026-08-14T12:00:00Z" },
+              errors: {
+                code: "PLUGIN_ENABLED_FILTER_INVALID",
+                message: "enabled must be a boolean value.",
+              },
+            }),
+          });
+          return;
+        }
+      }
+
+      const items = state.plugins
+        .filter((plugin) => {
+          const normalizedStatus = normalizePluginStatus(plugin.status);
+          if (statusFilter && normalizedStatus !== statusFilter) {
+            return false;
+          }
+          if (enabledPredicate !== null && plugin.enabled !== enabledPredicate) {
+            return false;
+          }
+          if (searchFilter) {
+            const haystack = JSON.stringify(plugin).toLowerCase();
+            return haystack.includes(searchFilter);
+          }
+          return true;
+        })
+        .sort((a, b) => String(b.updated_at).localeCompare(String(a.updated_at)))
+        .slice(0, limit);
+
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          success: true,
+          data: {
+            items,
+            total: items.length,
+            status_counts: computePluginStatusCounts(items),
+          },
+          meta: { request_id: "req-plugins-list", timestamp: "2026-08-14T12:00:00Z" },
+          errors: null,
+        }),
+      });
+      return;
+    }
+
+    if (method === "POST" && pathname === "/api/v1/plugins/install") {
+      const manifest = parsePluginManifest(request.postDataJSON());
+
+      const existing = state.plugins.find((plugin) => plugin.plugin_key === manifest.pluginKey);
+      if (existing) {
+        if (existing.version === manifest.version) {
+          await route.fulfill({
+            status: 201,
+            contentType: "application/json",
+            body: JSON.stringify({
+              success: true,
+              data: buildPluginActionPayload(existing, "replayed"),
+              meta: { request_id: "req-plugin-install-replayed", timestamp: "2026-08-14T12:00:00Z" },
+              errors: null,
+            }),
+          });
+          return;
+        }
+
+        await route.fulfill({
+          status: 409,
+          contentType: "application/json",
+          body: JSON.stringify({
+            success: false,
+            data: null,
+            meta: { request_id: "req-plugin-install-409", timestamp: "2026-08-14T12:00:00Z" },
+            errors: {
+              code: "PLUGIN_VERSION_CONFLICT",
+              message: "plugin_key is already registered with a different version.",
+            },
+          }),
+        });
+        return;
+      }
+
+      const signatureFailure = validatePluginSignature(manifest.signer, manifest.signature);
+      if (signatureFailure) {
+        await route.fulfill({
+          status: signatureFailure.status,
+          contentType: "application/json",
+          body: JSON.stringify({
+            success: false,
+            data: null,
+            meta: { request_id: "req-plugin-install-signature", timestamp: "2026-08-14T12:00:00Z" },
+            errors: {
+              code: signatureFailure.code,
+              message: signatureFailure.message,
+            },
+          }),
+        });
+        return;
+      }
+
+      const dependencyFailure = validatePluginDependencies(manifest.dependencies);
+      if (dependencyFailure) {
+        await route.fulfill({
+          status: dependencyFailure.status,
+          contentType: "application/json",
+          body: JSON.stringify({
+            success: false,
+            data: null,
+            meta: { request_id: "req-plugin-install-dependencies", timestamp: "2026-08-14T12:00:00Z" },
+            errors: {
+              code: dependencyFailure.code,
+              message: dependencyFailure.message,
+            },
+          }),
+        });
+        return;
+      }
+
+      const sandboxFailure = validatePluginSandbox(manifest.sandbox);
+      if (sandboxFailure) {
+        await route.fulfill({
+          status: sandboxFailure.status,
+          contentType: "application/json",
+          body: JSON.stringify({
+            success: false,
+            data: null,
+            meta: { request_id: "req-plugin-install-sandbox", timestamp: "2026-08-14T12:00:00Z" },
+            errors: {
+              code: sandboxFailure.code,
+              message: sandboxFailure.message,
+            },
+          }),
+        });
+        return;
+      }
+
+      const now = "2026-08-14T12:00:00Z";
+      const created: MockPluginRecord = {
+        plugin_id: nextPluginId(state),
+        plugin_key: manifest.pluginKey,
+        name: manifest.name,
+        version: manifest.version,
+        manifest: {
+          plugin_key: manifest.pluginKey,
+          name: manifest.name,
+          version: manifest.version,
+          signer: manifest.signer,
+          signature: manifest.signature,
+          dependencies: manifest.dependencies,
+          sandbox: manifest.sandbox,
+          metadata: manifest.metadata,
+        },
+        signature_status: "verified",
+        dependency_status: "compatible",
+        sandbox_status: "isolated",
+        status: "installed",
+        enabled: false,
+        failure_reason: null,
+        queue_status: "queued",
+        stream_entry_id: `plugin-${Date.now()}`,
+        warning: null,
+        installed_at: now,
+        updated_at: now,
+      };
+      state.plugins.unshift(created);
+
+      await route.fulfill({
+        status: 201,
+        contentType: "application/json",
+        body: JSON.stringify({
+          success: true,
+          data: buildPluginActionPayload(created, "queued"),
+          meta: { request_id: "req-plugin-install", timestamp: now },
+          errors: null,
+        }),
+      });
+      return;
+    }
+
+    const enableMatch = pathname.match(/^\/api\/v1\/plugins\/([^/]+)\/enable$/);
+    if (method === "POST" && enableMatch) {
+      const pluginId = enableMatch[1] ?? "";
+      const target = state.plugins.find((plugin) => plugin.plugin_id === pluginId);
+      if (!target) {
+        await route.fulfill({
+          status: 404,
+          contentType: "application/json",
+          body: JSON.stringify({
+            success: false,
+            data: null,
+            meta: { request_id: "req-plugin-enable-404", timestamp: "2026-08-14T12:00:00Z" },
+            errors: { code: "PLUGIN_NOT_FOUND", message: "Plugin not found." },
+          }),
+        });
+        return;
+      }
+
+      if (target.enabled && normalizePluginStatus(target.status) === "enabled") {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            success: true,
+            data: buildPluginActionPayload(target, "replayed"),
+            meta: { request_id: "req-plugin-enable-replayed", timestamp: "2026-08-14T12:00:00Z" },
+            errors: null,
+          }),
+        });
+        return;
+      }
+
+      const manifest = typeof target.manifest === "object" && target.manifest !== null
+        ? target.manifest as Record<string, unknown>
+        : {};
+
+      const signatureFailure = validatePluginSignature(
+        String(manifest.signer ?? ""),
+        String(manifest.signature ?? ""),
+      );
+      const dependencyFailure = validatePluginDependencies(
+        typeof manifest.dependencies === "object" && manifest.dependencies !== null
+          ? manifest.dependencies as Record<string, unknown>
+          : {},
+      );
+      const sandboxFailure = validatePluginSandbox(
+        typeof manifest.sandbox === "object" && manifest.sandbox !== null
+          ? manifest.sandbox as Record<string, unknown>
+          : {},
+      );
+
+      const failure = signatureFailure ?? dependencyFailure ?? sandboxFailure;
+      if (failure) {
+        const now = "2026-08-14T12:02:00Z";
+        target.status = "failed";
+        target.enabled = false;
+        target.failure_reason = failure.code;
+        target.queue_status = "queued";
+        target.stream_entry_id = `plugin-${Date.now()}`;
+        target.warning = null;
+        target.updated_at = now;
+        if (signatureFailure) {
+          target.signature_status = "invalid";
+        }
+        if (dependencyFailure) {
+          target.dependency_status = "incompatible";
+        }
+        if (sandboxFailure) {
+          target.sandbox_status = "blocked";
+        }
+
+        await route.fulfill({
+          status: failure.status,
+          contentType: "application/json",
+          body: JSON.stringify({
+            success: false,
+            data: null,
+            meta: { request_id: "req-plugin-enable-failure", timestamp: now },
+            errors: {
+              code: failure.code,
+              message: failure.message,
+            },
+          }),
+        });
+        return;
+      }
+
+      const now = "2026-08-14T12:01:00Z";
+      target.status = "enabled";
+      target.enabled = true;
+      target.failure_reason = null;
+      target.signature_status = "verified";
+      target.dependency_status = "compatible";
+      target.sandbox_status = "isolated";
+      target.queue_status = "queued";
+      target.stream_entry_id = `plugin-${Date.now()}`;
+      target.warning = null;
+      target.updated_at = now;
+
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          success: true,
+          data: buildPluginActionPayload(target, "queued"),
+          meta: { request_id: "req-plugin-enable", timestamp: now },
+          errors: null,
+        }),
+      });
+      return;
+    }
+
+    const disableMatch = pathname.match(/^\/api\/v1\/plugins\/([^/]+)\/disable$/);
+    if (method === "POST" && disableMatch) {
+      const pluginId = disableMatch[1] ?? "";
+      const target = state.plugins.find((plugin) => plugin.plugin_id === pluginId);
+      if (!target) {
+        await route.fulfill({
+          status: 404,
+          contentType: "application/json",
+          body: JSON.stringify({
+            success: false,
+            data: null,
+            meta: { request_id: "req-plugin-disable-404", timestamp: "2026-08-14T12:00:00Z" },
+            errors: { code: "PLUGIN_NOT_FOUND", message: "Plugin not found." },
+          }),
+        });
+        return;
+      }
+
+      if (!target.enabled && ["disabled", "installed", "failed"].includes(normalizePluginStatus(target.status))) {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            success: true,
+            data: buildPluginActionPayload(target, "replayed"),
+            meta: { request_id: "req-plugin-disable-replayed", timestamp: "2026-08-14T12:00:00Z" },
+            errors: null,
+          }),
+        });
+        return;
+      }
+
+      const now = "2026-08-14T12:03:00Z";
+      target.status = "disabled";
+      target.enabled = false;
+      target.failure_reason = null;
+      target.queue_status = "queued";
+      target.stream_entry_id = `plugin-${Date.now()}`;
+      target.warning = null;
+      target.updated_at = now;
+
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          success: true,
+          data: buildPluginActionPayload(target, "queued"),
+          meta: { request_id: "req-plugin-disable", timestamp: now },
           errors: null,
         }),
       });

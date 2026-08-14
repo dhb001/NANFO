@@ -28,6 +28,7 @@ _STREAM_KEYS: dict[str, str] = {
     "telemetry": "stream:telemetry",
     "alert": "stream:alert",
     "simulation": "stream:simulation",
+    "plugin": "stream:plugin",
 }
 
 

@@ -8,6 +8,7 @@ import {
   IntentPage,
   LoginPage,
   OverviewPage,
+  PluginsPage,
   ReliabilityPage,
   SimulationPage,
   TenancyPage,
@@ -53,6 +54,7 @@ export function App() {
             <Route path="topology-analysis" element={<TopologyAnalysisPage />} />
             <Route path="telemetry" element={<TelemetryPage />} />
             <Route path="reliability" element={<ReliabilityPage />} />
+            <Route path="plugins" element={<PluginsPage />} />
             <Route path="digital-twin" element={<TwinPage />} />
             <Route path="simulation" element={<SimulationPage />} />
             <Route path="intent" element={<IntentPage />} />

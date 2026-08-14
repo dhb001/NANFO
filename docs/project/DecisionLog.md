@@ -3,6 +3,83 @@
 Lightweight chronological notes for decisions that do not require a full ADR.
 
 ## 2026-08-14
+### VS12 Closure Gate: Accept Completion After Full Backend + Frontend Green Validation Suite
+Decision: Mark VS12 complete once scoped plugin backend validation, full backend regression, and full frontend quality gates all pass in a single closure evidence set.
+Reason:
+- Slice-completion governance requires both backend and frontend acceptance criteria to pass before closure.
+- VS12 Step 1 and Step 2 implementation scope is complete; remaining requirement is authoritative validation evidence and tracking finalization.
+- Final rerun produced all-green frontend e2e (`13/13`) including new VS12 plugin lifecycle scenarios.
+Impact:
+- `CurrentSprint.md` now marks VS12 status as `COMPLETE`, closes VS12 checklist items, and records command-level closure evidence.
+- `DevelopmentJournal.md` includes dedicated VS12 Step 1, Step 2, and closure entries with backend/frontend gate outcomes.
+- Remaining-work checklist advances to VS13 as the next planned unfinished slice.
+Assumptions:
+- Existing large `three` chunk warning remains accepted baseline for this milestone and is deferred to later production-readiness/performance slices.
+- Closure acceptance uses the latest all-green run outputs as authoritative evidence.
+Related:
+- `docs/project/CurrentSprint.md`
+- `docs/project/DevelopmentJournal.md`
+- `docs/project/DecisionLog.md`
+
+## 2026-08-14
+### VS12 Step 2: Frontend Plugin Lifecycle Parity on Existing Contracts
+Decision: Implement VS12 frontend parity as a dedicated `/ops/plugins` runtime safety surface driven strictly by existing plugin REST contracts, with route/nav/hotkey/command integrations and explicit safety-state UX.
+Reason:
+- VS12 closure governance requires frontend acceptance criteria (UI states, lifecycle controls, failure/retry behavior, tests) in addition to backend endpoint delivery.
+- Existing backend Step 1 already delivered the approved endpoint set; frontend parity can be completed without API/event/channel expansion.
+- Plugin operations are operator-sensitive and benefit from keyboard-first navigation additions (`u`, `g u`) aligned with established shell patterns.
+Impact:
+- Added typed plugins API client/hooks and plugin runtime safety page with install/enable/disable workflows, safety badges, and failure-state messaging.
+- Added app routing export + protected route wiring for `/ops/plugins`.
+- Added plugins entry points in app shell, command palette, and hotkey mappings.
+- Added VS12 frontend coverage across API/unit/component/e2e layers and expanded shared e2e session mocks for plugin lifecycle + safety failure semantics.
+Assumptions:
+- VS12 continues to rely on near-real-time polling reconciliation for lifecycle updates; no websocket channel is added in this slice.
+- Existing bundle-size warning for `three` remains accepted baseline and is deferred to later production-readiness optimization scope.
+Related:
+- `frontend/src/features/plugins/PluginsPage.tsx`
+- `frontend/src/features/plugins/hooks.ts`
+- `frontend/src/features/plugins/api.ts`
+- `frontend/src/app/App.tsx`
+- `frontend/src/app/routes.ts`
+- `frontend/src/shared/ui/AppShell.tsx`
+- `frontend/src/shared/ui/CommandPalette.tsx`
+- `frontend/src/shared/lib/hotkeys.ts`
+- `frontend/tests/e2e/vs12-plugins-lifecycle.spec.ts`
+- `frontend/tests/e2e/support/session.ts`
+- `docs/project/CurrentSprint.md`
+- `docs/project/DevelopmentJournal.md`
+
+## 2026-08-14
+### VS12 Step 1: Plugin Runtime Safety Activation with Persistence and Event/Audit Parity
+Decision: Activate VS12 plugin runtime safety scope by adding the PRD-approved plugin endpoint set (`GET /api/v1/plugins`, `POST /api/v1/plugins/install`, `POST /api/v1/plugins/{id}/enable`, `POST /api/v1/plugins/{id}/disable`), migration-backed registry persistence, and plugin lifecycle event/audit parity.
+Reason:
+- CurrentSprint VS12 scope explicitly enables these four plugin endpoints while prohibiting route-surface expansion and new websocket channels.
+- Plugins PRD acceptance requires explicit signature/dependency validation and fault-isolation behavior with bounded lifecycle controls.
+- Existing modular monolith event-bus patterns and fail-open publication semantics support bounded implementation without architecture drift.
+Impact:
+- Added Plugin module persistence/service stack and Alembic migration `0007_plugin_lifecycle_baseline` for registry lifecycle records.
+- Added plugins router wiring and lifecycle validation logic for install/enable/disable transitions.
+- Added plugin stream registration plus audit mapping coverage for `plugin.installed|plugin.enabled|plugin.disabled|plugin.failed`.
+- Added targeted unit/integration coverage for plugin endpoints, service safety behavior, and event/audit/startup parity.
+Assumptions:
+- VS12 lifecycle controls intentionally stop at install/enable/disable and do not expose unrestricted plugin runtime execution paths.
+- Queue publication degradation remains warning-only/non-fatal (`queue_status=deferred`) to preserve existing fail-open operational posture.
+Related:
+- `backend/app/api/v1/plugins.py`
+- `backend/app/modules/plugin/service.py`
+- `backend/app/modules/plugin/repository.py`
+- `backend/app/modules/plugin/models.py`
+- `backend/alembic/versions/0007_plugin_lifecycle_baseline.py`
+- `backend/app/events/publisher.py`
+- `backend/app/events/bus.py`
+- `backend/app/events/consumers/audit_consumer.py`
+- `backend/tests/integration/test_plugins_endpoints.py`
+- `backend/tests/unit/test_plugin_service.py`
+- `docs/project/CurrentSprint.md`
+- `docs/project/DevelopmentJournal.md`
+
+## 2026-08-14
 ### VS11 Closure Gate: Accept Completion After Full Backend + Frontend Green Validation Suite
 Decision: Mark VS11 complete once scoped alerts backend validation, full backend regression, and full frontend quality gates all pass in a single closure evidence set.
 Reason:

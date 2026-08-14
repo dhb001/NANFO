@@ -155,3 +155,4 @@ def test_startup_simulation_stream_is_provisioned_for_consumer_groups():
     from app.events.bus import STREAM_GROUPS
 
     assert "stream:simulation" in STREAM_GROUPS
+    assert "stream:plugin" in STREAM_GROUPS

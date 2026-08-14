@@ -1,0 +1,146 @@
+"""NANFO Backend - Plugin module repository.
+
+Persistence operations for plugin lifecycle records.
+"""
+
+from __future__ import annotations
+
+import uuid
+
+from sqlalchemy import String, cast, desc, or_, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.modules.plugin.models import PluginRecord
+
+
+class PluginRepository:
+    """Repository for plugin registry persistence."""
+
+    def __init__(self, db: AsyncSession):
+        self._db = db
+
+    @staticmethod
+    def _apply_filters(
+        query,
+        *,
+        status: str | None,
+        enabled: bool | None,
+        search: str | None,
+    ):
+        if status is not None:
+            query = query.where(PluginRecord.status == status)
+        if enabled is not None:
+            query = query.where(PluginRecord.enabled == enabled)
+        if search:
+            normalized = search.strip()
+            if normalized:
+                pattern = f"%{normalized}%"
+                query = query.where(
+                    or_(
+                        PluginRecord.plugin_key.ilike(pattern),
+                        PluginRecord.name.ilike(pattern),
+                        PluginRecord.version.ilike(pattern),
+                        cast(PluginRecord.manifest, String).ilike(pattern),
+                    )
+                )
+        return query
+
+    async def list_plugins(
+        self,
+        *,
+        status: str | None,
+        enabled: bool | None,
+        search: str | None,
+        limit: int,
+    ) -> list[PluginRecord]:
+        query = select(PluginRecord)
+        query = self._apply_filters(
+            query,
+            status=status,
+            enabled=enabled,
+            search=search,
+        )
+        query = query.order_by(desc(PluginRecord.updated_at), desc(PluginRecord.installed_at)).limit(limit)
+        result = await self._db.execute(query)
+        return list(result.scalars().all())
+
+    async def get_by_id(self, plugin_id: uuid.UUID) -> PluginRecord | None:
+        result = await self._db.execute(select(PluginRecord).where(PluginRecord.plugin_id == plugin_id))
+        return result.scalar_one_or_none()
+
+    async def get_by_plugin_key(self, plugin_key: str) -> PluginRecord | None:
+        result = await self._db.execute(select(PluginRecord).where(PluginRecord.plugin_key == plugin_key))
+        return result.scalar_one_or_none()
+
+    async def create(
+        self,
+        *,
+        plugin_id: uuid.UUID,
+        plugin_key: str,
+        name: str,
+        version: str,
+        manifest: dict,
+        signature_status: str,
+        dependency_status: str,
+        sandbox_status: str,
+        status: str,
+        enabled: bool,
+        failure_reason: str | None,
+        queue_status: str,
+        stream_entry_id: str | None,
+        warning: str | None,
+    ) -> PluginRecord:
+        plugin = PluginRecord(
+            plugin_id=plugin_id,
+            plugin_key=plugin_key,
+            name=name,
+            version=version,
+            manifest=manifest,
+            signature_status=signature_status,
+            dependency_status=dependency_status,
+            sandbox_status=sandbox_status,
+            status=status,
+            enabled=enabled,
+            failure_reason=failure_reason,
+            queue_status=queue_status,
+            stream_entry_id=stream_entry_id,
+            warning=warning,
+        )
+        self._db.add(plugin)
+        await self._db.flush()
+        return plugin
+
+    async def update_lifecycle(
+        self,
+        plugin: PluginRecord,
+        *,
+        status: str,
+        enabled: bool,
+        failure_reason: str | None,
+        queue_status: str,
+        stream_entry_id: str | None,
+        warning: str | None,
+        signature_status: str | None = None,
+        dependency_status: str | None = None,
+        sandbox_status: str | None = None,
+        manifest: dict | None = None,
+        version: str | None = None,
+    ) -> PluginRecord:
+        plugin.status = status
+        plugin.enabled = enabled
+        plugin.failure_reason = failure_reason
+        plugin.queue_status = queue_status
+        plugin.stream_entry_id = stream_entry_id
+        plugin.warning = warning
+        if signature_status is not None:
+            plugin.signature_status = signature_status
+        if dependency_status is not None:
+            plugin.dependency_status = dependency_status
+        if sandbox_status is not None:
+            plugin.sandbox_status = sandbox_status
+        if manifest is not None:
+            plugin.manifest = manifest
+        if version is not None:
+            plugin.version = version
+        await self._db.flush()
+        return plugin
