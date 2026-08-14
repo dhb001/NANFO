@@ -3,6 +3,25 @@
 Lightweight chronological notes for decisions that do not require a full ADR.
 
 ## 2026-08-14
+### VS17 Step 1: Approve External Load-Tooling Path and Lock Finite Execution Checklist Before Implementation
+Decision: Start VS17 by locking a finite execution checklist in `CurrentSprint.md` and approving a single external load-tooling path (`k6`) with Docker fallback as the baseline runner, while keeping Step 1 implementation docs-only.
+Reason:
+- CurrentSprint + VS16 continuity plan define VS17 as the first executable follow-on slice and require deterministic load profile execution with no contract expansion.
+- Selecting one tooling path up front reduces execution ambiguity and prevents multi-tool scope creep in later steps.
+- A checklist-first entry preserves atomic step commits and keeps API envelope/C5/C6/fail-open constraints explicit before code changes.
+Impact:
+- `CurrentSprint.md` now marks VS17 `IN PROGRESS`, adds `Subsystem Progress — Vertical Slice 17`, and records Step 1 completion with remaining Step 2 + closure checkpoints.
+- `DevelopmentJournal.md` now records Step 1 charter decisions and validation evidence.
+- VS17 implementation scope remains bounded to tooling/harness/fixtures/runbook artifacts with no product API/event/channel/schema changes.
+Assumptions:
+- `k6` execution may rely on Docker when a host binary is unavailable, and this is acceptable within VS17 tooling-only scope.
+- Stage-profile execution can remain documented/optional in Step 2 while local deterministic baseline is required for closure evidence.
+Related:
+- `docs/project/CurrentSprint.md`
+- `docs/project/DevelopmentJournal.md`
+- `docs/project/OptimizationContinuityPlan-VS16.md`
+
+## 2026-08-14
 ### VS16 Closure Gate: Accept Completion as Planning-Only Slice with Full Required Backend Validation Evidence
 Decision: Mark VS16 complete after Step 1 + Step 2 planning/governance deliverables and a final green closure-gate run for required backend checks, without running frontend full-gate commands because no frontend files changed.
 Reason:

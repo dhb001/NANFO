@@ -1,5 +1,14 @@
 # Development Journal
 
+## [2026-08-14] - Vertical Slice 17 Step 1 (Execution Charter + Finite Checklist Lock)
+
+- **Implemented (VS17 step scope):** Activated VS17 as the current execution slice and locked a finite, non-overlapping step sequence in `CurrentSprint.md` before introducing any tooling/runtime changes.
+- **Charter locked:** Recorded a bounded VS17 plan that approves one external load-tooling path (`k6` with Docker fallback), defines deterministic local/staging profile expectations, and requires explicit rollback/failure-handling documentation.
+- **Checklist baseline:** Added `Subsystem Progress — Vertical Slice 17` with three explicit checkpoints (`Step 1` charter lock, `Step 2` implementation baseline, `Closure Gate`) and marked `VS17` as `IN PROGRESS`.
+- **Validation:** Ran required gates in this step run: scoped Ruff (`poetry run ruff check tests/integration/test_telemetry_synthetic_load.py`), VS17-targeted baseline test (`poetry run pytest tests/integration/test_telemetry_synthetic_load.py -q`, `1 passed`), and full backend regression (`poetry run pytest tests -q`, `456 passed`).
+- **Frontend gate applicability:** Frontend full-gate command chain was not required in Step 1 because no frontend files were touched.
+- **Scope/governance:** Docs-only execution increment; no REST/WebSocket/event/channel/schema contract changes, no API envelope drift, no C5/C6 boundary changes, and fail-open runtime/event behavior remained unchanged.
+
 ## [2026-08-14] - Vertical Slice 16 Closure Gate Complete
 
 - **Completed:** Closed VS16 after finalizing planning/governance deliverables for follow-on optimization slices and deferred external load-tooling execution continuity.
