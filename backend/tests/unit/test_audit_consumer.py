@@ -199,6 +199,48 @@ async def test_audit_consumer_writes_intent_execution_started_event():
     db.commit.assert_awaited_once()
 
 
+@pytest.mark.asyncio
+async def test_audit_consumer_writes_intent_execution_failed_with_rollback_metadata():
+    db = AsyncMock()
+    db.commit = AsyncMock()
+
+    intent_id = str(uuid.uuid4())
+    correlation_id = str(uuid.uuid4())
+    payload = {
+        "intent_id": intent_id,
+        "workspace_id": str(uuid.uuid4()),
+        "status": "execution_failed",
+        "execution_provenance": {
+            "verification": {"status": "failed"},
+            "rollback": {"attempted": True, "status": "completed"},
+        },
+    }
+    event = {
+        "event_type": "intent.execution_failed",
+        "correlation_id": correlation_id,
+        "payload": payload,
+    }
+
+    repo = MagicMock()
+    repo.append = AsyncMock()
+
+    with (
+        patch(
+            "app.events.consumers.audit_consumer.AsyncSessionLocal",
+            return_value=_session_context_manager(db),
+        ),
+        patch("app.events.consumers.audit_consumer.AuditLogRepository", return_value=repo),
+    ):
+        await handle_audit_event(event)
+
+    append_kwargs = repo.append.await_args.kwargs
+    assert append_kwargs["event_type"] == "intent.execution_failed"
+    assert append_kwargs["resource_type"] == "intent"
+    assert append_kwargs["resource_id"] == uuid.UUID(intent_id)
+    assert append_kwargs["metadata"]["execution_provenance"]["rollback"]["status"] == "completed"
+    db.commit.assert_awaited_once()
+
+
 def test_audit_handlers_include_intent_lifecycle_events():
     assert "intent.validated" in AUDIT_HANDLERS
     assert "intent.execution_started" in AUDIT_HANDLERS

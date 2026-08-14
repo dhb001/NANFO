@@ -20,6 +20,16 @@ def _make_token() -> str:
         user_id=str(uuid.uuid4()),
         email="intent@example.com",
         roles=["Admin"],
+        permissions=["write:config", "read:topology", "execute:rollback"],
+    )
+    return token
+
+
+def _make_no_execute_token() -> str:
+    token, _ = create_access_token(
+        user_id=str(uuid.uuid4()),
+        email="intent-no-exec@example.com",
+        roles=["Admin"],
         permissions=["write:config", "read:topology"],
     )
     return token
@@ -287,6 +297,24 @@ def test_execute_intent_returns_envelope_and_execution_payload(client):
     assert body["data"]["intent_id"] == str(intent_id)
     assert body["data"]["status"] == "execution_started"
     assert body["data"]["idempotent_replay"] is False
+
+
+def test_execute_intent_requires_execute_rollback_permission(client):
+    headers = {"Authorization": f"Bearer {_make_no_execute_token()}"}
+    response = client.post(
+        "/api/v1/intents/execute",
+        json={
+            "workspace_id": str(uuid.uuid4()),
+            "intent_id": str(uuid.uuid4()),
+            "idempotency_key": "idem-1",
+        },
+        headers=headers,
+    )
+
+    assert response.status_code == 403
+    body = response.json()
+    assert body["success"] is False
+    assert body["errors"]["code"] == "INTENT_EXECUTION_PERMISSION_DENIED"
 
 
 def test_execute_intent_prefers_body_idempotency_key_over_header(client):

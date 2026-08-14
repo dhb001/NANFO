@@ -80,3 +80,42 @@ async def test_intent_event_missing_network_id_is_ignored_for_ws_delta():
         await handle_ws_intent_event(event)
 
     mock_digital_twin_ws_manager.push_delta.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_intent_execution_failed_event_includes_rollback_changed_fields():
+    payload = {
+        "intent_id": str(uuid.uuid4()),
+        "network_id": str(uuid.uuid4()),
+        "intent_kind": "isolate_vlan",
+        "status": "execution_failed",
+        "confidence": {
+            "score": 0.84,
+            "band": "80-94",
+            "approval_required": True,
+        },
+        "execution_provenance": {
+            "verification": {"status": "failed"},
+            "rollback": {"attempted": True, "status": "completed"},
+        },
+    }
+    event = {
+        "event_id": str(uuid.uuid4()),
+        "event_type": "intent.execution_failed",
+        "timestamp": datetime.now(UTC).isoformat(),
+        "source": "intent",
+        "correlation_id": str(uuid.uuid4()),
+        "version": "1",
+        "payload": payload,
+    }
+
+    with patch("app.events.consumers.ws_push_consumer.digital_twin_ws_manager") as mock_digital_twin_ws_manager:
+        mock_digital_twin_ws_manager.push_delta = AsyncMock()
+        await handle_ws_intent_event(event)
+
+    kwargs = mock_digital_twin_ws_manager.push_delta.await_args.kwargs
+    changed_fields = kwargs["scene_object"]["changed_fields"]
+    assert kwargs["event_type"] == "intent.execution_failed"
+    assert changed_fields["status"] == "execution_failed"
+    assert changed_fields["verification_status"] == "failed"
+    assert changed_fields["rollback_status"] == "completed"

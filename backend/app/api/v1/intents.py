@@ -74,6 +74,7 @@ async def execute_intent(
         idempotency_key=effective_idempotency_key,
         correlation_id=meta.request_id,
         requested_by_user_id=claims.user_id,
+        requested_permissions=claims.permissions,
     )
     payload = ExecuteIntentResponse.model_validate(result)
     return success_response(payload, meta.request_id, started, meta.timestamp)

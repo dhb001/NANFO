@@ -78,6 +78,28 @@ def _extract_uuid_text(payload: dict, *keys: str) -> str | None:
     return None
 
 
+def _extract_verification_and_rollback_status(payload: dict) -> tuple[str | None, str | None]:
+    execution_provenance_raw = payload.get("execution_provenance")
+    if not isinstance(execution_provenance_raw, dict):
+        return None, None
+
+    verification_status = None
+    verification_raw = execution_provenance_raw.get("verification")
+    if isinstance(verification_raw, dict):
+        status_value = str(verification_raw.get("status", "")).strip()
+        if status_value:
+            verification_status = status_value
+
+    rollback_status = None
+    rollback_raw = execution_provenance_raw.get("rollback")
+    if isinstance(rollback_raw, dict):
+        status_value = str(rollback_raw.get("status", "")).strip()
+        if status_value:
+            rollback_status = status_value
+
+    return verification_status, rollback_status
+
+
 async def _safe_increment_alert_counter(
     redis,
     *,
@@ -292,16 +314,23 @@ async def handle_ws_intent_event(event: dict) -> None:
     status = str(payload.get("status", "unknown")).strip() or "unknown"
     scene_object_id = f"intent-{intent_id}" if intent_id else "intent-state"
 
+    verification_status, rollback_status = _extract_verification_and_rollback_status(payload)
+    changed_fields = {
+        "status": status,
+        "intent_kind": str(payload.get("intent_kind", "")).strip(),
+        "confidence": payload.get("confidence") if isinstance(payload.get("confidence"), dict) else {},
+    }
+    if verification_status is not None:
+        changed_fields["verification_status"] = verification_status
+    if rollback_status is not None:
+        changed_fields["rollback_status"] = rollback_status
+
     scene_object = {
         "id": scene_object_id,
         "object_type": "intent_state",
         "intent_id": intent_id,
         "status": status,
-        "changed_fields": {
-            "status": status,
-            "intent_kind": str(payload.get("intent_kind", "")).strip(),
-            "confidence": payload.get("confidence") if isinstance(payload.get("confidence"), dict) else {},
-        },
+        "changed_fields": changed_fields,
     }
 
     await digital_twin_ws_manager.push_delta(

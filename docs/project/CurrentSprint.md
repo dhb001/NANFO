@@ -41,7 +41,7 @@
 - Milestone 10 closure gate is complete and release-readiness evidence is recorded.
 
 ### VS9 — Hypervisor Execution + Rollback Baseline
-- Status: **PLANNED**.
+- Status: **IN PROGRESS**.
 - Objective: Complete intent-to-hypervisor baseline execution with verification and rollback-ready lifecycle outcomes.
 - Scope boundaries: Use existing intent API surface (`POST /api/v1/intents/execute`, `GET /api/v1/intents/{id}`); no `/api/v1/ai/*` additions; no C5/C6 relaxations.
 - Acceptance criteria: Validated intents transition to terminal lifecycle outcomes (`execution_completed` or `execution_failed`), rollback metadata is persisted when applicable, and terminal intent lifecycle events are emitted/audited.
@@ -55,6 +55,12 @@
   - Accessibility/responsiveness acceptance criteria: Accessible status timeline semantics, keyboard navigation for execution controls, clear assistive messaging for failed/rolled-back outcomes, and mobile-safe execution detail layouts.
   - Frontend tests required (`unit`, `component`, `e2e`): Unit tests for terminal-state mapping and rollback metadata transforms; component tests for lifecycle timeline/cards; e2e tests covering execution start, completion/failure rendering, and retry UX.
   - API and WebSocket dependencies: `POST /api/v1/intents/execute`, `GET /api/v1/intents/{id}`, `/ws/digital-twin` intent lifecycle deltas.
+
+## Subsystem Progress — Vertical Slice 9
+
+- [x] Step 1: Add backend hypervisor execution baseline with verification + rollback-ready lifecycle metadata and execute-permission gate (`execute:rollback`) while preserving existing intent API surface and fail-open event publication semantics.
+- [ ] Step 2: Add VS9 frontend execution-monitoring parity for terminal-state visibility and rollback metadata context (logic + component + e2e updates).
+- [ ] Closure Gate: Final scoped/frontend/backend validation pass and VS9 tracking finalization.
 
 ### VS10 — Deferred Topology Analysis Endpoints
 - Status: **PLANNED**.

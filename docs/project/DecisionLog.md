@@ -3,6 +3,33 @@
 Lightweight chronological notes for decisions that do not require a full ADR.
 
 ## 2026-08-14
+### VS9 Step 1: Hypervisor Baseline Outcome Semantics and Execute Permission Gate
+Decision: Implement VS9 backend baseline by introducing a dedicated in-process hypervisor execution service that deterministically sets terminal intent outcomes (`execution_completed` / `execution_failed`) based on verification outcome, persists rollback metadata when verification fails, and enforces `execute:rollback` permission on `POST /api/v1/intents/execute`.
+Reason:
+- VS9 objective requires moving from deferred lifecycle placeholders to intent-to-hypervisor baseline execution outcomes with rollback-ready metadata.
+- Existing contracts already define required REST surface and event names; introducing new endpoints/channels would violate scope boundaries.
+- Permission gating at execute entry aligns with Authentication PRD permission model and reduces unsafe dispatch risk.
+Impact:
+- Added `backend/app/modules/intent/hypervisor.py` with deterministic verification + rollback-ready outcome shaping.
+- `IntentExecutionService.execute_intent(...)` now records `verification` and optional `rollback` metadata in `execution_provenance`, updates terminal status from hypervisor baseline outcome, and keeps event publication fail-open semantics.
+- Added `INTENT_EXECUTION_PERMISSION_DENIED` conflict path (`403`) when caller lacks `execute:rollback`.
+- Extended ws intent delta mapping with optional `verification_status` and `rollback_status` changed fields for operator context while preserving canonical channel/payload shape.
+Assumptions:
+- VS9 Step 1 uses deterministic in-process baseline execution outcomes (no vendor driver calls, no Celery queue orchestration) to preserve finite scope and reversibility.
+- Verification-failure rollback metadata is baseline provenance evidence and does not yet imply external device-level rollback execution telemetry beyond current documented contracts.
+Related:
+- `backend/app/modules/intent/hypervisor.py`
+- `backend/app/modules/intent/service.py`
+- `backend/app/api/v1/intents.py`
+- `backend/app/events/consumers/ws_push_consumer.py`
+- `backend/tests/unit/test_intent_hypervisor_service.py`
+- `backend/tests/unit/test_intent_execution_service.py`
+- `backend/tests/integration/test_intent_endpoints.py`
+- `backend/tests/integration/test_intent_event_ws_flow.py`
+- `docs/project/CurrentSprint.md`
+- `docs/project/DevelopmentJournal.md`
+
+## 2026-08-14
 ### Frontend Full-Gate Revalidation and Evidence-First Closure Update
 Decision: After E2E suite expansion and stability fixes, require a fresh full frontend quality gate run (`lint`, `typecheck`, `test`, `test:e2e`, `build`, `perf:bundle`) and record results in sprint/journal evidence before closure commit.
 Reason:

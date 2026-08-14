@@ -16,10 +16,14 @@ import redis.asyncio as aioredis
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.logging import get_logger
 from app.events.publisher import publish_event
+from app.modules.intent.hypervisor import HypervisorExecutionService
 from app.modules.intent.repository import IntentRepository
 from app.modules.network.repository import NetworkRepository
 from app.modules.organization.service import WorkspaceService as OrgWorkspaceService
+
+logger = get_logger(__name__)
 
 _SUPPORTED_ACTIONS = {
     "optimize_wireless_capacity",
@@ -61,6 +65,17 @@ def _build_reason(code: str, message: str, path: str | None = None) -> dict[str,
     if path:
         reason["path"] = path
     return reason
+
+
+def _coerce_permissions_for_execute(raw_permissions: Any) -> set[str]:
+    if not isinstance(raw_permissions, list):
+        return set()
+    normalized: set[str] = set()
+    for raw in raw_permissions:
+        permission = str(raw).strip().lower()
+        if permission:
+            normalized.add(permission)
+    return normalized
 
 
 def _confidence_band(score: float) -> str:
@@ -309,12 +324,22 @@ class IntentExecutionService:
         idempotency_key: str | None,
         correlation_id: str,
         requested_by_user_id: str,
+        requested_permissions: list[str],
     ) -> dict[str, Any]:
-        await self._workspace_svc.get_active_workspace(workspace_id)
-
         normalized_idempotency_key = _coerce_non_empty_text(idempotency_key) or None
         normalized_correlation_id = _coerce_correlation_uuid(correlation_id)
         now = datetime.now(UTC)
+
+        if "execute:rollback" not in _coerce_permissions_for_execute(requested_permissions):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "code": "INTENT_EXECUTION_PERMISSION_DENIED",
+                    "message": "execute:rollback permission is required for intent execution.",
+                },
+            )
+
+        await self._workspace_svc.get_active_workspace(workspace_id)
 
         existing_by_key = None
 
@@ -393,13 +418,15 @@ class IntentExecutionService:
                 },
             )
 
-        execution_provenance = dict(intent.execution_provenance) if isinstance(intent.execution_provenance, dict) else {}
-        execution_provenance.update(
+        execution_provenance_started = (
+            dict(intent.execution_provenance) if isinstance(intent.execution_provenance, dict) else {}
+        )
+        execution_provenance_started.update(
             {
                 "pipeline_stage": "execution_started",
                 "status": "execution_started",
-                "executor": "intent_engine_baseline",
-                "execution_mode": "deferred_hypervisor",
+                "executor": "hypervisor_baseline",
+                "execution_mode": "vendor_neutral_baseline",
                 "policy_reference": "ADR-008",
                 "execution_started_at": now.isoformat(),
                 "requested_by_user_id": requested_by_user_id,
@@ -407,11 +434,13 @@ class IntentExecutionService:
             }
         )
 
-        explainability = dict(intent.explainability) if isinstance(intent.explainability, dict) else {}
-        explainability.update(
+        explainability_started = (
+            dict(intent.explainability) if isinstance(intent.explainability, dict) else {}
+        )
+        explainability_started.update(
             {
                 "execution_posture": "simulation_required_before_hypervisor",
-                "execution_summary": "Execution lifecycle started; hypervisor dispatch deferred to M9 scope.",
+                "execution_summary": "Execution lifecycle started; hypervisor dispatch in progress.",
             }
         )
 
@@ -421,8 +450,8 @@ class IntentExecutionService:
 
         update_kwargs: dict[str, Any] = {
             "status": "execution_started",
-            "execution_provenance": execution_provenance,
-            "explainability": explainability,
+            "execution_provenance": execution_provenance_started,
+            "explainability": explainability_started,
             "confidence_score": confidence_score,
             "confidence_band": confidence_band,
             "approval_required": approval_required,
@@ -448,8 +477,8 @@ class IntentExecutionService:
                 if isinstance(intent.validation_result, dict)
                 else {}
             ),
-            "execution_provenance": execution_provenance,
-            "explainability": explainability,
+            "execution_provenance": execution_provenance_started,
+            "explainability": explainability_started,
             "confidence": {
                 "score": confidence_score,
                 "band": confidence_band,
@@ -470,9 +499,120 @@ class IntentExecutionService:
             queue_status = "deferred"
             warning = "event_queue_unavailable"
 
+        terminal_status = "execution_failed"
+        terminal_event_type = f"intent.{terminal_status}"
+        terminal_time = datetime.now(UTC)
+
+        hypervisor_outcome = HypervisorExecutionService().execute(
+            intent_id=intent.intent_id,
+            intent_kind=str(intent.intent_kind),
+            validation_result=(
+                dict(intent.validation_result)
+                if isinstance(intent.validation_result, dict)
+                else {}
+            ),
+            correlation_id=normalized_correlation_id,
+            requested_by_user_id=requested_by_user_id,
+        )
+
+        terminal_execution_provenance = dict(execution_provenance_started)
+        terminal_explainability = dict(explainability_started)
+
+        terminal_status = hypervisor_outcome.terminal_status
+        terminal_event_type = f"intent.{terminal_status}"
+
+        if terminal_status == "execution_completed":
+            terminal_execution_provenance.update(
+                {
+                    "pipeline_stage": "execution_completed",
+                    "status": "execution_completed",
+                    "execution_completed_at": terminal_time.isoformat(),
+                    "completion_mode": "verified",
+                    "verification": hypervisor_outcome.verification,
+                }
+            )
+            terminal_explainability.update(
+                {
+                    "execution_summary": hypervisor_outcome.execution_summary,
+                }
+            )
+        else:
+            terminal_execution_provenance.update(
+                {
+                    "pipeline_stage": "execution_failed",
+                    "status": "execution_failed",
+                    "execution_failed_at": terminal_time.isoformat(),
+                    "failure_reason": hypervisor_outcome.failure_reason or "execution_unavailable",
+                    "verification": hypervisor_outcome.verification,
+                }
+            )
+            if hypervisor_outcome.rollback is not None:
+                terminal_execution_provenance["rollback"] = hypervisor_outcome.rollback
+            terminal_explainability.update(
+                {
+                    "execution_summary": hypervisor_outcome.execution_summary,
+                    "failure_reason": hypervisor_outcome.failure_reason or "execution_unavailable",
+                }
+            )
+
+        if queue_status == "deferred" and warning:
+            terminal_execution_provenance["event_publication"] = {
+                "status": "deferred",
+                "warning": warning,
+            }
+
         await self._repo.update_status(
             intent,
-            status="execution_started",
+            status=terminal_status,
+            execution_provenance=terminal_execution_provenance,
+            explainability=terminal_explainability,
+            queue_status=queue_status,
+            warning=warning,
+        )
+
+        terminal_payload = {
+            "intent_id": str(intent.intent_id),
+            "workspace_id": str(intent.workspace_id),
+            "network_id": str(intent.network_id) if intent.network_id is not None else None,
+            "intent_kind": str(intent.intent_kind),
+            "status": terminal_status,
+            "validation_result": (
+                dict(intent.validation_result)
+                if isinstance(intent.validation_result, dict)
+                else {}
+            ),
+            "execution_provenance": terminal_execution_provenance,
+            "explainability": terminal_explainability,
+            "confidence": {
+                "score": confidence_score,
+                "band": confidence_band,
+                "approval_required": approval_required,
+            },
+            "requested_by_user_id": requested_by_user_id,
+        }
+
+        try:
+            terminal_stream_entry_id = await publish_event(
+                redis=self._redis,
+                event_type=terminal_event_type,
+                source="intent",
+                payload=terminal_payload,
+                correlation_id=str(normalized_correlation_id),
+            )
+            stream_entry_id = terminal_stream_entry_id
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "intent_terminal_event_publish_failed",
+                intent_id=str(intent.intent_id),
+                event_type=terminal_event_type,
+                status=terminal_status,
+                correlation_id=str(normalized_correlation_id),
+                error=str(exc),
+            )
+
+        await self._repo.update_status(
+            intent,
+            status=terminal_status,
             queue_status=queue_status,
             stream_entry_id=stream_entry_id,
             warning=warning,

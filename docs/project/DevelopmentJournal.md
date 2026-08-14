@@ -1,5 +1,15 @@
 # Development Journal
 
+## [2026-08-14] - Vertical Slice 9 Step 1 (Hypervisor Execution + Rollback Backend Baseline)
+
+- **Implemented (Step 1 backend baseline):** Added a dedicated hypervisor execution service (`backend/app/modules/intent/hypervisor.py`) that deterministically produces terminal execution outcomes with verification metadata and rollback metadata on verification failure, without introducing new API routes/channels/events.
+- **Execution service integration:** `IntentExecutionService.execute_intent(...)` now routes validated intents through the VS9 hypervisor baseline outcome model, persists verification/rollback provenance under `execution_provenance`, and emits governed terminal lifecycle events (`intent.execution_completed` / `intent.execution_failed`) aligned to actual hypervisor baseline outcome.
+- **Permission hardening:** Added execute permission gate requiring `execute:rollback` for `POST /api/v1/intents/execute` via existing JWT permission claims path; denial returns canonical 403 error (`INTENT_EXECUTION_PERMISSION_DENIED`) without envelope drift.
+- **Realtime/audit contract continuity:** Extended ws intent delta mapping to include optional `verification_status` and `rollback_status` fields from execution provenance for operator visibility while preserving `/ws/digital-twin` scene delta contract shape and fail-open handling.
+- **Coverage additions:** Added new unit suite for hypervisor baseline service and expanded intent execution/audit/ws/integration tests to cover successful verification, verification-failure rollback, fail-open started-event publication degradation, and execute-permission denial.
+- **Validation:** Scoped Ruff passed for all touched backend files; targeted VS9 tests passed (`63 passed`); full backend regression gate passed (`360 passed`).
+- **Scope/governance:** No `/api/v1/ai/*` additions, no API envelope drift, no C5/C6 relaxations, no schema migration required in Step 1, and no unrelated module refactors.
+
 ## [2026-08-14] - Frontend Full Quality Gate Pass + Evidence Refresh
 
 - **Implemented (frontend-scope hardening):** Finalized Playwright stability fixes by removing strict-mode ambiguous locators in VS2/VS7 and making session network mocks query-tolerant + workspace-aware for tenancy flows.

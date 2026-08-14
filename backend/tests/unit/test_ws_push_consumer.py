@@ -494,3 +494,34 @@ async def test_ws_intent_consumer_invalid_network_id_is_noop():
         await handle_ws_intent_event(event)
 
     mock_digital_twin_ws_manager.push_delta.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_ws_intent_consumer_maps_verification_and_rollback_statuses():
+    event = _intent_event(
+        "intent.execution_failed",
+        payload={
+            "intent_id": str(uuid.uuid4()),
+            "network_id": str(uuid.uuid4()),
+            "intent_kind": "isolate_vlan",
+            "status": "execution_failed",
+            "confidence": {
+                "score": 0.84,
+                "band": "80-94",
+                "approval_required": True,
+            },
+            "execution_provenance": {
+                "verification": {"status": "failed"},
+                "rollback": {"status": "completed"},
+            },
+        },
+    )
+
+    with patch("app.events.consumers.ws_push_consumer.digital_twin_ws_manager") as mock_digital_twin_ws_manager:
+        mock_digital_twin_ws_manager.push_delta = AsyncMock()
+        await handle_ws_intent_event(event)
+
+    kwargs = mock_digital_twin_ws_manager.push_delta.await_args.kwargs
+    changed_fields = kwargs["scene_object"]["changed_fields"]
+    assert changed_fields["verification_status"] == "failed"
+    assert changed_fields["rollback_status"] == "completed"
