@@ -3,6 +3,30 @@
 Lightweight chronological notes for decisions that do not require a full ADR.
 
 ## 2026-08-14
+### VS17 Step 2: Use Docker k6 Fallback with User-Mapped Artifacts and Writable Output-Dir Fallback
+Decision: Implement VS17 external load-tooling baseline with a single k6 execution path that auto-resolves host vs Docker runner, enforces Docker user mapping, and falls back to `/tmp/opencode/vs17-artifacts-<run_id>` when the preferred artifact directory is not writable.
+Reason:
+- `CurrentSprint.md` and `OptimizationContinuityPlan-VS16.md` require one approved external tooling path with deterministic evidence outputs and no product-surface expansion.
+- Host environments may not have `k6` installed, and previous runs showed root-owned artifact paths causing non-deterministic rerun failures.
+- User-mapped Docker execution plus writable-path fallback preserves repeatability and avoids permission dead-ends without altering runtime contracts.
+Impact:
+- Added `backend/app/modules/telemetry/load_tooling.py`, `backend/scripts/run_vs17_external_load.py`, and `backend/scripts/k6/vs17_telemetry_health.js` for deterministic profile execution, fixture pump, command orchestration, and evidence artifact writing.
+- Added focused VS17 unit coverage in `backend/tests/unit/test_vs17_load_tooling.py`, including runner resolution, output-dir fallback, and k6 summary metric extraction behavior.
+- Added `docs/project/VS17ExternalLoadToolingRunbook.md` to operationalize execution and failure/rollback guidance.
+- Local smoke evidence run succeeded with Docker fallback and deterministic counters/metrics artifacts under `/tmp/opencode/vs17-artifacts-20260814T205740Z`.
+Assumptions:
+- VS17 accepts fallback artifact output under `/tmp/opencode` when repository artifact path ownership is not writable; permanence of evidence is tracked in sprint/journal entries.
+- Current k6 summary format may expose flat metric keys or `values` maps; parser must tolerate both for stable evidence extraction.
+Related:
+- `backend/app/modules/telemetry/load_tooling.py`
+- `backend/scripts/run_vs17_external_load.py`
+- `backend/scripts/k6/vs17_telemetry_health.js`
+- `backend/tests/unit/test_vs17_load_tooling.py`
+- `docs/project/VS17ExternalLoadToolingRunbook.md`
+- `docs/project/CurrentSprint.md`
+- `docs/project/DevelopmentJournal.md`
+
+## 2026-08-14
 ### VS17 Step 1: Approve External Load-Tooling Path and Lock Finite Execution Checklist Before Implementation
 Decision: Start VS17 by locking a finite execution checklist in `CurrentSprint.md` and approving a single external load-tooling path (`k6`) with Docker fallback as the baseline runner, while keeping Step 1 implementation docs-only.
 Reason:

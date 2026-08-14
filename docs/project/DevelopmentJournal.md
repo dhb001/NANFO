@@ -1,5 +1,17 @@
 # Development Journal
 
+## [2026-08-14] - Vertical Slice 17 Step 2 (External Load-Tooling Baseline Implementation)
+
+- **Implemented (VS17 step scope):** Delivered the bounded VS17 execution baseline across telemetry load-tooling helpers, k6 orchestration script, deterministic k6 profile script, focused unit coverage, and operator runbook guidance.
+- **Backend implementation artifacts:** Added `backend/app/modules/telemetry/load_tooling.py`, `backend/scripts/run_vs17_external_load.py`, `backend/scripts/k6/vs17_telemetry_health.js`, and `backend/tests/unit/test_vs17_load_tooling.py` to provide deterministic profile resolution, fixture pumping, k6 command execution, and evidence artifact writing.
+- **Execution hardening applied:** Added Docker user mapping (`--user <uid>:<gid>`) and writable output-directory fallback (`/tmp/opencode/vs17-artifacts-<run_id>`) to prevent root-owned artifact failures when default `backend/artifacts/load-testing/vs17` is not writable.
+- **k6 evidence extraction fix:** Extended summary parsing to support current k6 summary shapes (`metric.values` and flat metric keys, including `http_req_duration{expected_response:true}` fallback) so evidence metrics are populated deterministically.
+- **Runbook delivery:** Added `docs/project/VS17ExternalLoadToolingRunbook.md` with preconditions, command paths (authenticated and fixture-only), expected outputs, and bounded failure/rollback handling.
+- **Execution evidence (local-smoke):** `poetry run python scripts/run_vs17_external_load.py --profile local-smoke --base-url http://127.0.0.1:8000` succeeded with Docker runner fallback, artifact `status=success`, counter delta `ingested=120 persisted=120 fanout=120 dropped=0`, and k6 metrics (`http_req_failed_rate=0.0`, `http_req_duration_p95_ms=2.1907872`, `http_reqs_count=495.0`) from `/tmp/opencode/vs17-artifacts-20260814T205740Z/20260814T205740Z_local_smoke.json`.
+- **Validation:** Scoped Ruff passed (`poetry run ruff check app/modules/telemetry/load_tooling.py scripts/run_vs17_external_load.py tests/unit/test_vs17_load_tooling.py`), VS17-targeted suite passed (`poetry run pytest tests/unit/test_vs17_load_tooling.py -q`, `28 passed`), and full backend regression passed (`poetry run pytest tests -q`, `484 passed`).
+- **Frontend gate applicability:** Frontend full-gate command chain remains not required for Step 2 because no frontend files were touched.
+- **Scope/governance:** Tooling/test/docs-only increment; no REST/WebSocket/event/channel/schema contract changes, no API envelope drift, no C5/C6 boundary change, and fail-open runtime/event semantics remain unchanged.
+
 ## [2026-08-14] - Vertical Slice 17 Step 1 (Execution Charter + Finite Checklist Lock)
 
 - **Implemented (VS17 step scope):** Activated VS17 as the current execution slice and locked a finite, non-overlapping step sequence in `CurrentSprint.md` before introducing any tooling/runtime changes.
