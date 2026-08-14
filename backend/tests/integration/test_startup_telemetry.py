@@ -156,3 +156,4 @@ def test_startup_simulation_stream_is_provisioned_for_consumer_groups():
 
     assert "stream:simulation" in STREAM_GROUPS
     assert "stream:plugin" in STREAM_GROUPS
+    assert "stream:report" in STREAM_GROUPS

@@ -9,6 +9,7 @@ import {
   LoginPage,
   OverviewPage,
   PluginsPage,
+  ReportsPage,
   ReliabilityPage,
   SimulationPage,
   TenancyPage,
@@ -55,6 +56,7 @@ export function App() {
             <Route path="telemetry" element={<TelemetryPage />} />
             <Route path="reliability" element={<ReliabilityPage />} />
             <Route path="plugins" element={<PluginsPage />} />
+            <Route path="reports" element={<ReportsPage />} />
             <Route path="digital-twin" element={<TwinPage />} />
             <Route path="simulation" element={<SimulationPage />} />
             <Route path="intent" element={<IntentPage />} />

@@ -7,6 +7,7 @@ export const TopologyAnalysisPage = lazy(() => import("@/features/topology/Topol
 export const TelemetryPage = lazy(() => import("@/features/telemetry/TelemetryPage").then((module) => ({ default: module.TelemetryPage })));
 export const ReliabilityPage = lazy(() => import("@/features/reliability/ReliabilityPage").then((module) => ({ default: module.ReliabilityPage })));
 export const PluginsPage = lazy(() => import("@/features/plugins/PluginsPage").then((module) => ({ default: module.PluginsPage })));
+export const ReportsPage = lazy(() => import("@/features/reporting/ReportsPage").then((module) => ({ default: module.ReportsPage })));
 export const TwinPage = lazy(() => import("@/features/digitalTwin/TwinPage").then((module) => ({ default: module.TwinPage })));
 export const SimulationPage = lazy(() => import("@/features/simulation/SimulationPage").then((module) => ({ default: module.SimulationPage })));
 export const IntentPage = lazy(() => import("@/features/intent/IntentPage").then((module) => ({ default: module.IntentPage })));

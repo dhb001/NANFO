@@ -31,6 +31,7 @@ STREAM_GROUPS: dict[str, str] = {
     "stream:alert": "nanfo-consumers",
     "stream:simulation": "nanfo-consumers",
     "stream:plugin": "nanfo-consumers",
+    "stream:report": "nanfo-consumers",
 }
 
 

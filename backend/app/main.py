@@ -31,6 +31,7 @@ from app.api.v1.intents import router as intent_router
 from app.api.v1.networks import router as network_router
 from app.api.v1.organizations import router as org_router
 from app.api.v1.plugins import router as plugins_router
+from app.api.v1.reports import router as reports_router
 from app.api.v1.simulation import router as simulation_router
 from app.api.v1.telemetry import router as telemetry_router
 from app.api.v1.topology import router as topology_router
@@ -42,6 +43,7 @@ from app.db.redis import close_redis, get_redis_client, init_redis
 from app.events.bus import STREAM_GROUPS, ensure_consumer_groups, run_consumer_loop
 from app.events.consumers.alert_consumer import ALERT_HANDLERS
 from app.events.consumers.audit_consumer import AUDIT_HANDLERS
+from app.events.consumers.report_consumer import REPORT_HANDLERS
 from app.events.consumers.telemetry_consumer import TELEMETRY_HANDLERS
 from app.events.consumers.topology_consumer import TOPOLOGY_HANDLERS
 from app.events.consumers.ws_push_consumer import WS_PUSH_HANDLERS
@@ -195,6 +197,7 @@ async def lifespan(app: FastAPI):
         WS_PUSH_HANDLERS,
         TELEMETRY_HANDLERS,
         ALERT_HANDLERS,
+        REPORT_HANDLERS,
     )
 
     # Start one consumer loop per stream
@@ -320,6 +323,7 @@ app.include_router(telemetry_router)
 app.include_router(simulation_router)
 app.include_router(intent_router)
 app.include_router(plugins_router)
+app.include_router(reports_router)
 app.include_router(alerts_router)
 app.include_router(audit_router)
 app.include_router(ws_router)

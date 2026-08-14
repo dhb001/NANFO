@@ -13,6 +13,7 @@
 - Vertical Slice 10 Implementation: **COMPLETE** — Deferred topology analysis endpoints and frontend parity are delivered through VS10 closure gate with full backend/frontend validation evidence.
 - Vertical Slice 11 Implementation: **COMPLETE** — Alerts lifecycle API completion and frontend parity are delivered through VS11 closure gate with full backend/frontend validation evidence.
 - Vertical Slice 12 Implementation: **COMPLETE** — Plugin runtime safety baseline and frontend plugin lifecycle parity are delivered through VS12 closure gate with full backend/frontend validation evidence.
+- Vertical Slice 13 Implementation: **COMPLETE** — Reporting async generation/status baseline and frontend reporting lifecycle parity are delivered through VS13 closure gate with full backend/frontend validation evidence.
 
 ## Subsystem Progress — Vertical Slice 8
 
@@ -139,7 +140,7 @@
 - [x] Closure Gate: Final scoped/frontend/backend validation pass and VS12 tracking finalization (`poetry run ruff check` scoped plugin files ✅, VS12 targeted backend suite `51 passed` ✅, backend regression `poetry run pytest tests -q` `427 passed` ✅, frontend `npm run lint` ✅, `npm run typecheck` ✅, `npm run test` `56 passed` ✅, `npm run test:e2e` `13/13 passed` ✅, `npm run build` ✅, `npm run perf:bundle` ✅).
 
 ### VS13 — Reporting Async Pipeline Baseline
-- Status: **PLANNED**.
+- Status: **COMPLETE**.
 - Objective: Deliver report generation/status APIs with queue-backed artifact lifecycle tracking.
 - Scope boundaries: Implement only `POST /api/v1/reports/generate` and `GET /api/v1/reports/{id}` with metadata/artifact references; no ad-hoc analytics endpoint expansion.
 - Acceptance criteria: Requests produce stable report jobs, status endpoint reflects terminal states, and `report.requested|generated|failed` event contracts are covered.
@@ -153,6 +154,14 @@
   - Accessibility/responsiveness acceptance criteria: Accessible form labels/errors, keyboard-first report actions, screen-reader-friendly status changes, and responsive request/status layouts.
   - Frontend tests required (`unit`, `component`, `e2e`): Unit tests for report status mapping and retry triggers; component tests for generate/status views; e2e tests for request -> in-progress -> success/failure lifecycle.
   - API and WebSocket dependencies: `POST /api/v1/reports/generate`, `GET /api/v1/reports/{id}`; WebSocket dependency: none documented for this slice.
+  - Current blocker: none.
+  - Latest frontend full-gate evidence (2026-08-14): `npm run lint` PASS, `npm run typecheck` PASS, `npm run test` PASS (`19 files, 67 tests`), `npm run test:e2e` PASS (`15/15`), `npm run build` PASS, `npm run perf:bundle` PASS.
+
+## Subsystem Progress — Vertical Slice 13
+
+- [x] Step 1: Add backend reporting async baseline (`POST /api/v1/reports/generate`, `GET /api/v1/reports/{id}`) with migration-backed report lifecycle persistence, idempotency/date-range/format/network-boundary validation, report stream registration, report consumer lifecycle transitions, audit parity for `report.requested|generated|failed`, and fail-open queue degradation behavior.
+- [x] Step 2: Add VS13 frontend reporting parity (typed reporting API/hooks, report generate/status page with loading/empty/error/retry/success states, artifact metadata rendering, retry flow for failed jobs, and navigation/hotkey/command palette wiring for `/ops/reports`).
+- [x] Closure Gate: Final scoped/frontend/backend validation pass and VS13 tracking finalization (`poetry run ruff check app/modules/report tests/unit/test_report_service.py tests/integration/test_reports_endpoints.py tests/unit/test_report_consumer.py tests/unit/test_event_contracts.py tests/unit/test_audit_consumer.py tests/integration/test_startup_telemetry.py` ✅, VS13 targeted backend suite `54 passed` ✅, backend regression `poetry run pytest tests -q` `455 passed` ✅, frontend `npm run lint` ✅, `npm run typecheck` ✅, `npm run test` `67 passed` ✅, `npm run test:e2e` `15/15 passed` ✅, `npm run build` ✅, `npm run perf:bundle` ✅).
 
 ### VS14 — Production Readiness Closure Gate
 - Status: **PLANNED**.
@@ -177,7 +186,7 @@
 - [x] VS10 closure complete (deferred topology analysis endpoint set delivered under C6 governance).
 - [x] VS11 closure complete (alerts API lifecycle + event parity delivered).
 - [x] VS12 closure complete (plugin lifecycle + sandbox safety baseline delivered).
-- [ ] VS13 closure complete (reporting async generation/status baseline delivered).
+- [x] VS13 closure complete (reporting async generation/status baseline delivered).
 - [ ] VS14 closure complete (M10 production readiness gate and release evidence finalized).
 
 ## Subsystem Progress — Vertical Slice 7

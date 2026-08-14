@@ -58,6 +58,46 @@ export interface MockPluginRecord {
   updated_at: string;
 }
 
+export interface MockReportArtifactRef {
+  artifact_id: string;
+  uri: string;
+  media_type: string;
+  checksum_sha256: string;
+  size_bytes: number;
+  generated_at: string;
+}
+
+export interface MockReportRecord {
+  report_id: string;
+  workspace_id: string;
+  network_id: string | null;
+  report_type: string;
+  format: string;
+  status: "requested" | "generated" | "failed";
+  date_range: {
+    start: string;
+    end: string;
+  };
+  scope: Record<string, unknown>;
+  filters: Record<string, unknown>;
+  artifacts: MockReportArtifactRef[];
+  error: {
+    code: string;
+    message: string;
+    [key: string]: unknown;
+  } | null;
+  queue_status: "queued" | "deferred" | "replayed";
+  stream_entry_id: string | null;
+  warning: string | null;
+  idempotency_key: string | null;
+  correlation_id: string;
+  requested_by_user_id: string;
+  requested_at: string;
+  completed_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface SessionMockState {
   userId: string;
   email: string;
@@ -67,6 +107,7 @@ export interface SessionMockState {
   devicesByNetwork: Record<string, MockDevice[]>;
   alerts: MockAlertRecord[];
   plugins: MockPluginRecord[];
+  reports: MockReportRecord[];
 }
 
 export function createDefaultSessionState(): SessionMockState {
@@ -108,6 +149,7 @@ export function createDefaultSessionState(): SessionMockState {
     },
     alerts: [],
     plugins: [],
+    reports: [],
   };
 }
 
@@ -316,6 +358,121 @@ function validatePluginSandbox(sandbox: Record<string, unknown>): { code: string
   }
 
   return null;
+}
+
+function nextReportId(state: SessionMockState): string {
+  const serial = String(state.reports.length + 951).padStart(12, "0");
+  return `00000000-0000-0000-0000-${serial}`;
+}
+
+function normalizeReportFormat(value: unknown): "pdf" | "csv" | null {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  if (normalized === "pdf" || normalized === "csv") {
+    return normalized;
+  }
+  return null;
+}
+
+function isValidDateRange(dateRange: { start: string; end: string } | null): boolean {
+  if (!dateRange) {
+    return false;
+  }
+  const start = new Date(dateRange.start);
+  const end = new Date(dateRange.end);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+    return false;
+  }
+  return start.getTime() <= end.getTime();
+}
+
+function parseReportGenerateBody(payload: unknown): {
+  workspace_id: string;
+  network_id: string | null;
+  report_type: string;
+  format: "pdf" | "csv";
+  date_range: { start: string; end: string };
+  scope: Record<string, unknown>;
+  filters: Record<string, unknown>;
+} | null {
+  const body = typeof payload === "object" && payload !== null
+    ? payload as Record<string, unknown>
+    : null;
+  if (!body) {
+    return null;
+  }
+
+  const workspaceId = String(body.workspace_id ?? "").trim();
+  const reportType = String(body.report_type ?? "").trim();
+  const format = normalizeReportFormat(body.format);
+  const networkIdRaw = body.network_id;
+  const networkId = networkIdRaw == null ? null : String(networkIdRaw).trim() || null;
+
+  const dateRangeRaw = typeof body.date_range === "object" && body.date_range !== null
+    ? body.date_range as Record<string, unknown>
+    : null;
+  const dateRange = dateRangeRaw
+    ? {
+      start: String(dateRangeRaw.start ?? "").trim(),
+      end: String(dateRangeRaw.end ?? "").trim(),
+    }
+    : null;
+
+  const scope = typeof body.scope === "object" && body.scope !== null && !Array.isArray(body.scope)
+    ? body.scope as Record<string, unknown>
+    : null;
+  const filters = typeof body.filters === "object" && body.filters !== null && !Array.isArray(body.filters)
+    ? body.filters as Record<string, unknown>
+    : null;
+
+  if (!workspaceId || !reportType || !format || !dateRange || !scope || !filters) {
+    return null;
+  }
+
+  return {
+    workspace_id: workspaceId,
+    network_id: networkId,
+    report_type: reportType,
+    format,
+    date_range: dateRange,
+    scope,
+    filters,
+  };
+}
+
+function reportRequestFingerprint(input: {
+  network_id: string | null;
+  report_type: string;
+  format: string;
+  date_range: { start: string; end: string };
+  scope: Record<string, unknown>;
+  filters: Record<string, unknown>;
+}): string {
+  return JSON.stringify({
+    network_id: input.network_id,
+    report_type: input.report_type,
+    format: input.format,
+    date_range: input.date_range,
+    scope: input.scope,
+    filters: input.filters,
+  });
+}
+
+function buildReportArtifact(record: MockReportRecord, generatedAt: string): MockReportArtifactRef {
+  const extension = record.format === "csv" ? "csv" : "pdf";
+  const mediaType = extension === "pdf" ? "application/pdf" : "text/csv";
+  return {
+    artifact_id: `artifact-${record.report_id}-${extension}`,
+    uri: `s3://nanfo-reports/${record.workspace_id}/${record.report_id}.${extension}`,
+    media_type: mediaType,
+    checksum_sha256: `sha256-${record.report_id.replace(/-/g, "").slice(0, 18)}`,
+    size_bytes: extension === "pdf" ? 16384 : 8192,
+    generated_at: generatedAt,
+  };
+}
+
+function shouldReportFail(record: MockReportRecord): boolean {
+  const filters = record.filters;
+  return filters.force_fail === true || filters.fail_generation === true;
 }
 
 export async function installSessionMocks(page: Page, state: SessionMockState): Promise<void> {
@@ -1064,6 +1221,268 @@ export async function installSessionMocks(page: Page, state: SessionMockState): 
           success: true,
           data: buildPluginActionPayload(target, "queued"),
           meta: { request_id: "req-plugin-disable", timestamp: now },
+          errors: null,
+        }),
+      });
+      return;
+    }
+
+    await route.continue();
+  });
+
+  await page.route("**/api/v1/reports/**", async (route) => {
+    const request = route.request();
+    const requestUrl = new URL(request.url());
+    const method = request.method();
+    const pathname = requestUrl.pathname;
+
+    if (method === "POST" && pathname === "/api/v1/reports/generate") {
+      const payload = parseReportGenerateBody(request.postDataJSON());
+      if (!payload) {
+        await route.fulfill({
+          status: 400,
+          contentType: "application/json",
+          body: JSON.stringify({
+            success: false,
+            data: null,
+            meta: { request_id: "req-report-generate-400", timestamp: "2026-08-14T12:00:00Z" },
+            errors: {
+              code: "REPORT_REQUEST_INVALID",
+              message: "Report request payload is invalid.",
+            },
+          }),
+        });
+        return;
+      }
+
+      if (payload.workspace_id !== state.workspaceId) {
+        await route.fulfill({
+          status: 404,
+          contentType: "application/json",
+          body: JSON.stringify({
+            success: false,
+            data: null,
+            meta: { request_id: "req-report-workspace-404", timestamp: "2026-08-14T12:00:00Z" },
+            errors: {
+              code: "WORKSPACE_NOT_FOUND",
+              message: "Workspace not found.",
+            },
+          }),
+        });
+        return;
+      }
+
+      if (payload.network_id && !state.networks.some((network) => network.network_id === payload.network_id)) {
+        await route.fulfill({
+          status: 404,
+          contentType: "application/json",
+          body: JSON.stringify({
+            success: false,
+            data: null,
+            meta: { request_id: "req-report-network-404", timestamp: "2026-08-14T12:00:00Z" },
+            errors: {
+              code: "REPORT_NETWORK_NOT_FOUND",
+              message: "network_id does not reference an active network.",
+            },
+          }),
+        });
+        return;
+      }
+
+      if (!isValidDateRange(payload.date_range)) {
+        await route.fulfill({
+          status: 400,
+          contentType: "application/json",
+          body: JSON.stringify({
+            success: false,
+            data: null,
+            meta: { request_id: "req-report-date-400", timestamp: "2026-08-14T12:00:00Z" },
+            errors: {
+              code: "REPORT_DATE_RANGE_INVALID",
+              message: "date_range.start and date_range.end must be valid timestamps with start <= end.",
+            },
+          }),
+        });
+        return;
+      }
+
+      const idempotencyKey = request.headers()["idempotency-key"]?.trim() ?? "";
+      const fingerprint = reportRequestFingerprint(payload);
+      const existing = idempotencyKey
+        ? state.reports.find((report) => report.workspace_id === payload.workspace_id && report.idempotency_key === idempotencyKey)
+        : null;
+
+      if (existing) {
+        const existingFingerprint = reportRequestFingerprint(existing);
+        if (existingFingerprint !== fingerprint) {
+          await route.fulfill({
+            status: 409,
+            contentType: "application/json",
+            body: JSON.stringify({
+              success: false,
+              data: null,
+              meta: { request_id: "req-report-idempotency-409", timestamp: "2026-08-14T12:00:00Z" },
+              errors: {
+                code: "REPORT_IDEMPOTENCY_CONFLICT",
+                message: "idempotency_key is already bound to a different report request.",
+              },
+            }),
+          });
+          return;
+        }
+
+        await route.fulfill({
+          status: 202,
+          contentType: "application/json",
+          body: JSON.stringify({
+            success: true,
+            data: {
+              ...existing,
+              idempotent_replay: true,
+              queue_status: existing.queue_status === "requested" ? "queued" : existing.queue_status,
+            },
+            meta: { request_id: "req-report-generate-replayed", timestamp: "2026-08-14T12:00:00Z" },
+            errors: null,
+          }),
+        });
+        return;
+      }
+
+      const now = "2026-08-14T12:00:00Z";
+      const reportId = nextReportId(state);
+      const shouldFail = shouldReportFail({
+        report_id: reportId,
+        workspace_id: payload.workspace_id,
+        network_id: payload.network_id,
+        report_type: payload.report_type,
+        format: payload.format,
+        status: "requested",
+        date_range: payload.date_range,
+        scope: payload.scope,
+        filters: payload.filters,
+        artifacts: [],
+        error: null,
+        queue_status: "queued",
+        stream_entry_id: null,
+        warning: null,
+        idempotency_key: idempotencyKey || null,
+        correlation_id: `corr-${Date.now()}`,
+        requested_by_user_id: state.userId,
+        requested_at: now,
+        completed_at: null,
+        created_at: now,
+        updated_at: now,
+      });
+
+      const queuedStatus: MockReportRecord["status"] = shouldFail ? "failed" : "generated";
+      const terminalTime = "2026-08-14T12:00:05Z";
+      const seedRecord: MockReportRecord = {
+        report_id: reportId,
+        workspace_id: payload.workspace_id,
+        network_id: payload.network_id,
+        report_type: payload.report_type,
+        format: payload.format,
+        status: queuedStatus,
+        date_range: payload.date_range,
+        scope: payload.scope,
+        filters: payload.filters,
+        artifacts: shouldFail ? [] : [buildReportArtifact({
+          report_id: reportId,
+          workspace_id: payload.workspace_id,
+          network_id: payload.network_id,
+          report_type: payload.report_type,
+          format: payload.format,
+          status: queuedStatus,
+          date_range: payload.date_range,
+          scope: payload.scope,
+          filters: payload.filters,
+          artifacts: [],
+          error: null,
+          queue_status: "queued",
+          stream_entry_id: null,
+          warning: null,
+          idempotency_key: idempotencyKey || null,
+          correlation_id: `corr-${Date.now()}`,
+          requested_by_user_id: state.userId,
+          requested_at: now,
+          completed_at: null,
+          created_at: now,
+          updated_at: now,
+        }, terminalTime)],
+        error: shouldFail
+          ? {
+            code: "REPORT_GENERATION_FAILED",
+            message: "Report generation failed during queue processing.",
+          }
+          : null,
+        queue_status: "queued",
+        stream_entry_id: "report-1000-0",
+        warning: null,
+        idempotency_key: idempotencyKey || null,
+        correlation_id: `corr-${Date.now()}`,
+        requested_by_user_id: state.userId,
+        requested_at: now,
+        completed_at: terminalTime,
+        created_at: now,
+        updated_at: terminalTime,
+      };
+
+      state.reports.unshift(seedRecord);
+
+      const requestedView = {
+        ...seedRecord,
+        status: "requested",
+        artifacts: [],
+        error: null,
+        completed_at: null,
+        updated_at: now,
+      };
+
+      await route.fulfill({
+        status: 202,
+        contentType: "application/json",
+        body: JSON.stringify({
+          success: true,
+          data: {
+            ...requestedView,
+            idempotent_replay: false,
+          },
+          meta: { request_id: "req-report-generate", timestamp: now },
+          errors: null,
+        }),
+      });
+      return;
+    }
+
+    if (method === "GET" && pathname.startsWith("/api/v1/reports/")) {
+      const reportId = pathname.replace("/api/v1/reports/", "").trim();
+      const workspaceId = requestUrl.searchParams.get("workspace_id")?.trim() ?? "";
+      const report = state.reports.find((item) => item.report_id === reportId && item.workspace_id === workspaceId);
+
+      if (!report) {
+        await route.fulfill({
+          status: 404,
+          contentType: "application/json",
+          body: JSON.stringify({
+            success: false,
+            data: null,
+            meta: { request_id: "req-report-detail-404", timestamp: "2026-08-14T12:00:00Z" },
+            errors: {
+              code: "REPORT_NOT_FOUND",
+              message: "Report not found.",
+            },
+          }),
+        });
+        return;
+      }
+
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          success: true,
+          data: report,
+          meta: { request_id: "req-report-detail", timestamp: "2026-08-14T12:00:06Z" },
           errors: null,
         }),
       });

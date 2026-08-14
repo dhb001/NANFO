@@ -33,6 +33,10 @@ describe("hotkeys", () => {
       nextPrefix: null,
       path: "/ops/plugins",
     });
+    expect(resolveChordNavigation(null, "y")).toEqual({
+      nextPrefix: null,
+      path: "/ops/reports",
+    });
   });
 
   it("resolves g-prefixed chord navigation", () => {
@@ -59,6 +63,10 @@ describe("hotkeys", () => {
     expect(resolveChordNavigation("g", "u")).toEqual({
       nextPrefix: null,
       path: "/ops/plugins",
+    });
+    expect(resolveChordNavigation("g", "y")).toEqual({
+      nextPrefix: null,
+      path: "/ops/reports",
     });
   });
 });

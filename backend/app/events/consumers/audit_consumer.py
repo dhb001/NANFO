@@ -36,6 +36,9 @@ _AUDIT_MAP: dict[str, dict] = {
     "plugin.enabled": {"resource_type": "plugin"},
     "plugin.disabled": {"resource_type": "plugin"},
     "plugin.failed": {"resource_type": "plugin"},
+    "report.requested": {"resource_type": "report"},
+    "report.generated": {"resource_type": "report"},
+    "report.failed": {"resource_type": "report"},
     "network.device.added":    {"resource_type": "device"},
     "network.device.updated":  {"resource_type": "device"},
     "network.device.deleted":  {"resource_type": "device"},
@@ -85,6 +88,7 @@ async def handle_audit_event(event: dict) -> None:
         payload.get("alert_id")
         or payload.get("alertId")
         or payload.get("intent_id")
+        or payload.get("report_id")
         or payload.get("plugin_id")
         or payload.get("simulation_id")
         or payload.get("parent_simulation_id")

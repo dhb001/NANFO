@@ -29,6 +29,7 @@ from app.modules.organization.models import (  # noqa: F401
     OrgMember,
     Workspace,
 )
+from app.modules.report.models import ReportRecord  # noqa: F401
 from app.modules.telemetry.models import TelemetryRecord  # noqa: F401
 
 config = context.config

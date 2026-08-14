@@ -80,6 +80,9 @@ class Settings(BaseSettings):
     PLUGIN_ALLOWED_ISOLATION_MODES: str = "process,container"
     PLUGIN_ALLOWED_PERMISSIONS: str = "read:telemetry,read:topology,read:alerts"
 
+    # Reporting artifact lifecycle baseline
+    REPORTS_ARTIFACT_BUCKET: str = "nanfo-reports"
+
     @computed_field  # type: ignore[misc]
     @property
     def POSTGRES_DSN(self) -> str:

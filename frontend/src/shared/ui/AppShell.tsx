@@ -12,6 +12,7 @@ const navItems = [
   { to: "/ops/telemetry", label: "Telemetry", keyHint: "G T" },
   { to: "/ops/reliability", label: "Reliability", keyHint: "G R / G L" },
   { to: "/ops/plugins", label: "Plugins", keyHint: "G U" },
+  { to: "/ops/reports", label: "Reports", keyHint: "G Y" },
   { to: "/ops/digital-twin", label: "Digital Twin", keyHint: "G D" },
   { to: "/ops/simulation", label: "Simulation", keyHint: "G S" },
   { to: "/ops/intent", label: "Intent", keyHint: "G I" },

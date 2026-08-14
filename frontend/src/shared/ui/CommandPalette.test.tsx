@@ -69,4 +69,24 @@ describe("CommandPalette", () => {
 
     expect(screen.getByText("Go to Plugins")).toBeInTheDocument();
   });
+
+  it("includes reports navigation command", async () => {
+    const user = userEvent.setup();
+
+    useUiStore.setState({
+      commandPaletteOpen: true,
+      toasts: [],
+    });
+
+    render(
+      <MemoryRouter>
+        <CommandPalette />
+      </MemoryRouter>,
+    );
+
+    const search = screen.getByLabelText("Search commands");
+    await user.type(search, "reports");
+
+    expect(screen.getByText("Go to Reports")).toBeInTheDocument();
+  });
 });

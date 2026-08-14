@@ -1,5 +1,33 @@
 # Development Journal
 
+## [2026-08-14] - Vertical Slice 13 Closure Gate Complete
+
+- **Completed:** Closed VS13 after finishing backend reporting async lifecycle delivery and frontend reporting parity.
+- **Backend closure validation:** Scoped Ruff on VS13 report module/tests passed; VS13 targeted backend suite passed (`54` tests); final backend regression gate passed (`poetry run pytest tests -q`, `455 passed`).
+- **Frontend closure validation:** Full frontend quality gate passed (`npm run lint`, `npm run typecheck`, `npm run test` with `67` tests, `npm run test:e2e` with `15/15` specs, `npm run build`, `npm run perf:bundle`).
+- **Scope/governance confirmation:** No endpoint expansion beyond VS13-approved reporting routes, no REST envelope drift, no C5/C6 boundary relaxation, no undocumented event/channel additions, and no new websocket channels for this slice.
+- **Performance note:** Build/perf gates remain green with existing large `three` chunk warning unchanged from prior baseline.
+
+## [2026-08-14] - Vertical Slice 13 Step 2 (Frontend Reporting Parity)
+
+- **Implemented (VS13 frontend parity):** Added a dedicated reports operator surface (`/ops/reports`) with report request form, lifecycle status view, artifact metadata rendering, failed-job diagnostics, and retry flow.
+- **Client/hook contract alignment:** Added typed reporting REST client + hooks for `POST /reports/generate` and `GET /reports/{id}` preserving canonical envelope usage, `workspace_id` status-query contract, and `Idempotency-Key` request handling.
+- **Navigation/accessibility parity:** Added reports navigation across app shell, command palette, and keyboard shortcuts (`y`, `g y`) to preserve keyboard-first workflows.
+- **Failure/retry behavior:** Added explicit JSON/date-range client validation, surfaced idempotency conflict and terminal failure context, and implemented retry path with regenerated idempotency key for failed report requests.
+- **Coverage updates:** Added VS13 frontend logic/API/component coverage and new Playwright lifecycle spec for generated and failed->retry report flows; extended shared e2e session mocks for reporting endpoints and idempotency semantics.
+- **Validation:** Frontend quality gates passed (`npm run lint`, `npm run typecheck`, `npm run test` `19 files, 67 tests`, `npm run test:e2e` `15/15`, `npm run build`, `npm run perf:bundle`).
+- **Scope/governance:** No backend API/event/channel changes in Step 2 and no contract/envelope drift.
+
+## [2026-08-14] - Vertical Slice 13 Step 1 (Reporting Async Pipeline Backend Baseline)
+
+- **Implemented (VS13 backend):** Added reporting API endpoints `POST /api/v1/reports/generate` (`202`) and `GET /api/v1/reports/{id}` under canonical `{success,data,meta,errors}` envelope responses.
+- **Persistence baseline:** Added migration `0008_reporting_async_pipeline_baseline` and Report module ORM/repository/service foundation for lifecycle state, idempotency replay/conflict handling, output format/date-range validation, and artifact/error metadata.
+- **Event/audit parity:** Added report stream routing and consumer-group registration, report lifecycle consumer handling for `report.requested` terminal transitions, and audit mapping coverage for `report.requested|report.generated|report.failed`.
+- **Fail-open behavior:** Reporting lifecycle publish failures remain warning-only (`queue_status=deferred`, `warning=event_queue_unavailable`) with persisted lifecycle continuity and non-fatal API responses.
+- **Coverage updates:** Added reporting service + consumer unit suites, reporting endpoint integration suite, and parity assertions in existing event-contract/audit/startup registration tests.
+- **Validation:** Scoped Ruff passed for VS13 report scope; VS13 targeted backend suite passed (`54 passed`); full backend regression gate passed (`455 passed`).
+- **Scope/governance:** No unapproved API/channel additions, no cross-module SQL join drift, and no C5/C6 boundary relaxations.
+
 ## [2026-08-14] - Vertical Slice 12 Closure Gate Complete
 
 - **Completed:** Closed VS12 after finishing backend plugin runtime safety delivery and frontend plugin lifecycle parity.

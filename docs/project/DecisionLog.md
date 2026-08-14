@@ -3,6 +3,85 @@
 Lightweight chronological notes for decisions that do not require a full ADR.
 
 ## 2026-08-14
+### VS13 Closure Gate: Accept Completion After Full Backend + Frontend Green Validation Suite
+Decision: Mark VS13 complete once scoped reporting backend validation, full backend regression, and full frontend quality gates all pass in a single closure evidence set.
+Reason:
+- Slice-completion governance requires both backend and frontend acceptance criteria to pass before closure.
+- VS13 Step 1 and Step 2 implementation scope is complete; remaining requirement is authoritative validation evidence and tracking finalization.
+- Final rerun produced all-green frontend e2e (`15/15`) including new VS13 reporting lifecycle scenarios.
+Impact:
+- `CurrentSprint.md` now marks VS13 status as `COMPLETE`, closes VS13 checklist items, and records command-level closure evidence.
+- `DevelopmentJournal.md` includes dedicated VS13 Step 1, Step 2, and closure entries with backend/frontend gate outcomes.
+- Remaining-work checklist advances to VS14 as the next planned unfinished slice.
+Assumptions:
+- Existing large `three` chunk warning remains accepted baseline for this milestone and is deferred to production-readiness/performance scope.
+- Closure acceptance uses the latest all-green run outputs as authoritative evidence.
+Related:
+- `docs/project/CurrentSprint.md`
+- `docs/project/DevelopmentJournal.md`
+- `docs/project/DecisionLog.md`
+
+## 2026-08-14
+### VS13 Step 2: Frontend Reporting Lifecycle Parity on Existing Contracts
+Decision: Implement VS13 frontend parity as a dedicated `/ops/reports` lifecycle surface driven strictly by reporting REST contracts, with route/nav/hotkey/command integrations and explicit failure/retry behavior.
+Reason:
+- VS13 closure governance requires frontend acceptance criteria (UI states, retry handling, tests) in addition to backend endpoint delivery.
+- Existing backend Step 1 already delivered the approved endpoint set; frontend parity can be completed without API/event/channel expansion.
+- Reporting operations are asynchronous and operator-sensitive, so explicit status/retry UX and keyboard-first discoverability are required for practical usage.
+Impact:
+- Added typed reporting API client/hooks and reporting page with generate/status workflows, artifact metadata rendering, and failed-job retry action.
+- Added app routing export + protected route wiring for `/ops/reports`.
+- Added reports entry points in app shell, command palette, and hotkey mappings (`y`, `g y`).
+- Added VS13 frontend coverage across logic/API/component/e2e layers and extended shared e2e session mocks for reporting contracts/idempotency semantics.
+Assumptions:
+- VS13 status freshness uses polling-based reconciliation (`useQuery` refetch interval); no websocket channel is added in this slice.
+- Existing bundle-size warning for `three` remains accepted baseline and is deferred to production-readiness optimization scope.
+Related:
+- `frontend/src/features/reporting/ReportsPage.tsx`
+- `frontend/src/features/reporting/hooks.ts`
+- `frontend/src/features/reporting/api.ts`
+- `frontend/src/features/reporting/logic.ts`
+- `frontend/src/app/App.tsx`
+- `frontend/src/app/routes.ts`
+- `frontend/src/shared/ui/AppShell.tsx`
+- `frontend/src/shared/ui/CommandPalette.tsx`
+- `frontend/src/shared/lib/hotkeys.ts`
+- `frontend/tests/e2e/vs13-reporting.spec.ts`
+- `frontend/tests/e2e/support/session.ts`
+- `docs/project/CurrentSprint.md`
+- `docs/project/DevelopmentJournal.md`
+
+## 2026-08-14
+### VS13 Step 1: Reporting Async Pipeline Activation with Persistence and Event/Audit Parity
+Decision: Activate VS13 reporting scope by adding the PRD-approved reporting endpoint set (`POST /api/v1/reports/generate`, `GET /api/v1/reports/{id}`), migration-backed report lifecycle persistence, and reporting event/audit parity.
+Reason:
+- CurrentSprint VS13 scope explicitly enables these two reporting endpoints while prohibiting route-surface expansion.
+- Reporting PRD acceptance requires asynchronous generation lifecycle and artifact/error metadata visibility.
+- Existing modular monolith event-bus patterns and fail-open publication semantics support bounded implementation without architecture drift.
+Impact:
+- Added Report module persistence/service stack and Alembic migration `0008_reporting_async_pipeline_baseline` for lifecycle records.
+- Added reporting router wiring and validation logic for idempotency, format/date-range, and workspace/network boundary checks.
+- Added report stream registration plus report consumer and audit mapping coverage for `report.requested|report.generated|report.failed`.
+- Added targeted unit/integration coverage for reporting service, endpoints, consumer behavior, and event/audit/startup parity.
+Assumptions:
+- VS13 lifecycle uses deterministic in-process consumer baseline for terminal generated/failed outcomes and artifact metadata synthesis rather than external worker integration in this slice.
+- Queue publication degradation remains warning-only/non-fatal (`queue_status=deferred`) to preserve existing fail-open operational posture.
+Related:
+- `backend/app/api/v1/reports.py`
+- `backend/app/modules/report/service.py`
+- `backend/app/modules/report/repository.py`
+- `backend/app/modules/report/models.py`
+- `backend/alembic/versions/0008_reporting_async_pipeline_baseline.py`
+- `backend/app/events/publisher.py`
+- `backend/app/events/bus.py`
+- `backend/app/events/consumers/report_consumer.py`
+- `backend/app/events/consumers/audit_consumer.py`
+- `backend/tests/integration/test_reports_endpoints.py`
+- `backend/tests/unit/test_report_service.py`
+- `docs/project/CurrentSprint.md`
+- `docs/project/DevelopmentJournal.md`
+
+## 2026-08-14
 ### VS12 Closure Gate: Accept Completion After Full Backend + Frontend Green Validation Suite
 Decision: Mark VS12 complete once scoped plugin backend validation, full backend regression, and full frontend quality gates all pass in a single closure evidence set.
 Reason:

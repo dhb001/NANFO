@@ -382,3 +382,47 @@ def test_audit_handlers_include_plugin_lifecycle_events():
     assert "plugin.enabled" in AUDIT_HANDLERS
     assert "plugin.disabled" in AUDIT_HANDLERS
     assert "plugin.failed" in AUDIT_HANDLERS
+
+
+@pytest.mark.asyncio
+async def test_audit_consumer_writes_report_generated_event():
+    db = AsyncMock()
+    db.commit = AsyncMock()
+
+    report_id = str(uuid.uuid4())
+    correlation_id = str(uuid.uuid4())
+    payload = {
+        "report_id": report_id,
+        "report_type": "executive_summary",
+        "status": "generated",
+    }
+    event = {
+        "event_type": "report.generated",
+        "correlation_id": correlation_id,
+        "payload": payload,
+    }
+
+    repo = MagicMock()
+    repo.append = AsyncMock()
+
+    with (
+        patch(
+            "app.events.consumers.audit_consumer.AsyncSessionLocal",
+            return_value=_session_context_manager(db),
+        ),
+        patch("app.events.consumers.audit_consumer.AuditLogRepository", return_value=repo),
+    ):
+        await handle_audit_event(event)
+
+    append_kwargs = repo.append.await_args.kwargs
+    assert append_kwargs["event_type"] == "report.generated"
+    assert append_kwargs["resource_type"] == "report"
+    assert append_kwargs["resource_id"] == uuid.UUID(report_id)
+    assert append_kwargs["correlation_id"] == uuid.UUID(correlation_id)
+    db.commit.assert_awaited_once()
+
+
+def test_audit_handlers_include_report_lifecycle_events():
+    assert "report.requested" in AUDIT_HANDLERS
+    assert "report.generated" in AUDIT_HANDLERS
+    assert "report.failed" in AUDIT_HANDLERS

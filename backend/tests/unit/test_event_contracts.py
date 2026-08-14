@@ -26,3 +26,11 @@ def test_plugin_module_stream_is_registered_for_event_publishing():
 
 def test_plugin_stream_has_consumer_group_registration():
     assert STREAM_GROUPS["stream:plugin"] == "nanfo-consumers"
+
+
+def test_report_module_stream_is_registered_for_event_publishing():
+    assert _STREAM_KEYS["report"] == "stream:report"
+
+
+def test_report_stream_has_consumer_group_registration():
+    assert STREAM_GROUPS["stream:report"] == "nanfo-consumers"
