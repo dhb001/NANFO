@@ -13,7 +13,11 @@ from fastapi.testclient import TestClient
 from app.core.dependencies import get_db, get_redis
 from app.core.security import create_access_token
 from app.main import app
-from app.modules.network.schemas import TopologyGraphResponse
+from app.modules.network.schemas import (
+    TopologyDeviceNeighboursResponse,
+    TopologyGraphResponse,
+    TopologyImpactResponse,
+)
 
 
 def _make_token():
@@ -216,8 +220,8 @@ class TestDeviceEndpoints:
         assert response.status_code == 404
 
 
-class TestC6DeferredEndpointsAbsent:
-    """C6: deferred topology endpoints must NOT be routable."""
+class TestTopologyRouteSurface:
+    """VS10: topology analysis route surface is enabled while legacy paths stay non-routable."""
 
     def test_neighbors_endpoint_does_not_exist(self, client, headers):
         network_id = uuid.uuid4()
@@ -229,29 +233,17 @@ class TestC6DeferredEndpointsAbsent:
         response = client.get("/api/v1/topology/impact", params={"network_id": str(network_id)}, headers=headers)
         assert response.status_code == 404
 
-    def test_reconcile_endpoint_does_not_exist(self, client, headers):
-        response = client.post("/api/v1/topology/reconcile", headers=headers)
-        assert response.status_code == 404
-
-    def test_neighbors_path_pattern_still_not_routable(self, client, headers):
-        response = client.get(f"/api/v1/topology/device/{uuid.uuid4()}/neighbors", headers=headers)
-        assert response.status_code == 404
-
-    def test_impact_path_pattern_still_not_routable(self, client, headers):
-        response = client.get(f"/api/v1/topology/impact/{uuid.uuid4()}", headers=headers)
-        assert response.status_code == 404
-
     def test_reconcile_subpath_pattern_still_not_routable(self, client, headers):
         response = client.post("/api/v1/topology/reconcile/full", headers=headers)
         assert response.status_code == 404
 
     def test_reconcile_get_method_still_not_routable(self, client, headers):
         response = client.get("/api/v1/topology/reconcile", headers=headers)
-        assert response.status_code == 404
+        assert response.status_code == 405
 
     def test_impact_path_post_method_still_not_routable(self, client, headers):
         response = client.post(f"/api/v1/topology/impact/{uuid.uuid4()}", headers=headers)
-        assert response.status_code == 404
+        assert response.status_code == 405
 
     def test_topology_graph_endpoint_exists(self, client, headers):
         """Confirm GET /topology/graph IS registered (not blocked by C6)."""
@@ -270,6 +262,88 @@ class TestC6DeferredEndpointsAbsent:
                 params={"network_id": str(uuid.uuid4())},
                 headers=headers,
             )
+        assert response.status_code != 404
+
+    def test_topology_neighbors_endpoint_exists(self, client, headers):
+        payload = TopologyDeviceNeighboursResponse(
+            device={
+                "device_id": "device-1",
+                "hostname": "core-1",
+                "device_type": "router",
+                "status": "active",
+                "spatial_ref_id": None,
+            },
+            neighbours=[],
+            depth=1,
+            total=0,
+        )
+        with (
+            patch(
+                "app.modules.network.topology.TopologyQueryService.get_device_neighbours",
+                return_value=payload,
+            ),
+            patch("app.api.v1.topology.get_neo4j_driver") as mock_driver,
+        ):
+            mock_driver.return_value = AsyncMock()
+            response = client.get(
+                f"/api/v1/topology/device/{uuid.uuid4()}/neighbors",
+                headers=headers,
+            )
+
+        assert response.status_code != 404
+
+    def test_topology_impact_endpoint_exists(self, client, headers):
+        payload = TopologyImpactResponse(
+            device={
+                "device_id": "device-1",
+                "hostname": "core-1",
+                "device_type": "router",
+                "status": "active",
+                "spatial_ref_id": None,
+            },
+            impacts=[],
+            max_hops=3,
+            total=0,
+        )
+        with (
+            patch(
+                "app.modules.network.topology.TopologyQueryService.get_impact_analysis",
+                return_value=payload,
+            ),
+            patch("app.api.v1.topology.get_neo4j_driver") as mock_driver,
+        ):
+            mock_driver.return_value = AsyncMock()
+            response = client.get(
+                f"/api/v1/topology/impact/{uuid.uuid4()}",
+                headers=headers,
+            )
+
+        assert response.status_code != 404
+
+    def test_topology_reconcile_endpoint_exists(self, client, headers):
+        with (
+            patch(
+                "app.modules.network.topology.TopologyQueryService.reconcile_network",
+                return_value={
+                    "reconcile_id": str(uuid.uuid4()),
+                    "network_id": str(uuid.uuid4()),
+                    "status": "completed",
+                    "checked_nodes": 2,
+                    "checked_edges": 1,
+                    "missing_workspace_nodes": 0,
+                    "workspace_backfilled_nodes": 0,
+                    "warning": None,
+                },
+            ),
+            patch("app.api.v1.topology.get_neo4j_driver") as mock_driver,
+        ):
+            mock_driver.return_value = AsyncMock()
+            response = client.post(
+                "/api/v1/topology/reconcile",
+                json={"network_id": str(uuid.uuid4())},
+                headers=headers,
+            )
+
         assert response.status_code != 404
 
 
@@ -458,6 +532,213 @@ class TestTopologyNodeEndpoint:
             mock_driver.return_value = AsyncMock()
             response = client.get(
                 f"/api/v1/topology/nodes/{uuid.uuid4()}",
+                headers=headers,
+            )
+
+        assert response.status_code == 404
+
+
+class TestTopologyAnalysisEndpoints:
+    def test_topology_neighbors_endpoint_returns_envelope(self, client, headers):
+        payload = TopologyDeviceNeighboursResponse(
+            device={
+                "device_id": "device-1",
+                "hostname": "core-1",
+                "device_type": "router",
+                "status": "active",
+                "spatial_ref_id": "campus-a/core-1",
+            },
+            neighbours=[
+                {
+                    "device_id": "device-2",
+                    "hostname": "dist-2",
+                    "device_type": "switch",
+                    "status": "active",
+                    "spatial_ref_id": "campus-a/dist-2",
+                    "edge_type": "connected_to",
+                    "edge_metadata": {"link_quality": "good"},
+                    "direction": "outbound",
+                    "hop_depth": 1,
+                },
+                {
+                    "device_id": "device-3",
+                    "hostname": "edge-3",
+                    "device_type": "switch",
+                    "status": "active",
+                    "spatial_ref_id": None,
+                    "edge_type": "connected_to",
+                    "edge_metadata": {},
+                    "direction": "inbound",
+                    "hop_depth": 2,
+                },
+            ],
+            depth=2,
+            total=2,
+        )
+        with (
+            patch(
+                "app.modules.network.topology.TopologyQueryService.get_device_neighbours",
+                return_value=payload,
+            ) as mock_get_neighbours,
+            patch("app.api.v1.topology.get_neo4j_driver") as mock_driver,
+        ):
+            mock_driver.return_value = AsyncMock()
+            response = client.get(
+                f"/api/v1/topology/device/{uuid.uuid4()}/neighbors?depth=2&limit=25",
+                headers=headers,
+            )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["success"] is True
+        assert body["errors"] is None
+        assert body["data"]["depth"] == 2
+        assert body["data"]["total"] == 2
+        assert body["data"]["neighbours"][0]["edge_metadata"]["link_quality"] == "good"
+
+        call_kwargs = mock_get_neighbours.call_args.kwargs
+        assert call_kwargs["depth"] == 2
+        assert call_kwargs["limit"] == 25
+
+    def test_topology_neighbors_endpoint_not_found_returns_404(self, client, headers):
+        with (
+            patch(
+                "app.modules.network.topology.TopologyQueryService.get_device_neighbours",
+                return_value=None,
+            ),
+            patch("app.api.v1.topology.get_neo4j_driver") as mock_driver,
+        ):
+            mock_driver.return_value = AsyncMock()
+            response = client.get(
+                f"/api/v1/topology/device/{uuid.uuid4()}/neighbors",
+                headers=headers,
+            )
+
+        assert response.status_code == 404
+
+    def test_topology_impact_endpoint_returns_envelope(self, client, headers):
+        payload = TopologyImpactResponse(
+            device={
+                "device_id": "device-1",
+                "hostname": "core-1",
+                "device_type": "router",
+                "status": "active",
+                "spatial_ref_id": "campus-a/core-1",
+            },
+            impacts=[
+                {
+                    "device_id": "device-2",
+                    "hostname": "dist-2",
+                    "device_type": "switch",
+                    "status": "active",
+                    "spatial_ref_id": "campus-a/dist-2",
+                    "hop_depth": 1,
+                },
+                {
+                    "device_id": "device-3",
+                    "hostname": "edge-3",
+                    "device_type": "switch",
+                    "status": "active",
+                    "spatial_ref_id": None,
+                    "hop_depth": 2,
+                },
+            ],
+            max_hops=4,
+            total=2,
+        )
+        with (
+            patch(
+                "app.modules.network.topology.TopologyQueryService.get_impact_analysis",
+                return_value=payload,
+            ) as mock_get_impact,
+            patch("app.api.v1.topology.get_neo4j_driver") as mock_driver,
+        ):
+            mock_driver.return_value = AsyncMock()
+            response = client.get(
+                f"/api/v1/topology/impact/{uuid.uuid4()}?max_hops=4&limit=12",
+                headers=headers,
+            )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["success"] is True
+        assert body["errors"] is None
+        assert body["data"]["max_hops"] == 4
+        assert body["data"]["total"] == 2
+        assert body["data"]["impacts"][1]["hop_depth"] == 2
+
+        call_kwargs = mock_get_impact.call_args.kwargs
+        assert call_kwargs["max_hops"] == 4
+        assert call_kwargs["limit"] == 12
+
+    def test_topology_impact_endpoint_not_found_returns_404(self, client, headers):
+        with (
+            patch(
+                "app.modules.network.topology.TopologyQueryService.get_impact_analysis",
+                return_value=None,
+            ),
+            patch("app.api.v1.topology.get_neo4j_driver") as mock_driver,
+        ):
+            mock_driver.return_value = AsyncMock()
+            response = client.get(
+                f"/api/v1/topology/impact/{uuid.uuid4()}",
+                headers=headers,
+            )
+
+        assert response.status_code == 404
+
+    def test_topology_reconcile_endpoint_returns_envelope(self, client, headers):
+        network_id = uuid.uuid4()
+        reconcile_id = uuid.uuid4()
+        with (
+            patch(
+                "app.modules.network.topology.TopologyQueryService.reconcile_network",
+                return_value={
+                    "reconcile_id": str(reconcile_id),
+                    "network_id": str(network_id),
+                    "status": "completed",
+                    "checked_nodes": 8,
+                    "checked_edges": 7,
+                    "missing_workspace_nodes": 2,
+                    "workspace_backfilled_nodes": 2,
+                    "warning": None,
+                },
+            ) as mock_reconcile,
+            patch("app.api.v1.topology.get_neo4j_driver") as mock_driver,
+        ):
+            mock_driver.return_value = AsyncMock()
+            response = client.post(
+                "/api/v1/topology/reconcile",
+                json={"network_id": str(network_id)},
+                headers=headers,
+            )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["success"] is True
+        assert body["errors"] is None
+        assert body["data"]["reconcile_id"] == str(reconcile_id)
+        assert body["data"]["status"] == "completed"
+        assert body["data"]["checked_nodes"] == 8
+        assert body["data"]["workspace_backfilled_nodes"] == 2
+
+        call_kwargs = mock_reconcile.call_args.kwargs
+        assert call_kwargs["network_id"] == network_id
+        assert isinstance(call_kwargs["correlation_id"], str)
+        assert call_kwargs["actor_id"]
+
+    def test_topology_reconcile_endpoint_not_found_returns_404(self, client, headers):
+        with (
+            patch(
+                "app.modules.network.topology.TopologyQueryService.reconcile_network",
+                return_value=None,
+            ),
+            patch("app.api.v1.topology.get_neo4j_driver") as mock_driver,
+        ):
+            mock_driver.return_value = AsyncMock()
+            response = client.post(
+                "/api/v1/topology/reconcile",
+                json={"network_id": str(uuid.uuid4())},
                 headers=headers,
             )
 

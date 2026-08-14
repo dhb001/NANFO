@@ -10,6 +10,7 @@
 - Vertical Slice 7 Implementation: **COMPLETE** — Simulation lifecycle baseline execution delivered through **VS7 Step 7** with branch/read/compare endpoints, lifecycle audit/contract alignment, and closure regression gate complete.
 - Vertical Slice 8 Implementation: **COMPLETE** — Intent Engine recommendation/explainability baseline and frontend parity are delivered through VS8 closure gate with validated intent UX/realtime reconciliation, tenancy management parity, and full frontend quality gates.
 - Vertical Slice 9 Implementation: **COMPLETE** — Hypervisor execution + rollback baseline and frontend execution-monitoring parity are delivered through VS9 closure gate with full backend/frontend validation evidence.
+- Vertical Slice 10 Implementation: **IN PROGRESS** — Deferred topology analysis endpoint implementation has started with backend route/service/test delivery for neighbors, impact, and reconcile baseline.
 
 ## Subsystem Progress — Vertical Slice 8
 
@@ -64,7 +65,7 @@
 - [x] Closure Gate: Final scoped/frontend/backend validation pass and VS9 tracking finalization (`poetry run ruff check` scoped intent files ✅, VS9 targeted backend suite `63 passed` ✅, backend regression `poetry run pytest tests -q` `360 passed` ✅, frontend `npm run lint` ✅, `npm run typecheck` ✅, `npm run test` `28 passed` ✅, `npm run test:e2e` `8/8 passed` ✅, `npm run build` ✅, `npm run perf:bundle` ✅).
 
 ### VS10 — Deferred Topology Analysis Endpoints
-- Status: **PLANNED**.
+- Status: **IN PROGRESS**.
 - Objective: Deliver deferred topology analysis endpoints under C6 with deterministic query semantics.
 - Scope boundaries: Implement only `GET /api/v1/topology/device/{id}/neighbors`, `GET /api/v1/topology/impact/{id}`, and `POST /api/v1/topology/reconcile`; no unapproved endpoint expansion.
 - Acceptance criteria: Neighbor query returns deterministic ordering + edge metadata, impact query returns reachable dependency set with hop depth, and reconcile flow emits auditable lifecycle events.
@@ -78,6 +79,12 @@
   - Accessibility/responsiveness acceptance criteria: Keyboard and screen-reader access for graph/list alternatives, touch-safe controls for reconcile actions, and responsive panel collapse/stack behavior across viewport sizes.
   - Frontend tests required (`unit`, `component`, `e2e`): Unit tests for query parameter/state normalization; component tests for neighbour/impact/reconcile states; e2e tests for successful analysis, empty analysis, and retry-on-error flows.
   - API and WebSocket dependencies: `GET /api/v1/topology/device/{id}/neighbors`, `GET /api/v1/topology/impact/{id}`, `POST /api/v1/topology/reconcile`, `/ws/topology`.
+
+## Subsystem Progress — Vertical Slice 10
+
+- [x] Step 1: Add backend deferred-topology endpoints (`GET /topology/device/{id}/neighbors`, `GET /topology/impact/{id}`, `POST /topology/reconcile`) with deterministic ordering, edge metadata/hop-depth semantics, and auditable reconcile lifecycle events under canonical envelope contracts.
+- [ ] Step 2: Add VS10 frontend topology-analysis parity (neighbors + impact + reconcile UI, async state coverage, realtime topology-delta invalidation behavior, and required unit/component/e2e updates).
+- [ ] Closure Gate: Final scoped/frontend/backend validation pass and VS10 tracking finalization.
 
 ### VS11 — Alerts API Lifecycle Completion
 - Status: **PLANNED**.

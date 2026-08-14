@@ -246,3 +246,48 @@ def test_audit_handlers_include_intent_lifecycle_events():
     assert "intent.execution_started" in AUDIT_HANDLERS
     assert "intent.execution_completed" in AUDIT_HANDLERS
     assert "intent.execution_failed" in AUDIT_HANDLERS
+
+
+@pytest.mark.asyncio
+async def test_audit_consumer_writes_topology_reconcile_completed_event():
+    db = AsyncMock()
+    db.commit = AsyncMock()
+
+    network_id = str(uuid.uuid4())
+    correlation_id = str(uuid.uuid4())
+    payload = {
+        "network_id": network_id,
+        "status": "completed",
+        "checked_nodes": 6,
+        "checked_edges": 4,
+    }
+    event = {
+        "event_type": "network.topology.reconcile_completed",
+        "correlation_id": correlation_id,
+        "payload": payload,
+    }
+
+    repo = MagicMock()
+    repo.append = AsyncMock()
+
+    with (
+        patch(
+            "app.events.consumers.audit_consumer.AsyncSessionLocal",
+            return_value=_session_context_manager(db),
+        ),
+        patch("app.events.consumers.audit_consumer.AuditLogRepository", return_value=repo),
+    ):
+        await handle_audit_event(event)
+
+    append_kwargs = repo.append.await_args.kwargs
+    assert append_kwargs["event_type"] == "network.topology.reconcile_completed"
+    assert append_kwargs["resource_type"] == "network"
+    assert append_kwargs["resource_id"] == uuid.UUID(network_id)
+    assert append_kwargs["correlation_id"] == uuid.UUID(correlation_id)
+    db.commit.assert_awaited_once()
+
+
+def test_audit_handlers_include_topology_reconcile_events():
+    assert "network.topology.reconcile_requested" in AUDIT_HANDLERS
+    assert "network.topology.reconcile_completed" in AUDIT_HANDLERS
+    assert "network.topology.reconcile_failed" in AUDIT_HANDLERS

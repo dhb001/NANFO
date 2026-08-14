@@ -3,6 +3,32 @@
 Lightweight chronological notes for decisions that do not require a full ADR.
 
 ## 2026-08-14
+### VS10 Step 1: Deferred Topology Endpoints Activation with Deterministic Graph Semantics
+Decision: Activate VS10 deferred topology endpoint set by implementing `GET /api/v1/topology/device/{id}/neighbors`, `GET /api/v1/topology/impact/{id}`, and `POST /api/v1/topology/reconcile` in the existing topology module, with deterministic ordering, bounded traversal depth, and reconcile lifecycle audit events.
+Reason:
+- CurrentSprint VS10 scope explicitly enables these three deferred endpoints under C6 while prohibiting route-surface expansion beyond them.
+- Topology PRD acceptance requires deterministic neighbour metadata, reachable dependency set with hop depth, and auditable reconcile lifecycle outcomes.
+- Existing topology service/router and event-bus patterns allow bounded implementation without schema changes or contract drift.
+Impact:
+- Topology router now exposes all VS10-approved endpoints with canonical envelope responses and 404 semantics for missing device/network resources.
+- `TopologyQueryService` now provides deterministic neighbours/impact analysis plus reconcile orchestration with per-network counts and workspace backfill checks.
+- Reconcile lifecycle emits auditable events: `network.topology.reconcile_requested`, `network.topology.reconcile_completed`, and `network.topology.reconcile_failed`.
+- Audit consumer now persists reconcile lifecycle events as network-scoped audit records.
+Assumptions:
+- Event names use `network.topology.*` within EventAPI naming convention and remain internal contracts until PRD/API docs are expanded in closure tracking.
+- Reconcile baseline is analysis/audit oriented (no cross-module write side effects beyond existing topology graph data hygiene).
+Related:
+- `backend/app/api/v1/topology.py`
+- `backend/app/modules/network/topology.py`
+- `backend/app/modules/network/schemas.py`
+- `backend/app/events/consumers/audit_consumer.py`
+- `backend/tests/unit/test_topology_flow.py`
+- `backend/tests/unit/test_audit_consumer.py`
+- `backend/tests/integration/test_network_endpoints.py`
+- `docs/project/CurrentSprint.md`
+- `docs/project/DevelopmentJournal.md`
+
+## 2026-08-14
 ### VS9 Closure Gate: Evidence Acceptance on Immediate Green Rerun for Flaky E2E
 Decision: Accept VS9 closure validation after a full all-green rerun of the frontend e2e suite when an earlier run produced a single transient timeout in `vs2-telemetry` that passed immediately on retry and on full rerun without code changes.
 Reason:

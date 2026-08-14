@@ -451,3 +451,294 @@ async def test_get_node_with_neighbours_forces_depth_to_one():
 
     query = session.run.await_args.args[0]
     assert "CONNECTED_TO" in query
+
+
+@pytest.mark.asyncio
+async def test_get_device_neighbours_returns_deterministic_rows_with_metadata_and_depth():
+    root_record = {
+        "device_id": "device-1",
+        "hostname": "core-1",
+        "device_type": "router",
+        "status": "active",
+        "spatial_ref_id": "campus-a/core-1",
+    }
+    root_result = MagicMock()
+    root_result.single = AsyncMock(return_value=root_record)
+
+    neighbours_result = MagicMock()
+    neighbours_result.data = AsyncMock(
+        return_value=[
+            {
+                "selected": {
+                    "device_id": "device-2",
+                    "hostname": "edge-2",
+                    "device_type": "switch",
+                    "status": "active",
+                    "spatial_ref_id": "campus-a/edge-2",
+                    "edge_type": "connected_to",
+                    "edge_metadata": {"link_quality": "good"},
+                    "direction": "inbound",
+                    "hop_depth": 2,
+                }
+            },
+            {
+                "selected": {
+                    "device_id": "device-3",
+                    "hostname": "edge-3",
+                    "device_type": "switch",
+                    "status": "active",
+                    "spatial_ref_id": None,
+                    "edge_type": "connected_to",
+                    "edge_metadata": {},
+                    "direction": "outbound",
+                    "hop_depth": 1,
+                }
+            },
+        ]
+    )
+
+    session = AsyncMock()
+    session.run = AsyncMock(side_effect=[root_result, neighbours_result])
+    session_cm = AsyncMock()
+    session_cm.__aenter__.return_value = session
+    session_cm.__aexit__.return_value = None
+
+    driver = MagicMock()
+    driver.session.return_value = session_cm
+
+    svc = TopologyQueryService(driver=driver)
+    result = await svc.get_device_neighbours(device_id=uuid.uuid4(), depth=10, limit=5)
+
+    assert result is not None
+    assert result.device.device_id == "device-1"
+    assert result.depth == 6
+    assert result.total == 2
+    assert result.neighbours[0].edge_metadata == {"link_quality": "good"}
+    assert result.neighbours[0].hop_depth == 2
+    assert result.neighbours[1].hop_depth == 1
+
+    neighbours_call = session.run.await_args_list[1]
+    assert neighbours_call.kwargs["limit"] == 5
+    assert "1..6" in neighbours_call.args[0]
+
+
+@pytest.mark.asyncio
+async def test_get_device_neighbours_returns_none_when_root_missing():
+    root_result = MagicMock()
+    root_result.single = AsyncMock(return_value=None)
+
+    session = AsyncMock()
+    session.run = AsyncMock(return_value=root_result)
+    session_cm = AsyncMock()
+    session_cm.__aenter__.return_value = session
+    session_cm.__aexit__.return_value = None
+
+    driver = MagicMock()
+    driver.session.return_value = session_cm
+
+    svc = TopologyQueryService(driver=driver)
+    result = await svc.get_device_neighbours(device_id=uuid.uuid4(), depth=1, limit=20)
+
+    assert result is None
+    session.run.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_get_impact_analysis_returns_ordered_reachable_set():
+    root_record = {
+        "device_id": "device-1",
+        "hostname": "core-1",
+        "device_type": "router",
+        "status": "active",
+        "spatial_ref_id": "campus-a/core-1",
+    }
+    root_result = MagicMock()
+    root_result.single = AsyncMock(return_value=root_record)
+
+    impact_result = MagicMock()
+    impact_result.data = AsyncMock(
+        return_value=[
+            {
+                "impact": {
+                    "device_id": "device-2",
+                    "hostname": "dist-2",
+                    "device_type": "switch",
+                    "status": "active",
+                    "spatial_ref_id": "campus-a/dist-2",
+                    "hop_depth": 1,
+                }
+            },
+            {
+                "impact": {
+                    "device_id": "device-3",
+                    "hostname": "edge-3",
+                    "device_type": "switch",
+                    "status": "active",
+                    "spatial_ref_id": None,
+                    "hop_depth": 2,
+                }
+            },
+        ]
+    )
+
+    session = AsyncMock()
+    session.run = AsyncMock(side_effect=[root_result, impact_result])
+    session_cm = AsyncMock()
+    session_cm.__aenter__.return_value = session
+    session_cm.__aexit__.return_value = None
+
+    driver = MagicMock()
+    driver.session.return_value = session_cm
+
+    svc = TopologyQueryService(driver=driver)
+    result = await svc.get_impact_analysis(device_id=uuid.uuid4(), max_hops=20, limit=9)
+
+    assert result is not None
+    assert result.device.device_id == "device-1"
+    assert result.max_hops == 8
+    assert result.total == 2
+    assert result.impacts[0].device_id == "device-2"
+    assert result.impacts[0].hop_depth == 1
+    assert result.impacts[1].device_id == "device-3"
+    assert result.impacts[1].hop_depth == 2
+
+    impact_call = session.run.await_args_list[1]
+    assert impact_call.kwargs["limit"] == 9
+    assert "1..8" in impact_call.args[0]
+
+
+@pytest.mark.asyncio
+async def test_get_impact_analysis_returns_none_when_root_missing():
+    root_result = MagicMock()
+    root_result.single = AsyncMock(return_value=None)
+
+    session = AsyncMock()
+    session.run = AsyncMock(return_value=root_result)
+    session_cm = AsyncMock()
+    session_cm.__aenter__.return_value = session
+    session_cm.__aexit__.return_value = None
+
+    driver = MagicMock()
+    driver.session.return_value = session_cm
+
+    svc = TopologyQueryService(driver=driver)
+    result = await svc.get_impact_analysis(device_id=uuid.uuid4(), max_hops=2, limit=200)
+
+    assert result is None
+    session.run.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_reconcile_network_returns_none_when_network_not_found():
+    network_id = uuid.uuid4()
+
+    session = AsyncMock()
+    session_cm = AsyncMock()
+    session_cm.__aenter__.return_value = session
+    session_cm.__aexit__.return_value = None
+    driver = MagicMock()
+    driver.session.return_value = session_cm
+
+    with patch.object(
+        NetworkRepository,
+        "get_workspace_ids_for_network_ids",
+        new=AsyncMock(return_value={}),
+    ) as workspace_lookup, patch("app.modules.network.topology.publish_event", new_callable=AsyncMock) as publish_event:
+        result = await TopologyQueryService(driver=driver).reconcile_network(
+            network_id=network_id,
+            db=AsyncMock(),
+            redis=AsyncMock(),
+            actor_id=str(uuid.uuid4()),
+            correlation_id="corr-1",
+        )
+
+    assert result is None
+    workspace_lookup.assert_awaited_once_with([str(network_id)])
+    publish_event.assert_not_awaited()
+    session.run.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_reconcile_network_returns_counts_and_emits_requested_and_completed_events():
+    network_id = uuid.uuid4()
+    workspace_id = str(uuid.uuid4())
+
+    node_result = MagicMock()
+    node_result.single = AsyncMock(return_value={"node_count": 7})
+    edge_result = MagicMock()
+    edge_result.single = AsyncMock(return_value={"edge_count": 6})
+    missing_result = MagicMock()
+    missing_result.single = AsyncMock(return_value={"missing_workspace_nodes": 2})
+    backfill_result = MagicMock()
+    backfill_result.single = AsyncMock(return_value={"workspace_backfilled_nodes": 2})
+
+    session = AsyncMock()
+    session.run = AsyncMock(side_effect=[node_result, edge_result, missing_result, backfill_result])
+    session_cm = AsyncMock()
+    session_cm.__aenter__.return_value = session
+    session_cm.__aexit__.return_value = None
+    driver = MagicMock()
+    driver.session.return_value = session_cm
+
+    with patch.object(
+        NetworkRepository,
+        "get_workspace_ids_for_network_ids",
+        new=AsyncMock(return_value={str(network_id): workspace_id}),
+    ), patch("app.modules.network.topology.publish_event", new_callable=AsyncMock) as publish_event:
+        result = await TopologyQueryService(driver=driver).reconcile_network(
+            network_id=network_id,
+            db=AsyncMock(),
+            redis=AsyncMock(),
+            actor_id=str(uuid.uuid4()),
+            correlation_id="corr-2",
+        )
+
+    assert result is not None
+    assert result["network_id"] == str(network_id)
+    assert result["status"] == "completed"
+    assert result["checked_nodes"] == 7
+    assert result["checked_edges"] == 6
+    assert result["missing_workspace_nodes"] == 2
+    assert result["workspace_backfilled_nodes"] == 2
+    assert result["warning"] is None
+
+    assert publish_event.await_count == 2
+    first_event_kwargs = publish_event.await_args_list[0].kwargs
+    second_event_kwargs = publish_event.await_args_list[1].kwargs
+    assert first_event_kwargs["event_type"] == "network.topology.reconcile_requested"
+    assert second_event_kwargs["event_type"] == "network.topology.reconcile_completed"
+
+
+@pytest.mark.asyncio
+async def test_reconcile_network_emits_failed_event_and_raises_on_neo4j_error():
+    network_id = uuid.uuid4()
+    workspace_id = str(uuid.uuid4())
+
+    session = AsyncMock()
+    session.run = AsyncMock(side_effect=RuntimeError("neo4j unavailable"))
+    session_cm = AsyncMock()
+    session_cm.__aenter__.return_value = session
+    session_cm.__aexit__.return_value = None
+    driver = MagicMock()
+    driver.session.return_value = session_cm
+
+    with (
+        patch.object(
+            NetworkRepository,
+            "get_workspace_ids_for_network_ids",
+            new=AsyncMock(return_value={str(network_id): workspace_id}),
+        ),
+        patch("app.modules.network.topology.publish_event", new_callable=AsyncMock) as publish_event,
+        pytest.raises(RuntimeError, match="neo4j unavailable"),
+    ):
+        await TopologyQueryService(driver=driver).reconcile_network(
+            network_id=network_id,
+            db=AsyncMock(),
+            redis=AsyncMock(),
+            actor_id=str(uuid.uuid4()),
+            correlation_id="corr-3",
+        )
+
+    assert publish_event.await_count == 2
+    assert publish_event.await_args_list[0].kwargs["event_type"] == "network.topology.reconcile_requested"
+    assert publish_event.await_args_list[1].kwargs["event_type"] == "network.topology.reconcile_failed"

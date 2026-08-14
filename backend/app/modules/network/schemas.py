@@ -1,7 +1,7 @@
 """NANFO Backend — Network module Pydantic schemas.
 
 Request/response schemas for network, device, and topology endpoints.
-Deferred endpoints (/neighbors, /impact, /reconcile) are NOT defined here (C6).
+Topology analysis schemas for VS10 are included under this module ownership.
 """
 
 from __future__ import annotations
@@ -97,3 +97,38 @@ class TopologyEdge(BaseModel):
 class TopologyGraphResponse(BaseModel):
     nodes: list[TopologyNode]
     edges: list[TopologyEdge]
+
+
+class TopologyNeighbourEdge(BaseModel):
+    device_id: str
+    hostname: str
+    device_type: str
+    status: str
+    spatial_ref_id: str | None = None
+    edge_type: str
+    edge_metadata: dict
+    direction: str
+    hop_depth: int
+
+
+class TopologyDeviceNeighboursResponse(BaseModel):
+    device: TopologyNode
+    neighbours: list[TopologyNeighbourEdge]
+    depth: int
+    total: int
+
+
+class TopologyImpactNode(BaseModel):
+    device_id: str
+    hostname: str
+    device_type: str
+    status: str
+    spatial_ref_id: str | None = None
+    hop_depth: int
+
+
+class TopologyImpactResponse(BaseModel):
+    device: TopologyNode
+    impacts: list[TopologyImpactNode]
+    max_hops: int
+    total: int

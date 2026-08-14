@@ -1,5 +1,16 @@
 # Development Journal
 
+## [2026-08-14] - Vertical Slice 10 Step 1 (Deferred Topology Analysis Endpoints Backend Baseline)
+
+- **Implemented (VS10 backend):** Enabled deferred topology analysis routes `GET /api/v1/topology/device/{id}/neighbors`, `GET /api/v1/topology/impact/{id}`, and `POST /api/v1/topology/reconcile` in the existing topology router with canonical `{success,data,meta,errors}` envelope responses.
+- **Neighbours query semantics:** Added deterministic neighbor analysis in `TopologyQueryService.get_device_neighbours(...)` with bounded traversal depth, stable ordering, edge metadata (`edge_metadata`) and directional/hop-depth context per neighbour.
+- **Impact query semantics:** Added reachable dependency analysis in `TopologyQueryService.get_impact_analysis(...)` returning deterministic impacted-node ordering by hop depth then device id.
+- **Reconcile baseline + auditability:** Added `TopologyQueryService.reconcile_network(...)` with network ownership validation, per-network topology count/backfill checks, and auditable lifecycle event publication (`network.topology.reconcile_requested|completed|failed`) with fail-open handling for event publication degradation.
+- **Audit integration:** Extended audit consumer mapping to persist reconcile lifecycle events as `resource_type=network` entries.
+- **Coverage updates:** Expanded topology unit tests for neighbors/impact/reconcile logic, route integration tests for enabled endpoint surfaces/envelopes/not-found behavior, and audit consumer unit tests for reconcile lifecycle event persistence mapping.
+- **Validation:** Scoped Ruff passed; targeted backend suite passed (`62 passed`); full backend regression gate passed (`375 passed`); frontend quality gates remained green on rerun (`lint`, `typecheck`, `test`, `test:e2e`, `build`, `perf:bundle`).
+- **Scope/governance:** No schema migration required, no API envelope drift, no new websocket channel additions, and changes remained confined to VS10 topology scope.
+
 ## [2026-08-14] - Vertical Slice 9 Closure Gate Complete
 
 - **Completed:** Closed VS9 after completing both backend hypervisor execution baseline delivery and frontend execution-monitoring parity with rollback diagnostics.
