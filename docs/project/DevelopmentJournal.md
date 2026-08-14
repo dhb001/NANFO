@@ -1,5 +1,22 @@
 # Development Journal
 
+## [2026-08-14] - Vertical Slice 9 Closure Gate Complete
+
+- **Completed:** Closed VS9 after completing both backend hypervisor execution baseline delivery and frontend execution-monitoring parity with rollback diagnostics.
+- **Backend closure validation:** Scoped Ruff for VS9 intent/hypervisor files passed; VS9 targeted backend suite passed (`63` tests); final backend regression gate passed (`poetry run pytest tests -q`, `360` passed).
+- **Frontend closure validation:** Full frontend gate passed (`npm run lint`, `npm run typecheck`, `npm run test` with `28` tests, `npm run test:e2e` with `8/8` specs, `npm run build`, `npm run perf:bundle`).
+- **Stability note:** One intermediate `test:e2e` run showed a transient VS2 inspector-option timeout; immediate rerun passed `8/8` without code changes and final closure evidence uses the all-green run.
+- **Governance/scope confirmation:** No new API routes/channels/events beyond documented VS9 contracts, no REST envelope drift, no C5/C6 relaxation, and no schema migration required for VS9.
+
+## [2026-08-14] - Vertical Slice 9 Step 2 (Frontend Execution Monitoring + Rollback Metadata Parity)
+
+- **Implemented (VS9 frontend parity):** Extended intent execution monitoring UI to surface verification and rollback diagnostics from `execution_provenance`, including rollback reference, failure reason, and event publication warnings in `Intent Detail`.
+- **Realtime visibility update:** Realtime intent cards now render optional `verification_status` and `rollback_status` hints from `/ws/digital-twin` `changed_fields` while preserving existing status-first badge semantics.
+- **Failure-state UX hardening:** Added explicit failed-execution async state rendering when execution provenance carries terminal failure reason, keeping retry-safe execution flow and existing guardrails intact.
+- **Test coverage updates:** Added logic tests for execution diagnostics extraction and explainability summary precedence, component tests for failed-execution diagnostics rendering, and e2e VS8/VS9-aligned flow assertions for execution-failed terminal state with rollback reference visibility.
+- **Validation:** Scoped frontend lint passed; targeted frontend tests passed (`15` tests across intent logic/component/helpers); targeted Playwright intent e2e passed (`1` test).
+- **Scope/governance:** No backend API contract changes, no envelope drift, no new channels/events, and no unrelated frontend refactors.
+
 ## [2026-08-14] - Vertical Slice 9 Step 1 (Hypervisor Execution + Rollback Backend Baseline)
 
 - **Implemented (Step 1 backend baseline):** Added a dedicated hypervisor execution service (`backend/app/modules/intent/hypervisor.py`) that deterministically produces terminal execution outcomes with verification metadata and rollback metadata on verification failure, without introducing new API routes/channels/events.

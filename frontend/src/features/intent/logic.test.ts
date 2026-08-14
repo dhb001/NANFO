@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  explainabilitySummary,
   intentSceneObjectId,
   isIntentTerminalStatus,
+  mapExecutionDiagnostics,
   mapIntentLifecycle,
   resolveConfidenceTone,
   shouldRefetchIntentFromRealtime,
@@ -99,5 +101,42 @@ describe("intent logic", () => {
     expect(shouldRefetchIntentFromRealtime("execution_started", "execution_failed")).toBe(true);
     expect(shouldRefetchIntentFromRealtime("execution_started", "unknown_state")).toBe(false);
     expect(shouldRefetchIntentFromRealtime("execution_started", undefined)).toBe(false);
+  });
+
+  it("maps verification and rollback diagnostics from execution provenance", () => {
+    const diagnostics = mapExecutionDiagnostics(
+      createDetail({
+        status: "execution_failed",
+        execution_provenance: {
+          verification: { status: "failed" },
+          rollback: {
+            attempted: true,
+            status: "completed",
+            rollback_reference_id: "rbk-1",
+          },
+          failure_reason: "post_change_verification_failed",
+          event_publication: { warning: "event_queue_unavailable" },
+        },
+      }),
+    );
+
+    expect(diagnostics.verificationStatus).toBe("failed");
+    expect(diagnostics.rollbackStatus).toBe("completed");
+    expect(diagnostics.rollbackAttempted).toBe(true);
+    expect(diagnostics.rollbackReferenceId).toBe("rbk-1");
+    expect(diagnostics.failureReason).toBe("post_change_verification_failed");
+    expect(diagnostics.eventPublicationWarning).toBe("event_queue_unavailable");
+  });
+
+  it("prefers execution_summary over summary in explainability", () => {
+    const summary = explainabilitySummary(
+      createDetail({
+        explainability: {
+          summary: "fallback",
+          execution_summary: "execution specific",
+        },
+      }),
+    );
+    expect(summary).toBe("execution specific");
   });
 });

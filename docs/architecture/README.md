@@ -7,3 +7,4 @@ Suggested contents:
 - deployment/runtime views
 - data flow narratives
 - threat and trust boundary sketches
+- frontend architecture baseline (`Frontend.md`)

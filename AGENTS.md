@@ -29,3 +29,10 @@ This repository uses custom agent rules, workflows, and skills from the `.agents
 - Simulation/Physics: `.agents/rules/physics-engine.md`
 - Frontend: `.agents/rules/frontend-architecture.md`
 - Digital Twin: `.agents/rules/digital-twin.md`
+
+## Frontend Source Of Truth
+- For frontend tasks, always load `docs/architecture/Frontend.md` and apply its structure, contract, performance, and testing gates before implementation.
+
+## Remaining VS Pointer
+- Authoritative post-VS8 remaining-work plan: `docs/project/CurrentSprint.md` (`Post-VS8 Plan` and `Remaining Work Master Checklist`).
+- Before implementation, load this section to identify the first unfinished planned slice and respect its scope boundaries.

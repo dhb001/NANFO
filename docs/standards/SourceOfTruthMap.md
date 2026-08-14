@@ -11,7 +11,7 @@ Each recurring question must map to exactly one canonical document.
 | How should context be loaded and resolved? | `.agents/rules/context-loading.md` |
 | How should APIs look globally? | `docs/api/API_STANDARD.md` |
 | How does backend architecture work? | `.agents/rules/backend-architecture.md` |
-| How does frontend architecture work? | `.agents/rules/frontend-architecture.md` |
+| How does frontend architecture work? | `docs/architecture/Frontend.md` |
 | How does Digital Twin architecture work? | `.agents/rules/digital-twin.md` |
 | How does AIOS architecture work? | `docs/architecture/AIOS.md` |
 | How does Hypervisor architecture work? | `docs/architecture/Hypervisor.md` |

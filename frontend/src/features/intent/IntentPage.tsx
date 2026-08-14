@@ -10,6 +10,7 @@ import {
   explainabilitySummary,
   intentSceneObjectId,
   isIntentTerminalStatus,
+  mapExecutionDiagnostics,
   mapIntentLifecycle,
   resolveConfidenceTone,
   shouldRefetchIntentFromRealtime,
@@ -256,6 +257,7 @@ export function IntentPage() {
           >
             {(detail) => {
               const lifecycle = mapIntentLifecycle(detail);
+              const diagnostics = mapExecutionDiagnostics(detail);
               return (
                 <div style={{ display: "grid", gap: "0.56rem" }}>
                   <div style={{ display: "flex", gap: "0.4rem", flexWrap: "wrap" }}>
@@ -267,6 +269,38 @@ export function IntentPage() {
                     <Badge text={detail.queue_status} tone={detail.queue_status === "queued" ? "ok" : "warn"} />
                   </div>
                   <div style={{ color: "var(--ink-2)", fontSize: "0.9rem" }}>{explainabilitySummary(detail)}</div>
+
+                  <div style={{ display: "flex", gap: "0.35rem", flexWrap: "wrap" }}>
+                    {diagnostics.verificationStatus ? (
+                      <Badge
+                        text={`verification ${diagnostics.verificationStatus}`}
+                        tone={diagnostics.verificationStatus === "passed" ? "ok" : "warn"}
+                      />
+                    ) : null}
+                    {diagnostics.rollbackAttempted ? (
+                      <Badge
+                        text={`rollback ${diagnostics.rollbackStatus ?? "attempted"}`}
+                        tone={diagnostics.rollbackStatus === "completed" ? "ok" : "danger"}
+                      />
+                    ) : null}
+                    {diagnostics.eventPublicationWarning ? (
+                      <Badge text={`event ${diagnostics.eventPublicationWarning}`} tone="warn" />
+                    ) : null}
+                  </div>
+                  {diagnostics.rollbackReferenceId ? (
+                    <div className="mono" style={{ color: "var(--ink-3)", fontSize: "0.74rem" }}>
+                      rollback_ref: {diagnostics.rollbackReferenceId}
+                    </div>
+                  ) : null}
+                  {diagnostics.failureReason ? (
+                    <div className="mono" style={{ color: "var(--ink-3)", fontSize: "0.74rem" }}>
+                      failure_reason: {diagnostics.failureReason}
+                    </div>
+                  ) : null}
+                  {diagnostics.failureReason ? (
+                    <AsyncState title="Execution failed" description={diagnostics.failureReason} />
+                  ) : null}
+
                   <div style={{ display: "grid", gap: "0.36rem" }}>
                     {lifecycle.map((item) => (
                       <div
@@ -297,29 +331,49 @@ export function IntentPage() {
             <div style={{ color: "var(--ink-3)" }}>No intent realtime deltas observed yet.</div>
           ) : (
             <div style={{ display: "grid", gap: "0.4rem", maxHeight: 360, overflow: "auto" }}>
-              {intentRealtimeCards.map((item) => (
-                <div
-                  key={`${item.id}-${String(item.status)}`}
-                  style={{ border: "1px solid var(--line-soft)", borderRadius: "9px", padding: "0.44rem 0.48rem" }}
-                >
-                  <div style={{ display: "flex", justifyContent: "space-between" }}>
-                    <strong>{item.id}</strong>
-                    <Badge
-                      text={String(item.status ?? "unknown")}
-                      tone={
-                        item.status === "execution_failed"
-                          ? "danger"
-                          : item.status === "execution_completed" || item.status === "validated"
-                            ? "ok"
-                            : "warn"
-                      }
-                    />
+              {intentRealtimeCards.map((item) => {
+                const changedFields = item.changed_fields;
+                const verificationStatus =
+                  changedFields && typeof changedFields === "object" && "verification_status" in changedFields
+                    ? String((changedFields as { verification_status?: unknown }).verification_status ?? "").trim()
+                    : "";
+                const rollbackStatus =
+                  changedFields && typeof changedFields === "object" && "rollback_status" in changedFields
+                    ? String((changedFields as { rollback_status?: unknown }).rollback_status ?? "").trim()
+                    : "";
+
+                return (
+                  <div
+                    key={`${item.id}-${String(item.status)}`}
+                    style={{ border: "1px solid var(--line-soft)", borderRadius: "9px", padding: "0.44rem 0.48rem" }}
+                  >
+                    <div style={{ display: "flex", justifyContent: "space-between" }}>
+                      <strong>{item.id}</strong>
+                      <Badge
+                        text={String(item.status ?? "unknown")}
+                        tone={
+                          item.status === "execution_failed"
+                            ? "danger"
+                            : item.status === "execution_completed" || item.status === "validated"
+                              ? "ok"
+                              : "warn"
+                        }
+                      />
+                    </div>
+                    {verificationStatus || rollbackStatus ? (
+                      <div style={{ display: "flex", gap: "0.35rem", marginTop: "0.2rem" }}>
+                        {verificationStatus ? <Badge text={`verification ${verificationStatus}`} tone="warn" /> : null}
+                        {rollbackStatus ? (
+                          <Badge text={`rollback ${rollbackStatus}`} tone={rollbackStatus === "completed" ? "ok" : "danger"} />
+                        ) : null}
+                      </div>
+                    ) : null}
+                    <div className="mono" style={{ color: "var(--ink-3)", fontSize: "0.74rem" }}>
+                      intent_id: {String(item.intent_id ?? "-")}
+                    </div>
                   </div>
-                  <div className="mono" style={{ color: "var(--ink-3)", fontSize: "0.74rem" }}>
-                    intent_id: {String(item.intent_id ?? "-")}
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </Panel>

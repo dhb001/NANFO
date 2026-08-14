@@ -3,6 +3,24 @@
 Lightweight chronological notes for decisions that do not require a full ADR.
 
 ## 2026-08-14
+### VS9 Closure Gate: Evidence Acceptance on Immediate Green Rerun for Flaky E2E
+Decision: Accept VS9 closure validation after a full all-green rerun of the frontend e2e suite when an earlier run produced a single transient timeout in `vs2-telemetry` that passed immediately on retry and on full rerun without code changes.
+Reason:
+- VS9 closure governance requires current command-level proof for backend and frontend gates.
+- The failing signal was non-deterministic (timeout in select option availability) and did not persist when the same full command was rerun in the same environment.
+- Blocking closure on a non-reproducible transient would not improve contract correctness and would delay bounded-scope completion.
+Impact:
+- VS9 closure evidence records the passing rerun as authoritative (`npm run test:e2e` `8/8`), alongside backend scoped/full regression and full frontend quality gates.
+- No additional scope expansion was introduced; no API/event/channel changes were required to satisfy closure.
+Assumptions:
+- The VS2 inspector timeout remains a known flaky risk to monitor, but it is not a deterministic regression against VS9 acceptance criteria.
+- Future slices may prioritize hardening this flake if recurrence increases.
+Related:
+- `frontend/tests/e2e/vs2-telemetry.spec.ts`
+- `docs/project/CurrentSprint.md`
+- `docs/project/DevelopmentJournal.md`
+
+## 2026-08-14
 ### VS9 Step 1: Hypervisor Baseline Outcome Semantics and Execute Permission Gate
 Decision: Implement VS9 backend baseline by introducing a dedicated in-process hypervisor execution service that deterministically sets terminal intent outcomes (`execution_completed` / `execution_failed`) based on verification outcome, persists rollback metadata when verification fails, and enforces `execute:rollback` permission on `POST /api/v1/intents/execute`.
 Reason:

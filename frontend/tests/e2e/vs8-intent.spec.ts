@@ -110,7 +110,7 @@ test.describe("VS8 intent parity", () => {
     let detailCall = 0;
     await page.route("**/api/v1/intents/00000000-0000-0000-0000-000000000901?workspace_id=00000000-0000-0000-0000-000000000222", async (route) => {
       detailCall += 1;
-      const status = detailCall >= 2 ? "execution_completed" : "execution_started";
+      const status = detailCall >= 2 ? "execution_failed" : "execution_started";
       await route.fulfill({
         status: 200,
         contentType: "application/json",
@@ -126,14 +126,23 @@ test.describe("VS8 intent parity", () => {
             validation_result: { validated_at: "2026-08-13T10:00:10Z" },
             execution_provenance: {
               execution_started_at: "2026-08-13T10:00:12Z",
-              execution_completed_at: "2026-08-13T10:00:20Z",
+              execution_failed_at: "2026-08-13T10:00:20Z",
+              failure_reason: "post_change_verification_failed",
+              verification: {
+                status: "failed",
+              },
+              rollback: {
+                attempted: true,
+                status: "completed",
+                rollback_reference_id: "rbk-1",
+              },
             },
-            explainability: { summary: "Execution completed" },
+            explainability: { summary: "Execution failed verification; rollback baseline completed." },
             confidence: { score: 0.84, band: "high", approval_required: false },
             idempotency_key: "intent-test-2",
-            queue_status: "queued",
+            queue_status: "deferred",
             stream_entry_id: "112",
-            warning: null,
+            warning: "event_queue_unavailable",
             correlation_id: "corr-2",
             requested_by_user_id: "00000000-0000-0000-0000-000000000123",
             requested_at: "2026-08-13T10:00:10Z",
@@ -161,6 +170,7 @@ test.describe("VS8 intent parity", () => {
     await page.getByRole("button", { name: "Execute" }).click();
     await expect(page.getByText("Execution accepted")).toBeVisible();
 
-    await expect(page.getByText("execution_completed").first()).toBeVisible();
+    await expect(page.getByText("execution_failed").first()).toBeVisible();
+    await expect(page.getByText("rollback_ref: rbk-1")).toBeVisible();
   });
 });

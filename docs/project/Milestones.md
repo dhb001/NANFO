@@ -24,8 +24,23 @@
 ## M8
 - AIOS recommendation and explainability baseline complete.
 
+- Execution slices aligned to M8 completion path:
+  - VS8 (in progress): intent recommendation/explainability baseline closure.
+
 ## M9
 - Hypervisor execution and rollback baseline complete.
 
+- Planned implementation slice:
+  - VS9: hypervisor execution + rollback baseline via intent lifecycle.
+
 ## M10
 - Production readiness criteria met.
+
+- Planned implementation slices:
+  - VS10: deferred topology analysis endpoints (`neighbors`, `impact`, `reconcile`).
+  - VS11: alerts lifecycle API completion (`list`, `ack`, `resolve`).
+  - VS12: plugins lifecycle + sandbox safety baseline.
+  - VS13: reporting async generation/status baseline.
+  - VS14: production-readiness closure gate and release evidence finalization.
+
+Authoritative ordered checklist and closure criteria live in `docs/project/CurrentSprint.md` (`Post-VS8 Plan`).

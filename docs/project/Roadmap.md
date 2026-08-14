@@ -30,6 +30,18 @@
 ## Milestone 10 - Production Readiness
 - Hardening, observability, security posture, and controlled release criteria.
 
+## Vertical Slice Sequence (Post-VS8)
+- VS9 (planned): Hypervisor execution + rollback baseline via existing intent contracts.
+- VS10 (planned): Deferred topology analysis endpoint set (`neighbors`, `impact`, `reconcile`) under C6 governance.
+- VS11 (planned): Alerts lifecycle API completion (`list`, `ack`, `resolve`) with event/audit parity.
+- VS12 (planned): Plugin registry lifecycle + sandbox safety baseline.
+- VS13 (planned): Reporting async generation/status + artifact lifecycle baseline.
+- VS14 (planned): M10 production-readiness closure gate (hardening, validation evidence, release criteria).
+
+Completion rule for all planned slices: backend and frontend acceptance criteria must both pass before a slice is marked complete.
+
+Source of truth for ordered remaining work and slice closure criteria: `docs/project/CurrentSprint.md` (`Post-VS8 Plan`).
+
 ## First Vertical Slice
 - User logs in.
 - User creates a network.

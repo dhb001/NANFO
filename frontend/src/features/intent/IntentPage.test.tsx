@@ -119,6 +119,49 @@ describe("IntentPage", () => {
     expect(screen.getByRole("button", { name: "Execute" })).toBeDisabled();
   });
 
+  it("renders rollback diagnostics and failure state when execution failed", () => {
+    mockUseIntentDetail.mockReturnValue(
+      detailQuery({
+        intent_id: "00000000-0000-0000-0000-000000000444",
+        workspace_id: "00000000-0000-0000-0000-000000000222",
+        network_id: "00000000-0000-0000-0000-000000000333",
+        status: "execution_failed",
+        intent_kind: "isolate_vlan",
+        intent_payload: { action: "isolate_vlan" },
+        validation_result: { validated_at: "2026-08-13T10:00:00Z" },
+        execution_provenance: {
+          execution_started_at: "2026-08-13T10:01:00Z",
+          execution_failed_at: "2026-08-13T10:03:00Z",
+          failure_reason: "post_change_verification_failed",
+          verification: { status: "failed" },
+          rollback: {
+            attempted: true,
+            status: "completed",
+            rollback_reference_id: "rbk-1",
+          },
+          event_publication: { warning: "event_queue_unavailable" },
+        },
+        explainability: { summary: "failed" },
+        confidence: { score: 0.72, band: "60-79", approval_required: true },
+        idempotency_key: "idem-1",
+        queue_status: "deferred",
+        stream_entry_id: null,
+        warning: "event_queue_unavailable",
+        correlation_id: "corr-1",
+        requested_by_user_id: "00000000-0000-0000-0000-000000000123",
+        requested_at: "2026-08-13T10:00:00Z",
+        created_at: "2026-08-13T10:00:00Z",
+        updated_at: "2026-08-13T10:03:00Z",
+      }),
+    );
+
+    render(<IntentPage />);
+
+    expect(screen.getByText("rollback_ref: rbk-1")).toBeInTheDocument();
+    expect(screen.getByText("failure_reason: post_change_verification_failed")).toBeInTheDocument();
+    expect(screen.getByText("Execution failed")).toBeInTheDocument();
+  });
+
   it("refetches intent detail when realtime status changes", async () => {
     const user = userEvent.setup();
     mockUseIntentDetail.mockReturnValue(

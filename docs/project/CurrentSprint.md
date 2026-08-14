@@ -9,6 +9,7 @@
 - Vertical Slice 6 Implementation: **COMPLETE** — Digital Twin spatial-reference execution delivered through **VS6 Step 5** with closure regression gate complete.
 - Vertical Slice 7 Implementation: **COMPLETE** — Simulation lifecycle baseline execution delivered through **VS7 Step 7** with branch/read/compare endpoints, lifecycle audit/contract alignment, and closure regression gate complete.
 - Vertical Slice 8 Implementation: **COMPLETE** — Intent Engine recommendation/explainability baseline and frontend parity are delivered through VS8 closure gate with validated intent UX/realtime reconciliation, tenancy management parity, and full frontend quality gates.
+- Vertical Slice 9 Implementation: **COMPLETE** — Hypervisor execution + rollback baseline and frontend execution-monitoring parity are delivered through VS9 closure gate with full backend/frontend validation evidence.
 
 ## Subsystem Progress — Vertical Slice 8
 
@@ -41,7 +42,7 @@
 - Milestone 10 closure gate is complete and release-readiness evidence is recorded.
 
 ### VS9 — Hypervisor Execution + Rollback Baseline
-- Status: **IN PROGRESS**.
+- Status: **COMPLETE**.
 - Objective: Complete intent-to-hypervisor baseline execution with verification and rollback-ready lifecycle outcomes.
 - Scope boundaries: Use existing intent API surface (`POST /api/v1/intents/execute`, `GET /api/v1/intents/{id}`); no `/api/v1/ai/*` additions; no C5/C6 relaxations.
 - Acceptance criteria: Validated intents transition to terminal lifecycle outcomes (`execution_completed` or `execution_failed`), rollback metadata is persisted when applicable, and terminal intent lifecycle events are emitted/audited.
@@ -59,8 +60,8 @@
 ## Subsystem Progress — Vertical Slice 9
 
 - [x] Step 1: Add backend hypervisor execution baseline with verification + rollback-ready lifecycle metadata and execute-permission gate (`execute:rollback`) while preserving existing intent API surface and fail-open event publication semantics.
-- [ ] Step 2: Add VS9 frontend execution-monitoring parity for terminal-state visibility and rollback metadata context (logic + component + e2e updates).
-- [ ] Closure Gate: Final scoped/frontend/backend validation pass and VS9 tracking finalization.
+- [x] Step 2: Add VS9 frontend execution-monitoring parity for terminal-state visibility and rollback metadata context (logic + component + e2e updates) including rollback reference/failure diagnostics and realtime verification/rollback status rendering.
+- [x] Closure Gate: Final scoped/frontend/backend validation pass and VS9 tracking finalization (`poetry run ruff check` scoped intent files ✅, VS9 targeted backend suite `63 passed` ✅, backend regression `poetry run pytest tests -q` `360 passed` ✅, frontend `npm run lint` ✅, `npm run typecheck` ✅, `npm run test` `28 passed` ✅, `npm run test:e2e` `8/8 passed` ✅, `npm run build` ✅, `npm run perf:bundle` ✅).
 
 ### VS10 — Deferred Topology Analysis Endpoints
 - Status: **PLANNED**.
@@ -145,7 +146,7 @@
 ## Remaining Work Master Checklist (Authoritative, Ordered, Non-Overlapping)
 
 - [x] VS8 closure complete (frontend parity workstream + final closure tracking evidence recorded).
-- [ ] VS9 closure complete (hypervisor execution + rollback baseline with terminal intent lifecycle outcomes).
+- [x] VS9 closure complete (hypervisor execution + rollback baseline with terminal intent lifecycle outcomes).
 - [ ] VS10 closure complete (deferred topology analysis endpoint set delivered under C6 governance).
 - [ ] VS11 closure complete (alerts API lifecycle + event parity delivered).
 - [ ] VS12 closure complete (plugin lifecycle + sandbox safety baseline delivered).

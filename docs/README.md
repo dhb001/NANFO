@@ -62,6 +62,7 @@
 - `architecture/Vision.md`
 - `architecture/Architecture.md`
 - `architecture/AIOS.md`
+- `architecture/Frontend.md`
 - `architecture/Hypervisor.md`
 - `architecture/Physics.md`
 - `architecture/DigitalTwin.md`
