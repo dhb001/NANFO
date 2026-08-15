@@ -6,11 +6,11 @@ All endpoints follow API_STANDARD.md §2 envelope via the responses module.
 
 from __future__ import annotations
 
+import re
 import uuid
 from datetime import datetime
 
 from pydantic import BaseModel, field_validator
-import re
 
 
 def _validate_slug(value: str) -> str:

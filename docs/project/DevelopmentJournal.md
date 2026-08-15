@@ -1,5 +1,15 @@
 # Development Journal
 
+## [2026-08-15] - chapter-01 to chapter-12 Conformance Audit Closure
+
+- **Completed:** Finalized end-to-end chapter conformance audit coverage (`chapter-01` through `chapter-12`) with explicit delivered-scope classification, remediation tracking, and certification output.
+- **Backend remediation delivered:** Organization membership add flow now validates `user_id` against active identity records before insert and returns canonical `404 USER_NOT_FOUND` when invalid (`backend/app/modules/identity/service.py`, `backend/app/modules/organization/service.py`).
+- **Frontend remediation delivered:** Realtime websocket management now parses structured websocket error frames, routes non-auth websocket errors through a dedicated callback, and triggers single-flight token refresh on websocket unauthorized signals with bounded toast feedback for repeated non-auth socket errors (`frontend/src/shared/realtime/useManagedWebSocket.ts`, `frontend/src/features/realtime/RealtimesBridge.tsx`).
+- **Coverage updates:** Added focused frontend unit tests for websocket error normalization/unauthorized handling and realtime bridge refresh/toast throttling, plus backend unit/integration coverage for organization member identity validation (`frontend/src/shared/realtime/useManagedWebSocket.test.tsx`, `frontend/src/features/realtime/RealtimesBridge.test.tsx`, `backend/tests/unit/test_org_service.py`, `backend/tests/integration/test_org_endpoints.py`).
+- **Validation evidence:** Backend scoped Ruff passed; targeted backend remediation suites passed (`18 passed`); full backend regression passed (`492 passed`); frontend full gate passed (`lint`, `typecheck`, `test` `78 passed`, `test:e2e` `17/17`, `build`, `perf:bundle` with all bounded checks true).
+- **Tracking/artifact finalization:** Added canonical chapter conformance artifact `docs/project/ChapterConformanceAudit.md` and updated sprint tracking to record audit closure and residual roadmap-scoped deltas.
+- **Scope/governance confirmation:** No API envelope drift, no C5/C6 boundary relaxation, no undocumented REST/WebSocket/event/channel/schema additions, and fail-open behavior continuity preserved.
+
 ## [2026-08-15] - Vertical Slice 20 Closure Gate Complete
 
 - **Completed:** Closed VS20 as the optimization-program sign-off slice by consolidating VS17-VS19 closure evidence, finalizing continuity-tracking documents, and executing final required validation for closure.

@@ -3,6 +3,29 @@
 Lightweight chronological notes for decisions that do not require a full ADR.
 
 ## 2026-08-15
+### chapter-01 to chapter-12 Conformance Audit: Accept Closure with Targeted Remediation and Explicit Residual Register
+Decision: Mark the chapter conformance audit complete after (a) finalizing a chapter-by-chapter conformance matrix for `chapter-01` through `chapter-12`, (b) remediating in-scope critical gaps (organization member identity validation and realtime websocket unauthorized/error handling hardening), and (c) recording full validation evidence in a dedicated audit artifact.
+Reason:
+- The audit objective is implementation conformance verification against chapter source-of-truth documents while preserving established contract and architecture guardrails.
+- The identified in-scope gaps were bounded and remediable without introducing new product-surface contracts or violating C5/C6 and fail-open constraints.
+- Required validation commands for touched backend/frontend scope are all green in the closure run, and residual differences are roadmap/aspirational breadth rather than regressions in delivered scope.
+Impact:
+- Added `docs/project/ChapterConformanceAudit.md` as the canonical chapter conformance artifact containing the matrix, remediation list, validation outcomes, residual-gap register, and certification statement.
+- Updated sprint/journal tracking to record chapter audit closure and evidence lineage.
+- Backend organization member add path now rejects unknown/inactive `user_id` with canonical `USER_NOT_FOUND` error; frontend realtime websocket flow now performs unauthorized refresh handling with structured socket error routing.
+Assumptions:
+- Remaining chapter-to-implementation deltas documented in the residual register (federated AIOS breadth, procedural OSM generation, full DAL/UNIL breadth, GraphQL and additional websocket channels, full Timescale/object-storage operationalization) are accepted as roadmap scope beyond current delivered baseline.
+- No additional contract-surface changes are required for this closure because conformance is certified against current delivered scope boundaries.
+Related:
+- `docs/project/ChapterConformanceAudit.md`
+- `docs/project/CurrentSprint.md`
+- `docs/project/DevelopmentJournal.md`
+- `backend/app/modules/organization/service.py`
+- `backend/app/modules/identity/service.py`
+- `frontend/src/shared/realtime/useManagedWebSocket.ts`
+- `frontend/src/features/realtime/RealtimesBridge.tsx`
+
+## 2026-08-15
 ### VS20 Closure Gate: Accept Optimization Program Sign-Off with Consolidated VS17-VS19 Evidence
 Decision: Mark VS20 complete as a verification/sign-off-only slice after confirming VS17-VS19 closure evidence continuity, finalizing tracking docs, and running final required backend regression.
 Reason:

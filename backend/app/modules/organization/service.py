@@ -15,17 +15,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
 from app.events.publisher import publish_event
-from app.modules.organization.models import OrgMember, Organization, Workspace
+from app.modules.identity.service import IdentityDirectoryService
+from app.modules.organization.models import Workspace
 from app.modules.organization.repository import (
-    OrgMemberRepository,
     OrganizationRepository,
+    OrgMemberRepository,
     WorkspaceRepository,
 )
 from app.modules.organization.schemas import (
     CreateOrgRequest,
     CreateWorkspaceRequest,
-    MemberResponse,
     MemberListResponse,
+    MemberResponse,
     OrgListResponse,
     OrgResponse,
     WorkspaceListResponse,
@@ -147,6 +148,7 @@ class MemberService:
         self._redis = redis
         self._repo = OrgMemberRepository(db)
         self._org_repo = OrganizationRepository(db)
+        self._identity_directory = IdentityDirectoryService(db)
 
     async def add_member(
         self, org_id: uuid.UUID, user_id: uuid.UUID, org_role: str, actor_id: str, correlation_id: str
@@ -155,15 +157,20 @@ class MemberService:
         if org is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Organization not found.")
 
+        user_exists = await self._identity_directory.user_exists(user_id)
+        if not user_exists:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={
+                    "code": "USER_NOT_FOUND",
+                    "message": "user_id does not reference an active user.",
+                },
+            )
+
         # Check duplicate membership
         existing = await self._repo.get_member(org_id, user_id)
         if existing is not None:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="User is already a member.")
-
-        # Organization.md §2: validate user_id via Identity API call before inserting.
-        # In this modular monolith slice, Identity is in the same process.
-        # A full M3 implementation will inject an IdentityClient for cross-service validation.
-        # For Slice 1, user_id is trusted from the calling actor's JWT claims.
 
         member = await self._repo.add_member(org_id=org_id, user_id=user_id, org_role=org_role)
         await self._db.commit()

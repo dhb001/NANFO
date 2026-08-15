@@ -5,16 +5,16 @@ Dependencies overridden with mocks; no database required.
 """
 
 import uuid
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
-import pytest
 import fakeredis
+import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
-from app.main import app
 from app.core.dependencies import get_db, get_redis
 from app.core.security import create_access_token
-from app.modules.organization.models import Organization, Workspace
+from app.main import app
 
 
 def _make_token(roles=None):
@@ -146,3 +146,28 @@ class TestMemberEndpoints:
             headers=headers,
         )
         assert response.status_code == 422
+
+    def test_add_member_unknown_user_returns_404(self, client, admin_token):
+        org_id = uuid.uuid4()
+        unknown_user_id = uuid.uuid4()
+        headers = {"Authorization": f"Bearer {admin_token}"}
+
+        with patch(
+            "app.modules.organization.service.MemberService.add_member",
+            side_effect=HTTPException(
+                status_code=404,
+                detail={
+                    "code": "USER_NOT_FOUND",
+                    "message": "user_id does not reference an active user.",
+                },
+            ),
+        ):
+            response = client.post(
+                f"/api/v1/organizations/{org_id}/members",
+                json={"user_id": str(unknown_user_id), "org_role": "Admin"},
+                headers=headers,
+            )
+
+        assert response.status_code == 404
+        body = response.json()
+        assert body["errors"]["code"] == "USER_NOT_FOUND"

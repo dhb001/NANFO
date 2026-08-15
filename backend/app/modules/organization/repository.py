@@ -11,7 +11,7 @@ import uuid
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.organization.models import OrgMember, Organization, Workspace
+from app.modules.organization.models import Organization, OrgMember, Workspace
 
 
 class OrganizationRepository:

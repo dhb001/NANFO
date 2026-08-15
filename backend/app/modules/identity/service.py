@@ -27,7 +27,6 @@ from app.core.security import (
     verify_password,
 )
 from app.events.publisher import publish_event
-from app.modules.identity.models import User
 from app.modules.identity.repository import AuditLogRepository, UserRepository
 from app.modules.identity.schemas import AccessToken, TokenPair, UserProfile
 
@@ -111,7 +110,7 @@ class AuthService:
         roles = await self._user_repo.get_roles_for_user(user)
         permissions = await self._user_repo.get_permissions_for_roles(roles)
 
-        access_token, access_jti = create_access_token(
+        access_token, _access_jti = create_access_token(
             user_id=str(user.user_id),
             email=user.email,
             roles=roles,
@@ -228,3 +227,14 @@ class AuthService:
             roles=roles,
             permissions=permissions,
         )
+
+
+class IdentityDirectoryService:
+    """Read-only identity lookup contract for cross-module validation flows."""
+
+    def __init__(self, db: AsyncSession):
+        self._user_repo = UserRepository(db)
+
+    async def user_exists(self, user_id: uuid.UUID) -> bool:
+        user = await self._user_repo.get_by_id(user_id)
+        return user is not None and bool(user.is_active)

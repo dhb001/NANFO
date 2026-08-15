@@ -21,6 +21,7 @@
 - Vertical Slice 18 Implementation: **COMPLETE** — Backend performance continuity hardening is delivered through VS18 closure gate with deterministic threshold assertions from VS17 evidence, fail-open coverage continuity, and full required backend validation.
 - Vertical Slice 19 Implementation: **COMPLETE** — Frontend performance continuity hardening is delivered through VS19 closure gate with deterministic bundle/perf bounds, elevated-volume realtime responsiveness coverage, and full required frontend/backend validation.
 - Vertical Slice 20 Implementation: **COMPLETE** — Optimization program closure gate is delivered with consolidated VS17-VS19 evidence, continuity-doc sign-off, and final required backend regression confirmation.
+- Chapter Conformance Audit (chapter-01 to chapter-12): **COMPLETE** — chapter-by-chapter implementation conformance classification was finalized, targeted in-scope remediation was applied (organization member identity validation and realtime websocket unauthorized/error handling hardening), and required backend/frontend validation evidence was recorded.
 
 ## Subsystem Progress — Vertical Slice 8
 
@@ -316,6 +317,23 @@
 - [x] VS18 closure complete (backend performance continuity hardening with deterministic threshold assertions and fail-open coverage continuity).
 - [x] VS19 closure complete (frontend performance continuity hardening with deterministic bundle/perf bounds and elevated-volume realtime responsiveness coverage).
 - [x] VS20 closure complete (optimization program closure gate finalized with consolidated evidence, continuity-doc sign-off, and final backend regression confirmation).
+- [x] chapter-01 to chapter-12 conformance audit closure complete (matrix, remediation list, validation outcomes, residual-gap register, and certification statement recorded in `docs/project/ChapterConformanceAudit.md`).
+
+## Post-VS20 Quality Governance
+
+### chapter-01 to chapter-12 Implementation Conformance Audit
+- Status: **COMPLETE**.
+- Objective: Verify delivered implementation against chapter source-of-truth documents and remediate critical in-scope deltas without contract drift.
+- Scope boundaries: No net-new REST/WebSocket/event/channel/schema additions; preserve canonical API envelope; preserve C5/C6 constraints; preserve fail-open runtime/event behavior.
+- Closure gate: Scoped backend Ruff + targeted backend tests for remediated scope + full backend regression + frontend full quality gate for touched frontend scope.
+- Evidence artifact: `docs/project/ChapterConformanceAudit.md`.
+
+## Subsystem Progress — Chapter Conformance Audit
+
+- [x] Step 1: Build chapter-by-chapter conformance matrix (`chapter-01` through `chapter-12`) and classify each chapter against delivered implementation scope with explicit evidence pointers.
+- [x] Step 2: Remediate in-scope gaps: enforce organization member `user_id` active-user validation (`USER_NOT_FOUND`) and harden frontend realtime websocket unauthorized refresh/error handling paths.
+- [x] Step 3: Execute closure validation suite (`poetry run ruff check` scoped files, targeted backend tests, `poetry run pytest tests -q`, frontend `lint/typecheck/test/test:e2e/build/perf:bundle`) and document outcomes in `ChapterConformanceAudit.md`.
+- [x] Closure Gate: Project tracking finalized with chapter conformance artifact and residual-gap register documented for post-optimization roadmap continuity.
 
 ## Subsystem Progress — Vertical Slice 7
 
@@ -420,6 +438,7 @@
 ## Blocked / Deferred
 - Digital Twin spatial references — deferred to M6
 - Post-VS16 optimization sequence (VS17-VS20) is complete; deeper bundle-shape reduction for the large `three` chunk and staged/CI external load-tooling expansion remain deferred carryover candidates for the next roadmap phase.
+- Chapter conformance residual roadmap deltas (federated AIOS breadth, procedural OSM generation, full DAL/UNIL breadth, GraphQL and additional websocket channels, and full Timescale/object-storage operationalization) are documented in `docs/project/ChapterConformanceAudit.md`.
 - Repo-wide Ruff debt outside VS2 Step 8 scope remains and is tracked for later cleanup.
 
 ## Next Sprint Candidates
