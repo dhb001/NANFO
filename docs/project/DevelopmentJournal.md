@@ -1,5 +1,15 @@
 # Development Journal
 
+## [2026-08-15] - Vertical Slice 18 Step 1 (Execution Charter + Finite Checklist Lock)
+
+- **Implemented (VS18 step scope):** Activated VS18 as the current execution slice and locked a finite, non-overlapping checklist in `CurrentSprint.md` before introducing continuity-threshold code changes.
+- **Charter locked:** Recorded VS18 objective/scope/closure boundaries as backend continuity hardening only (tests/instrumentation/docs), with explicit prohibition on REST/WebSocket/event/channel/schema expansion and no C5/C6 or fail-open semantic drift.
+- **Checklist baseline:** Added `Subsystem Progress — Vertical Slice 18` with three bounded checkpoints (`Step 1` charter lock, `Step 2` threshold implementation + fail-open coverage continuity, `Closure Gate`) and marked Step 1 complete.
+- **Threshold-governance assumptions:** Anchored Step 2 continuity posture to VS17 local-smoke evidence continuity (`http_req_failed_rate=0.0`, `http_req_duration_p95_ms=2.1907872`, zero dropped counter delta) while preserving environment-tolerant threshold tuning to avoid noisy false negatives.
+- **Validation:** Ran required gates in this step run: scoped Ruff (`poetry run ruff check tests/integration/test_telemetry_synthetic_load.py`), VS18-targeted baseline test (`poetry run pytest tests/integration/test_telemetry_synthetic_load.py -q`, `1 passed`), and full backend regression (`poetry run pytest tests -q`, `484 passed`).
+- **Frontend gate applicability:** Frontend full-gate command chain is not required in Step 1 because no frontend files were touched.
+- **Scope/governance:** Docs-only execution increment; no API envelope drift, no C5/C6 boundary changes, no fail-open behavior change, and no unrelated refactors.
+
 ## [2026-08-14] - Vertical Slice 17 Closure Gate Complete
 
 - **Completed:** Closed VS17 after delivering the external load-tooling execution baseline and recording deterministic local-smoke evidence with full required backend validation gates.

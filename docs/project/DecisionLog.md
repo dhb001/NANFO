@@ -2,6 +2,26 @@
 
 Lightweight chronological notes for decisions that do not require a full ADR.
 
+## 2026-08-15
+### VS18 Step 1: Lock Backend-Only Continuity Charter and Finite Checklist Before Threshold Implementation
+Decision: Start VS18 with a docs-first charter lock in `CurrentSprint.md`, marking the slice `IN PROGRESS` and defining a finite three-checkpoint sequence (`Step 1` charter, `Step 2` implementation, `Closure Gate`) before introducing any backend continuity-threshold code changes.
+Reason:
+- `CurrentSprint.md` identifies VS18 as the first unfinished slice and constrains scope to backend tests/instrumentation/docs with no product-surface expansion.
+- A checklist-first start preserves atomic per-step commits and prevents overlap with VS19 frontend continuity scope.
+- Explicitly carrying forward VS17 local-smoke evidence as Step 2 threshold input improves continuity while keeping thresholds environment-tolerant to reduce noisy false negatives.
+Impact:
+- `CurrentSprint.md` now marks VS18 `IN PROGRESS`, adds `Subsystem Progress — Vertical Slice 18`, and records Step 1 completion with remaining Step 2 + closure checkpoints.
+- `DevelopmentJournal.md` records Step 1 implementation and validation evidence.
+- VS18 implementation remains bounded to backend continuity assertions/coverage and documentation updates only; no REST/WebSocket/event/channel/schema changes are introduced by Step 1.
+Assumptions:
+- Step 2 will derive bounded continuity assertions from VS17 signals (`http_req_failed_rate`, p95 latency, dropped-event posture) using tolerant thresholds suitable for local/staging variance.
+- Existing fail-open degraded-branch semantics remain mandatory and must stay covered by targeted suites.
+Related:
+- `docs/project/CurrentSprint.md`
+- `docs/project/DevelopmentJournal.md`
+- `docs/project/DecisionLog.md`
+- `docs/project/OptimizationContinuityPlan-VS16.md`
+
 ## 2026-08-14
 ### VS17 Closure Gate: Accept Completion with Docker-Backed Local-Smoke Evidence and Full Required Backend Validation
 Decision: Mark VS17 complete after the closure gate shows a successful deterministic local-smoke external-load run and all required backend validation gates pass, without running frontend full-gate commands because no frontend files changed.

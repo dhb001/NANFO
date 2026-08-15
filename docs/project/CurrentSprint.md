@@ -253,13 +253,19 @@
 - [x] Closure Gate: Final VS17 validation pass and tracking finalization (`poetry run ruff check app/modules/telemetry/load_tooling.py scripts/run_vs17_external_load.py tests/unit/test_vs17_load_tooling.py` ✅, VS17 targeted backend suite `poetry run pytest tests/unit/test_vs17_load_tooling.py -q` `28 passed` ✅, backend regression `poetry run pytest tests -q` `484 passed` ✅; local-smoke evidence run `poetry run python scripts/run_vs17_external_load.py --profile local-smoke --base-url http://127.0.0.1:8000` produced `status=success` with counter delta `ingested=120 persisted=120 fanout=120 dropped=0` and k6 metrics in `/tmp/opencode/vs17-artifacts-20260814T205740Z/20260814T205740Z_local_smoke.json`; frontend full gate not required because no frontend files were touched in VS17).
 
 ### VS18 — Backend Performance Continuity Hardening
-- Status: **PLANNED**.
+- Status: **IN PROGRESS**.
 - Objective: Convert VS17 load signals into deterministic backend continuity assertions/threshold evidence without contract expansion.
 - Scope boundaries: Backend tests/instrumentation/docs only; no API/event/channel/schema additions.
 - Acceptance criteria: Targeted suites enforce bounded latency/error/drop posture; fail-open degraded branches remain covered; threshold assumptions are documented.
 - Risks: Over-tuned thresholds causing noisy regressions and environment-sensitivity false negatives.
 - Dependencies: VS17 evidence artifacts and existing telemetry/reliability harness continuity.
 - Closure gate: Scoped Ruff + targeted backend continuity tests + full backend regression (`poetry run pytest tests -q`).
+
+## Subsystem Progress — Vertical Slice 18
+
+- [x] Step 1: Lock VS18 execution charter with a finite, non-overlapping checklist and explicit threshold-governance assumptions derived from VS17 local-smoke evidence continuity.
+- [ ] Step 2: Implement backend continuity threshold assertions from VS17 load signals (latency/error/drop posture) and retain explicit fail-open degraded-branch coverage in targeted backend suites.
+- [ ] Closure Gate: Final VS18 validation pass and tracking finalization (`poetry run ruff check` scoped VS18 backend files, VS18 targeted backend continuity suite, and `poetry run pytest tests -q`; frontend full gate not required when frontend files are untouched).
 
 ### VS19 — Frontend Performance Continuity Hardening
 - Status: **PLANNED**.
@@ -291,7 +297,7 @@
 - [x] VS15 closure complete (post-M10 synthetic load campaign + performance continuity evidence refresh finalized).
 - [x] VS16 closure complete (follow-on optimization planning + deferred external load-tooling expansion governance finalized).
 - [x] VS17 closure complete (external load-tooling execution baseline with deterministic evidence artifacts).
-- [ ] VS18 pending (backend performance continuity hardening).
+- [ ] VS18 in progress (backend performance continuity hardening).
 - [ ] VS19 pending (frontend performance continuity hardening).
 - [ ] VS20 pending (optimization program closure gate).
 
@@ -401,4 +407,4 @@
 - Repo-wide Ruff debt outside VS2 Step 8 scope remains and is tracked for later cleanup.
 
 ## Next Sprint Candidates
-- VS18 Step 1 implementation focused on backend performance continuity hardening from VS17 evidence artifacts.
+- VS18 Step 2 implementation focused on backend performance continuity threshold assertions and fail-open degraded-branch coverage from VS17 evidence artifacts.
