@@ -18,6 +18,7 @@
 - Vertical Slice 15 Implementation: **COMPLETE** — Post-M10 synthetic load campaign baseline and frontend burst-resilience continuity hardening are delivered through VS15 closure gate with full backend/frontend validation evidence.
 - Vertical Slice 16 Implementation: **COMPLETE** — Follow-on optimization planning and deferred external load-tooling expansion governance are delivered through VS16 closure gate with required backend validation evidence.
 - Vertical Slice 17 Implementation: **COMPLETE** — External load-tooling execution baseline is delivered through VS17 closure gate with deterministic `k6` (Docker fallback) evidence artifacts and full required backend validation.
+- Vertical Slice 18 Implementation: **COMPLETE** — Backend performance continuity hardening is delivered through VS18 closure gate with deterministic threshold assertions from VS17 evidence, fail-open coverage continuity, and full required backend validation.
 
 ## Subsystem Progress — Vertical Slice 8
 
@@ -253,7 +254,7 @@
 - [x] Closure Gate: Final VS17 validation pass and tracking finalization (`poetry run ruff check app/modules/telemetry/load_tooling.py scripts/run_vs17_external_load.py tests/unit/test_vs17_load_tooling.py` ✅, VS17 targeted backend suite `poetry run pytest tests/unit/test_vs17_load_tooling.py -q` `28 passed` ✅, backend regression `poetry run pytest tests -q` `484 passed` ✅; local-smoke evidence run `poetry run python scripts/run_vs17_external_load.py --profile local-smoke --base-url http://127.0.0.1:8000` produced `status=success` with counter delta `ingested=120 persisted=120 fanout=120 dropped=0` and k6 metrics in `/tmp/opencode/vs17-artifacts-20260814T205740Z/20260814T205740Z_local_smoke.json`; frontend full gate not required because no frontend files were touched in VS17).
 
 ### VS18 — Backend Performance Continuity Hardening
-- Status: **IN PROGRESS**.
+- Status: **COMPLETE**.
 - Objective: Convert VS17 load signals into deterministic backend continuity assertions/threshold evidence without contract expansion.
 - Scope boundaries: Backend tests/instrumentation/docs only; no API/event/channel/schema additions.
 - Acceptance criteria: Targeted suites enforce bounded latency/error/drop posture; fail-open degraded branches remain covered; threshold assumptions are documented.
@@ -265,7 +266,7 @@
 
 - [x] Step 1: Lock VS18 execution charter with a finite, non-overlapping checklist and explicit threshold-governance assumptions derived from VS17 local-smoke evidence continuity.
 - [x] Step 2: Implement backend continuity threshold assertions from VS17 load signals (latency/error/drop posture) and retain explicit fail-open degraded-branch coverage in targeted backend suites.
-- [ ] Closure Gate: Final VS18 validation pass and tracking finalization (`poetry run ruff check` scoped VS18 backend files, VS18 targeted backend continuity suite, and `poetry run pytest tests -q`; frontend full gate not required when frontend files are untouched).
+- [x] Closure Gate: Final VS18 validation pass and tracking finalization (`poetry run ruff check app/modules/telemetry/load_tooling.py tests/unit/test_vs17_load_tooling.py tests/integration/test_telemetry_synthetic_load.py` ✅, VS18 targeted backend suite `poetry run pytest tests/unit/test_vs17_load_tooling.py tests/integration/test_telemetry_synthetic_load.py tests/unit/test_telemetry_consumer.py -q` `47 passed` ✅, backend regression `poetry run pytest tests -q` `489 passed` ✅; frontend full gate not required because no frontend files were touched in VS18).
 
 ### VS19 — Frontend Performance Continuity Hardening
 - Status: **PLANNED**.
@@ -297,7 +298,7 @@
 - [x] VS15 closure complete (post-M10 synthetic load campaign + performance continuity evidence refresh finalized).
 - [x] VS16 closure complete (follow-on optimization planning + deferred external load-tooling expansion governance finalized).
 - [x] VS17 closure complete (external load-tooling execution baseline with deterministic evidence artifacts).
-- [ ] VS18 in progress (backend performance continuity hardening).
+- [x] VS18 closure complete (backend performance continuity hardening with deterministic threshold assertions and fail-open coverage continuity).
 - [ ] VS19 pending (frontend performance continuity hardening).
 - [ ] VS20 pending (optimization program closure gate).
 
@@ -403,8 +404,8 @@
 
 ## Blocked / Deferred
 - Digital Twin spatial references — deferred to M6
-- Macro-scale synthetic load campaign baseline is delivered in VS15; backend continuity threshold hardening from VS17 external-load evidence is deferred to VS18.
+- Macro-scale synthetic load campaign baseline is delivered in VS15 and backend continuity threshold hardening from VS17 evidence is delivered in VS18; frontend performance continuity follow-up remains planned in VS19.
 - Repo-wide Ruff debt outside VS2 Step 8 scope remains and is tracked for later cleanup.
 
 ## Next Sprint Candidates
-- VS18 Step 2 implementation focused on backend performance continuity threshold assertions and fail-open degraded-branch coverage from VS17 evidence artifacts.
+- VS19 Step 1 implementation focused on frontend performance continuity hardening with deterministic bundle/perf trend evidence and elevated-volume realtime operator-flow regression coverage.

@@ -1,5 +1,14 @@
 # Development Journal
 
+## [2026-08-15] - Vertical Slice 18 Closure Gate Complete
+
+- **Completed:** Closed VS18 after delivering backend continuity-threshold hardening from VS17 evidence signals and validating fail-open degraded-branch continuity.
+- **Closure validation:** Scoped Ruff passed (`poetry run ruff check app/modules/telemetry/load_tooling.py tests/unit/test_vs17_load_tooling.py tests/integration/test_telemetry_synthetic_load.py`), VS18-targeted backend suite passed (`poetry run pytest tests/unit/test_vs17_load_tooling.py tests/integration/test_telemetry_synthetic_load.py tests/unit/test_telemetry_consumer.py -q`, `47 passed`), and final backend regression passed (`poetry run pytest tests -q`, `489 passed`).
+- **Frontend gate applicability:** Frontend full-gate command chain remained not required for VS18 closure because no frontend files were touched in this slice.
+- **Continuity-hardening outcome:** VS17 evidence payload acceptance now carries deterministic continuity thresholds (`http_req_failed_rate`, `http_req_duration_p95_ms`, persisted/fanout/dropped ratio posture) and fails evidence status on bounded threshold violations.
+- **Scope/governance confirmation:** No REST/WebSocket/event/channel/schema contract changes, no API envelope drift, no C5/C6 boundary changes, and existing fail-open runtime/event behavior remained unchanged.
+- **Continuity handoff:** Remaining-work plan now advances to VS19 frontend performance continuity hardening.
+
 ## [2026-08-15] - Vertical Slice 18 Step 2 (Backend Continuity Threshold Assertions + Fail-Open Coverage Continuity)
 
 - **Implemented (VS18 step scope):** Added deterministic backend continuity-threshold evaluation derived from VS17 local-smoke evidence signals and integrated those checks into VS17 evidence payload acceptance without changing product runtime/API/event/channel/schema contracts.

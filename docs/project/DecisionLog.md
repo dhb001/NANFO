@@ -3,6 +3,28 @@
 Lightweight chronological notes for decisions that do not require a full ADR.
 
 ## 2026-08-15
+### VS18 Closure Gate: Accept Completion with Continuity-Threshold Enforcement and Full Required Backend Validation
+Decision: Mark VS18 complete after continuity-threshold instrumentation/tests are delivered and closure gates are fully green across scoped Ruff, VS18-targeted continuity suites, and full backend regression, without running frontend full-gate commands because frontend files were untouched.
+Reason:
+- VS18 scope boundaries are backend tests/instrumentation/docs only; closure requires deterministic continuity assertions and backend validation evidence, not frontend gates when frontend scope is untouched.
+- Final closure evidence demonstrates bounded threshold enforcement on latency/error/drop posture while preserving fail-open degraded behavior coverage.
+- Command-level validation outcomes are all green in the same closure cycle.
+Impact:
+- `CurrentSprint.md` now marks VS18 as `COMPLETE`, checks Step 2 and closure checklist items, and advances next-slice execution targeting VS19.
+- `DevelopmentJournal.md` records closure-gate evidence and confirms frontend gate non-applicability.
+- `DecisionLog.md` preserves closure acceptance rationale and continuity-hardening evidence basis.
+Assumptions:
+- VS19 will address deferred frontend performance continuity hardening (including bundle/perf trend tracking and elevated-volume operator flow validation) without backend contract changes.
+- Existing threshold constants remain environment-tolerant defaults and can be retuned in future slices only with documented evidence.
+Related:
+- `docs/project/CurrentSprint.md`
+- `docs/project/DevelopmentJournal.md`
+- `docs/project/DecisionLog.md`
+- `backend/app/modules/telemetry/load_tooling.py`
+- `backend/tests/unit/test_vs17_load_tooling.py`
+- `backend/tests/integration/test_telemetry_synthetic_load.py`
+
+## 2026-08-15
 ### VS18 Step 2: Enforce Backend Continuity Threshold Posture Through Load-Tooling Evidence Acceptance Checks
 Decision: Implement VS18 continuity hardening by adding deterministic threshold evaluation to VS17 load-tooling evidence generation (`build_vs17_evidence_payload`) and failing evidence status when bounded continuity checks (latency/error/drop and persist/fanout ratios) are violated.
 Reason:
