@@ -3,6 +3,27 @@
 Lightweight chronological notes for decisions that do not require a full ADR.
 
 ## 2026-08-15
+### VS18 Step 2: Enforce Backend Continuity Threshold Posture Through Load-Tooling Evidence Acceptance Checks
+Decision: Implement VS18 continuity hardening by adding deterministic threshold evaluation to VS17 load-tooling evidence generation (`build_vs17_evidence_payload`) and failing evidence status when bounded continuity checks (latency/error/drop and persist/fanout ratios) are violated.
+Reason:
+- VS18 acceptance criteria require targeted suites to enforce bounded latency/error/drop posture from VS17 load signals without product-surface changes.
+- Existing VS17 evidence path is the narrowest in-boundary integration point for continuity assertions and avoids runtime API/module drift.
+- Embedding continuity checks in evidence acceptance keeps operational behavior fail-open while making regression signals explicit and testable.
+Impact:
+- Added VS18 threshold constants and `evaluate_vs18_continuity_posture(...)` in `backend/app/modules/telemetry/load_tooling.py` with baseline metadata tied to VS17 local-smoke evidence continuity.
+- `build_vs17_evidence_payload(...)` now includes a `continuity` section (`baseline`, `thresholds`, `observed`, `checks`) and continuity acceptance checks (`continuity_*`) that participate in final success/failure status.
+- Expanded unit/integration coverage in `backend/tests/unit/test_vs17_load_tooling.py` and `backend/tests/integration/test_telemetry_synthetic_load.py` to assert positive/negative continuity threshold behavior and preserve degraded-branch coverage continuity.
+Assumptions:
+- Thresholds are environment-tolerant guardrails for continuity regression detection (`failed_rate <= 0.05`, `p95 <= 500ms`, persisted/fanout ratios >= `0.99`, dropped ratio <= `0.01`) and may be tuned in future slices if measured variance requires documented adjustment.
+- Continuity hardening remains evidence/test/instrumentation scope only; no REST/WebSocket/event/channel/schema contract expansion is introduced.
+Related:
+- `backend/app/modules/telemetry/load_tooling.py`
+- `backend/tests/unit/test_vs17_load_tooling.py`
+- `backend/tests/integration/test_telemetry_synthetic_load.py`
+- `docs/project/CurrentSprint.md`
+- `docs/project/DevelopmentJournal.md`
+
+## 2026-08-15
 ### VS18 Step 1: Lock Backend-Only Continuity Charter and Finite Checklist Before Threshold Implementation
 Decision: Start VS18 with a docs-first charter lock in `CurrentSprint.md`, marking the slice `IN PROGRESS` and defining a finite three-checkpoint sequence (`Step 1` charter, `Step 2` implementation, `Closure Gate`) before introducing any backend continuity-threshold code changes.
 Reason:

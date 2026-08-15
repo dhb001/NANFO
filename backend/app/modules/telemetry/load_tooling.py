@@ -26,6 +26,16 @@ VS17_ARTIFACT_VERSION = "vs17.external-load.v1"
 VS17_DEFAULT_ARTIFACT_DIR = Path("artifacts/load-testing/vs17")
 VS17_DEFAULT_K6_SCRIPT_PATH = Path("scripts/k6/vs17_telemetry_health.js")
 
+VS18_BASELINE_LOCAL_SMOKE_HTTP_REQ_FAILED_RATE = 0.0
+VS18_BASELINE_LOCAL_SMOKE_HTTP_REQ_DURATION_P95_MS = 2.1907872
+VS18_BASELINE_LOCAL_SMOKE_EVENTS = 120
+
+VS18_MAX_HTTP_REQ_FAILED_RATE = 0.05
+VS18_MAX_HTTP_REQ_DURATION_P95_MS = 500.0
+VS18_MIN_PERSIST_TO_PUBLISHED_RATIO = 0.99
+VS18_MIN_FANOUT_TO_PUBLISHED_RATIO = 0.99
+VS18_MAX_DROPPED_TO_PUBLISHED_RATIO = 0.01
+
 VS17_EVIDENCE_COUNTER_KEYS = (
     "ingested_events",
     "persisted_events",
@@ -349,6 +359,83 @@ def extract_vs17_k6_metrics(summary: dict[str, Any] | None) -> dict[str, float |
     }
 
 
+def evaluate_vs18_continuity_posture(
+    *,
+    fixture_result: VS17FixturePumpResult,
+    counter_delta: dict[str, int],
+    k6_metrics: dict[str, float | None],
+    k6_metrics_required: bool,
+) -> dict[str, Any]:
+    """Evaluate VS18 continuity thresholds using VS17 evidence signals."""
+    published_events = max(_to_int(fixture_result.events_published), 0)
+    ratio_denominator = max(published_events, 1)
+
+    persisted_events = _to_int(counter_delta.get("persisted_events", 0))
+    fanout_events = _to_int(counter_delta.get("fanout_events", 0))
+    dropped_events = _to_int(counter_delta.get("dropped_events", 0))
+
+    persisted_ratio = persisted_events / ratio_denominator
+    fanout_ratio = fanout_events / ratio_denominator
+    dropped_ratio = dropped_events / ratio_denominator
+
+    http_req_failed_rate = _to_optional_float(k6_metrics.get("http_req_failed_rate"))
+    http_req_duration_p95_ms = _to_optional_float(k6_metrics.get("http_req_duration_p95_ms"))
+
+    checks = {
+        "persist_ratio_within_threshold": persisted_ratio >= VS18_MIN_PERSIST_TO_PUBLISHED_RATIO,
+        "fanout_ratio_within_threshold": fanout_ratio >= VS18_MIN_FANOUT_TO_PUBLISHED_RATIO,
+        "dropped_ratio_within_threshold": dropped_ratio <= VS18_MAX_DROPPED_TO_PUBLISHED_RATIO,
+    }
+
+    if k6_metrics_required:
+        checks["http_req_failed_rate_within_threshold"] = (
+            http_req_failed_rate is not None
+            and http_req_failed_rate <= VS18_MAX_HTTP_REQ_FAILED_RATE
+        )
+        checks["http_req_duration_p95_within_threshold"] = (
+            http_req_duration_p95_ms is not None
+            and http_req_duration_p95_ms <= VS18_MAX_HTTP_REQ_DURATION_P95_MS
+        )
+    else:
+        checks["http_req_failed_rate_within_threshold"] = True
+        checks["http_req_duration_p95_within_threshold"] = True
+
+    return {
+        "baseline": {
+            "source": "vs17_local_smoke_20260814T205740Z",
+            "http_req_failed_rate": VS18_BASELINE_LOCAL_SMOKE_HTTP_REQ_FAILED_RATE,
+            "http_req_duration_p95_ms": VS18_BASELINE_LOCAL_SMOKE_HTTP_REQ_DURATION_P95_MS,
+            "fixture_events": VS18_BASELINE_LOCAL_SMOKE_EVENTS,
+            "counter_delta": {
+                "ingested_events": VS18_BASELINE_LOCAL_SMOKE_EVENTS,
+                "persisted_events": VS18_BASELINE_LOCAL_SMOKE_EVENTS,
+                "fanout_events": VS18_BASELINE_LOCAL_SMOKE_EVENTS,
+                "dropped_events": 0,
+            },
+        },
+        "thresholds": {
+            "max_http_req_failed_rate": VS18_MAX_HTTP_REQ_FAILED_RATE,
+            "max_http_req_duration_p95_ms": VS18_MAX_HTTP_REQ_DURATION_P95_MS,
+            "min_persist_to_published_ratio": VS18_MIN_PERSIST_TO_PUBLISHED_RATIO,
+            "min_fanout_to_published_ratio": VS18_MIN_FANOUT_TO_PUBLISHED_RATIO,
+            "max_dropped_to_published_ratio": VS18_MAX_DROPPED_TO_PUBLISHED_RATIO,
+        },
+        "observed": {
+            "published_events": published_events,
+            "persisted_events": persisted_events,
+            "fanout_events": fanout_events,
+            "dropped_events": dropped_events,
+            "persist_to_published_ratio": round(persisted_ratio, 6),
+            "fanout_to_published_ratio": round(fanout_ratio, 6),
+            "dropped_to_published_ratio": round(dropped_ratio, 6),
+            "http_req_failed_rate": http_req_failed_rate,
+            "http_req_duration_p95_ms": http_req_duration_p95_ms,
+            "k6_metrics_required": k6_metrics_required,
+        },
+        "checks": checks,
+    }
+
+
 def _extract_k6_metric_from_candidates(
     metrics: dict[str, Any],
     metric_names: tuple[str, ...],
@@ -440,6 +527,13 @@ def build_vs17_evidence_payload(
         counters_after=counters_after,
     )
     k6_metrics = extract_vs17_k6_metrics(k6_summary)
+    continuity = evaluate_vs18_continuity_posture(
+        fixture_result=fixture_result,
+        counter_delta=counter_delta,
+        k6_metrics=k6_metrics,
+        k6_metrics_required=k6_runner != "skipped",
+    )
+    continuity_checks = continuity["checks"]
 
     k6_exit_code = k6_result.exit_code if k6_result is not None else None
     acceptance_checks = {
@@ -450,6 +544,21 @@ def build_vs17_evidence_payload(
         "fanout_signal_present": counter_delta["fanout_events"] > 0,
         "error_signal_recorded": counter_delta["dropped_events"] >= 0,
         "k6_command_success": k6_exit_code in (None, 0),
+        "continuity_http_req_failed_rate_within_threshold": continuity_checks[
+            "http_req_failed_rate_within_threshold"
+        ],
+        "continuity_http_req_duration_p95_within_threshold": continuity_checks[
+            "http_req_duration_p95_within_threshold"
+        ],
+        "continuity_persist_ratio_within_threshold": continuity_checks[
+            "persist_ratio_within_threshold"
+        ],
+        "continuity_fanout_ratio_within_threshold": continuity_checks[
+            "fanout_ratio_within_threshold"
+        ],
+        "continuity_dropped_ratio_within_threshold": continuity_checks[
+            "dropped_ratio_within_threshold"
+        ],
     }
     is_success = failure_reason is None and all(acceptance_checks.values())
 
@@ -469,6 +578,7 @@ def build_vs17_evidence_payload(
             "stderr": _truncate_text(k6_result.stderr if k6_result else ""),
             "metrics": k6_metrics,
         },
+        "continuity": continuity,
         "fixture": asdict(fixture_result),
         "counters": {
             "before": counters_before,
@@ -514,3 +624,12 @@ def _to_int(value: Any) -> int:
         return int(value)
     except (TypeError, ValueError):
         return 0
+
+
+def _to_optional_float(value: Any) -> float | None:
+    try:
+        if value is None:
+            return None
+        return float(value)
+    except (TypeError, ValueError):
+        return None

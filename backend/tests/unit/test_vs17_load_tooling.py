@@ -11,6 +11,13 @@ import pytest
 
 from app.modules.telemetry.load_tooling import (
     VS17_LOAD_PROFILES,
+    VS18_BASELINE_LOCAL_SMOKE_HTTP_REQ_DURATION_P95_MS,
+    VS18_BASELINE_LOCAL_SMOKE_HTTP_REQ_FAILED_RATE,
+    VS18_MAX_DROPPED_TO_PUBLISHED_RATIO,
+    VS18_MAX_HTTP_REQ_DURATION_P95_MS,
+    VS18_MAX_HTTP_REQ_FAILED_RATE,
+    VS18_MIN_FANOUT_TO_PUBLISHED_RATIO,
+    VS18_MIN_PERSIST_TO_PUBLISHED_RATIO,
     VS17FixturePumpResult,
     VS17LoadProfile,
     build_vs17_counter_delta,
@@ -18,6 +25,7 @@ from app.modules.telemetry.load_tooling import (
     build_vs17_evidence_payload,
     build_vs17_k6_command,
     build_vs17_summary_path,
+    evaluate_vs18_continuity_posture,
     extract_vs17_k6_metrics,
     get_vs17_load_profile,
     list_vs17_load_profiles,
@@ -334,8 +342,8 @@ def test_build_evidence_payload_success_shape():
         counters_after={
             "ingested_events": 13,
             "persisted_events": 13,
-            "fanout_events": 12,
-            "dropped_events": 1,
+            "fanout_events": 13,
+            "dropped_events": 0,
         },
         started_at=datetime(2026, 1, 1, tzinfo=UTC),
         finished_at=datetime(2026, 1, 1, tzinfo=UTC),
@@ -345,11 +353,19 @@ def test_build_evidence_payload_success_shape():
     assert payload["evidence"] == {
         "ingest_events": 3,
         "persist_events": 3,
-        "fanout_events": 2,
-        "error_events": 1,
+        "fanout_events": 3,
+        "error_events": 0,
     }
     assert payload["acceptance_checks"]["fixture_publish_complete"] is True
     assert payload["acceptance_checks"]["k6_command_success"] is True
+    assert payload["acceptance_checks"]["continuity_http_req_failed_rate_within_threshold"] is True
+    assert payload["acceptance_checks"]["continuity_http_req_duration_p95_within_threshold"] is True
+    assert payload["acceptance_checks"]["continuity_persist_ratio_within_threshold"] is True
+    assert payload["acceptance_checks"]["continuity_fanout_ratio_within_threshold"] is True
+    assert payload["acceptance_checks"]["continuity_dropped_ratio_within_threshold"] is True
+    continuity = payload["continuity"]
+    assert continuity["thresholds"]["max_http_req_failed_rate"] == VS18_MAX_HTTP_REQ_FAILED_RATE
+    assert continuity["thresholds"]["max_http_req_duration_p95_ms"] == VS18_MAX_HTTP_REQ_DURATION_P95_MS
 
 
 def test_build_evidence_payload_failed_when_reason_present():
@@ -390,6 +406,158 @@ def test_build_evidence_payload_failed_when_reason_present():
     assert payload["status"] == "failed"
     assert payload["failure_reason"] == "fixture_publish_incomplete"
     assert payload["acceptance_checks"]["fixture_publish_complete"] is False
+
+
+def test_build_evidence_payload_skip_k6_keeps_continuity_http_checks_passed():
+    profile = _fixture_profile()
+    fixture_result = VS17FixturePumpResult(
+        events_requested=3,
+        events_published=3,
+        publish_failures=0,
+        first_correlation_id="c1",
+        last_correlation_id="c3",
+    )
+
+    payload = build_vs17_evidence_payload(
+        run_id="20260814T120000Z",
+        profile=profile,
+        k6_runner="skipped",
+        k6_command=[],
+        k6_result=None,
+        k6_summary=None,
+        fixture_result=fixture_result,
+        counters_before={
+            "ingested_events": 10,
+            "persisted_events": 10,
+            "fanout_events": 10,
+            "dropped_events": 0,
+        },
+        counters_after={
+            "ingested_events": 13,
+            "persisted_events": 13,
+            "fanout_events": 13,
+            "dropped_events": 0,
+        },
+        started_at=datetime(2026, 1, 1, tzinfo=UTC),
+        finished_at=datetime(2026, 1, 1, tzinfo=UTC),
+    )
+
+    assert payload["status"] == "success"
+    assert payload["continuity"]["observed"]["k6_metrics_required"] is False
+    assert payload["acceptance_checks"]["continuity_http_req_failed_rate_within_threshold"] is True
+    assert payload["acceptance_checks"]["continuity_http_req_duration_p95_within_threshold"] is True
+
+
+def test_build_evidence_payload_fails_when_continuity_drop_ratio_exceeds_threshold():
+    profile = _fixture_profile()
+    fixture_result = VS17FixturePumpResult(
+        events_requested=3,
+        events_published=3,
+        publish_failures=0,
+        first_correlation_id="c1",
+        last_correlation_id="c3",
+    )
+
+    payload = build_vs17_evidence_payload(
+        run_id="20260814T120000Z",
+        profile=profile,
+        k6_runner="host",
+        k6_command=["k6", "run"],
+        k6_result=None,
+        k6_summary={
+            "metrics": {
+                "http_req_failed": {"values": {"rate": 0.0}},
+                "http_req_duration": {"values": {"p(95)": 5.0}},
+                "http_reqs": {"values": {"count": 30}},
+            }
+        },
+        fixture_result=fixture_result,
+        counters_before={
+            "ingested_events": 10,
+            "persisted_events": 10,
+            "fanout_events": 10,
+            "dropped_events": 0,
+        },
+        counters_after={
+            "ingested_events": 13,
+            "persisted_events": 13,
+            "fanout_events": 13,
+            "dropped_events": 1,
+        },
+        started_at=datetime(2026, 1, 1, tzinfo=UTC),
+        finished_at=datetime(2026, 1, 1, tzinfo=UTC),
+    )
+
+    assert payload["status"] == "failed"
+    assert payload["continuity"]["observed"]["dropped_to_published_ratio"] > VS18_MAX_DROPPED_TO_PUBLISHED_RATIO
+    assert payload["acceptance_checks"]["continuity_dropped_ratio_within_threshold"] is False
+
+
+def test_evaluate_vs18_continuity_posture_within_thresholds():
+    fixture_result = VS17FixturePumpResult(
+        events_requested=120,
+        events_published=120,
+        publish_failures=0,
+        first_correlation_id="c1",
+        last_correlation_id="c120",
+    )
+
+    continuity = evaluate_vs18_continuity_posture(
+        fixture_result=fixture_result,
+        counter_delta={
+            "persisted_events": 120,
+            "fanout_events": 120,
+            "dropped_events": 0,
+        },
+        k6_metrics={
+            "http_req_failed_rate": VS18_BASELINE_LOCAL_SMOKE_HTTP_REQ_FAILED_RATE,
+            "http_req_duration_p95_ms": VS18_BASELINE_LOCAL_SMOKE_HTTP_REQ_DURATION_P95_MS,
+            "http_reqs_count": 495.0,
+        },
+        k6_metrics_required=True,
+    )
+
+    assert continuity["baseline"]["http_req_failed_rate"] == VS18_BASELINE_LOCAL_SMOKE_HTTP_REQ_FAILED_RATE
+    assert continuity["baseline"]["http_req_duration_p95_ms"] == VS18_BASELINE_LOCAL_SMOKE_HTTP_REQ_DURATION_P95_MS
+    assert continuity["observed"]["persist_to_published_ratio"] == 1.0
+    assert continuity["observed"]["fanout_to_published_ratio"] == 1.0
+    assert continuity["observed"]["dropped_to_published_ratio"] == 0.0
+    assert continuity["checks"]["http_req_failed_rate_within_threshold"] is True
+    assert continuity["checks"]["http_req_duration_p95_within_threshold"] is True
+    assert continuity["checks"]["persist_ratio_within_threshold"] is True
+    assert continuity["checks"]["fanout_ratio_within_threshold"] is True
+    assert continuity["checks"]["dropped_ratio_within_threshold"] is True
+
+
+def test_evaluate_vs18_continuity_posture_detects_threshold_violations():
+    fixture_result = VS17FixturePumpResult(
+        events_requested=100,
+        events_published=100,
+        publish_failures=0,
+        first_correlation_id="c1",
+        last_correlation_id="c100",
+    )
+
+    continuity = evaluate_vs18_continuity_posture(
+        fixture_result=fixture_result,
+        counter_delta={
+            "persisted_events": int(VS18_MIN_PERSIST_TO_PUBLISHED_RATIO * 100) - 1,
+            "fanout_events": int(VS18_MIN_FANOUT_TO_PUBLISHED_RATIO * 100) - 1,
+            "dropped_events": 2,
+        },
+        k6_metrics={
+            "http_req_failed_rate": VS18_MAX_HTTP_REQ_FAILED_RATE + 0.01,
+            "http_req_duration_p95_ms": VS18_MAX_HTTP_REQ_DURATION_P95_MS + 1.0,
+            "http_reqs_count": 495.0,
+        },
+        k6_metrics_required=True,
+    )
+
+    assert continuity["checks"]["http_req_failed_rate_within_threshold"] is False
+    assert continuity["checks"]["http_req_duration_p95_within_threshold"] is False
+    assert continuity["checks"]["persist_ratio_within_threshold"] is False
+    assert continuity["checks"]["fanout_ratio_within_threshold"] is False
+    assert continuity["checks"]["dropped_ratio_within_threshold"] is False
 
 
 def test_write_evidence_artifact_writes_json(tmp_path: Path):

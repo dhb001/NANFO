@@ -264,7 +264,7 @@
 ## Subsystem Progress — Vertical Slice 18
 
 - [x] Step 1: Lock VS18 execution charter with a finite, non-overlapping checklist and explicit threshold-governance assumptions derived from VS17 local-smoke evidence continuity.
-- [ ] Step 2: Implement backend continuity threshold assertions from VS17 load signals (latency/error/drop posture) and retain explicit fail-open degraded-branch coverage in targeted backend suites.
+- [x] Step 2: Implement backend continuity threshold assertions from VS17 load signals (latency/error/drop posture) and retain explicit fail-open degraded-branch coverage in targeted backend suites.
 - [ ] Closure Gate: Final VS18 validation pass and tracking finalization (`poetry run ruff check` scoped VS18 backend files, VS18 targeted backend continuity suite, and `poetry run pytest tests -q`; frontend full gate not required when frontend files are untouched).
 
 ### VS19 — Frontend Performance Continuity Hardening

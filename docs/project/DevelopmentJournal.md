@@ -1,5 +1,16 @@
 # Development Journal
 
+## [2026-08-15] - Vertical Slice 18 Step 2 (Backend Continuity Threshold Assertions + Fail-Open Coverage Continuity)
+
+- **Implemented (VS18 step scope):** Added deterministic backend continuity-threshold evaluation derived from VS17 local-smoke evidence signals and integrated those checks into VS17 evidence payload acceptance without changing product runtime/API/event/channel/schema contracts.
+- **Threshold instrumentation update:** Extended `backend/app/modules/telemetry/load_tooling.py` with VS18 threshold constants and `evaluate_vs18_continuity_posture(...)` to compute bounded checks for k6 failed-rate/p95 latency and persisted/fanout/dropped counter ratios against published fixture volume.
+- **Evidence acceptance hardening:** `build_vs17_evidence_payload(...)` now records a dedicated `continuity` block (`baseline`, `thresholds`, `observed`, `checks`) and promotes continuity checks into top-level `acceptance_checks` so degraded continuity posture fails evidence deterministically while preserving existing fail-open semantics.
+- **Unit coverage additions:** Expanded `backend/tests/unit/test_vs17_load_tooling.py` with continuity posture positive/negative threshold tests, skip-k6 continuity handling assertions, and evidence acceptance assertions for continuity checks.
+- **Integration coverage additions:** Extended `backend/tests/integration/test_telemetry_synthetic_load.py` with a VS18-targeted synthetic burst assertion flow validating persisted/fanout/drop ratio posture through `evaluate_vs18_continuity_posture(...)` while preserving existing consumer fail-open behavior coverage in `tests/unit/test_telemetry_consumer.py`.
+- **Validation:** Scoped Ruff passed (`poetry run ruff check app/modules/telemetry/load_tooling.py tests/unit/test_vs17_load_tooling.py tests/integration/test_telemetry_synthetic_load.py`), VS18-targeted backend suite passed (`poetry run pytest tests/unit/test_vs17_load_tooling.py tests/integration/test_telemetry_synthetic_load.py tests/unit/test_telemetry_consumer.py -q`, `47 passed`), and full backend regression passed (`poetry run pytest tests -q`, `489 passed`).
+- **Frontend gate applicability:** Frontend full-gate command chain is not required in Step 2 because no frontend files were touched.
+- **Scope/governance:** No API envelope drift, no C5/C6 boundary change, no fail-open behavior change, and no unrelated refactors.
+
 ## [2026-08-15] - Vertical Slice 18 Step 1 (Execution Charter + Finite Checklist Lock)
 
 - **Implemented (VS18 step scope):** Activated VS18 as the current execution slice and locked a finite, non-overlapping checklist in `CurrentSprint.md` before introducing continuity-threshold code changes.
