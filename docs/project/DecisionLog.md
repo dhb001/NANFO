@@ -3,6 +3,30 @@
 Lightweight chronological notes for decisions that do not require a full ADR.
 
 ## 2026-08-15
+### VS19 Step 2: Enforce Frontend Bundle/Perf Continuity via Deterministic Gate-Level Threshold Checks
+Decision: Implement VS19 Step 2 by extending `perf:bundle` with deterministic continuity checks that parse built JS assets and enforce bounded thresholds for total gzip size, largest chunk, largest non-`three` chunk, `three` chunk, and Digital Twin route chunk (`TwinPage`) footprint.
+Reason:
+- VS19 acceptance criteria require trend-tracked and bounded bundle/perf outputs while keeping scope limited to frontend perf/build/test hardening.
+- The existing `vite build --mode production` gate surfaces warnings but does not provide deterministic pass/fail continuity thresholds.
+- A dedicated typed checker with test coverage adds reproducible governance signals without changing runtime contracts.
+Impact:
+- Added `frontend/src/scripts/perf/check-bundle-continuity.ts` with deterministic metrics collection, bounded threshold checks, and structured continuity snapshot output.
+- Added script entrypoint `frontend/scripts/perf/check-bundle-continuity.ts` and updated `frontend/package.json` `perf:bundle` to execute the continuity checker after production build.
+- Added `frontend/src/scripts/perf/check-bundle-continuity.test.ts` coverage for threshold pass/fail behavior and snapshot structure.
+- Current measured snapshot (`total_js_gzip_kb=397.98`, `largest_chunk_gzip_kb=248.61`, `largest_non_three_chunk_gzip_kb=52.79`, `three_chunk_gzip_kb=248.61`, `twin_page_chunk_gzip_kb=3.12`) is within configured VS19 bounds.
+Assumptions:
+- Running the checker with `node --experimental-strip-types` is acceptable in current repo tooling constraints and keeps dependencies unchanged.
+- Thresholds represent continuity guardrails derived from current baseline and may be tuned in later slices only with documented evidence.
+Related:
+- `frontend/package.json`
+- `frontend/src/scripts/perf/check-bundle-continuity.ts`
+- `frontend/scripts/perf/check-bundle-continuity.ts`
+- `frontend/src/scripts/perf/check-bundle-continuity.test.ts`
+- `docs/project/CurrentSprint.md`
+- `docs/project/DevelopmentJournal.md`
+- `docs/project/DecisionLog.md`
+
+## 2026-08-15
 ### VS19 Step 1: Lock Frontend-Only Continuity Charter and Finite Checklist Before Performance Hardening
 Decision: Start VS19 with a docs-first charter lock in `CurrentSprint.md`, marking the slice `IN PROGRESS` and defining a finite four-checkpoint sequence (`Step 1` charter, `Step 2` bundle/perf continuity guardrails, `Step 3` elevated-volume realtime responsiveness hardening, `Closure Gate`) before code-level frontend hardening.
 Reason:

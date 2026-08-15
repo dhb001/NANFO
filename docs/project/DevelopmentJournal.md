@@ -1,5 +1,15 @@
 # Development Journal
 
+## [2026-08-15] - Vertical Slice 19 Step 2 (Bundle/Perf Continuity Guardrails + Deterministic Trend Snapshot)
+
+- **Implemented (VS19 step scope):** Added deterministic frontend bundle/perf continuity guardrails and trend-snapshot reporting on top of the existing `perf:bundle` gate.
+- **Continuity guardrail delivery:** Added a typed continuity analyzer (`frontend/src/scripts/perf/check-bundle-continuity.ts`) that computes bundle-size telemetry from `dist/assets` and enforces bounded thresholds for `total_js_gzip`, `largest_chunk_gzip`, `largest_non_three_chunk_gzip`, `three_chunk_gzip`, and `TwinPage` chunk gzip size.
+- **Perf gate wiring:** Updated `frontend/package.json` so `npm run perf:bundle` now runs production build plus continuity checks (`node --experimental-strip-types ./scripts/perf/check-bundle-continuity.ts`) and fails deterministically on threshold breaches.
+- **Test coverage:** Added `frontend/src/scripts/perf/check-bundle-continuity.test.ts` to validate pass/fail threshold behavior and deterministic snapshot structure for guardrail outputs.
+- **Current bounded snapshot:** `npm run perf:bundle` reports `chunk_count=26`, `total_js_gzip_kb=397.98`, `largest_chunk_file=three-CnQjXUib.js`, `largest_chunk_gzip_kb=248.61`, `largest_non_three_chunk_gzip_kb=52.79`, `three_chunk_gzip_kb=248.61`, and `twin_page_chunk_gzip_kb=3.12`, all within configured limits.
+- **Validation:** Frontend full gate passed (`npm run lint`, `npm run typecheck`, `npm run test` `71 passed`, `npm run test:e2e` `16/16 passed`, `npm run build`, `npm run perf:bundle`) and required full backend regression passed (`poetry run pytest tests -q`, `489 passed`).
+- **Scope/governance:** Frontend perf/test tooling increment only; no backend API/event/channel/schema changes, no API envelope drift, no C5/C6 boundary drift, and fail-open behavior remains unchanged.
+
 ## [2026-08-15] - Vertical Slice 19 Step 1 (Execution Charter + Finite Checklist Lock)
 
 - **Implemented (VS19 step scope):** Activated VS19 as the current slice and locked a finite, non-overlapping checklist in `CurrentSprint.md` before frontend performance-hardening implementation.

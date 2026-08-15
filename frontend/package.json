@@ -12,7 +12,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
-    "perf:bundle": "vite build --mode production"
+    "perf:bundle": "vite build --mode production && node --experimental-strip-types ./scripts/perf/check-bundle-continuity.ts"
   },
   "dependencies": {
     "@react-three/drei": "^9.122.0",

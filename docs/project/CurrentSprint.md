@@ -280,7 +280,7 @@
 ## Subsystem Progress — Vertical Slice 19
 
 - [x] Step 1: Lock VS19 execution charter with a finite, non-overlapping checklist and preserve hard constraints (API envelope stability, C5/C6 continuity, fail-open behavior continuity, and no backend contract changes) before frontend perf hardening implementation.
-- [ ] Step 2: Implement frontend bundle/perf continuity guardrails for deterministic trend tracking and bounded outputs, including the existing large `three` chunk warning follow-up path.
+- [x] Step 2: Implement frontend bundle/perf continuity guardrails for deterministic trend tracking and bounded outputs, including the existing large `three` chunk warning follow-up path.
 - [ ] Step 3: Implement frontend realtime responsiveness hardening under elevated fixture volumes with deterministic regression coverage while preserving accessibility and keyboard workflow baselines.
 - [ ] Closure Gate: Final VS19 frontend full-gate pass + full backend regression + tracking finalization.
 
