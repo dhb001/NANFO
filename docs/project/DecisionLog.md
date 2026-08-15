@@ -3,6 +3,26 @@
 Lightweight chronological notes for decisions that do not require a full ADR.
 
 ## 2026-08-15
+### VS19 Step 1: Lock Frontend-Only Continuity Charter and Finite Checklist Before Performance Hardening
+Decision: Start VS19 with a docs-first charter lock in `CurrentSprint.md`, marking the slice `IN PROGRESS` and defining a finite four-checkpoint sequence (`Step 1` charter, `Step 2` bundle/perf continuity guardrails, `Step 3` elevated-volume realtime responsiveness hardening, `Closure Gate`) before code-level frontend hardening.
+Reason:
+- `CurrentSprint.md` identifies VS19 as the first unfinished slice and constrains scope to frontend perf/build/test hardening with no backend contract changes.
+- A checklist-first entry preserves atomic per-step commits and prevents overlap with VS20 closure-governance scope.
+- Explicitly carrying forward the existing large `three` chunk warning as bounded follow-up keeps continuity focused without introducing unrelated refactors.
+Impact:
+- `CurrentSprint.md` now marks VS19 `IN PROGRESS`, adds `Subsystem Progress — Vertical Slice 19`, and records Step 1 completion with remaining Step 2/Step 3/closure checkpoints.
+- `DevelopmentJournal.md` records Step 1 implementation and full frontend/backend gate evidence.
+- VS19 implementation remains bounded to frontend performance continuity hardening and tracking updates only; no REST/WebSocket/event/channel/schema contract changes are introduced by Step 1.
+Assumptions:
+- Step 2 will implement deterministic bundle/perf trend tracking and bounded output guardrails while preserving existing route contracts and operator workflows.
+- Step 3 will target elevated-volume realtime responsiveness coverage/hardening without altering backend contracts or fail-open semantics.
+Related:
+- `docs/project/CurrentSprint.md`
+- `docs/project/DevelopmentJournal.md`
+- `docs/project/DecisionLog.md`
+- `docs/project/OptimizationContinuityPlan-VS16.md`
+
+## 2026-08-15
 ### VS18 Closure Gate: Accept Completion with Continuity-Threshold Enforcement and Full Required Backend Validation
 Decision: Mark VS18 complete after continuity-threshold instrumentation/tests are delivered and closure gates are fully green across scoped Ruff, VS18-targeted continuity suites, and full backend regression, without running frontend full-gate commands because frontend files were untouched.
 Reason:

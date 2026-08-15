@@ -1,5 +1,14 @@
 # Development Journal
 
+## [2026-08-15] - Vertical Slice 19 Step 1 (Execution Charter + Finite Checklist Lock)
+
+- **Implemented (VS19 step scope):** Activated VS19 as the current slice and locked a finite, non-overlapping checklist in `CurrentSprint.md` before frontend performance-hardening implementation.
+- **Charter locked:** Preserved VS19 hard constraints (`no backend contract changes`, canonical API envelope stability, C5/C6 continuity, and fail-open behavior continuity) with explicit Step 2/Step 3/Closure boundaries.
+- **Checklist baseline:** Added `Subsystem Progress — Vertical Slice 19` with bounded checkpoints (`Step 1` charter lock, `Step 2` bundle/perf continuity guardrails, `Step 3` elevated-volume realtime responsiveness hardening, `Closure Gate`) and marked Step 1 complete.
+- **Validation:** Frontend full gate passed (`npm run lint`, `npm run typecheck`, `npm run test` `68 passed`, `npm run test:e2e` `16/16 passed`, `npm run build`, `npm run perf:bundle`) and required full backend regression passed (`poetry run pytest tests -q`, `489 passed`).
+- **Performance baseline note:** Build and perf gates remain green with the existing large `three` chunk warning (`three` chunk `925.19 kB` raw / `254.58 kB` gzip) tracked as the explicit VS19 follow-up target.
+- **Scope/governance:** Docs-only Step 1 increment; no backend/frontend contract changes, no API/event/channel/schema drift, no C5/C6 relaxation, and no fail-open behavior change.
+
 ## [2026-08-15] - Vertical Slice 18 Closure Gate Complete
 
 - **Completed:** Closed VS18 after delivering backend continuity-threshold hardening from VS17 evidence signals and validating fail-open degraded-branch continuity.
