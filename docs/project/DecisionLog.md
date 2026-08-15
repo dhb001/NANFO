@@ -3,6 +3,27 @@
 Lightweight chronological notes for decisions that do not require a full ADR.
 
 ## 2026-08-15
+### VS20 Closure Gate: Accept Optimization Program Sign-Off with Consolidated VS17-VS19 Evidence
+Decision: Mark VS20 complete as a verification/sign-off-only slice after confirming VS17-VS19 closure evidence continuity, finalizing tracking docs, and running final required backend regression.
+Reason:
+- VS20 scope boundaries require closure governance and evidence consolidation only, with no net-new product-surface changes unless minimal defect remediation is required.
+- VS17-VS19 are complete with green required gates, so the remaining closure obligation is continuity-doc alignment and final regression confirmation.
+- VS20 touched only project-tracking documentation, so frontend full-gate execution is not required under the established closure-gate rule for untouched frontend scope.
+Impact:
+- `CurrentSprint.md` now marks VS20 as `COMPLETE`, adds a finite VS20 subsystem checklist, and closes the remaining-work master checklist through VS20.
+- `Roadmap.md` and `Milestones.md` now reflect VS16-VS20 status as complete for cross-document continuity parity.
+- `DevelopmentJournal.md` now records VS20 closure evidence and explicit carryover risks for the next roadmap phase.
+Assumptions:
+- Deferred follow-up remains outside VS20 scope: deeper bundle-shape reduction for the large `three` chunk and staged/CI external load-tooling expansion.
+- No additional closure validation commands are required beyond final backend regression when scope remains docs-only with untouched frontend/backend runtime code.
+Related:
+- `docs/project/CurrentSprint.md`
+- `docs/project/DevelopmentJournal.md`
+- `docs/project/DecisionLog.md`
+- `docs/project/Roadmap.md`
+- `docs/project/Milestones.md`
+
+## 2026-08-15
 ### VS19 Closure Gate: Accept Completion with Deterministic Frontend Continuity Bounds and Full Validation Evidence
 Decision: Mark VS19 complete after Step 2/Step 3 deliveries and a final all-green closure-gate run covering full frontend quality commands plus full backend regression.
 Reason:

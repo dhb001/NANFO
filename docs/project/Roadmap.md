@@ -38,11 +38,11 @@
 - VS13 (complete): Reporting async generation/status + artifact lifecycle baseline.
 - VS14 (complete): M10 production-readiness closure gate (hardening, validation evidence, release criteria).
 - VS15 (complete): Post-M10 synthetic load campaign baseline + frontend burst-resilience continuity evidence refresh.
-- VS16 (in progress): Follow-on optimization planning and deferred external load-tooling expansion governance.
-- VS17 (planned): External load-tooling execution baseline.
-- VS18 (planned): Backend performance continuity hardening.
-- VS19 (planned): Frontend performance continuity hardening.
-- VS20 (planned): Optimization program closure gate.
+- VS16 (complete): Follow-on optimization planning and deferred external load-tooling expansion governance.
+- VS17 (complete): External load-tooling execution baseline.
+- VS18 (complete): Backend performance continuity hardening.
+- VS19 (complete): Frontend performance continuity hardening.
+- VS20 (complete): Optimization program closure gate.
 
 Completion rule for all planned slices: backend and frontend acceptance criteria must both pass before a slice is marked complete.
 

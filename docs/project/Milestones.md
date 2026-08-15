@@ -48,10 +48,10 @@
 
 - Slice sequence:
   - VS15 (complete): synthetic load baseline + frontend burst-resilience continuity.
-  - VS16 (in progress): optimization planning/governance lock.
-  - VS17 (planned): external load-tooling execution baseline.
-  - VS18 (planned): backend performance continuity hardening.
-  - VS19 (planned): frontend performance continuity hardening.
-  - VS20 (planned): optimization program closure gate.
+  - VS16 (complete): optimization planning/governance lock.
+  - VS17 (complete): external load-tooling execution baseline.
+  - VS18 (complete): backend performance continuity hardening.
+  - VS19 (complete): frontend performance continuity hardening.
+  - VS20 (complete): optimization program closure gate.
 
 Authoritative ordered checklist and closure criteria live in `docs/project/CurrentSprint.md` (`Post-VS16 Plan`).
