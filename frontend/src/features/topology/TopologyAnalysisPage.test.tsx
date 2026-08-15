@@ -44,7 +44,9 @@ describe("TopologyAnalysisPage", () => {
     useLiveStore.setState({
       topologyByDeviceId: {},
       telemetryByDeviceMetric: {},
+      telemetryKeysNewestFirst: [],
       sceneObjects: {},
+      sceneObjectIdsNewestFirst: [],
       alerts: [],
       topologyStatus: "closed",
       telemetryStatus: "closed",

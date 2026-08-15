@@ -50,7 +50,9 @@ describe("ReliabilityPage", () => {
     useLiveStore.setState({
       topologyByDeviceId: {},
       telemetryByDeviceMetric: {},
+      telemetryKeysNewestFirst: [],
       sceneObjects: {},
+      sceneObjectIdsNewestFirst: [],
       alerts: [
         {
           event_id: "evt-ws-ack",

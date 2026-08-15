@@ -43,10 +43,16 @@ export function IntentPage() {
   const canExecute = canExecuteIntent(detailQuery.data);
 
   const sceneObjects = useLiveStore((state) => state.sceneObjects);
+  const sceneObjectIdsNewestFirst = useLiveStore((state) => state.sceneObjectIdsNewestFirst);
   const realtimeIntent = intentId ? sceneObjects[intentSceneObjectId(intentId)] : undefined;
   const intentRealtimeCards = useMemo(
-    () => Object.values(sceneObjects).filter((item) => item.object_type === "intent_state").slice(0, 20),
-    [sceneObjects],
+    () =>
+      sceneObjectIdsNewestFirst
+        .map((id) => sceneObjects[id])
+        .filter((item): item is (typeof sceneObjects)[string] => Boolean(item))
+        .filter((item) => item.object_type === "intent_state")
+        .slice(0, 20),
+    [sceneObjects, sceneObjectIdsNewestFirst],
   );
 
   useEffect(() => {

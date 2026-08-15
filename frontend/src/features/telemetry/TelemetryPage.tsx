@@ -32,8 +32,16 @@ export function TelemetryPage() {
   const deviceHistoryQuery = useDeviceTelemetry(token, selectedDeviceId);
 
   const liveMetrics = useLiveStore((state) => state.telemetryByDeviceMetric);
+  const telemetryKeysNewestFirst = useLiveStore((state) => state.telemetryKeysNewestFirst);
 
-  const liveMetricEntries = useMemo(() => Object.values(liveMetrics).slice(0, 20), [liveMetrics]);
+  const liveMetricEntries = useMemo(
+    () =>
+      telemetryKeysNewestFirst
+        .slice(0, 20)
+        .map((key) => liveMetrics[key])
+        .filter((metric): metric is (typeof liveMetrics)[string] => Boolean(metric)),
+    [liveMetrics, telemetryKeysNewestFirst],
+  );
   const historyRows = historyQuery.data?.items ?? [];
   const historyParentRef = useRef<HTMLDivElement | null>(null);
 

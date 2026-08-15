@@ -54,8 +54,10 @@ describe("IntentPage", () => {
     });
     useLiveStore.setState({
       sceneObjects: {},
+      sceneObjectIdsNewestFirst: [],
       topologyByDeviceId: {},
       telemetryByDeviceMetric: {},
+      telemetryKeysNewestFirst: [],
       alerts: [],
       topologyStatus: "closed",
       telemetryStatus: "closed",

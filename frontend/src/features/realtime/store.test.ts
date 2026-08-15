@@ -6,7 +6,9 @@ describe("realtime store", () => {
     useLiveStore.setState({
       topologyByDeviceId: {},
       telemetryByDeviceMetric: {},
+      telemetryKeysNewestFirst: [],
       sceneObjects: {},
+      sceneObjectIdsNewestFirst: [],
       alerts: [],
       topologyStatus: "closed",
       telemetryStatus: "closed",
@@ -64,7 +66,9 @@ describe("realtime store", () => {
     useLiveStore.setState({
       topologyByDeviceId: {},
       telemetryByDeviceMetric: {},
+      telemetryKeysNewestFirst: [],
       sceneObjects: {},
+      sceneObjectIdsNewestFirst: [],
       alerts: [],
       topologyStatus: "closed",
       telemetryStatus: "closed",
@@ -94,7 +98,9 @@ describe("realtime store", () => {
     useLiveStore.setState({
       topologyByDeviceId: {},
       telemetryByDeviceMetric: {},
+      telemetryKeysNewestFirst: [],
       sceneObjects: {},
+      sceneObjectIdsNewestFirst: [],
       alerts: [],
       topologyStatus: "closed",
       telemetryStatus: "closed",
@@ -140,5 +146,78 @@ describe("realtime store", () => {
     expect(afterUpdate[0].event_id).toBe("evt-100");
     expect(afterUpdate[0].event_type).toBe("alert.resolved");
     expect(afterUpdate.filter((item) => item.event_id === "evt-100")).toHaveLength(1);
+  });
+
+  it("caps retained telemetry metrics at 300 with newest-first key ordering", () => {
+    useLiveStore.setState({
+      topologyByDeviceId: {},
+      telemetryByDeviceMetric: {},
+      telemetryKeysNewestFirst: [],
+      sceneObjects: {},
+      sceneObjectIdsNewestFirst: [],
+      alerts: [],
+      topologyStatus: "closed",
+      telemetryStatus: "closed",
+      alertsStatus: "closed",
+      digitalTwinStatus: "closed",
+    });
+
+    for (let index = 0; index < 360; index += 1) {
+      useLiveStore.getState().applyTelemetryDelta({
+        delta_type: "metric",
+        metric: {
+          event_id: `evt-${index}`,
+          device_id: `device-${index}`,
+          network_id: "network-1",
+          workspace_id: "workspace-1",
+          metric: "cpu_usage",
+          value: index,
+          unit: "%",
+          observed_at: `2026-08-15T00:${String(index % 60).padStart(2, "0")}:00Z`,
+          source: "runtime",
+          tags: {},
+        },
+      });
+    }
+
+    const state = useLiveStore.getState();
+    const keys = Object.keys(state.telemetryByDeviceMetric);
+    expect(keys).toHaveLength(300);
+    expect(state.telemetryKeysNewestFirst).toHaveLength(300);
+    expect(state.telemetryKeysNewestFirst[0]).toBe("device-359:cpu_usage");
+    expect(state.telemetryKeysNewestFirst[299]).toBe("device-60:cpu_usage");
+  });
+
+  it("caps retained scene objects at 300 with newest-first object ordering", () => {
+    useLiveStore.setState({
+      topologyByDeviceId: {},
+      telemetryByDeviceMetric: {},
+      telemetryKeysNewestFirst: [],
+      sceneObjects: {},
+      sceneObjectIdsNewestFirst: [],
+      alerts: [],
+      topologyStatus: "closed",
+      telemetryStatus: "closed",
+      alertsStatus: "closed",
+      digitalTwinStatus: "closed",
+    });
+
+    for (let index = 0; index < 360; index += 1) {
+      useLiveStore.getState().applyDigitalTwinDelta({
+        delta_type: "update",
+        scene_object: {
+          id: `scene-${index}`,
+          object_type: "simulation_state",
+          status: index % 2 === 0 ? "running" : "completed",
+        },
+      });
+    }
+
+    const state = useLiveStore.getState();
+    const ids = Object.keys(state.sceneObjects);
+    expect(ids).toHaveLength(300);
+    expect(state.sceneObjectIdsNewestFirst).toHaveLength(300);
+    expect(state.sceneObjectIdsNewestFirst[0]).toBe("scene-359");
+    expect(state.sceneObjectIdsNewestFirst[299]).toBe("scene-60");
   });
 });

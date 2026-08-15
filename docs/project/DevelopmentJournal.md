@@ -1,5 +1,14 @@
 # Development Journal
 
+## [2026-08-15] - Vertical Slice 19 Step 3 (Realtime Responsiveness Hardening + Elevated-Volume Regression Coverage)
+
+- **Implemented (VS19 step scope):** Hardened frontend realtime state retention for elevated fixture volumes and aligned high-volume rendering paths to deterministic newest-first keys without changing backend contracts.
+- **Realtime-store hardening:** Extended `frontend/src/features/realtime/store.ts` with bounded retention for telemetry metrics (`300`) and digital-twin scene objects (`300`) using explicit newest-first key indexes (`telemetryKeysNewestFirst`, `sceneObjectIdsNewestFirst`) while preserving existing fail-open delta application semantics.
+- **UI responsiveness alignment:** Updated telemetry, simulation, and intent realtime views to consume bounded newest-first indexes instead of unordered `Object.values(...)` scans, reducing elevated-volume render churn (`frontend/src/features/telemetry/TelemetryPage.tsx`, `frontend/src/features/simulation/SimulationPage.tsx`, `frontend/src/features/intent/IntentPage.tsx`).
+- **Coverage delivery:** Added VS19 unit coverage for telemetry/scene retention caps and ordering guarantees in `frontend/src/features/realtime/store.test.ts`, updated dependent feature tests for new store shape, and added elevated-volume cross-flow e2e coverage in `frontend/tests/e2e/vs19-frontend-continuity.spec.ts` (telemetry history + reliability filter/status toggles under high-volume fixtures).
+- **Validation:** Frontend full gate passed (`npm run lint`, `npm run typecheck`, `npm run test` `73 passed`, `npm run test:e2e` `17/17 passed`, `npm run build`, `npm run perf:bundle`) and required full backend regression passed (`poetry run pytest tests -q`, `489 passed`).
+- **Scope/governance:** Frontend-only realtime responsiveness increment; no backend API/event/channel/schema changes, no API envelope drift, no C5/C6 relaxations, and fail-open behavior continuity preserved.
+
 ## [2026-08-15] - Vertical Slice 19 Step 2 (Bundle/Perf Continuity Guardrails + Deterministic Trend Snapshot)
 
 - **Implemented (VS19 step scope):** Added deterministic frontend bundle/perf continuity guardrails and trend-snapshot reporting on top of the existing `perf:bundle` gate.

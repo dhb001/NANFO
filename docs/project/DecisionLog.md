@@ -3,6 +3,32 @@
 Lightweight chronological notes for decisions that do not require a full ADR.
 
 ## 2026-08-15
+### VS19 Step 3: Bound Realtime Store Cardinality and Add Elevated-Volume Cross-Flow Coverage
+Decision: Implement VS19 Step 3 by adding explicit bounded retention/indexing for realtime telemetry and digital-twin state in frontend store ownership, then verifying responsiveness with a dedicated elevated-volume e2e flow spanning telemetry and reliability routes.
+Reason:
+- VS19 acceptance criteria require realtime operator flows to remain responsive under elevated fixture volumes while preserving accessibility and keyboard behavior baselines.
+- Existing alert retention was bounded, but telemetry and scene-object maps could grow without explicit cardinality limits.
+- Adding bounded newest-first indexes allows deterministic rendering order and avoids unbounded high-volume map churn in key operator views.
+Impact:
+- Updated `frontend/src/features/realtime/store.ts` to enforce telemetry/scene retention caps (`300`) and track newest-first keys (`telemetryKeysNewestFirst`, `sceneObjectIdsNewestFirst`).
+- Updated realtime-heavy views (`TelemetryPage`, `SimulationPage`, `IntentPage`) to consume bounded newest-first key order rather than broad `Object.values(...)` scans.
+- Extended unit coverage in `frontend/src/features/realtime/store.test.ts` for telemetry/scene cap and ordering guarantees; updated dependent tests for store shape additions.
+- Added `frontend/tests/e2e/vs19-frontend-continuity.spec.ts` for elevated-volume telemetry + reliability responsiveness regression.
+Assumptions:
+- Retention cap `300` for telemetry and scene-object stores is sufficient for operator continuity signal while avoiding unbounded memory/render pressure in this slice.
+- Step 3 remains frontend-only and does not alter backend event cadence, payload contracts, or fail-open semantics.
+Related:
+- `frontend/src/features/realtime/store.ts`
+- `frontend/src/features/realtime/store.test.ts`
+- `frontend/src/features/telemetry/TelemetryPage.tsx`
+- `frontend/src/features/simulation/SimulationPage.tsx`
+- `frontend/src/features/intent/IntentPage.tsx`
+- `frontend/tests/e2e/vs19-frontend-continuity.spec.ts`
+- `docs/project/CurrentSprint.md`
+- `docs/project/DevelopmentJournal.md`
+- `docs/project/DecisionLog.md`
+
+## 2026-08-15
 ### VS19 Step 2: Enforce Frontend Bundle/Perf Continuity via Deterministic Gate-Level Threshold Checks
 Decision: Implement VS19 Step 2 by extending `perf:bundle` with deterministic continuity checks that parse built JS assets and enforce bounded thresholds for total gzip size, largest chunk, largest non-`three` chunk, `three` chunk, and Digital Twin route chunk (`TwinPage`) footprint.
 Reason:

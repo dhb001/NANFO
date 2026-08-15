@@ -37,12 +37,15 @@ export function SimulationPage() {
   const compareQuery = useSimulationCompare(token, trackedSimulationId, baselineSimulationId);
 
   const sceneObjects = useLiveStore((state) => state.sceneObjects);
+  const sceneObjectIdsNewestFirst = useLiveStore((state) => state.sceneObjectIdsNewestFirst);
   const simulationSceneObjects = useMemo(
     () =>
-      Object.values(sceneObjects)
+      sceneObjectIdsNewestFirst
+        .map((id) => sceneObjects[id])
+        .filter((item): item is (typeof sceneObjects)[string] => Boolean(item))
         .filter((item) => item.object_type === "simulation_state")
         .slice(0, 20),
-    [sceneObjects],
+    [sceneObjects, sceneObjectIdsNewestFirst],
   );
 
   async function start(event: FormEvent) {
