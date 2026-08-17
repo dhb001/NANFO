@@ -26,6 +26,26 @@ def _make_token() -> str:
     return token
 
 
+def _make_read_only_token() -> str:
+    token, _ = create_access_token(
+        user_id=str(uuid.uuid4()),
+        email="plugins-read@example.com",
+        roles=["Admin"],
+        permissions=["read:topology"],
+    )
+    return token
+
+
+def _make_write_only_token() -> str:
+    token, _ = create_access_token(
+        user_id=str(uuid.uuid4()),
+        email="plugins-write@example.com",
+        roles=["Admin"],
+        permissions=["write:config"],
+    )
+    return token
+
+
 @pytest.fixture
 def client() -> TestClient:
     fake_r = fakeredis.FakeAsyncRedis(decode_responses=True)
@@ -380,3 +400,33 @@ def test_plugin_routes_require_auth(client):
     assert install_response.status_code in (401, 403)
     assert enable_response.status_code in (401, 403)
     assert disable_response.status_code in (401, 403)
+
+
+def test_list_plugins_requires_read_topology_permission(client):
+    headers = {"Authorization": f"Bearer {_make_write_only_token()}"}
+    response = client.get("/api/v1/plugins", headers=headers)
+    assert response.status_code == 403
+
+
+def test_plugin_mutations_require_write_config_permission(client):
+    headers = {"Authorization": f"Bearer {_make_read_only_token()}"}
+    install_response = client.post(
+        "/api/v1/plugins/install",
+        json={
+            "plugin_key": "safe-plugin",
+            "name": "Safe Plugin",
+            "version": "1.0.0",
+            "signer": "nanfo-labs",
+            "signature": "sig:abcdef1234567890",
+            "dependencies": {},
+            "sandbox": {"isolation_mode": "process", "permissions": ["read:telemetry"]},
+            "metadata": {},
+        },
+        headers=headers,
+    )
+    enable_response = client.post(f"/api/v1/plugins/{uuid.uuid4()}/enable", headers=headers)
+    disable_response = client.post(f"/api/v1/plugins/{uuid.uuid4()}/disable", headers=headers)
+
+    assert install_response.status_code == 403
+    assert enable_response.status_code == 403
+    assert disable_response.status_code == 403

@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.dependencies import (
     RequestMeta,
     TokenClaims,
+    require_permissions,
     get_current_user,
     get_db,
     get_redis,
@@ -117,7 +118,7 @@ class TopologyReconcileAPIResponse(BaseModel):
 @router.get("/graph", response_model=TopologyGraphAPIResponse, status_code=status.HTTP_200_OK)
 async def get_topology_graph(
     network_id: uuid.UUID,
-    claims: Annotated[TokenClaims, Depends(get_current_user)],
+    claims: Annotated[TokenClaims, Depends(require_permissions("read:topology"))],
     meta: Annotated[RequestMeta, Depends(get_request_meta)],
     depth: int = 2,
     limit: int = Query(default=100, ge=1, le=500),
@@ -156,7 +157,7 @@ async def get_topology_graph(
 @router.get("/nodes/{device_id}", response_model=TopologyNodeAPIResponse, status_code=status.HTTP_200_OK)
 async def get_topology_node_with_neighbours(
     device_id: uuid.UUID,
-    claims: Annotated[TokenClaims, Depends(get_current_user)],
+    claims: Annotated[TokenClaims, Depends(require_permissions("read:topology"))],
     meta: Annotated[RequestMeta, Depends(get_request_meta)],
     depth: int = Query(default=1, ge=1),
 ):
@@ -183,7 +184,7 @@ async def get_topology_node_with_neighbours(
 @router.get("/device/{device_id}/neighbors", response_model=TopologyNeighboursAPIResponse, status_code=status.HTTP_200_OK)
 async def get_topology_device_neighbours(
     device_id: uuid.UUID,
-    claims: Annotated[TokenClaims, Depends(get_current_user)],
+    claims: Annotated[TokenClaims, Depends(require_permissions("read:topology"))],
     meta: Annotated[RequestMeta, Depends(get_request_meta)],
     depth: int = Query(default=1, ge=1, le=6),
     limit: int = Query(default=200, ge=1, le=1000),
@@ -211,7 +212,7 @@ async def get_topology_device_neighbours(
 @router.get("/impact/{device_id}", response_model=TopologyImpactAPIResponse, status_code=status.HTTP_200_OK)
 async def get_topology_impact(
     device_id: uuid.UUID,
-    claims: Annotated[TokenClaims, Depends(get_current_user)],
+    claims: Annotated[TokenClaims, Depends(require_permissions("read:topology"))],
     meta: Annotated[RequestMeta, Depends(get_request_meta)],
     max_hops: int = Query(default=3, ge=1, le=8),
     limit: int = Query(default=500, ge=1, le=2000),
@@ -239,7 +240,7 @@ async def get_topology_impact(
 @router.post("/reconcile", response_model=TopologyReconcileAPIResponse, status_code=status.HTTP_200_OK)
 async def reconcile_topology(
     req: TopologyReconcileRequest,
-    claims: Annotated[TokenClaims, Depends(get_current_user)],
+    claims: Annotated[TokenClaims, Depends(require_permissions("write:config"))],
     meta: Annotated[RequestMeta, Depends(get_request_meta)],
     db: Annotated[AsyncSession, Depends(get_db)],
     redis: Annotated[aioredis.Redis, Depends(get_redis)],

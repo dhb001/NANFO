@@ -26,6 +26,27 @@ def _make_token() -> str:
     return token
 
 
+def _make_no_read_telemetry_token() -> str:
+    token, _ = create_access_token(
+        user_id=str(uuid.uuid4()),
+        email="reports-no-read@example.com",
+        roles=["Admin"],
+        permissions=["write:config"],
+    )
+    return token
+
+
+def _make_workspace_scoped_token(*, workspace_id: uuid.UUID) -> str:
+    token, _ = create_access_token(
+        user_id=str(uuid.uuid4()),
+        email="reports-scoped@example.com",
+        roles=["Admin"],
+        permissions=["read:telemetry", "write:config"],
+        workspace_id=str(workspace_id),
+    )
+    return token
+
+
 @pytest.fixture
 def client() -> TestClient:
     fake_r = fakeredis.FakeAsyncRedis(decode_responses=True)
@@ -357,3 +378,66 @@ def test_report_routes_require_auth(client):
 
     assert generate_response.status_code in (401, 403)
     assert get_response.status_code in (401, 403)
+
+
+def test_report_routes_require_read_telemetry_permission(client):
+    headers = {"Authorization": f"Bearer {_make_no_read_telemetry_token()}"}
+    generate_response = client.post(
+        "/api/v1/reports/generate",
+        json={
+            "workspace_id": str(uuid.uuid4()),
+            "network_id": str(uuid.uuid4()),
+            "report_type": "executive_summary",
+            "format": "pdf",
+            "date_range": {
+                "start": "2026-08-01T00:00:00Z",
+                "end": "2026-08-14T00:00:00Z",
+            },
+            "scope": {"workspace": "all"},
+            "filters": {"kpi": "latency"},
+        },
+        headers=headers,
+    )
+    get_response = client.get(
+        f"/api/v1/reports/{uuid.uuid4()}",
+        params={"workspace_id": str(uuid.uuid4())},
+        headers=headers,
+    )
+
+    assert generate_response.status_code == 403
+    assert get_response.status_code == 403
+
+
+def test_report_generate_workspace_scope_mismatch_returns_403(client):
+    token_workspace_id = uuid.uuid4()
+    headers = {"Authorization": f"Bearer {_make_workspace_scoped_token(workspace_id=token_workspace_id)}"}
+    response = client.post(
+        "/api/v1/reports/generate",
+        json={
+            "workspace_id": str(uuid.uuid4()),
+            "network_id": str(uuid.uuid4()),
+            "report_type": "executive_summary",
+            "format": "pdf",
+            "date_range": {
+                "start": "2026-08-01T00:00:00Z",
+                "end": "2026-08-14T00:00:00Z",
+            },
+            "scope": {"workspace": "all"},
+            "filters": {"kpi": "latency"},
+        },
+        headers=headers,
+    )
+
+    assert response.status_code == 403
+
+
+def test_report_get_workspace_scope_mismatch_returns_403(client):
+    token_workspace_id = uuid.uuid4()
+    headers = {"Authorization": f"Bearer {_make_workspace_scoped_token(workspace_id=token_workspace_id)}"}
+    response = client.get(
+        f"/api/v1/reports/{uuid.uuid4()}",
+        params={"workspace_id": str(uuid.uuid4())},
+        headers=headers,
+    )
+
+    assert response.status_code == 403

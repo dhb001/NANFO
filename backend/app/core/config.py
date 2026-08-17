@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     # Application
     APP_ENV: str = "development"
     LOG_LEVEL: str = "INFO"
+    CORS_ALLOW_ORIGINS: str = "http://localhost:5173,http://127.0.0.1:5173"
 
     # PostgreSQL
     POSTGRES_HOST: str
@@ -105,6 +106,11 @@ class Settings(BaseSettings):
     @property
     def REDIS_URL(self) -> str:
         return f"redis://:{self.REDIS_PASSWORD}@{self.REDIS_HOST}:{self.REDIS_PORT}/{self.REDIS_DB}"
+
+    @computed_field  # type: ignore[misc]
+    @property
+    def CORS_ALLOW_ORIGINS_LIST(self) -> list[str]:
+        return [origin.strip() for origin in self.CORS_ALLOW_ORIGINS.split(",") if origin.strip()]
 
 
 @lru_cache

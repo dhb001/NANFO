@@ -85,7 +85,12 @@ async def telemetry_websocket(
         })
         await websocket.send_text(ack)
 
-        await telemetry_ws_manager.subscribe(network_id, websocket)
+        await telemetry_ws_manager.subscribe(
+            network_id,
+            websocket,
+            token_exp=claims.get("exp"),
+            token_jti=claims.get("jti"),
+        )
 
         while True:
             await websocket.receive_text()

@@ -16,10 +16,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.dependencies import (
     RequestMeta,
     TokenClaims,
+    enforce_workspace_scope,
     get_current_user,
     get_db,
     get_redis,
     get_request_meta,
+    require_permissions,
 )
 from app.core.responses import APIResponse, success_response
 from app.modules.network.schemas import (
@@ -41,21 +43,27 @@ router = APIRouter(prefix="/api/v1/networks", tags=["Networks"])
 @router.post("", response_model=APIResponse[NetworkResponse], status_code=status.HTTP_201_CREATED)
 async def create_network(
     req: CreateNetworkRequest,
-    claims: Annotated[TokenClaims, Depends(get_current_user)],
+    claims: Annotated[TokenClaims, Depends(require_permissions("write:config"))],
     meta: Annotated[RequestMeta, Depends(get_request_meta)],
     db: Annotated[AsyncSession, Depends(get_db)],
     redis: Annotated[aioredis.Redis, Depends(get_redis)],
 ):
     started = time.monotonic()
+    scoped_workspace_id = enforce_workspace_scope(claims=claims, workspace_id=req.workspace_id)
     svc = NetworkService(db=db, redis=redis)
-    result = await svc.create_network(req=req, actor_id=claims.user_id, correlation_id=meta.request_id)
+    result = await svc.create_network(
+        req=req,
+        actor_id=claims.user_id,
+        correlation_id=meta.request_id,
+        requested_workspace_id=scoped_workspace_id,
+    )
     return success_response(result, meta.request_id, started, meta.timestamp)
 
 
 @router.get("", response_model=APIResponse[NetworkListResponse], status_code=status.HTTP_200_OK)
 async def list_networks(
     workspace_id: uuid.UUID,
-    claims: Annotated[TokenClaims, Depends(get_current_user)],
+    claims: Annotated[TokenClaims, Depends(require_permissions("read:topology"))],
     meta: Annotated[RequestMeta, Depends(get_request_meta)],
     db: Annotated[AsyncSession, Depends(get_db)],
     redis: Annotated[aioredis.Redis, Depends(get_redis)],
@@ -63,8 +71,14 @@ async def list_networks(
     page_size: int = 20,
 ):
     started = time.monotonic()
+    scoped_workspace_id = enforce_workspace_scope(claims=claims, workspace_id=workspace_id)
     svc = NetworkService(db=db, redis=redis)
-    result = await svc.list_networks(workspace_id=workspace_id, page=page, page_size=page_size)
+    result = await svc.list_networks(
+        workspace_id=workspace_id,
+        page=page,
+        page_size=page_size,
+        requested_workspace_id=scoped_workspace_id,
+    )
     return success_response(result, meta.request_id, started, meta.timestamp)
 
 
@@ -74,21 +88,28 @@ async def list_networks(
 async def add_device(
     network_id: uuid.UUID,
     req: CreateDeviceRequest,
-    claims: Annotated[TokenClaims, Depends(get_current_user)],
+    claims: Annotated[TokenClaims, Depends(require_permissions("write:config"))],
     meta: Annotated[RequestMeta, Depends(get_request_meta)],
     db: Annotated[AsyncSession, Depends(get_db)],
     redis: Annotated[aioredis.Redis, Depends(get_redis)],
 ):
     started = time.monotonic()
+    requested_workspace_id = enforce_workspace_scope(claims=claims, workspace_id=None)
     svc = DeviceService(db=db, redis=redis)
-    result = await svc.add_device(network_id=network_id, req=req, actor_id=claims.user_id, correlation_id=meta.request_id)
+    result = await svc.add_device(
+        network_id=network_id,
+        req=req,
+        actor_id=claims.user_id,
+        correlation_id=meta.request_id,
+        requested_workspace_id=requested_workspace_id,
+    )
     return success_response(result, meta.request_id, started, meta.timestamp)
 
 
 @router.get("/{network_id}/devices", response_model=APIResponse[DeviceListResponse], status_code=status.HTTP_200_OK)
 async def list_devices(
     network_id: uuid.UUID,
-    claims: Annotated[TokenClaims, Depends(get_current_user)],
+    claims: Annotated[TokenClaims, Depends(require_permissions("read:topology"))],
     meta: Annotated[RequestMeta, Depends(get_request_meta)],
     db: Annotated[AsyncSession, Depends(get_db)],
     redis: Annotated[aioredis.Redis, Depends(get_redis)],
@@ -96,8 +117,14 @@ async def list_devices(
     page_size: int = 20,
 ):
     started = time.monotonic()
+    requested_workspace_id = enforce_workspace_scope(claims=claims, workspace_id=None)
     svc = DeviceService(db=db, redis=redis)
-    result = await svc.list_devices(network_id=network_id, page=page, page_size=page_size)
+    result = await svc.list_devices(
+        network_id=network_id,
+        page=page,
+        page_size=page_size,
+        requested_workspace_id=requested_workspace_id,
+    )
     return success_response(result, meta.request_id, started, meta.timestamp)
 
 
@@ -106,12 +133,13 @@ async def update_device(
     network_id: uuid.UUID,
     device_id: uuid.UUID,
     req: UpdateDeviceRequest,
-    claims: Annotated[TokenClaims, Depends(get_current_user)],
+    claims: Annotated[TokenClaims, Depends(require_permissions("write:config"))],
     meta: Annotated[RequestMeta, Depends(get_request_meta)],
     db: Annotated[AsyncSession, Depends(get_db)],
     redis: Annotated[aioredis.Redis, Depends(get_redis)],
 ):
     started = time.monotonic()
+    requested_workspace_id = enforce_workspace_scope(claims=claims, workspace_id=None)
     svc = DeviceService(db=db, redis=redis)
     result = await svc.update_device_spatial_ref(
         network_id=network_id,
@@ -119,5 +147,6 @@ async def update_device(
         req=req,
         actor_id=claims.user_id,
         correlation_id=meta.request_id,
+        requested_workspace_id=requested_workspace_id,
     )
     return success_response(result, meta.request_id, started, meta.timestamp)

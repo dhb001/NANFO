@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from app.modules.identity.models import AuditLog, Role, User, UserRole
+from app.modules.identity.models import Role, User, UserRole
 from app.modules.identity.service import AuthService
 
 
@@ -52,7 +52,7 @@ class TestLogin:
             patch.object(auth_svc._user_repo, "get_roles_for_user", return_value=["Admin"]) as _,
             patch.object(auth_svc._user_repo, "get_permissions_for_roles", return_value=["write:config"]) as _,
             patch("app.modules.identity.service.verify_password", return_value=True),
-            patch("app.modules.identity.service.publish_event", new_callable=AsyncMock),
+            patch("app.modules.identity.service.publish_event", new_callable=AsyncMock) as mock_publish,
         ):
             result = await auth_svc.login(
                 email="test@example.com",
@@ -63,6 +63,30 @@ class TestLogin:
         assert result.access_token
         assert result.refresh_token
         assert result.token_type == "bearer"
+        assert mock_publish.await_count >= 1
+
+    @pytest.mark.asyncio
+    async def test_successful_login_event_publish_failure_is_fail_open(self, auth_svc, user):
+        with (
+            patch.object(auth_svc._user_repo, "get_by_email", return_value=user),
+            patch.object(auth_svc._user_repo, "get_roles_for_user", return_value=["Admin"]),
+            patch.object(auth_svc._user_repo, "get_permissions_for_roles", return_value=["write:config"]),
+            patch("app.modules.identity.service.verify_password", return_value=True),
+            patch(
+                "app.modules.identity.service.publish_event",
+                new_callable=AsyncMock,
+                side_effect=RuntimeError("stream unavailable"),
+            ),
+        ):
+            result = await auth_svc.login(
+                email="test@example.com",
+                password="correct",
+                ip_address="127.0.0.1",
+                correlation_id=str(uuid.uuid4()),
+            )
+
+        assert result.access_token
+        assert result.refresh_token
 
     @pytest.mark.asyncio
     async def test_invalid_password_raises_401(self, auth_svc, user):
@@ -72,14 +96,32 @@ class TestLogin:
             patch.object(auth_svc._user_repo, "get_by_email", return_value=user),
             patch("app.modules.identity.service.verify_password", return_value=False),
             patch("app.modules.identity.service.publish_event", new_callable=AsyncMock),
+            pytest.raises(HTTPException) as exc_info,
         ):
-            with pytest.raises(HTTPException) as exc_info:
-                await auth_svc.login("test@example.com", "wrong", "127.0.0.1", str(uuid.uuid4()))
+            await auth_svc.login("test@example.com", "wrong", "127.0.0.1", str(uuid.uuid4()))
         assert exc_info.value.status_code == 401
         # Error message must not say 'password' or 'email' specifically
         detail = exc_info.value.detail.lower()
         assert "password" not in detail
         assert "email" not in detail
+
+    @pytest.mark.asyncio
+    async def test_invalid_password_event_publish_failure_preserves_401(self, auth_svc, user):
+        from fastapi import HTTPException
+
+        with (
+            patch.object(auth_svc._user_repo, "get_by_email", return_value=user),
+            patch("app.modules.identity.service.verify_password", return_value=False),
+            patch(
+                "app.modules.identity.service.publish_event",
+                new_callable=AsyncMock,
+                side_effect=RuntimeError("stream unavailable"),
+            ),
+            pytest.raises(HTTPException) as exc_info,
+        ):
+            await auth_svc.login("test@example.com", "wrong", "127.0.0.1", str(uuid.uuid4()))
+
+        assert exc_info.value.status_code == 401
 
     @pytest.mark.asyncio
     async def test_unknown_user_raises_401(self, auth_svc):
@@ -88,9 +130,9 @@ class TestLogin:
         with (
             patch.object(auth_svc._user_repo, "get_by_email", return_value=None),
             patch("app.modules.identity.service.publish_event", new_callable=AsyncMock),
+            pytest.raises(HTTPException) as exc_info,
         ):
-            with pytest.raises(HTTPException) as exc_info:
-                await auth_svc.login("ghost@example.com", "any", "127.0.0.1", str(uuid.uuid4()))
+            await auth_svc.login("ghost@example.com", "any", "127.0.0.1", str(uuid.uuid4()))
         assert exc_info.value.status_code == 401
 
     @pytest.mark.asyncio
@@ -102,9 +144,11 @@ class TestLogin:
         key = f"ratelimit:login:{ip}"
         await fake_redis.set(key, "5", ex=60)
 
-        with patch("app.modules.identity.service.publish_event", new_callable=AsyncMock):
-            with pytest.raises(HTTPException) as exc_info:
-                await auth_svc.login("x@y.com", "p", ip, str(uuid.uuid4()))
+        with (
+            patch("app.modules.identity.service.publish_event", new_callable=AsyncMock),
+            pytest.raises(HTTPException) as exc_info,
+        ):
+            await auth_svc.login("x@y.com", "p", ip, str(uuid.uuid4()))
         assert exc_info.value.status_code == 429
 
     @pytest.mark.asyncio
@@ -117,9 +161,9 @@ class TestLogin:
             patch.object(auth_svc._user_repo, "get_by_email", return_value=inactive),
             patch("app.modules.identity.service.verify_password", return_value=True),
             patch("app.modules.identity.service.publish_event", new_callable=AsyncMock),
+            pytest.raises(HTTPException) as exc_info,
         ):
-            with pytest.raises(HTTPException) as exc_info:
-                await auth_svc.login("test@example.com", "pass", "127.0.0.1", str(uuid.uuid4()))
+            await auth_svc.login("test@example.com", "pass", "127.0.0.1", str(uuid.uuid4()))
         assert exc_info.value.status_code == 401
 
 
@@ -136,6 +180,21 @@ class TestLogout:
 
         deny_key = f"jti:deny:{jti}"
         assert await fake_redis.exists(deny_key) == 1
+
+    @pytest.mark.asyncio
+    async def test_logout_event_publish_failure_is_fail_open(self, auth_svc, fake_redis):
+        from datetime import timedelta
+
+        jti = str(uuid.uuid4())
+        exp = int((datetime.now(UTC) + timedelta(minutes=14)).timestamp())
+        with patch(
+            "app.modules.identity.service.publish_event",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("stream unavailable"),
+        ):
+            await auth_svc.logout(jti=jti, exp=exp, user_id=str(uuid.uuid4()), correlation_id=str(uuid.uuid4()))
+
+        assert await fake_redis.exists(f"jti:deny:{jti}") == 1
 
 
 class TestRefresh:
@@ -154,10 +213,31 @@ class TestRefresh:
         assert result.expires_in > 0
 
     @pytest.mark.asyncio
+    async def test_refresh_event_publish_failure_is_fail_open(self, auth_svc, user):
+        from app.core.security import create_refresh_token
+
+        refresh_token, _ = create_refresh_token(user_id=str(user.user_id))
+        with (
+            patch.object(auth_svc._user_repo, "get_by_id", return_value=user),
+            patch.object(auth_svc._user_repo, "get_roles_for_user", return_value=["Admin"]),
+            patch.object(auth_svc._user_repo, "get_permissions_for_roles", return_value=["write:config"]),
+            patch(
+                "app.modules.identity.service.publish_event",
+                new_callable=AsyncMock,
+                side_effect=RuntimeError("stream unavailable"),
+            ),
+        ):
+            result = await auth_svc.refresh(refresh_token=refresh_token, correlation_id=str(uuid.uuid4()))
+
+        assert result.access_token
+
+    @pytest.mark.asyncio
     async def test_access_token_as_refresh_raises_401(self, auth_svc):
         """Passing an access token to /refresh must be rejected."""
         from fastapi import HTTPException
+
         from app.core.security import create_access_token
+
         token, _ = create_access_token(user_id="u1", email="a@b.com", roles=[], permissions=[])
         with pytest.raises(HTTPException) as exc_info:
             await auth_svc.refresh(refresh_token=token, correlation_id=str(uuid.uuid4()))

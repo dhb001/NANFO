@@ -94,13 +94,20 @@ class AuthService:
                 metadata={"reason": "invalid_credentials", "ip_address": ip_address},
             )
             await self._db.commit()
-            await publish_event(
-                redis=self._redis,
-                event_type="auth.user.login_failed",
-                source="auth",
-                payload={"ip_address": ip_address},
-                correlation_id=correlation_id,
-            )
+            try:
+                await publish_event(
+                    redis=self._redis,
+                    event_type="auth.user.login_failed",
+                    source="auth",
+                    payload={"ip_address": ip_address},
+                    correlation_id=correlation_id,
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "auth_login_failed_event_publish_failed",
+                    correlation_id=correlation_id,
+                    error=str(exc),
+                )
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid credentials.",
@@ -128,13 +135,21 @@ class AuthService:
         )
         await self._db.commit()
 
-        await publish_event(
-            redis=self._redis,
-            event_type="auth.user.logged_in",
-            source="auth",
-            payload={"user_id": str(user.user_id), "ip_address": ip_address},
-            correlation_id=correlation_id,
-        )
+        try:
+            await publish_event(
+                redis=self._redis,
+                event_type="auth.user.logged_in",
+                source="auth",
+                payload={"user_id": str(user.user_id), "ip_address": ip_address},
+                correlation_id=correlation_id,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "auth_logged_in_event_publish_failed",
+                user_id=str(user.user_id),
+                correlation_id=correlation_id,
+                error=str(exc),
+            )
 
         settings2 = get_settings()
         return TokenPair(
@@ -160,13 +175,21 @@ class AuthService:
         )
         await self._db.commit()
 
-        await publish_event(
-            redis=self._redis,
-            event_type="auth.user.logged_out",
-            source="auth",
-            payload={"user_id": user_id, "jti": jti},
-            correlation_id=correlation_id,
-        )
+        try:
+            await publish_event(
+                redis=self._redis,
+                event_type="auth.user.logged_out",
+                source="auth",
+                payload={"user_id": user_id, "jti": jti},
+                correlation_id=correlation_id,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "auth_logged_out_event_publish_failed",
+                user_id=user_id,
+                correlation_id=correlation_id,
+                error=str(exc),
+            )
 
     async def refresh(self, refresh_token: str, correlation_id: str) -> AccessToken:
         """Issue a new access token from a valid refresh token."""
@@ -199,13 +222,21 @@ class AuthService:
             correlation_id=uuid.UUID(correlation_id),
         )
         await self._db.commit()
-        await publish_event(
-            redis=self._redis,
-            event_type="auth.token.refreshed",
-            source="auth",
-            payload={"user_id": user_id},
-            correlation_id=correlation_id,
-        )
+        try:
+            await publish_event(
+                redis=self._redis,
+                event_type="auth.token.refreshed",
+                source="auth",
+                payload={"user_id": user_id},
+                correlation_id=correlation_id,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "auth_token_refreshed_event_publish_failed",
+                user_id=user_id,
+                correlation_id=correlation_id,
+                error=str(exc),
+            )
 
         settings = get_settings()
         return AccessToken(

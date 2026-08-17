@@ -32,7 +32,7 @@ _WS_UNAUTHORIZED_FRAME = json.dumps({
 
 
 @dataclass(frozen=True)
-class _DigitalTwinConnectionAuth:
+class _ConnectionAuth:
     token_exp: int | None
     token_jti: str | None
 
@@ -53,13 +53,13 @@ def _coerce_token_jti(value: object) -> str | None:
     return token_jti or None
 
 
-def _is_token_expired(auth: _DigitalTwinConnectionAuth | None) -> bool:
+def _is_token_expired(auth: _ConnectionAuth | None) -> bool:
     if auth is None or auth.token_exp is None:
         return False
     return int(datetime.now(UTC).timestamp()) >= auth.token_exp
 
 
-async def _is_token_revoked(auth: _DigitalTwinConnectionAuth | None) -> bool:
+async def _is_token_revoked(auth: _ConnectionAuth | None) -> bool:
     if auth is None or auth.token_jti is None:
         return False
 
@@ -124,11 +124,23 @@ class TopologyWSManager:
     def __init__(self):
         # network_id → set of WebSocket connections
         self._subscriptions: dict[str, set[WebSocket]] = defaultdict(set)
+        self._connection_auth: dict[WebSocket, _ConnectionAuth] = {}
         self._lock = asyncio.Lock()
 
-    async def subscribe(self, network_id: str, websocket: WebSocket) -> None:
+    async def subscribe(
+        self,
+        network_id: str,
+        websocket: WebSocket,
+        *,
+        token_exp: int | None = None,
+        token_jti: str | None = None,
+    ) -> None:
         async with self._lock:
             self._subscriptions[network_id].add(websocket)
+            self._connection_auth[websocket] = _ConnectionAuth(
+                token_exp=_coerce_token_exp(token_exp),
+                token_jti=_coerce_token_jti(token_jti),
+            )
         logger.info("ws_subscribed", network_id=network_id)
 
     async def unsubscribe(self, network_id: str, websocket: WebSocket) -> None:
@@ -136,6 +148,11 @@ class TopologyWSManager:
             self._subscriptions[network_id].discard(websocket)
             if not self._subscriptions[network_id]:
                 del self._subscriptions[network_id]
+            has_other_subscriptions = any(
+                websocket in sockets for sockets in self._subscriptions.values()
+            )
+            if not has_other_subscriptions:
+                self._connection_auth.pop(websocket, None)
         logger.info("ws_unsubscribed", network_id=network_id)
 
     async def push_delta(self, network_id: str, event_type: str, delta_type: str, node: dict, correlation_id: str, timestamp: str) -> None:
@@ -157,9 +174,32 @@ class TopologyWSManager:
 
         dead_connections: list[tuple[str, WebSocket]] = []
         async with self._lock:
-            targets = set(self._subscriptions.get(network_id, set()))
+            targets = {
+                ws: self._connection_auth.get(ws)
+                for ws in self._subscriptions.get(network_id, set())
+            }
 
-        for ws in targets:
+        for ws, auth in targets.items():
+            if _is_token_expired(auth) or await _is_token_revoked(auth):
+                try:
+                    await ws.send_text(_WS_UNAUTHORIZED_FRAME)
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug(
+                        "ws_topology_unauthorized_frame_send_failed",
+                        network_id=network_id,
+                        error=str(exc),
+                    )
+                try:
+                    await ws.close(code=1008)
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug(
+                        "ws_topology_unauthorized_connection_close_failed",
+                        network_id=network_id,
+                        error=str(exc),
+                    )
+                dead_connections.append((network_id, ws))
+                continue
+
             try:
                 await ws.send_text(message)
             except Exception:  # noqa: BLE001
@@ -175,11 +215,23 @@ class TelemetryWSManager:
 
     def __init__(self):
         self._subscriptions: dict[str, set[WebSocket]] = defaultdict(set)
+        self._connection_auth: dict[WebSocket, _ConnectionAuth] = {}
         self._lock = asyncio.Lock()
 
-    async def subscribe(self, network_id: str, websocket: WebSocket) -> None:
+    async def subscribe(
+        self,
+        network_id: str,
+        websocket: WebSocket,
+        *,
+        token_exp: int | None = None,
+        token_jti: str | None = None,
+    ) -> None:
         async with self._lock:
             self._subscriptions[network_id].add(websocket)
+            self._connection_auth[websocket] = _ConnectionAuth(
+                token_exp=_coerce_token_exp(token_exp),
+                token_jti=_coerce_token_jti(token_jti),
+            )
         logger.info("ws_telemetry_subscribed", network_id=network_id)
 
     async def unsubscribe(self, network_id: str, websocket: WebSocket) -> None:
@@ -187,6 +239,11 @@ class TelemetryWSManager:
             self._subscriptions[network_id].discard(websocket)
             if not self._subscriptions[network_id]:
                 del self._subscriptions[network_id]
+            has_other_subscriptions = any(
+                websocket in sockets for sockets in self._subscriptions.values()
+            )
+            if not has_other_subscriptions:
+                self._connection_auth.pop(websocket, None)
         logger.info("ws_telemetry_unsubscribed", network_id=network_id)
 
     async def push_delta(
@@ -210,9 +267,32 @@ class TelemetryWSManager:
 
         dead_connections: list[tuple[str, WebSocket]] = []
         async with self._lock:
-            targets = set(self._subscriptions.get(network_id, set()))
+            targets = {
+                ws: self._connection_auth.get(ws)
+                for ws in self._subscriptions.get(network_id, set())
+            }
 
-        for ws in targets:
+        for ws, auth in targets.items():
+            if _is_token_expired(auth) or await _is_token_revoked(auth):
+                try:
+                    await ws.send_text(_WS_UNAUTHORIZED_FRAME)
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug(
+                        "ws_telemetry_unauthorized_frame_send_failed",
+                        network_id=network_id,
+                        error=str(exc),
+                    )
+                try:
+                    await ws.close(code=1008)
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug(
+                        "ws_telemetry_unauthorized_connection_close_failed",
+                        network_id=network_id,
+                        error=str(exc),
+                    )
+                dead_connections.append((network_id, ws))
+                continue
+
             try:
                 await ws.send_text(message)
             except Exception:  # noqa: BLE001
@@ -227,7 +307,7 @@ class DigitalTwinWSManager:
 
     def __init__(self):
         self._subscriptions: dict[str, set[WebSocket]] = defaultdict(set)
-        self._connection_auth: dict[WebSocket, _DigitalTwinConnectionAuth] = {}
+        self._connection_auth: dict[WebSocket, _ConnectionAuth] = {}
         self._lock = asyncio.Lock()
 
     async def subscribe(
@@ -240,7 +320,7 @@ class DigitalTwinWSManager:
     ) -> None:
         async with self._lock:
             self._subscriptions[network_id].add(websocket)
-            self._connection_auth[websocket] = _DigitalTwinConnectionAuth(
+            self._connection_auth[websocket] = _ConnectionAuth(
                 token_exp=_coerce_token_exp(token_exp),
                 token_jti=_coerce_token_jti(token_jti),
             )
@@ -301,7 +381,7 @@ class DigitalTwinWSManager:
                         error=str(exc),
                     )
                 try:
-                    await ws.close()
+                    await ws.close(code=1008)
                 except Exception as exc:  # noqa: BLE001
                     logger.debug(
                         "ws_digital_twin_expired_connection_close_failed",
@@ -325,7 +405,7 @@ class DigitalTwinWSManager:
                         error=str(exc),
                     )
                 try:
-                    await ws.close()
+                    await ws.close(code=1008)
                 except Exception as exc:  # noqa: BLE001
                     logger.debug(
                         "ws_digital_twin_revoked_connection_close_failed",
@@ -349,16 +429,29 @@ class AlertsWSManager:
 
     def __init__(self):
         self._subscribers: set[WebSocket] = set()
+        self._connection_auth: dict[WebSocket, _ConnectionAuth] = {}
         self._lock = asyncio.Lock()
 
-    async def subscribe(self, websocket: WebSocket) -> None:
+    async def subscribe(
+        self,
+        websocket: WebSocket,
+        *,
+        token_exp: int | None = None,
+        token_jti: str | None = None,
+    ) -> None:
         async with self._lock:
             self._subscribers.add(websocket)
+            self._connection_auth[websocket] = _ConnectionAuth(
+                token_exp=_coerce_token_exp(token_exp),
+                token_jti=_coerce_token_jti(token_jti),
+            )
         logger.info("ws_alerts_subscribed")
 
     async def unsubscribe(self, websocket: WebSocket) -> None:
         async with self._lock:
             self._subscribers.discard(websocket)
+            if websocket not in self._subscribers:
+                self._connection_auth.pop(websocket, None)
         logger.info("ws_alerts_unsubscribed")
 
     async def push_delta(
@@ -383,9 +476,24 @@ class AlertsWSManager:
 
         dead_connections: list[WebSocket] = []
         async with self._lock:
-            targets = set(self._subscribers)
+            targets = {
+                ws: self._connection_auth.get(ws)
+                for ws in self._subscribers
+            }
 
-        for ws in targets:
+        for ws, auth in targets.items():
+            if _is_token_expired(auth) or await _is_token_revoked(auth):
+                try:
+                    await ws.send_text(_WS_UNAUTHORIZED_FRAME)
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug("ws_alerts_unauthorized_frame_send_failed", error=str(exc))
+                try:
+                    await ws.close(code=1008)
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug("ws_alerts_unauthorized_connection_close_failed", error=str(exc))
+                dead_connections.append(ws)
+                continue
+
             try:
                 await ws.send_text(message)
             except Exception:  # noqa: BLE001

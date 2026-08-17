@@ -22,12 +22,6 @@ import { QueryState } from "@/shared/ui/QueryState";
 
 type PluginStatusFilter = "all" | "installed" | "enabled" | "disabled" | "failed";
 
-const ALLOWED_PLUGIN_PERMISSIONS = new Set([
-  "read:telemetry",
-  "read:topology",
-  "read:alerts",
-]);
-
 export function PluginsPage() {
   const token = useAuthStore((state) => state.accessToken);
   const pushToast = useUiStore((state) => state.pushToast);
@@ -68,17 +62,6 @@ export function PluginsPage() {
         .map((entry) => entry.trim())
         .filter(Boolean);
       const normalizedPermissions = requestedPermissions.map((permission) => permission.toLowerCase());
-      const invalidPermission = normalizedPermissions.find(
-        (permission) => !ALLOWED_PLUGIN_PERMISSIONS.has(permission),
-      );
-      if (invalidPermission) {
-        pushToast({
-          title: "Invalid permission",
-          description: `Unsupported permission: ${invalidPermission}`,
-          tone: "warn",
-        });
-        return;
-      }
 
       const result = await installMutation.mutateAsync({
         plugin_key: pluginKey.trim(),

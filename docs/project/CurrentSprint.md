@@ -23,6 +23,42 @@
 - Vertical Slice 20 Implementation: **COMPLETE** — Optimization program closure gate is delivered with consolidated VS17-VS19 evidence, continuity-doc sign-off, and final required backend regression confirmation.
 - Chapter Conformance Audit (chapter-01 to chapter-12): **COMPLETE** — chapter-by-chapter implementation conformance classification was finalized, targeted in-scope remediation was applied (organization member identity validation and realtime websocket unauthorized/error handling hardening), and required backend/frontend validation evidence was recorded.
 
+## VS21 — Global Audit + Remaining Work Completion
+
+- Status: **IN PROGRESS** (checkpoint updated 2026-08-16; in-scope remediations + command-gate evidence recorded, with explicit residual high-risk blockers pending follow-on scope decision).
+- Scope boundaries: no unapproved endpoint/channel expansion, preserve canonical envelope (`success`, `data`, `meta`, `errors`), preserve C5 org/workspace guardrails, preserve C6 deferred-topology guardrails, preserve fail-open realtime/event behavior.
+- [x] Step 1: Contract + surface audit (REST/WebSocket/event parity, frontend enum/state parity against backend-owned workflows).
+- [x] Step 2: Backend architecture/behavior audit (module boundaries, service/repository layering, auth/RBAC/tenant checks, migration/schema parity, fail-open publication/consumption behavior).
+- [x] Step 3: Frontend architecture/behavior audit (feature ownership, async-state completeness, realtime malformed/reconnect handling on `/ws/topology`, `/ws/alerts`, `/ws/digital-twin`, `/ws/telemetry`, accessibility/responsiveness continuity).
+- [x] Step 4: Testing/evidence audit and gap severity matrix (identify false-positive coverage claims and missing tests/contracts).
+- [ ] Step 5: Implement confirmed gaps in smallest safe increments with regression tests.
+- [x] Step 6: Run required backend/frontend command gates and capture evidence (including immediate rerun if transient/flaky).
+- [x] Step 7: Publish VS21 audit summary table + closure rationale in `CurrentSprint.md`, `DevelopmentJournal.md`, and `DecisionLog.md`.
+
+### VS21 Audit Checkpoint (2026-08-16)
+
+| Area | Finding | Outcome | Evidence Pointers |
+| --- | --- | --- | --- |
+| WebSocket auth revalidation parity | Non-digital-twin channels needed per-push expiry/revocation checks and unauthorized close parity. | **Closed** (manager + channel wiring + regressions). | `backend/app/websocket/manager.py`, `backend/app/websocket/topology.py`, `backend/app/websocket/telemetry.py`, `backend/app/websocket/alerts.py`, `backend/tests/unit/test_websocket_auth_revalidation.py`, `backend/tests/unit/test_websocket_digital_twin_auth.py` |
+| Organization/workspace API parity | Missing org/workspace mutation/detail parity (`PATCH/DELETE` org, org-scoped workspace get/update/delete). | **Closed** (routes + service/repository + integration/unit coverage). | `backend/app/api/v1/organizations.py`, `backend/app/modules/organization/service.py`, `backend/app/modules/organization/repository.py`, `backend/tests/integration/test_org_endpoints.py`, `backend/tests/unit/test_org_service.py` |
+| Fail-open publish continuity | Some org/network/auth publish paths lacked explicit warning-only degraded handling. | **Closed** (warning-only publish failure paths + tests). | `backend/app/modules/network/service.py`, `backend/app/modules/identity/service.py`, `backend/app/modules/organization/service.py`, `backend/tests/unit/test_network_service.py`, `backend/tests/unit/test_auth_service.py`, `backend/tests/unit/test_org_service.py` |
+| Audit mapping parity | Missing org update/delete event mappings in audit consumer. | **Closed**. | `backend/app/events/consumers/audit_consumer.py`, `backend/tests/unit/test_audit_consumer.py` |
+| Error envelope consistency | Request-validation errors were not consistently wrapped in canonical envelope. | **Closed** (`RequestValidationError` handler + integration coverage). | `backend/app/main.py`, `backend/tests/integration/test_error_envelope_handlers.py` |
+| Frontend auth session consistency | Login flow could persist unstable session state before `/auth/me` success. | **Closed** (persist session only after profile success; clear+toast on profile failure). | `frontend/src/features/auth/LoginPage.tsx`, `frontend/src/features/auth/LoginPage.test.tsx` |
+| Frontend plugin permission drift | Frontend allowlist pre-block could diverge from backend policy source-of-truth. | **Closed** (removed pre-block; backend remains authority). | `frontend/src/features/plugins/PluginsPage.tsx`, `frontend/src/features/plugins/PluginsPage.test.tsx` |
+| Frontend websocket unauthorized lifecycle | Unauthorized close handling could reconnect-loop in some branches. | **Closed** (unauthorized close path exits reconnect and triggers callback). | `frontend/src/shared/realtime/useManagedWebSocket.ts`, `frontend/src/shared/realtime/useManagedWebSocket.test.tsx` |
+| Global tenant/RBAC enforcement breadth | Several APIs still rely primarily on auth presence without consistent tenant/RBAC boundary enforcement across all route families. | **Open (high risk)** — requires approved cross-module hardening slice to avoid contract/behavior drift. | See `backend/app/api/v1/*.py` and domain services listed in VS21 Decision/Journal entries. |
+| Simulation terminal-event producer parity | `simulation.completed` / `simulation.cancelled` are consumed/mapped but currently lack producer path in active simulation lifecycle service. | **Open (high risk)** — requires approved lifecycle producer scope (likely new transition source, not currently implemented). | `backend/app/modules/simulation/service.py`, `backend/app/events/consumers/ws_push_consumer.py`, `backend/app/events/consumers/audit_consumer.py` |
+
+### VS21 Validation Evidence (2026-08-16)
+
+- Backend lint baseline gate: `poetry run ruff check .` -> **FAIL** (`63` findings in legacy untouched files; consistent with repo-wide Ruff debt tracked in `Blocked / Deferred`).
+- Backend touched-scope lint gate: `poetry run ruff check app/api/v1/organizations.py app/events/consumers/audit_consumer.py app/main.py app/modules/identity/service.py app/modules/network/service.py app/modules/organization/repository.py app/modules/organization/service.py app/websocket/alerts.py app/websocket/manager.py app/websocket/telemetry.py app/websocket/topology.py tests/integration/test_org_endpoints.py tests/integration/test_error_envelope_handlers.py tests/unit/test_audit_consumer.py tests/unit/test_auth_service.py tests/unit/test_event_contracts.py tests/unit/test_network_service.py tests/unit/test_org_service.py tests/unit/test_websocket_digital_twin_auth.py tests/unit/test_websocket_auth_revalidation.py` -> **PASS**.
+- Backend regression gate: `poetry run pytest tests -q` -> first run **FAIL** (`1` failure in `tests/integration/test_error_envelope_handlers.py`), fixed with targeted patch, immediate rerun **PASS** (`523 passed`).
+- Frontend gate: `npm run lint` -> **PASS**; `npm run typecheck` -> **PASS**; `npm run test` -> **PASS** (`23 files, 81 tests`).
+- Frontend e2e gate: `npm run test:e2e` -> first run **transient flaky** (`16 passed`, `1 flaky` in `vs4-simulation`), immediate rerun **PASS** (`17/17`).
+- Frontend build/perf: `npm run build` -> **PASS** (existing large `three` chunk warning unchanged); `npm run perf:bundle` -> **PASS** (all bounded checks true, `total_js_gzip_kb=398.37`, `largest_chunk_gzip_kb=248.61`, `largest_non_three_chunk_gzip_kb=52.79`, `three_chunk_gzip_kb=248.61`, `twin_page_chunk_gzip_kb=3.11`).
+
 ## Subsystem Progress — Vertical Slice 8
 
 - [x] Step 1: Lock VS8 contract scope and execution scaffold (IntentEngine endpoint/event set, migration classification, validation matrix, and risk register) in `docs/project/IntentEngineExecutionPlan-VS8.md`

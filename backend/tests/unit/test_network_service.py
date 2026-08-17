@@ -75,7 +75,7 @@ class TestNetworkService:
             # Patch the service-layer call — NOT the repository
             patch.object(net_svc._workspace_svc, "get_active_workspace", return_value=ws) as mock_ws,
             patch.object(net_svc._repo, "create", return_value=network),
-            patch("app.modules.network.service.publish_event", new_callable=AsyncMock),
+            patch("app.modules.network.service.publish_event", new_callable=AsyncMock) as mock_publish,
         ):
             result = await net_svc.create_network(
                 req=CreateNetworkRequest(workspace_id=ws.workspace_id, name="Net1"),
@@ -84,6 +84,41 @@ class TestNetworkService:
             )
         # Verify C5: the service-layer method was called
         mock_ws.assert_called_once_with(ws.workspace_id)
+        mock_publish.assert_awaited_once()
+        assert result.network_id == network.network_id
+
+    @pytest.mark.asyncio
+    async def test_create_network_workspace_scope_mismatch_raises_403(self, net_svc):
+        ws = _make_workspace()
+        with pytest.raises(HTTPException) as exc_info:
+            await net_svc.create_network(
+                req=CreateNetworkRequest(workspace_id=ws.workspace_id, name="Net1"),
+                actor_id="u1",
+                correlation_id=str(uuid.uuid4()),
+                requested_workspace_id=uuid.uuid4(),
+            )
+
+        assert exc_info.value.status_code == 403
+
+    @pytest.mark.asyncio
+    async def test_create_network_event_publish_failure_is_fail_open(self, net_svc):
+        ws = _make_workspace()
+        network = _make_network(workspace_id=ws.workspace_id)
+        with (
+            patch.object(net_svc._workspace_svc, "get_active_workspace", return_value=ws),
+            patch.object(net_svc._repo, "create", return_value=network),
+            patch(
+                "app.modules.network.service.publish_event",
+                new_callable=AsyncMock,
+                side_effect=RuntimeError("stream unavailable"),
+            ),
+        ):
+            result = await net_svc.create_network(
+                req=CreateNetworkRequest(workspace_id=ws.workspace_id, name="Net1"),
+                actor_id="u1",
+                correlation_id=str(uuid.uuid4()),
+            )
+
         assert result.network_id == network.network_id
 
     @pytest.mark.asyncio
@@ -104,6 +139,47 @@ class TestNetworkService:
                 correlation_id=str(uuid.uuid4()),
             )
         assert exc_info.value.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_list_networks_workspace_scope_mismatch_raises_403(self, net_svc):
+        workspace_id = uuid.uuid4()
+        with pytest.raises(HTTPException) as exc_info:
+            await net_svc.list_networks(
+                workspace_id=workspace_id,
+                page=1,
+                page_size=20,
+                requested_workspace_id=uuid.uuid4(),
+            )
+
+        assert exc_info.value.status_code == 403
+
+    @pytest.mark.asyncio
+    async def test_list_networks_validates_workspace_exists(self, net_svc):
+        workspace_id = uuid.uuid4()
+        with (
+            patch.object(net_svc._workspace_svc, "get_active_workspace", return_value=_make_workspace()) as mock_ws,
+            patch.object(net_svc._repo, "list_for_workspace", return_value=([], 0)) as mock_list,
+        ):
+            result = await net_svc.list_networks(workspace_id=workspace_id, page=1, page_size=20)
+
+        mock_ws.assert_awaited_once_with(workspace_id)
+        mock_list.assert_awaited_once_with(workspace_id, page=1, page_size=20)
+        assert result.total == 0
+
+    @pytest.mark.asyncio
+    async def test_assert_network_workspace_access_rejects_workspace_mismatch(self, net_svc):
+        network = _make_network(workspace_id=uuid.uuid4())
+        with (
+            patch.object(net_svc._repo, "get_by_id", return_value=network),
+            patch.object(net_svc._workspace_svc, "get_active_workspace", return_value=_make_workspace()),
+            pytest.raises(HTTPException) as exc_info,
+        ):
+            await net_svc.assert_network_workspace_access(
+                network_id=network.network_id,
+                requested_workspace_id=uuid.uuid4(),
+            )
+
+        assert exc_info.value.status_code == 403
 
     def test_c5_no_workspace_repository_direct_call(self, net_svc):
         """C5: NetworkService must hold a WorkspaceService reference, not a WorkspaceRepository."""
@@ -134,6 +210,7 @@ class TestDeviceService:
         )
         with (
             patch.object(dev_svc._network_repo, "get_by_id", return_value=network),
+            patch("app.modules.network.service.OrgWorkspaceService.get_active_workspace", new_callable=AsyncMock),
             patch.object(dev_svc._repo, "create", return_value=device),
             patch("app.modules.network.service.publish_event", new_callable=AsyncMock) as mock_pub,
         ):
@@ -148,11 +225,34 @@ class TestDeviceService:
                 correlation_id=str(uuid.uuid4()),
             )
         # Event must be published
-        mock_pub.assert_called_once()
-        call_kwargs = mock_pub.call_args.kwargs
+        mock_pub.assert_awaited_once()
+        call_kwargs = mock_pub.await_args.kwargs
         assert call_kwargs["event_type"] == "network.device.added"
         assert call_kwargs["payload"]["workspace_id"] == str(network.workspace_id)
         assert call_kwargs["payload"]["spatial_ref_id"] == "campus-a/building-1/floor-2/room-204/rack-3/device-router-01"
+        assert result.device_id == device.device_id
+
+    @pytest.mark.asyncio
+    async def test_add_device_event_publish_failure_is_fail_open(self, dev_svc):
+        network = _make_network()
+        device = _make_device(network_id=network.network_id)
+        with (
+            patch.object(dev_svc._network_repo, "get_by_id", return_value=network),
+            patch("app.modules.network.service.OrgWorkspaceService.get_active_workspace", new_callable=AsyncMock),
+            patch.object(dev_svc._repo, "create", return_value=device),
+            patch(
+                "app.modules.network.service.publish_event",
+                new_callable=AsyncMock,
+                side_effect=RuntimeError("stream unavailable"),
+            ),
+        ):
+            result = await dev_svc.add_device(
+                network_id=network.network_id,
+                req=CreateDeviceRequest(hostname="router-01", device_type="router"),
+                actor_id="u1",
+                correlation_id=str(uuid.uuid4()),
+            )
+
         assert result.device_id == device.device_id
 
     @pytest.mark.asyncio
@@ -162,6 +262,7 @@ class TestDeviceService:
 
         with (
             patch.object(dev_svc._network_repo, "get_by_id", return_value=network),
+            patch("app.modules.network.service.OrgWorkspaceService.get_active_workspace", new_callable=AsyncMock),
             patch.object(dev_svc._repo, "create", return_value=device) as mock_create,
             patch("app.modules.network.service.publish_event", new_callable=AsyncMock),
         ):
@@ -193,12 +294,32 @@ class TestDeviceService:
         assert exc_info.value.status_code == 404
 
     @pytest.mark.asyncio
+    async def test_add_device_workspace_scope_mismatch_raises_403(self, dev_svc):
+        workspace_id = uuid.uuid4()
+        network = _make_network(workspace_id=workspace_id)
+        with (
+            patch.object(dev_svc._network_repo, "get_by_id", return_value=network),
+            patch("app.modules.network.service.OrgWorkspaceService.get_active_workspace", new_callable=AsyncMock),
+            pytest.raises(HTTPException) as exc_info,
+        ):
+            await dev_svc.add_device(
+                network_id=network.network_id,
+                req=CreateDeviceRequest(hostname="router-01", device_type="router"),
+                actor_id="u1",
+                correlation_id=str(uuid.uuid4()),
+                requested_workspace_id=uuid.uuid4(),
+            )
+
+        assert exc_info.value.status_code == 403
+
+    @pytest.mark.asyncio
     async def test_add_device_event_type_follows_naming_convention(self, dev_svc):
         """EventAPI.md §1: event_type must follow module.entity.action pattern."""
         network = _make_network()
         device = _make_device(network_id=network.network_id)
         with (
             patch.object(dev_svc._network_repo, "get_by_id", return_value=network),
+            patch("app.modules.network.service.OrgWorkspaceService.get_active_workspace", new_callable=AsyncMock),
             patch.object(dev_svc._repo, "create", return_value=device),
             patch("app.modules.network.service.publish_event", new_callable=AsyncMock) as mock_pub,
         ):
@@ -221,6 +342,7 @@ class TestDeviceService:
 
         with (
             patch.object(dev_svc._network_repo, "get_by_id", return_value=network),
+            patch("app.modules.network.service.OrgWorkspaceService.get_active_workspace", new_callable=AsyncMock),
             patch.object(dev_svc._repo, "get_by_id", return_value=current),
             patch.object(dev_svc._repo, "update_spatial_ref_id", return_value=updated) as mock_update,
             patch("app.modules.network.service.publish_event", new_callable=AsyncMock) as mock_pub,
@@ -246,12 +368,41 @@ class TestDeviceService:
         assert result.device_id == current.device_id
 
     @pytest.mark.asyncio
+    async def test_update_device_spatial_ref_event_publish_failure_is_fail_open(self, dev_svc):
+        network = _make_network()
+        current = _make_device(network_id=network.network_id, spatial_ref_id="campus-a/device-old")
+        updated = _make_device(network_id=network.network_id, spatial_ref_id="campus-a/device-new")
+        updated.device_id = current.device_id
+
+        with (
+            patch.object(dev_svc._network_repo, "get_by_id", return_value=network),
+            patch("app.modules.network.service.OrgWorkspaceService.get_active_workspace", new_callable=AsyncMock),
+            patch.object(dev_svc._repo, "get_by_id", return_value=current),
+            patch.object(dev_svc._repo, "update_spatial_ref_id", return_value=updated),
+            patch(
+                "app.modules.network.service.publish_event",
+                new_callable=AsyncMock,
+                side_effect=RuntimeError("stream unavailable"),
+            ),
+        ):
+            result = await dev_svc.update_device_spatial_ref(
+                network_id=network.network_id,
+                device_id=current.device_id,
+                req=UpdateDeviceRequest(spatial_ref_id="campus-a/device-new"),
+                actor_id="u1",
+                correlation_id=str(uuid.uuid4()),
+            )
+
+        assert result.device_id == current.device_id
+
+    @pytest.mark.asyncio
     async def test_update_device_spatial_ref_no_change_skips_event_publish(self, dev_svc):
         network = _make_network()
         current = _make_device(network_id=network.network_id, spatial_ref_id="campus-a/device-1")
 
         with (
             patch.object(dev_svc._network_repo, "get_by_id", return_value=network),
+            patch("app.modules.network.service.OrgWorkspaceService.get_active_workspace", new_callable=AsyncMock),
             patch.object(dev_svc._repo, "get_by_id", return_value=current),
             patch.object(dev_svc._repo, "update_spatial_ref_id") as mock_update,
             patch("app.modules.network.service.publish_event", new_callable=AsyncMock) as mock_pub,
@@ -290,6 +441,7 @@ class TestDeviceService:
         network = _make_network()
         with (
             patch.object(dev_svc._network_repo, "get_by_id", return_value=network),
+            patch("app.modules.network.service.OrgWorkspaceService.get_active_workspace", new_callable=AsyncMock),
             patch.object(dev_svc._repo, "get_by_id", return_value=None),
             pytest.raises(HTTPException) as exc_info,
         ):
@@ -302,3 +454,21 @@ class TestDeviceService:
             )
 
         assert exc_info.value.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_list_devices_workspace_scope_mismatch_raises_403(self, dev_svc):
+        workspace_id = uuid.uuid4()
+        network = _make_network(workspace_id=workspace_id)
+        with (
+            patch.object(dev_svc._network_repo, "get_by_id", return_value=network),
+            patch("app.modules.network.service.OrgWorkspaceService.get_active_workspace", new_callable=AsyncMock),
+            pytest.raises(HTTPException) as exc_info,
+        ):
+            await dev_svc.list_devices(
+                network_id=network.network_id,
+                page=1,
+                page_size=20,
+                requested_workspace_id=uuid.uuid4(),
+            )
+
+        assert exc_info.value.status_code == 403

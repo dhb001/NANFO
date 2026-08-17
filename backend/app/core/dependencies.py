@@ -141,3 +141,38 @@ def require_permissions(*required_perms: str):
         return claims
 
     return _check
+
+
+def enforce_workspace_scope(
+    *,
+    claims: TokenClaims,
+    workspace_id: uuid.UUID | None,
+) -> uuid.UUID | None:
+    """Enforce optional token workspace scope against request workspace context.
+
+    If the token does not carry a workspace claim, the provided workspace_id is
+    returned unchanged. If the token carries a workspace claim, mismatches are
+    rejected with 403 and missing request workspace_id is bound to the claim.
+    """
+    claim_workspace_raw = claims.workspace_id
+    if claim_workspace_raw is None:
+        return workspace_id
+
+    try:
+        claim_workspace_id = uuid.UUID(str(claim_workspace_raw))
+    except (TypeError, ValueError, AttributeError):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Insufficient permissions.",
+        )
+
+    if workspace_id is None:
+        return claim_workspace_id
+
+    if workspace_id != claim_workspace_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Insufficient permissions.",
+        )
+
+    return workspace_id

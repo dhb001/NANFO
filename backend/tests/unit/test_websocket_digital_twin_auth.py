@@ -48,7 +48,7 @@ async def test_digital_twin_push_sends_unauthorized_and_closes_when_token_expire
     expired_ws.send_text.assert_awaited_once()
     expired_payload = expired_ws.send_text.await_args.args[0]
     assert "WS_UNAUTHORIZED" in expired_payload
-    expired_ws.close.assert_awaited_once()
+    expired_ws.close.assert_awaited_once_with(code=1008)
 
     live_ws.send_text.assert_awaited_once()
     live_ws.close.assert_not_awaited()
@@ -103,7 +103,7 @@ async def test_digital_twin_push_sends_unauthorized_and_closes_when_jti_revoked(
     revoked_ws.send_text.assert_awaited_once()
     revoked_payload = revoked_ws.send_text.await_args.args[0]
     assert "WS_UNAUTHORIZED" in revoked_payload
-    revoked_ws.close.assert_awaited_once()
+    revoked_ws.close.assert_awaited_once_with(code=1008)
     fake_redis.incr.assert_awaited_once_with("digital_twin:ws:security_close:revoked")
 
 
@@ -162,7 +162,7 @@ async def test_digital_twin_push_expired_counter_write_failure_is_fail_open():
         )
 
     ws.send_text.assert_awaited_once()
-    ws.close.assert_awaited_once()
+    ws.close.assert_awaited_once_with(code=1008)
 
 
 @pytest.mark.asyncio
@@ -191,4 +191,4 @@ async def test_digital_twin_push_expired_counter_client_unavailable_is_fail_open
         )
 
     ws.send_text.assert_awaited_once()
-    ws.close.assert_awaited_once()
+    ws.close.assert_awaited_once_with(code=1008)

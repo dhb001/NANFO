@@ -2,6 +2,27 @@
 
 Lightweight chronological notes for decisions that do not require a full ADR.
 
+## 2026-08-16
+### VS21 Checkpoint Decision: Accept Partial Closure with Explicit High-Risk Residuals and Evidence-Backed Gate Results
+Decision: Mark VS21 Steps 1-4, 6, and 7 complete with evidence-backed documentation while keeping Step 5 open for two explicit high-risk residuals that require approved follow-on scope: tenant/RBAC enforcement breadth and simulation terminal-event producer parity (`simulation.completed`/`simulation.cancelled`).
+Reason:
+- Audit and remediation objectives for confirmed in-scope defects are complete with targeted regression coverage and full command-gate evidence.
+- Required command chain was executed; transient failures were immediately rerun and recorded per execution standard, yielding final all-green backend/frontend validation except known pre-existing repo-wide Ruff debt outside touched scope.
+- Forcing broad tenant/RBAC hardening or introducing simulation terminal producer paths inside this checkpoint would risk non-minimal cross-module behavior expansion without a bounded approved slice/decision.
+Impact:
+- `CurrentSprint.md` now carries a VS21 audit matrix with closed findings, explicit open high-risk blockers, and command evidence (including transient rerun handling).
+- `DevelopmentJournal.md` records the same evidence lineage and keeps Step 5 pending for the residual blockers.
+- A focused test correction in `backend/tests/integration/test_error_envelope_handlers.py` stabilizes canonical HTTP-exception envelope validation by mocking deterministic service-layer 404 behavior.
+Assumptions:
+- Repo-wide Ruff baseline failures (`poetry run ruff check .`) remain accepted technical debt outside VS21 touched scope and do not invalidate touched-scope lint/regression evidence.
+- High-risk residuals require explicit follow-on approval/scope lock before implementation to prevent undocumented contract or boundary drift.
+Related:
+- `docs/project/CurrentSprint.md`
+- `docs/project/DevelopmentJournal.md`
+- `backend/tests/integration/test_error_envelope_handlers.py`
+- `backend/app/modules/simulation/service.py`
+- `backend/app/api/v1/*.py`
+
 ## 2026-08-15
 ### chapter-01 to chapter-12 Conformance Audit: Accept Closure with Targeted Remediation and Explicit Residual Register
 Decision: Mark the chapter conformance audit complete after (a) finalizing a chapter-by-chapter conformance matrix for `chapter-01` through `chapter-12`, (b) remediating in-scope critical gaps (organization member identity validation and realtime websocket unauthorized/error handling hardening), and (c) recording full validation evidence in a dedicated audit artifact.

@@ -190,7 +190,7 @@ describe("PluginsPage", () => {
     expect(mockInstallMutateAsync).toHaveBeenCalled();
   });
 
-  it("blocks install when sandbox permission is unsupported", async () => {
+  it("submits install even with unsupported permission and lets backend enforce policy", async () => {
     const user = userEvent.setup();
     render(<PluginsPage />);
 
@@ -198,8 +198,7 @@ describe("PluginsPage", () => {
     await user.type(screen.getByLabelText("Sandbox permissions"), "write:config");
     await user.click(screen.getByRole("button", { name: "Install Plugin" }));
 
-    expect(mockInstallMutateAsync).not.toHaveBeenCalled();
-    expect(useUiStore.getState().toasts.some((toast) => toast.title === "Invalid permission")).toBe(true);
+    expect(mockInstallMutateAsync).toHaveBeenCalled();
   });
 
   it("runs enable action for safe plugin", async () => {

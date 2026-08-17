@@ -5,17 +5,14 @@ Dependencies (DB, Redis) are overridden with mocks so no infrastructure is requi
 The key invariant tested here is that every response carries the API_STANDARD.md §2 envelope.
 """
 
-import uuid
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
+import fakeredis
 import pytest
 from fastapi.testclient import TestClient
-from httpx import AsyncClient, ASGITransport
 
-from app.main import app
 from app.core.dependencies import get_db, get_redis
-import fakeredis
-
+from app.main import app
 
 # ── Dependency overrides ──────────────────────────────────────────────────────
 
@@ -73,7 +70,9 @@ class TestAPIEnvelope:
         HTTP routing and response envelope shape, not repository internals.
         """
         from fastapi import HTTPException
+
         from app.modules.identity.service import AuthService
+
         with patch.object(AuthService, "login", side_effect=HTTPException(status_code=401, detail="Invalid credentials.")):
             response = client.post("/api/v1/auth/login", json={"email": "x@y.com", "password": "bad"})
         assert response.status_code == 401
@@ -102,13 +101,28 @@ class TestAPIEnvelope:
 # ── Auth endpoint tests ───────────────────────────────────────────────────────
 
 class TestLoginEndpoint:
+    def test_login_preflight_returns_cors_headers(self, client):
+        response = client.options(
+            "/api/v1/auth/login",
+            headers={
+                "Origin": "http://localhost:5173",
+                "Access-Control-Request-Method": "POST",
+                "Access-Control-Request-Headers": "content-type",
+            },
+        )
+        assert response.status_code == 200
+        assert response.headers.get("access-control-allow-origin") == "http://localhost:5173"
+        assert "POST" in response.headers.get("access-control-allow-methods", "")
+
     def test_login_rate_limit_returns_429(self, client):
         """Rate-limit breach must return 429 with a JSON body (Authentication.md §5).
 
         Mocks AuthService.login to simulate rate-limit so no real Redis or DB needed.
         """
         from fastapi import HTTPException
+
         from app.modules.identity.service import AuthService
+
         with patch.object(
             AuthService,
             "login",

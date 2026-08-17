@@ -6,12 +6,15 @@ import { Button } from "@/shared/ui/Button";
 import { AsyncState } from "@/shared/ui/AsyncState";
 import { toErrorMessage } from "@/shared/lib/errors";
 import { getProfile } from "@/features/auth/api";
+import { useUiStore } from "@/shared/state/ui-store";
 
 export function LoginPage() {
   const navigate = useNavigate();
   const [email, setEmail] = useState("test@example.com");
   const [password, setPassword] = useState("change-me");
   const setSession = useAuthStore((state) => state.setSession);
+  const clearSession = useAuthStore((state) => state.clearSession);
+  const pushToast = useUiStore((state) => state.pushToast);
 
   const loginMutation = useLogin();
 
@@ -20,20 +23,24 @@ export function LoginPage() {
   async function onSubmit(event: FormEvent) {
     event.preventDefault();
     const tokenPair = await loginMutation.mutateAsync({ email, password });
-    setSession({
-      accessToken: tokenPair.access_token,
-      refreshToken: tokenPair.refresh_token,
-      userId: "pending",
-    });
 
-    const profile = await getProfile(tokenPair.access_token);
-    if (profile) {
+    try {
+      const profile = await getProfile(tokenPair.access_token);
       setSession({
         accessToken: tokenPair.access_token,
         refreshToken: tokenPair.refresh_token,
         userId: profile.user_id,
       });
+    } catch {
+      clearSession();
+      pushToast({
+        title: "Profile lookup failed",
+        description: "Please sign in again.",
+        tone: "danger",
+      });
+      return;
     }
+
     navigate("/ops/overview");
   }
 

@@ -2,7 +2,7 @@
 
 Scope:
 - Deterministic scenario validation handoff payload shaping
-- Internal simulation lifecycle event publication (`simulation.started`)
+- Internal simulation lifecycle event publication (`simulation.started`, terminal parity)
 - Fail-open publication path to preserve API availability
 - VS7 simulation persistence baseline integration
 """
@@ -101,6 +101,20 @@ def _extract_metrics(run_output: Any) -> dict[str, float]:
     }
 
 
+def _derive_terminal_transition(
+    *,
+    queue_status: Any,
+    warning: Any,
+) -> tuple[str, str, str]:
+    normalized_queue_status = str(queue_status).strip().lower()
+    normalized_warning = str(warning).strip()
+
+    if normalized_queue_status == "deferred" or normalized_warning == "event_queue_unavailable":
+        return "cancelled", "blocked", "simulation.cancelled"
+
+    return "completed", "passed", "simulation.completed"
+
+
 class ScenarioValidationHandoffService:
     """Build deterministic simulation validation handoff payloads."""
 
@@ -163,13 +177,116 @@ class SimulationEventService:
         handoff_payload: dict[str, Any],
         correlation_id: str,
     ) -> str:
-        return await publish_event(
-            redis=self._redis,
+        return await self.publish_lifecycle_event(
             event_type="simulation.started",
-            source="simulation",
             payload=handoff_payload,
             correlation_id=correlation_id,
         )
+
+    async def publish_lifecycle_event(
+        self,
+        *,
+        event_type: str,
+        payload: dict[str, Any],
+        correlation_id: str,
+    ) -> str:
+        return await publish_event(
+            redis=self._redis,
+            event_type=event_type,
+            source="simulation",
+            payload=payload,
+            correlation_id=correlation_id,
+        )
+
+
+class SimulationTerminalEventService:
+    """Process started simulation events into terminal lifecycle outcomes."""
+
+    def __init__(self, *, db: AsyncSession, redis: aioredis.Redis):
+        self._db = db
+        self._redis = redis
+        self._repo = SimulationRepository(db)
+
+    async def process_started_event(self, *, event: dict[str, Any]) -> None:
+        payload_raw = event.get("payload")
+        payload = payload_raw if isinstance(payload_raw, dict) else {}
+        simulation_id_raw = payload.get("simulation_id")
+        simulation_id_text = str(simulation_id_raw).strip()
+        if not simulation_id_text:
+            logger.warning(
+                "simulation_terminal_transition_missing_simulation_id",
+                event_type=str(event.get("event_type", "")),
+            )
+            return
+
+        try:
+            simulation_id = uuid.UUID(simulation_id_text)
+        except (TypeError, ValueError, AttributeError):
+            logger.warning(
+                "simulation_terminal_transition_invalid_simulation_id",
+                event_type=str(event.get("event_type", "")),
+                simulation_id=simulation_id_text,
+            )
+            return
+
+        simulation = await self._repo.get_by_id(simulation_id)
+        if simulation is None:
+            logger.warning(
+                "simulation_terminal_transition_simulation_not_found",
+                simulation_id=str(simulation_id),
+            )
+            return
+
+        current_state = str(simulation.state).strip().lower()
+        current_status = str(simulation.status).strip().lower()
+        if current_state in {"completed", "cancelled"} or current_status in {"completed", "cancelled"}:
+            logger.info(
+                "simulation_terminal_transition_deduped",
+                simulation_id=str(simulation.simulation_id),
+                state=current_state,
+                status=current_status,
+            )
+            return
+
+        terminal_state, terminal_risk_gate, terminal_event_type = _derive_terminal_transition(
+            queue_status=simulation.queue_status,
+            warning=simulation.warning,
+        )
+        await self._repo.update_state(
+            simulation,
+            state=terminal_state,
+            status=terminal_state,
+            risk_gate=terminal_risk_gate,
+        )
+
+        terminal_payload = {
+            "simulation_id": str(simulation.simulation_id),
+            "scenario_id": str(simulation.scenario_id),
+            "network_id": str(simulation.network_id),
+            "scene_object_id": _DEFAULT_SIMULATION_OBJECT_ID,
+            "state": terminal_state,
+            "status": terminal_state,
+            "risk_gate": terminal_risk_gate,
+            "validation": dict(simulation.validation) if isinstance(simulation.validation, dict) else {},
+        }
+        correlation_id = _coerce_correlation_id(event.get("correlation_id"))
+
+        try:
+            await SimulationEventService(redis=self._redis).publish_lifecycle_event(
+                event_type=terminal_event_type,
+                payload=terminal_payload,
+                correlation_id=correlation_id,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "simulation_terminal_event_publish_failed",
+                simulation_id=str(simulation.simulation_id),
+                event_type=terminal_event_type,
+                correlation_id=correlation_id,
+                error=str(exc),
+            )
+
+        await self._db.commit()
 
 
 class SimulationStartService:

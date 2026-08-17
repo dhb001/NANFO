@@ -30,6 +30,27 @@ def _make_token():
     return token
 
 
+def _make_token_with_workspace(*, permissions: list[str], workspace_id: uuid.UUID) -> str:
+    token, _ = create_access_token(
+        user_id=str(uuid.uuid4()),
+        email="test@example.com",
+        roles=["Admin"],
+        permissions=permissions,
+        workspace_id=str(workspace_id),
+    )
+    return token
+
+
+def _make_token_without_permission() -> str:
+    token, _ = create_access_token(
+        user_id=str(uuid.uuid4()),
+        email="test@example.com",
+        roles=["Admin"],
+        permissions=["read:telemetry"],
+    )
+    return token
+
+
 @pytest.fixture
 def client() -> TestClient:
     import fakeredis
@@ -69,6 +90,85 @@ class TestNetworkEndpointsAuth:
     def test_list_networks_without_auth_returns_403(self, client):
         response = client.get("/api/v1/networks", params={"workspace_id": str(uuid.uuid4())})
         assert response.status_code in (401, 403)
+
+    def test_create_network_missing_write_permission_returns_403(self, client):
+        token = _make_token_without_permission()
+        headers = {"Authorization": f"Bearer {token}"}
+        response = client.post(
+            "/api/v1/networks",
+            json={"workspace_id": str(uuid.uuid4()), "name": "Denied"},
+            headers=headers,
+        )
+        assert response.status_code == 403
+
+    def test_list_networks_missing_read_topology_permission_returns_403(self, client):
+        token = _make_token_without_permission()
+        headers = {"Authorization": f"Bearer {token}"}
+        response = client.get(
+            "/api/v1/networks",
+            params={"workspace_id": str(uuid.uuid4())},
+            headers=headers,
+        )
+        assert response.status_code == 403
+
+    def test_add_device_missing_write_permission_returns_403(self, client):
+        token = _make_token_without_permission()
+        headers = {"Authorization": f"Bearer {token}"}
+        response = client.post(
+            f"/api/v1/networks/{uuid.uuid4()}/devices",
+            json={"hostname": "r1", "device_type": "router"},
+            headers=headers,
+        )
+        assert response.status_code == 403
+
+    def test_list_devices_missing_read_topology_permission_returns_403(self, client):
+        token = _make_token_without_permission()
+        headers = {"Authorization": f"Bearer {token}"}
+        response = client.get(
+            f"/api/v1/networks/{uuid.uuid4()}/devices",
+            headers=headers,
+        )
+        assert response.status_code == 403
+
+    def test_update_device_missing_write_permission_returns_403(self, client):
+        token = _make_token_without_permission()
+        headers = {"Authorization": f"Bearer {token}"}
+        response = client.patch(
+            f"/api/v1/networks/{uuid.uuid4()}/devices/{uuid.uuid4()}",
+            json={"spatial_ref_id": "campus-a/device"},
+            headers=headers,
+        )
+        assert response.status_code == 403
+
+    def test_list_networks_workspace_scope_mismatch_returns_403(self, client):
+        token_workspace_id = uuid.uuid4()
+        request_workspace_id = uuid.uuid4()
+        token = _make_token_with_workspace(
+            permissions=["write:config", "read:topology"],
+            workspace_id=token_workspace_id,
+        )
+        headers = {"Authorization": f"Bearer {token}"}
+        response = client.get(
+            "/api/v1/networks",
+            params={"workspace_id": str(request_workspace_id)},
+            headers=headers,
+        )
+        assert response.status_code == 403
+
+    def test_create_network_workspace_scope_mismatch_returns_403(self, client):
+        token_workspace_id = uuid.uuid4()
+        request_workspace_id = uuid.uuid4()
+        token = _make_token_with_workspace(
+            permissions=["write:config", "read:topology"],
+            workspace_id=token_workspace_id,
+        )
+        headers = {"Authorization": f"Bearer {token}"}
+        response = client.post(
+            "/api/v1/networks",
+            json={"workspace_id": str(request_workspace_id), "name": "Mismatch"},
+            headers=headers,
+        )
+        assert response.status_code == 403
 
 
 class TestCreateNetwork:
@@ -244,6 +344,52 @@ class TestTopologyRouteSurface:
     def test_impact_path_post_method_still_not_routable(self, client, headers):
         response = client.post(f"/api/v1/topology/impact/{uuid.uuid4()}", headers=headers)
         assert response.status_code == 405
+
+    def test_topology_read_routes_require_read_topology_permission(self, client):
+        token, _ = create_access_token(
+            user_id=str(uuid.uuid4()),
+            email="topology-no-read@example.com",
+            roles=["Admin"],
+            permissions=["read:telemetry", "write:config"],
+        )
+        headers = {"Authorization": f"Bearer {token}"}
+
+        graph_response = client.get(
+            "/api/v1/topology/graph",
+            params={"network_id": str(uuid.uuid4())},
+            headers=headers,
+        )
+        node_response = client.get(f"/api/v1/topology/nodes/{uuid.uuid4()}", headers=headers)
+        neighbors_response = client.get(
+            f"/api/v1/topology/device/{uuid.uuid4()}/neighbors",
+            headers=headers,
+        )
+        impact_response = client.get(
+            f"/api/v1/topology/impact/{uuid.uuid4()}",
+            headers=headers,
+        )
+
+        assert graph_response.status_code == 403
+        assert node_response.status_code == 403
+        assert neighbors_response.status_code == 403
+        assert impact_response.status_code == 403
+
+    def test_topology_reconcile_requires_write_config_permission(self, client):
+        token, _ = create_access_token(
+            user_id=str(uuid.uuid4()),
+            email="topology-no-write@example.com",
+            roles=["Admin"],
+            permissions=["read:topology"],
+        )
+        headers = {"Authorization": f"Bearer {token}"}
+
+        response = client.post(
+            "/api/v1/topology/reconcile",
+            json={"network_id": str(uuid.uuid4())},
+            headers=headers,
+        )
+
+        assert response.status_code == 403
 
     def test_topology_graph_endpoint_exists(self, client, headers):
         """Confirm GET /topology/graph IS registered (not blocked by C6)."""

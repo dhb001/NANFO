@@ -16,6 +16,7 @@ from app.core.dependencies import (
     get_db,
     get_redis,
     get_request_meta,
+    require_permissions,
 )
 from app.core.responses import APIResponse, success_response
 from app.db.postgres import AsyncSession
@@ -31,7 +32,7 @@ router = APIRouter(prefix="/api/v1/plugins", tags=["Plugins"])
 
 @router.get("", response_model=APIResponse[PluginListResponse], status_code=status.HTTP_200_OK)
 async def list_plugins(
-    claims: Annotated[TokenClaims, Depends(get_current_user)],
+    claims: Annotated[TokenClaims, Depends(require_permissions("read:topology"))],
     meta: Annotated[RequestMeta, Depends(get_request_meta)],
     db: Annotated[AsyncSession, Depends(get_db)],
     redis: Annotated[aioredis.Redis, Depends(get_redis)],
@@ -40,7 +41,6 @@ async def list_plugins(
     search: Annotated[str | None, Query()] = None,
     limit: Annotated[int, Query(ge=1, le=500)] = 200,
 ):
-    _ = claims
     started = time.monotonic()
     payload = await PluginService(db=db, redis=redis).list_plugins(
         status_filter=status_filter,
@@ -54,7 +54,7 @@ async def list_plugins(
 @router.post("/install", response_model=APIResponse[PluginActionResponse], status_code=status.HTTP_201_CREATED)
 async def install_plugin(
     req: PluginInstallRequest,
-    claims: Annotated[TokenClaims, Depends(get_current_user)],
+    claims: Annotated[TokenClaims, Depends(require_permissions("write:config"))],
     meta: Annotated[RequestMeta, Depends(get_request_meta)],
     db: Annotated[AsyncSession, Depends(get_db)],
     redis: Annotated[aioredis.Redis, Depends(get_redis)],
@@ -71,7 +71,7 @@ async def install_plugin(
 @router.post("/{plugin_id}/enable", response_model=APIResponse[PluginActionResponse], status_code=status.HTTP_200_OK)
 async def enable_plugin(
     plugin_id: uuid.UUID,
-    claims: Annotated[TokenClaims, Depends(get_current_user)],
+    claims: Annotated[TokenClaims, Depends(require_permissions("write:config"))],
     meta: Annotated[RequestMeta, Depends(get_request_meta)],
     db: Annotated[AsyncSession, Depends(get_db)],
     redis: Annotated[aioredis.Redis, Depends(get_redis)],
@@ -88,7 +88,7 @@ async def enable_plugin(
 @router.post("/{plugin_id}/disable", response_model=APIResponse[PluginActionResponse], status_code=status.HTTP_200_OK)
 async def disable_plugin(
     plugin_id: uuid.UUID,
-    claims: Annotated[TokenClaims, Depends(get_current_user)],
+    claims: Annotated[TokenClaims, Depends(require_permissions("write:config"))],
     meta: Annotated[RequestMeta, Depends(get_request_meta)],
     db: Annotated[AsyncSession, Depends(get_db)],
     redis: Annotated[aioredis.Redis, Depends(get_redis)],

@@ -9,7 +9,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 # ── Network schemas ───────────────────────────────────────────────────────────
 
@@ -66,6 +66,13 @@ class DeviceResponse(BaseModel):
     spatial_ref_id: str | None
     status: str
     created_at: datetime
+
+    @field_validator("ip_address", mode="before")
+    @classmethod
+    def stringify_ip_address(cls, value: object | None) -> str | None:
+        if value is None:
+            return None
+        return str(value)
 
     model_config = {"from_attributes": True}
 

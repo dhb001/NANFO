@@ -13,11 +13,11 @@ from __future__ import annotations
 
 import json
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query, status
+from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect, status
 from jose import JWTError
 
-from app.core.security import decode_token
 from app.core.logging import get_logger
+from app.core.security import decode_token
 from app.db.redis import get_redis_client
 from app.websocket.manager import topology_ws_manager
 
@@ -39,6 +39,8 @@ _INVALID_FILTER_FRAME = json.dumps({
     "event": "error",
     "data": {"code": "WS_INVALID_FILTER", "message": "network_id filter is required for topology channel."},
 })
+
+_WS_ERROR_CODE = 1011
 
 
 @router.websocket("/ws/topology")
@@ -98,7 +100,12 @@ async def topology_websocket(
         })
         await websocket.send_text(ack)
 
-        await topology_ws_manager.subscribe(network_id, websocket)
+        await topology_ws_manager.subscribe(
+            network_id,
+            websocket,
+            token_exp=claims.get("exp"),
+            token_jti=claims.get("jti"),
+        )
 
         # ── Step 4: Keep alive — deltas are pushed by WS push consumer ───────
         while True:
@@ -107,13 +114,13 @@ async def topology_websocket(
 
     except WebSocketDisconnect:
         logger.info("ws_disconnected", user_id=claims.get("sub"), network_id=network_id)
-    except Exception as exc:
+    except (ValueError, RuntimeError, OSError, TypeError) as exc:
         logger.error("ws_error", error=str(exc))
         try:
             await websocket.send_text(_UNAUTHORIZED_FRAME)
-            await websocket.close()
-        except Exception:
-            pass
+            await websocket.close(code=_WS_ERROR_CODE)
+        except (RuntimeError, OSError, TypeError) as close_exc:
+            logger.debug("ws_error_frame_send_failed", error=str(close_exc))
     finally:
         if network_id:
             await topology_ws_manager.unsubscribe(network_id, websocket)

@@ -19,6 +19,8 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, status
 from fastapi.exceptions import HTTPException as StarletteHTTPException
+from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from jose import JWTError
 from neo4j.exceptions import Neo4jError
@@ -44,6 +46,7 @@ from app.events.bus import STREAM_GROUPS, ensure_consumer_groups, run_consumer_l
 from app.events.consumers.alert_consumer import ALERT_HANDLERS
 from app.events.consumers.audit_consumer import AUDIT_HANDLERS
 from app.events.consumers.report_consumer import REPORT_HANDLERS
+from app.events.consumers.simulation_consumer import SIMULATION_HANDLERS
 from app.events.consumers.telemetry_consumer import TELEMETRY_HANDLERS
 from app.events.consumers.topology_consumer import TOPOLOGY_HANDLERS
 from app.events.consumers.ws_push_consumer import WS_PUSH_HANDLERS
@@ -198,6 +201,7 @@ async def lifespan(app: FastAPI):
         TELEMETRY_HANDLERS,
         ALERT_HANDLERS,
         REPORT_HANDLERS,
+        SIMULATION_HANDLERS,
     )
 
     # Start one consumer loop per stream
@@ -236,6 +240,15 @@ app = FastAPI(
     docs_url="/api/docs",
     redoc_url="/api/redoc",
     openapi_url="/api/openapi.json",
+)
+
+_settings = get_settings()
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_settings.CORS_ALLOW_ORIGINS_LIST,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 
@@ -294,6 +307,25 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
             "data": None,
             "meta": {"request_id": request.headers.get("X-Request-ID", ""), "timestamp": ""},
             "errors": {"code": code, "message": message},
+        },
+    )
+
+
+@app.exception_handler(RequestValidationError)
+async def request_validation_exception_handler(request: Request, exc: RequestValidationError):
+    """Return canonical validation error envelope for body/query/path validation failures."""
+    first_error = exc.errors()[0] if exc.errors() else None
+    message = first_error.get("msg") if isinstance(first_error, dict) else None
+    return JSONResponse(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        content={
+            "success": False,
+            "data": None,
+            "meta": {"request_id": request.headers.get("X-Request-ID", ""), "timestamp": ""},
+            "errors": {
+                "code": "VALIDATION_ERROR",
+                "message": str(message or "Request validation failed."),
+            },
         },
     )
 

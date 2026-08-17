@@ -118,4 +118,20 @@ describe("useManagedWebSocket", () => {
     expect(onFrame).not.toHaveBeenCalled();
     expect(onUnauthorized).not.toHaveBeenCalled();
   });
+
+  it("treats auth close code as unauthorized and does not reconnect", () => {
+    const onFrame = vi.fn();
+    const onUnauthorized = vi.fn();
+    const onError = vi.fn();
+
+    render(<Harness onFrame={onFrame} onUnauthorized={onUnauthorized} onError={onError} />);
+
+    const socket = MockWebSocket.instances[0];
+    act(() => {
+      socket.onclose?.(new CloseEvent("close", { code: 1008, reason: "policy" }));
+    });
+
+    expect(onUnauthorized).toHaveBeenCalledTimes(1);
+    expect(onError).not.toHaveBeenCalled();
+  });
 });

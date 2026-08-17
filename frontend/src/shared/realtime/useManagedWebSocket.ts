@@ -118,9 +118,14 @@ export function useManagedWebSocket<TFrame>(options: ManagedSocketOptions<TFrame
         }
       };
 
-      socket.onclose = () => {
+      socket.onclose = (event) => {
         onStatusChangeRef.current?.("closed");
         if (closedByUserRef.current) {
+          return;
+        }
+        if (event.code === 1008 || event.reason.toUpperCase().includes("WS_UNAUTHORIZED")) {
+          onUnauthorizedRef.current?.();
+          closedByUserRef.current = true;
           return;
         }
         attempt += 1;

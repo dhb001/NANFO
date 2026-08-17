@@ -16,6 +16,7 @@ from app.core.dependencies import (
     get_db,
     get_redis,
     get_request_meta,
+    require_permissions,
 )
 from app.core.responses import APIResponse, success_response
 from app.db.postgres import AsyncSession
@@ -27,7 +28,7 @@ router = APIRouter(prefix="/api/v1/alerts", tags=["Alerts"])
 
 @router.get("", response_model=APIResponse[AlertListResponse], status_code=status.HTTP_200_OK)
 async def list_alerts(
-    claims: Annotated[TokenClaims, Depends(get_current_user)],
+    claims: Annotated[TokenClaims, Depends(require_permissions("read:telemetry"))],
     meta: Annotated[RequestMeta, Depends(get_request_meta)],
     db: Annotated[AsyncSession, Depends(get_db)],
     redis: Annotated[aioredis.Redis, Depends(get_redis)],
@@ -38,7 +39,6 @@ async def list_alerts(
     search: Annotated[str | None, Query()] = None,
     limit: Annotated[int, Query(ge=1, le=500)] = 200,
 ):
-    _ = claims
     started = time.monotonic()
     payload = await AlertService(db=db, redis=redis).list_alerts(
         status_filter=status_filter,
@@ -54,7 +54,7 @@ async def list_alerts(
 @router.post("/{alert_id}/ack", response_model=APIResponse[AlertActionResponse], status_code=status.HTTP_200_OK)
 async def acknowledge_alert(
     alert_id: uuid.UUID,
-    claims: Annotated[TokenClaims, Depends(get_current_user)],
+    claims: Annotated[TokenClaims, Depends(require_permissions("write:config"))],
     meta: Annotated[RequestMeta, Depends(get_request_meta)],
     db: Annotated[AsyncSession, Depends(get_db)],
     redis: Annotated[aioredis.Redis, Depends(get_redis)],
@@ -71,7 +71,7 @@ async def acknowledge_alert(
 @router.post("/{alert_id}/resolve", response_model=APIResponse[AlertActionResponse], status_code=status.HTTP_200_OK)
 async def resolve_alert(
     alert_id: uuid.UUID,
-    claims: Annotated[TokenClaims, Depends(get_current_user)],
+    claims: Annotated[TokenClaims, Depends(require_permissions("write:config"))],
     meta: Annotated[RequestMeta, Depends(get_request_meta)],
     db: Annotated[AsyncSession, Depends(get_db)],
     redis: Annotated[aioredis.Redis, Depends(get_redis)],

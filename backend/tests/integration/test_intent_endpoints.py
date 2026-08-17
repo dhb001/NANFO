@@ -35,6 +35,37 @@ def _make_no_execute_token() -> str:
     return token
 
 
+def _make_no_write_token() -> str:
+    token, _ = create_access_token(
+        user_id=str(uuid.uuid4()),
+        email="intent-no-write@example.com",
+        roles=["Admin"],
+        permissions=["read:topology"],
+    )
+    return token
+
+
+def _make_no_read_topology_token() -> str:
+    token, _ = create_access_token(
+        user_id=str(uuid.uuid4()),
+        email="intent-no-read@example.com",
+        roles=["Admin"],
+        permissions=["write:config", "execute:rollback"],
+    )
+    return token
+
+
+def _make_workspace_scoped_token(*, workspace_id: uuid.UUID) -> str:
+    token, _ = create_access_token(
+        user_id=str(uuid.uuid4()),
+        email="intent-scoped@example.com",
+        roles=["Admin"],
+        permissions=["write:config", "read:topology", "execute:rollback"],
+        workspace_id=str(workspace_id),
+    )
+    return token
+
+
 @pytest.fixture
 def client() -> TestClient:
     fake_r = fakeredis.FakeAsyncRedis(decode_responses=True)
@@ -250,6 +281,37 @@ def test_validate_intent_requires_auth(client):
     assert response.status_code in (401, 403)
 
 
+def test_validate_intent_missing_write_permission_returns_403(client):
+    headers = {"Authorization": f"Bearer {_make_no_write_token()}"}
+    response = client.post(
+        "/api/v1/intents/validate",
+        json={
+            "workspace_id": str(uuid.uuid4()),
+            "network_id": str(uuid.uuid4()),
+            "intent": {"action": "reroute_path", "scope": {"building": "A"}},
+        },
+        headers=headers,
+    )
+
+    assert response.status_code == 403
+
+
+def test_validate_intent_workspace_scope_mismatch_returns_403(client):
+    token_workspace_id = uuid.uuid4()
+    headers = {"Authorization": f"Bearer {_make_workspace_scoped_token(workspace_id=token_workspace_id)}"}
+    response = client.post(
+        "/api/v1/intents/validate",
+        json={
+            "workspace_id": str(uuid.uuid4()),
+            "network_id": str(uuid.uuid4()),
+            "intent": {"action": "reroute_path", "scope": {"building": "A"}},
+        },
+        headers=headers,
+    )
+
+    assert response.status_code == 403
+
+
 def test_execute_intent_returns_envelope_and_execution_payload(client):
     headers = {"Authorization": f"Bearer {_make_token()}"}
     now = datetime.now(UTC)
@@ -418,6 +480,30 @@ def test_get_intent_invalid_workspace_id_returns_422(client):
     )
 
     assert response.status_code == 422
+
+
+def test_get_intent_missing_read_topology_permission_returns_403(client):
+    workspace_id = uuid.uuid4()
+    headers = {"Authorization": f"Bearer {_make_no_read_topology_token()}"}
+    response = client.get(
+        f"/api/v1/intents/{uuid.uuid4()}",
+        params={"workspace_id": str(workspace_id)},
+        headers=headers,
+    )
+
+    assert response.status_code == 403
+
+
+def test_get_intent_workspace_scope_mismatch_returns_403(client):
+    token_workspace_id = uuid.uuid4()
+    headers = {"Authorization": f"Bearer {_make_workspace_scoped_token(workspace_id=token_workspace_id)}"}
+    response = client.get(
+        f"/api/v1/intents/{uuid.uuid4()}",
+        params={"workspace_id": str(uuid.uuid4())},
+        headers=headers,
+    )
+
+    assert response.status_code == 403
 
 
 def test_execute_intent_invalid_payload_returns_422(client):

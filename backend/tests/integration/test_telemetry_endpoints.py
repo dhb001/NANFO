@@ -29,6 +29,27 @@ def _make_token() -> str:
     return token
 
 
+def _make_no_read_token() -> str:
+    token, _ = create_access_token(
+        user_id=str(uuid.uuid4()),
+        email="telemetry-no-read@example.com",
+        roles=["Admin"],
+        permissions=["read:topology"],
+    )
+    return token
+
+
+def _make_workspace_scoped_token(*, workspace_id: uuid.UUID) -> str:
+    token, _ = create_access_token(
+        user_id=str(uuid.uuid4()),
+        email="telemetry-scoped@example.com",
+        roles=["Admin"],
+        permissions=["read:telemetry"],
+        workspace_id=str(workspace_id),
+    )
+    return token
+
+
 @pytest.fixture
 def client() -> TestClient:
     import fakeredis
@@ -198,3 +219,26 @@ def test_telemetry_endpoints_require_auth(client):
     assert r1.status_code in (401, 403)
     assert r2.status_code in (401, 403)
     assert r3.status_code in (401, 403)
+
+
+def test_telemetry_endpoints_require_read_telemetry_permission(client):
+    headers = {"Authorization": f"Bearer {_make_no_read_token()}"}
+    r1 = client.get("/api/v1/telemetry/history", headers=headers)
+    r2 = client.get(f"/api/v1/telemetry/device/{uuid.uuid4()}", headers=headers)
+    r3 = client.get("/api/v1/telemetry/health", headers=headers)
+
+    assert r1.status_code == 403
+    assert r2.status_code == 403
+    assert r3.status_code == 403
+
+
+def test_telemetry_history_workspace_scope_mismatch_returns_403(client):
+    token_workspace_id = uuid.uuid4()
+    headers = {"Authorization": f"Bearer {_make_workspace_scoped_token(workspace_id=token_workspace_id)}"}
+    response = client.get(
+        "/api/v1/telemetry/history",
+        params={"workspace_id": str(uuid.uuid4())},
+        headers=headers,
+    )
+
+    assert response.status_code == 403

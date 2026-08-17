@@ -426,3 +426,47 @@ def test_audit_handlers_include_report_lifecycle_events():
     assert "report.requested" in AUDIT_HANDLERS
     assert "report.generated" in AUDIT_HANDLERS
     assert "report.failed" in AUDIT_HANDLERS
+
+
+@pytest.mark.asyncio
+async def test_audit_consumer_writes_org_workspace_and_org_lifecycle_events():
+    db = AsyncMock()
+    db.commit = AsyncMock()
+
+    org_id = str(uuid.uuid4())
+    workspace_id = str(uuid.uuid4())
+    correlation_id = str(uuid.uuid4())
+    payload = {
+        "org_id": org_id,
+        "workspace_id": workspace_id,
+        "actor_id": str(uuid.uuid4()),
+    }
+
+    events = [
+        {"event_type": "org.organization.updated", "correlation_id": correlation_id, "payload": payload},
+        {"event_type": "org.organization.deleted", "correlation_id": correlation_id, "payload": payload},
+        {"event_type": "org.workspace.updated", "correlation_id": correlation_id, "payload": payload},
+        {"event_type": "org.workspace.deleted", "correlation_id": correlation_id, "payload": payload},
+    ]
+
+    repo = MagicMock()
+    repo.append = AsyncMock()
+
+    with (
+        patch(
+            "app.events.consumers.audit_consumer.AsyncSessionLocal",
+            return_value=_session_context_manager(db),
+        ),
+        patch("app.events.consumers.audit_consumer.AuditLogRepository", return_value=repo),
+    ):
+        for event in events:
+            await handle_audit_event(event)
+
+    assert repo.append.await_count == 4
+
+
+def test_audit_handlers_include_org_update_delete_events():
+    assert "org.organization.updated" in AUDIT_HANDLERS
+    assert "org.organization.deleted" in AUDIT_HANDLERS
+    assert "org.workspace.updated" in AUDIT_HANDLERS
+    assert "org.workspace.deleted" in AUDIT_HANDLERS

@@ -12,6 +12,7 @@ from fastapi import HTTPException
 from app.modules.simulation.service import (
     ScenarioValidationHandoffService,
     SimulationStartService,
+    SimulationTerminalEventService,
     queue_scenario_validation_handoff,
 )
 
@@ -666,3 +667,178 @@ async def test_branch_simulation_event_publish_failure_is_fail_open(mock_db, fak
     assert result["simulation_id"] == str(branch.simulation_id)
     assert result["state"] == "draft"
     mock_db.commit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_terminal_consumer_transitions_started_record_to_completed(mock_db, fake_redis):
+    simulation_id = uuid.uuid4()
+    simulation = AsyncMock()
+    simulation.simulation_id = simulation_id
+    simulation.scenario_id = uuid.uuid4()
+    simulation.network_id = uuid.uuid4()
+    simulation.state = "queued"
+    simulation.status = "queued"
+    simulation.queue_status = "queued"
+    simulation.warning = None
+    simulation.validation = {"pipeline_stage": "handoff_queued"}
+
+    with (
+        patch("app.modules.simulation.service.SimulationRepository.get_by_id", new_callable=AsyncMock) as mock_get,
+        patch("app.modules.simulation.service.SimulationRepository.update_state", new_callable=AsyncMock) as mock_update_state,
+        patch("app.modules.simulation.service.SimulationEventService.publish_lifecycle_event", new_callable=AsyncMock) as mock_publish,
+    ):
+        mock_get.return_value = simulation
+        mock_publish.return_value = "2300-0"
+
+        svc = SimulationTerminalEventService(db=mock_db, redis=fake_redis)
+        await svc.process_started_event(
+            event={
+                "event_type": "simulation.started",
+                "correlation_id": str(uuid.uuid4()),
+                "payload": {"simulation_id": str(simulation_id)},
+            }
+        )
+
+    mock_update_state.assert_awaited_once_with(
+        simulation,
+        state="completed",
+        status="completed",
+        risk_gate="passed",
+    )
+    mock_publish.assert_awaited_once()
+    assert mock_publish.await_args.kwargs["event_type"] == "simulation.completed"
+    assert mock_publish.await_args.kwargs["payload"]["state"] == "completed"
+    assert mock_publish.await_args.kwargs["payload"]["status"] == "completed"
+    assert mock_publish.await_args.kwargs["payload"]["risk_gate"] == "passed"
+    mock_db.commit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_terminal_consumer_transitions_deferred_record_to_cancelled(mock_db, fake_redis):
+    simulation_id = uuid.uuid4()
+    simulation = AsyncMock()
+    simulation.simulation_id = simulation_id
+    simulation.scenario_id = uuid.uuid4()
+    simulation.network_id = uuid.uuid4()
+    simulation.state = "queued"
+    simulation.status = "queued"
+    simulation.queue_status = "deferred"
+    simulation.warning = "event_queue_unavailable"
+    simulation.validation = {}
+
+    with (
+        patch("app.modules.simulation.service.SimulationRepository.get_by_id", new_callable=AsyncMock) as mock_get,
+        patch("app.modules.simulation.service.SimulationRepository.update_state", new_callable=AsyncMock) as mock_update_state,
+        patch("app.modules.simulation.service.SimulationEventService.publish_lifecycle_event", new_callable=AsyncMock) as mock_publish,
+    ):
+        mock_get.return_value = simulation
+        mock_publish.return_value = "2400-0"
+
+        svc = SimulationTerminalEventService(db=mock_db, redis=fake_redis)
+        await svc.process_started_event(
+            event={
+                "event_type": "simulation.started",
+                "correlation_id": str(uuid.uuid4()),
+                "payload": {"simulation_id": str(simulation_id)},
+            }
+        )
+
+    mock_update_state.assert_awaited_once_with(
+        simulation,
+        state="cancelled",
+        status="cancelled",
+        risk_gate="blocked",
+    )
+    mock_publish.assert_awaited_once()
+    assert mock_publish.await_args.kwargs["event_type"] == "simulation.cancelled"
+    assert mock_publish.await_args.kwargs["payload"]["state"] == "cancelled"
+    assert mock_publish.await_args.kwargs["payload"]["status"] == "cancelled"
+    assert mock_publish.await_args.kwargs["payload"]["risk_gate"] == "blocked"
+    mock_db.commit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_terminal_consumer_dedupes_when_simulation_already_terminal(mock_db, fake_redis):
+    simulation_id = uuid.uuid4()
+    simulation = AsyncMock()
+    simulation.simulation_id = simulation_id
+    simulation.state = "completed"
+    simulation.status = "completed"
+
+    with (
+        patch("app.modules.simulation.service.SimulationRepository.get_by_id", new_callable=AsyncMock) as mock_get,
+        patch("app.modules.simulation.service.SimulationRepository.update_state", new_callable=AsyncMock) as mock_update_state,
+        patch("app.modules.simulation.service.SimulationEventService.publish_lifecycle_event", new_callable=AsyncMock) as mock_publish,
+    ):
+        mock_get.return_value = simulation
+
+        svc = SimulationTerminalEventService(db=mock_db, redis=fake_redis)
+        await svc.process_started_event(
+            event={
+                "event_type": "simulation.started",
+                "correlation_id": str(uuid.uuid4()),
+                "payload": {"simulation_id": str(simulation_id)},
+            }
+        )
+
+    mock_update_state.assert_not_awaited()
+    mock_publish.assert_not_awaited()
+    mock_db.commit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_terminal_consumer_publish_failure_is_fail_open(mock_db, fake_redis):
+    simulation_id = uuid.uuid4()
+    simulation = AsyncMock()
+    simulation.simulation_id = simulation_id
+    simulation.scenario_id = uuid.uuid4()
+    simulation.network_id = uuid.uuid4()
+    simulation.state = "queued"
+    simulation.status = "queued"
+    simulation.queue_status = "queued"
+    simulation.warning = None
+    simulation.validation = {}
+
+    with (
+        patch("app.modules.simulation.service.SimulationRepository.get_by_id", new_callable=AsyncMock) as mock_get,
+        patch("app.modules.simulation.service.SimulationRepository.update_state", new_callable=AsyncMock),
+        patch(
+            "app.modules.simulation.service.SimulationEventService.publish_lifecycle_event",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("stream unavailable"),
+        ),
+    ):
+        mock_get.return_value = simulation
+
+        svc = SimulationTerminalEventService(db=mock_db, redis=fake_redis)
+        await svc.process_started_event(
+            event={
+                "event_type": "simulation.started",
+                "correlation_id": str(uuid.uuid4()),
+                "payload": {"simulation_id": str(simulation_id)},
+            }
+        )
+
+    mock_db.commit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_terminal_consumer_ignores_events_without_simulation_id(mock_db, fake_redis):
+    with (
+        patch("app.modules.simulation.service.SimulationRepository.get_by_id", new_callable=AsyncMock) as mock_get,
+        patch("app.modules.simulation.service.SimulationRepository.update_state", new_callable=AsyncMock) as mock_update_state,
+        patch("app.modules.simulation.service.SimulationEventService.publish_lifecycle_event", new_callable=AsyncMock) as mock_publish,
+    ):
+        svc = SimulationTerminalEventService(db=mock_db, redis=fake_redis)
+        await svc.process_started_event(
+            event={
+                "event_type": "simulation.started",
+                "correlation_id": str(uuid.uuid4()),
+                "payload": {},
+            }
+        )
+
+    mock_get.assert_not_awaited()
+    mock_update_state.assert_not_awaited()
+    mock_publish.assert_not_awaited()
+    mock_db.commit.assert_not_awaited()

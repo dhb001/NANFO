@@ -50,6 +50,12 @@ class OrganizationRepository:
         org.deleted_at = datetime.now(UTC)
         await self._db.flush()
 
+    async def update(self, org: Organization, *, name: str | None = None) -> Organization:
+        if name is not None:
+            org.name = name
+        await self._db.flush()
+        return org
+
 
 class WorkspaceRepository:
 
@@ -78,6 +84,30 @@ class WorkspaceRepository:
         from datetime import UTC, datetime
         workspace.deleted_at = datetime.now(UTC)
         await self._db.flush()
+
+    async def get_by_org_and_id(self, *, org_id: uuid.UUID, workspace_id: uuid.UUID) -> Workspace | None:
+        result = await self._db.execute(
+            select(Workspace).where(
+                Workspace.workspace_id == workspace_id,
+                Workspace.org_id == org_id,
+                Workspace.deleted_at.is_(None),
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def update(
+        self,
+        workspace: Workspace,
+        *,
+        name: str | None = None,
+        description: str | None = None,
+    ) -> Workspace:
+        if name is not None:
+            workspace.name = name
+        if description is not None:
+            workspace.description = description
+        await self._db.flush()
+        return workspace
 
 
 class OrgMemberRepository:

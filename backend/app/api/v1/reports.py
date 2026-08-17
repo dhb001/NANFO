@@ -12,10 +12,12 @@ from fastapi import APIRouter, Depends, status
 from app.core.dependencies import (
     RequestMeta,
     TokenClaims,
+    enforce_workspace_scope,
     get_current_user,
     get_db,
     get_redis,
     get_request_meta,
+    require_permissions,
 )
 from app.core.responses import APIResponse, success_response
 from app.db.postgres import AsyncSession
@@ -36,18 +38,19 @@ router = APIRouter(prefix="/api/v1/reports", tags=["Reports"])
 )
 async def generate_report(
     req: GenerateReportRequest,
-    claims: Annotated[TokenClaims, Depends(get_current_user)],
+    claims: Annotated[TokenClaims, Depends(require_permissions("read:telemetry"))],
     meta: Annotated[RequestMeta, Depends(get_request_meta)],
     db: Annotated[AsyncSession, Depends(get_db)],
     redis: Annotated[aioredis.Redis, Depends(get_redis)],
 ):
     started = time.monotonic()
+    scoped_workspace_id = enforce_workspace_scope(claims=claims, workspace_id=req.workspace_id)
     header_idempotency_key = None
     if hasattr(meta, "request") and meta.request is not None:
         header_idempotency_key = meta.request.headers.get("Idempotency-Key")
 
     result = await ReportService(db=db, redis=redis).generate_report(
-        workspace_id=req.workspace_id,
+        workspace_id=scoped_workspace_id,
         network_id=req.network_id,
         report_type=req.report_type,
         output_format=req.format,
@@ -71,16 +74,16 @@ async def generate_report(
 async def get_report(
     report_id: uuid.UUID,
     workspace_id: uuid.UUID,
-    claims: Annotated[TokenClaims, Depends(get_current_user)],
+    claims: Annotated[TokenClaims, Depends(require_permissions("read:telemetry"))],
     meta: Annotated[RequestMeta, Depends(get_request_meta)],
     db: Annotated[AsyncSession, Depends(get_db)],
     redis: Annotated[aioredis.Redis, Depends(get_redis)],
 ):
-    _ = claims
+    scoped_workspace_id = enforce_workspace_scope(claims=claims, workspace_id=workspace_id)
     started = time.monotonic()
     result = await ReportService(db=db, redis=redis).get_report(
         report_id=report_id,
-        workspace_id=workspace_id,
+        workspace_id=scoped_workspace_id,
     )
     payload = ReportRecordResponse.model_validate(result)
     return success_response(payload, meta.request_id, started, meta.timestamp)

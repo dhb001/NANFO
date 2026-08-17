@@ -26,6 +26,26 @@ def _make_token() -> str:
     return token
 
 
+def _make_read_only_token() -> str:
+    token, _ = create_access_token(
+        user_id=str(uuid.uuid4()),
+        email="alerts-read@example.com",
+        roles=["Admin"],
+        permissions=["read:telemetry"],
+    )
+    return token
+
+
+def _make_write_only_token() -> str:
+    token, _ = create_access_token(
+        user_id=str(uuid.uuid4()),
+        email="alerts-write@example.com",
+        roles=["Admin"],
+        permissions=["write:config"],
+    )
+    return token
+
+
 @pytest.fixture
 def client() -> TestClient:
     fake_r = fakeredis.FakeAsyncRedis(decode_responses=True)
@@ -277,3 +297,18 @@ def test_alert_routes_require_auth(client):
     assert list_response.status_code in (401, 403)
     assert ack_response.status_code in (401, 403)
     assert resolve_response.status_code in (401, 403)
+
+
+def test_list_alerts_requires_read_telemetry_permission(client):
+    headers = {"Authorization": f"Bearer {_make_write_only_token()}"}
+    response = client.get("/api/v1/alerts", headers=headers)
+    assert response.status_code == 403
+
+
+def test_alert_mutations_require_write_config_permission(client):
+    headers = {"Authorization": f"Bearer {_make_read_only_token()}"}
+    ack_response = client.post(f"/api/v1/alerts/{uuid.uuid4()}/ack", headers=headers)
+    resolve_response = client.post(f"/api/v1/alerts/{uuid.uuid4()}/resolve", headers=headers)
+
+    assert ack_response.status_code == 403
+    assert resolve_response.status_code == 403

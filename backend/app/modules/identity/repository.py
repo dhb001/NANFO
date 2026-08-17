@@ -43,7 +43,12 @@ class UserRepository:
         return user
 
     async def get_roles_for_user(self, user: User) -> list[str]:
-        return [ur.role.name for ur in user.user_roles]
+        result = await self._db.execute(
+            select(Role.name)
+            .join(UserRole, UserRole.role_id == Role.role_id)
+            .where(UserRole.user_id == user.user_id)
+        )
+        return list(result.scalars().all())
 
     async def get_permissions_for_roles(self, role_names: list[str]) -> list[str]:
         # For this slice permissions are static seed data; fetch all for matching roles.

@@ -57,13 +57,21 @@ class OrgService:
         await self._db.commit()
         await self._db.refresh(org)
 
-        await publish_event(
-            redis=self._redis,
-            event_type="org.organization.created",
-            source="org",
-            payload={"org_id": str(org.org_id), "name": org.name, "slug": org.slug, "actor_id": actor_id},
-            correlation_id=correlation_id,
-        )
+        try:
+            await publish_event(
+                redis=self._redis,
+                event_type="org.organization.created",
+                source="org",
+                payload={"org_id": str(org.org_id), "name": org.name, "slug": org.slug, "actor_id": actor_id},
+                correlation_id=correlation_id,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "org_created_event_publish_failed",
+                org_id=str(org.org_id),
+                correlation_id=correlation_id,
+                error=str(exc),
+            )
         return OrgResponse.model_validate(org)
 
     async def list_orgs(self, user_id: str, page: int, page_size: int) -> OrgListResponse:
@@ -79,6 +87,91 @@ class OrgService:
         if member is None:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions.")
         return OrgResponse.model_validate(org)
+
+    async def update_org(
+        self,
+        *,
+        org_id: uuid.UUID,
+        user_id: str,
+        name: str | None,
+        actor_id: str,
+        correlation_id: str,
+    ) -> OrgResponse:
+        org = await self._repo.get_by_id(org_id)
+        if org is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Organization not found.")
+
+        member = await self._member_repo.get_member(org_id, uuid.UUID(user_id))
+        if member is None:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions.")
+
+        updated = await self._repo.update(org, name=name)
+        await self._db.commit()
+        await self._db.refresh(updated)
+
+        changed_fields: dict[str, str] = {}
+        if name is not None:
+            changed_fields["name"] = updated.name
+
+        try:
+            await publish_event(
+                redis=self._redis,
+                event_type="org.organization.updated",
+                source="org",
+                payload={
+                    "org_id": str(updated.org_id),
+                    "changed_fields": changed_fields,
+                    "actor_id": actor_id,
+                },
+                correlation_id=correlation_id,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "org_updated_event_publish_failed",
+                org_id=str(updated.org_id),
+                correlation_id=correlation_id,
+                error=str(exc),
+            )
+
+        return OrgResponse.model_validate(updated)
+
+    async def delete_org(
+        self,
+        *,
+        org_id: uuid.UUID,
+        user_id: str,
+        actor_id: str,
+        correlation_id: str,
+    ) -> None:
+        org = await self._repo.get_by_id(org_id)
+        if org is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Organization not found.")
+
+        member = await self._member_repo.get_member(org_id, uuid.UUID(user_id))
+        if member is None:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions.")
+
+        await self._repo.soft_delete(org)
+        await self._db.commit()
+
+        try:
+            await publish_event(
+                redis=self._redis,
+                event_type="org.organization.deleted",
+                source="org",
+                payload={
+                    "org_id": str(org.org_id),
+                    "actor_id": actor_id,
+                },
+                correlation_id=correlation_id,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "org_deleted_event_publish_failed",
+                org_id=str(org.org_id),
+                correlation_id=correlation_id,
+                error=str(exc),
+            )
 
 
 class WorkspaceService:
@@ -101,23 +194,119 @@ class WorkspaceService:
         await self._db.commit()
         await self._db.refresh(ws)
 
-        await publish_event(
-            redis=self._redis,
-            event_type="org.workspace.created",
-            source="org",
-            payload={
-                "workspace_id": str(ws.workspace_id),
-                "org_id": str(org_id),
-                "name": ws.name,
-                "actor_id": actor_id,
-            },
-            correlation_id=correlation_id,
-        )
+        try:
+            await publish_event(
+                redis=self._redis,
+                event_type="org.workspace.created",
+                source="org",
+                payload={
+                    "workspace_id": str(ws.workspace_id),
+                    "org_id": str(org_id),
+                    "name": ws.name,
+                    "actor_id": actor_id,
+                },
+                correlation_id=correlation_id,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "workspace_created_event_publish_failed",
+                workspace_id=str(ws.workspace_id),
+                correlation_id=correlation_id,
+                error=str(exc),
+            )
         return WorkspaceResponse.model_validate(ws)
 
     async def list_workspaces(self, org_id: uuid.UUID, page: int, page_size: int) -> WorkspaceListResponse:
         rows, total = await self._repo.list_for_org(org_id, page=page, page_size=page_size)
         return WorkspaceListResponse(items=[WorkspaceResponse.model_validate(r) for r in rows], total=total)
+
+    async def get_workspace_for_org(self, *, org_id: uuid.UUID, workspace_id: uuid.UUID) -> WorkspaceResponse:
+        ws = await self._repo.get_by_org_and_id(org_id=org_id, workspace_id=workspace_id)
+        if ws is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workspace not found.")
+        return WorkspaceResponse.model_validate(ws)
+
+    async def update_workspace(
+        self,
+        *,
+        org_id: uuid.UUID,
+        workspace_id: uuid.UUID,
+        name: str | None,
+        description: str | None,
+        actor_id: str,
+        correlation_id: str,
+    ) -> WorkspaceResponse:
+        ws = await self._repo.get_by_org_and_id(org_id=org_id, workspace_id=workspace_id)
+        if ws is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workspace not found.")
+
+        updated = await self._repo.update(ws, name=name, description=description)
+        await self._db.commit()
+        await self._db.refresh(updated)
+
+        changed_fields: dict[str, str | None] = {}
+        if name is not None:
+            changed_fields["name"] = updated.name
+        if description is not None:
+            changed_fields["description"] = updated.description
+
+        try:
+            await publish_event(
+                redis=self._redis,
+                event_type="org.workspace.updated",
+                source="org",
+                payload={
+                    "workspace_id": str(updated.workspace_id),
+                    "org_id": str(updated.org_id),
+                    "changed_fields": changed_fields,
+                    "actor_id": actor_id,
+                },
+                correlation_id=correlation_id,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "workspace_updated_event_publish_failed",
+                workspace_id=str(updated.workspace_id),
+                correlation_id=correlation_id,
+                error=str(exc),
+            )
+
+        return WorkspaceResponse.model_validate(updated)
+
+    async def delete_workspace(
+        self,
+        *,
+        org_id: uuid.UUID,
+        workspace_id: uuid.UUID,
+        actor_id: str,
+        correlation_id: str,
+    ) -> None:
+        ws = await self._repo.get_by_org_and_id(org_id=org_id, workspace_id=workspace_id)
+        if ws is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workspace not found.")
+
+        await self._repo.soft_delete(ws)
+        await self._db.commit()
+
+        try:
+            await publish_event(
+                redis=self._redis,
+                event_type="org.workspace.deleted",
+                source="org",
+                payload={
+                    "workspace_id": str(ws.workspace_id),
+                    "org_id": str(ws.org_id),
+                    "actor_id": actor_id,
+                },
+                correlation_id=correlation_id,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "workspace_deleted_event_publish_failed",
+                workspace_id=str(ws.workspace_id),
+                correlation_id=correlation_id,
+                error=str(exc),
+            )
 
     async def get_workspace(self, workspace_id: uuid.UUID) -> WorkspaceResponse:
         ws = await self._repo.get_by_id(workspace_id)
@@ -175,13 +364,22 @@ class MemberService:
         member = await self._repo.add_member(org_id=org_id, user_id=user_id, org_role=org_role)
         await self._db.commit()
 
-        await publish_event(
-            redis=self._redis,
-            event_type="org.member.added",
-            source="org",
-            payload={"org_id": str(org_id), "user_id": str(user_id), "org_role": org_role, "actor_id": actor_id},
-            correlation_id=correlation_id,
-        )
+        try:
+            await publish_event(
+                redis=self._redis,
+                event_type="org.member.added",
+                source="org",
+                payload={"org_id": str(org_id), "user_id": str(user_id), "org_role": org_role, "actor_id": actor_id},
+                correlation_id=correlation_id,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "org_member_added_event_publish_failed",
+                org_id=str(org_id),
+                user_id=str(user_id),
+                correlation_id=correlation_id,
+                error=str(exc),
+            )
         return MemberResponse.model_validate(member)
 
     async def list_members(self, org_id: uuid.UUID, page: int, page_size: int) -> MemberListResponse:
@@ -196,10 +394,19 @@ class MemberService:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Member not found.")
         await self._repo.remove_member(member)
         await self._db.commit()
-        await publish_event(
-            redis=self._redis,
-            event_type="org.member.removed",
-            source="org",
-            payload={"org_id": str(org_id), "user_id": str(user_id), "actor_id": actor_id},
-            correlation_id=correlation_id,
-        )
+        try:
+            await publish_event(
+                redis=self._redis,
+                event_type="org.member.removed",
+                source="org",
+                payload={"org_id": str(org_id), "user_id": str(user_id), "actor_id": actor_id},
+                correlation_id=correlation_id,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "org_member_removed_event_publish_failed",
+                org_id=str(org_id),
+                user_id=str(user_id),
+                correlation_id=correlation_id,
+                error=str(exc),
+            )

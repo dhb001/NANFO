@@ -73,7 +73,11 @@ async def alerts_websocket(
         })
         await websocket.send_text(ack)
 
-        await alerts_ws_manager.subscribe(websocket)
+        await alerts_ws_manager.subscribe(
+            websocket,
+            token_exp=claims.get("exp"),
+            token_jti=claims.get("jti"),
+        )
         subscribed = True
 
         while True:

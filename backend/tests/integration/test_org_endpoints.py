@@ -5,6 +5,7 @@ Dependencies overridden with mocks; no database required.
 """
 
 import uuid
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
 import fakeredis
@@ -134,6 +135,66 @@ class TestWorkspaceEndpoints:
         response = client.get(f"/api/v1/organizations/{org_id}/workspaces")
         assert response.status_code in (401, 403)
 
+    def test_get_workspace_returns_200_with_envelope(self, client, admin_token):
+        org_id = uuid.uuid4()
+        workspace_id = uuid.uuid4()
+        headers = {"Authorization": f"Bearer {admin_token}"}
+
+        with patch("app.modules.organization.service.WorkspaceService.get_workspace_for_org", new_callable=AsyncMock) as mock_get:
+            mock_get.return_value = {
+                "workspace_id": workspace_id,
+                "org_id": org_id,
+                "name": "Ops",
+                "description": "Ops workspace",
+                "created_at": datetime.now(UTC).isoformat(),
+            }
+            response = client.get(
+                f"/api/v1/organizations/{org_id}/workspaces/{workspace_id}",
+                headers=headers,
+            )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["success"] is True
+        assert body["data"]["workspace_id"] == str(workspace_id)
+
+    def test_update_workspace_returns_200_with_envelope(self, client, admin_token):
+        org_id = uuid.uuid4()
+        workspace_id = uuid.uuid4()
+        headers = {"Authorization": f"Bearer {admin_token}"}
+
+        with patch("app.modules.organization.service.WorkspaceService.update_workspace", new_callable=AsyncMock) as mock_update:
+            mock_update.return_value = {
+                "workspace_id": workspace_id,
+                "org_id": org_id,
+                "name": "Ops Updated",
+                "description": "Updated",
+                "created_at": datetime.now(UTC).isoformat(),
+            }
+            response = client.patch(
+                f"/api/v1/organizations/{org_id}/workspaces/{workspace_id}",
+                json={"name": "Ops Updated", "description": "Updated"},
+                headers=headers,
+            )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["success"] is True
+        assert body["data"]["name"] == "Ops Updated"
+
+    def test_delete_workspace_returns_204(self, client, admin_token):
+        org_id = uuid.uuid4()
+        workspace_id = uuid.uuid4()
+        headers = {"Authorization": f"Bearer {admin_token}"}
+
+        with patch("app.modules.organization.service.WorkspaceService.delete_workspace", new_callable=AsyncMock):
+            response = client.delete(
+                f"/api/v1/organizations/{org_id}/workspaces/{workspace_id}",
+                headers=headers,
+            )
+
+        assert response.status_code == 204
+
 
 class TestMemberEndpoints:
 
@@ -171,3 +232,37 @@ class TestMemberEndpoints:
         assert response.status_code == 404
         body = response.json()
         assert body["errors"]["code"] == "USER_NOT_FOUND"
+
+
+class TestOrgMutationEndpoints:
+
+    def test_update_org_returns_200_with_envelope(self, client, admin_token):
+        org_id = uuid.uuid4()
+        headers = {"Authorization": f"Bearer {admin_token}"}
+
+        with patch("app.modules.organization.service.OrgService.update_org", new_callable=AsyncMock) as mock_update:
+            mock_update.return_value = {
+                "org_id": org_id,
+                "name": "Updated Org",
+                "slug": "updated-org",
+                "created_at": datetime.now(UTC).isoformat(),
+            }
+            response = client.patch(
+                f"/api/v1/organizations/{org_id}",
+                json={"name": "Updated Org"},
+                headers=headers,
+            )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["success"] is True
+        assert body["data"]["name"] == "Updated Org"
+
+    def test_delete_org_returns_204(self, client, admin_token):
+        org_id = uuid.uuid4()
+        headers = {"Authorization": f"Bearer {admin_token}"}
+
+        with patch("app.modules.organization.service.OrgService.delete_org", new_callable=AsyncMock):
+            response = client.delete(f"/api/v1/organizations/{org_id}", headers=headers)
+
+        assert response.status_code == 204
