@@ -23,6 +23,14 @@
 - Vertical Slice 20 Implementation: **COMPLETE** — Optimization program closure gate is delivered with consolidated VS17-VS19 evidence, continuity-doc sign-off, and final required backend regression confirmation.
 - Chapter Conformance Audit (chapter-01 to chapter-12): **COMPLETE** — chapter-by-chapter implementation conformance classification was finalized, targeted in-scope remediation was applied (organization member identity validation and realtime websocket unauthorized/error handling hardening), and required backend/frontend validation evidence was recorded.
 
+## Enhancement Slice — Digital Twin 3D as Primary Operations Surface (Frontend-Only, Phase 1)
+
+- Status: **COMPLETE** (2026-08-18).
+- Scope boundaries: frontend-only changes; no backend API/event/websocket-channel expansion; canonical envelopes and existing event contracts preserved.
+- Delivered: strict Digital Twin scene adapter for topology + live topology deltas + existing telemetry + existing simulation/intent scene-object overlays, deterministic `spatial_ref_id`-aware placement with hash fallback, congestion overlay with neutral fallback when metrics are unavailable, layer toggles/legend/keyboard-accessible controls, inspector enhancements with configure handoff to existing `/ops/intent`, and session-only campus import (`.glb/.gltf` + optional sidecar JSON mapping validation) with no persistence.
+- Validation evidence: `npm run lint` ✅, `npm run typecheck` ✅, `npm run test` ✅ (`25 files, 97 tests`), `npm run test:e2e` ✅ (`19/19`), `npm run build` ✅ (existing large `three` chunk warning unchanged), `npm run perf:bundle` ✅ (`twin_page_chunk_gzip_kb=6.56`, bounded check true).
+- Residual risks (accepted in Phase 1): congestion severity heuristics depend on available metric names/units; no 3D model render/persistence path yet (import metadata is local session only by design); simulation terminal-event producer parity remains an existing backend residual outside this frontend-only slice.
+
 ## VS21 — Global Audit + Remaining Work Completion
 
 - Status: **IN PROGRESS** (checkpoint updated 2026-08-16; in-scope remediations + command-gate evidence recorded, with explicit residual high-risk blockers pending follow-on scope decision).

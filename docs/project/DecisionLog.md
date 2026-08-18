@@ -2,6 +2,31 @@
 
 Lightweight chronological notes for decisions that do not require a full ADR.
 
+## 2026-08-18
+### Digital Twin Primary Operations Surface (Frontend-Only Phase 1): Approve Deterministic Adapter + Session-Only Import Within Existing Contracts
+Decision: Implement Digital Twin Phase 1 entirely in frontend scope by introducing a deterministic scene adapter and operator UX enrichments while reusing existing REST/WebSocket/event contracts and preserving current backend surfaces.
+Reason:
+- Guardrails explicitly prohibit undocumented REST/channel/event expansion; Phase 1 objective is UX/state composition improvement only.
+- Existing topology graph + topology deltas + telemetry deltas + digital-twin scene-object deltas are sufficient for deterministic layout and congestion overlay with graceful neutral fallback.
+- Session-only campus import enables early operator workflow gains without persistence or backend schema/API dependencies.
+Impact:
+- Added adapter + mapping utilities: `frontend/src/features/digitalTwin/sceneAdapter.ts`, `frontend/src/features/digitalTwin/twinImport.ts`.
+- Updated Digital Twin UI surfaces: `frontend/src/features/digitalTwin/TwinPage.tsx`, `frontend/src/features/digitalTwin/TwinScene.tsx`, `frontend/src/features/digitalTwin/hooks.ts`.
+- Added/updated tests: `frontend/src/features/digitalTwin/sceneAdapter.test.ts`, `frontend/src/features/digitalTwin/TwinPage.test.tsx`, `frontend/src/features/digitalTwin/hooks.test.ts`, `frontend/tests/e2e/vs5-digital-twin.spec.ts`.
+- Full required frontend validation chain is green (`lint`, `typecheck`, `test`, `test:e2e`, `build`, `perf:bundle`), with continuity bounds preserved.
+Assumptions:
+- Congestion severity remains a deterministic frontend classification derived only from existing telemetry `metric`/`value`/`unit` fields and does not represent backend-owned alarm semantics.
+- Imported campus model/mapping data is intentionally ephemeral (session-only) in Phase 1 and requires explicit approved follow-on scope for persistence or authoritative object registration.
+Related:
+- `docs/api/WebSocket.md`
+- `docs/api/EventAPI.md`
+- `docs/features/Topology.md`
+- `docs/features/Simulation.md`
+- `docs/features/Telemetry.md`
+- `frontend/src/features/digitalTwin/sceneAdapter.ts`
+- `frontend/src/features/digitalTwin/TwinPage.tsx`
+- `frontend/tests/e2e/vs5-digital-twin.spec.ts`
+
 ## 2026-08-16
 ### VS21 Checkpoint Decision: Accept Partial Closure with Explicit High-Risk Residuals and Evidence-Backed Gate Results
 Decision: Mark VS21 Steps 1-4, 6, and 7 complete with evidence-backed documentation while keeping Step 5 open for two explicit high-risk residuals that require approved follow-on scope: tenant/RBAC enforcement breadth and simulation terminal-event producer parity (`simulation.completed`/`simulation.cancelled`).

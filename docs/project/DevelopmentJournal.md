@@ -1,5 +1,17 @@
 # Development Journal
 
+## [2026-08-18] - Digital Twin 3D Primary Operations Surface (Frontend-Only, Phase 1)
+
+- **Completed:** Delivered frontend-only Phase 1 enhancement for Digital Twin primary operations UX without backend contract changes.
+- **Scene adapter delivery:** Added strict adapter layer (`frontend/src/features/digitalTwin/sceneAdapter.ts`) merging base topology graph, live topology deltas, existing telemetry metric state, and existing simulation/intent scene-object deltas under deterministic mapping semantics.
+- **Deterministic placement:** Implemented `spatial_ref_id` hierarchical parsing (`campus/building/floor/rack/device`) and deterministic anchor placement; retained hash fallback path for missing/invalid `spatial_ref_id` values.
+- **Congestion overlay:** Added deterministic telemetry-derived severity mapping (`low`/`medium`/`high`) from existing metric/unit fields only, with explicit `neutral` fallback when congestion-relevant metrics are unavailable.
+- **Operator UX updates:** Added layer toggles (links, labels, congestion, simulation/intent overlays), visible congestion legend/thresholds, reduced-motion-safe scene behavior, keyboard-operable controls, and inspector enrichments (identity/type/status/spatial_ref_id + congestion snapshot + configure handoff to existing `/ops/intent`).
+- **Campus import (session-only):** Added local UI for `.glb/.gltf` upload and optional sidecar JSON mapping validation (`matched`, `unmatched`, `duplicates`) with no backend persistence.
+- **Coverage updates:** Added unit tests for spatial parser/placement and congestion mapping (`frontend/src/features/digitalTwin/sceneAdapter.test.ts`), component tests for TwinPage states and overlay toggles/import/configure flow (`frontend/src/features/digitalTwin/TwinPage.test.tsx`), hook updates (`frontend/src/features/digitalTwin/hooks.test.ts`), and e2e updates for congestion/rendering/import/configure handoff (`frontend/tests/e2e/vs5-digital-twin.spec.ts`).
+- **Validation evidence:** `npm run lint` PASS, `npm run typecheck` PASS, `npm run test` PASS (`25 files, 97 tests`), `npm run test:e2e` PASS (`19/19`), `npm run build` PASS, `npm run perf:bundle` PASS (`twin_page_chunk_gzip_kb=6.56`, bounded).
+- **Scope/governance confirmation:** No new REST endpoints, websocket channels, or event names; no backend code changes; canonical contracts and fail-open realtime behavior preserved.
+
 ## [2026-08-16] - VS21 Global Audit Checkpoint (Steps 1-4, 6, 7 Complete; Step 5 Partial)
 
 - **Completed:** Executed VS21 contract/backend/frontend/testing audit pass and closed confirmed in-scope gaps across websocket auth revalidation, org/workspace API parity, fail-open event publication continuity, audit consumer org update/delete mapping, canonical request-validation error envelope handling, frontend login session hardening, frontend plugin permission source-of-truth alignment, and frontend websocket unauthorized close lifecycle handling.

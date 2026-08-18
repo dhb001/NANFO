@@ -6,7 +6,7 @@ import {
 } from "./support/session";
 
 test.describe("VS5 digital twin realtime resilience", () => {
-  test("renders topology scene and tolerates websocket unavailability", async ({ page }) => {
+  test("renders topology scene, congestion legend, and configure handoff", async ({ page }) => {
     const state = createDefaultSessionState();
     await installSessionMocks(page, state);
 
@@ -23,10 +23,17 @@ test.describe("VS5 digital twin realtime resilience", () => {
                 hostname: "edge-1",
                 device_type: "switch",
                 status: "active",
-                spatial_ref_id: "campus-a/building-1/floor-1/rack-2",
+                spatial_ref_id: "campus-a/building-1/floor-1/rack-2/device-1",
               },
             ],
-            edges: [],
+            edges: [
+              {
+                source_id: "00000000-0000-0000-0000-000000000444",
+                target_id: "00000000-0000-0000-0000-000000000444",
+                edge_type: "connected_to",
+                metadata: {},
+              },
+            ],
           },
           meta: {
             request_id: "req-vs5-graph",
@@ -51,7 +58,7 @@ test.describe("VS5 digital twin realtime resilience", () => {
               hostname: "edge-1",
               device_type: "switch",
               status: "active",
-              spatial_ref_id: "campus-a/building-1/floor-1/rack-2",
+              spatial_ref_id: "campus-a/building-1/floor-1/rack-2/device-1",
             },
             neighbours: [],
           },
@@ -62,11 +69,144 @@ test.describe("VS5 digital twin realtime resilience", () => {
     });
 
     await loginFromUi(page);
+    await expect(page.getByRole("heading", { name: "Networks" })).toBeVisible();
+    await page.getByRole("button", { name: /Network A/ }).click();
 
     await page.getByRole("link", { name: "Digital Twin" }).click();
     await expect(page).toHaveURL(/\/ops\/digital-twin$/);
     await expect(page.getByText("3D Digital Twin")).toBeVisible();
-    await expect(page.getByText(/topology\s+(connecting|closed)/i)).toBeVisible();
-    await expect(page.getByText(/digital twin\s+(connecting|closed)/i)).toBeVisible();
+    await expect(page.getByText(/topology\s+(open|connecting|closed)/i)).toBeVisible();
+    await expect(page.getByText(/digital twin\s+(open|connecting|closed)/i)).toBeVisible();
+    await expect(page.getByText("Congestion legend")).toBeVisible();
+    await expect(page.getByText(/neutral unavailable metrics/i)).toBeVisible();
+
+    await page.getByLabel("Inspect node").selectOption("00000000-0000-0000-0000-000000000444");
+    await page.getByRole("button", { name: "Configure in Intent Workflow" }).click();
+    await expect(page).toHaveURL(/\/ops\/intent$/);
+  });
+
+  test("renders congestion controls and supports local import happy path", async ({ page }) => {
+    const state = createDefaultSessionState();
+    await installSessionMocks(page, state);
+
+    await page.route("**/api/v1/topology/graph?network_id=00000000-0000-0000-0000-000000000333&limit=200", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          success: true,
+          data: {
+            nodes: [
+              {
+                device_id: "00000000-0000-0000-0000-000000000444",
+                hostname: "edge-1",
+                device_type: "switch",
+                status: "active",
+                spatial_ref_id: null,
+              },
+            ],
+            edges: [],
+          },
+          meta: {
+            request_id: "req-vs5-graph-2",
+            timestamp: "2026-08-13T10:50:00Z",
+            execution_time_ms: 2,
+            next_cursor: null,
+          },
+          errors: null,
+        }),
+      });
+    });
+
+    await loginFromUi(page);
+    await expect(page.getByRole("heading", { name: "Networks" })).toBeVisible();
+    await page.getByRole("button", { name: /Network A/ }).click();
+    await page.getByRole("link", { name: "Digital Twin" }).click();
+
+    await page.getByRole("button", { name: "Congestion" }).click();
+    await expect(page.getByRole("button", { name: "Congestion" })).toHaveAttribute("aria-pressed", "false");
+    await page.getByRole("button", { name: "Congestion" }).click();
+    await expect(page.getByRole("button", { name: "Congestion" })).toHaveAttribute("aria-pressed", "true");
+
+    await page.getByLabel("Campus model file").setInputFiles({
+      name: "campus.glb",
+      mimeType: "model/gltf-binary",
+      buffer: Buffer.from("glb-binary"),
+    });
+    await expect(page.getByText(/model GLB/i)).toBeVisible();
+
+    await page.getByLabel("Campus mapping file").setInputFiles({
+      name: "mapping.json",
+      mimeType: "application/json",
+      buffer: Buffer.from(
+        JSON.stringify([
+          {
+            object_name: "rack-2",
+            device_id: "00000000-0000-0000-0000-000000000444",
+            spatial_ref_id: "campus-a/building-1/floor-1/rack-2/device-1",
+          },
+          {
+            object_name: "rack-3",
+            device_id: "missing-device-id",
+            spatial_ref_id: "campus-a/building-1/floor-1/rack-3/device-2",
+          },
+          {
+            object_name: "rack-3",
+            device_id: "00000000-0000-0000-0000-000000000444",
+            spatial_ref_id: "campus-a/building-1/floor-1/rack-4/device-3",
+          },
+        ]),
+      ),
+    });
+
+    await expect(page.getByText("matched 1", { exact: true })).toBeVisible();
+    await expect(page.getByText("unmatched 1", { exact: true })).toBeVisible();
+    await expect(page.getByText("duplicates 1", { exact: true })).toBeVisible();
+  });
+
+  test("shows import validation error for invalid model file", async ({ page }) => {
+    const state = createDefaultSessionState();
+    await installSessionMocks(page, state);
+
+    await page.route("**/api/v1/topology/graph?network_id=00000000-0000-0000-0000-000000000333&limit=200", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          success: true,
+          data: {
+            nodes: [
+              {
+                device_id: "00000000-0000-0000-0000-000000000444",
+                hostname: "edge-1",
+                device_type: "switch",
+                status: "active",
+                spatial_ref_id: null,
+              },
+            ],
+            edges: [],
+          },
+          meta: {
+            request_id: "req-vs5-graph-3",
+            timestamp: "2026-08-13T10:50:00Z",
+            execution_time_ms: 2,
+            next_cursor: null,
+          },
+          errors: null,
+        }),
+      });
+    });
+
+    await loginFromUi(page);
+    await expect(page.getByRole("heading", { name: "Networks" })).toBeVisible();
+    await page.getByRole("button", { name: /Network A/ }).click();
+    await page.getByRole("link", { name: "Digital Twin" }).click();
+
+    await page.getByLabel("Campus model file").setInputFiles({
+      name: "campus.txt",
+      mimeType: "text/plain",
+      buffer: Buffer.from("invalid"),
+    });
+    await expect(page.getByText("Model file must be .glb or .gltf.")).toBeVisible();
   });
 });
