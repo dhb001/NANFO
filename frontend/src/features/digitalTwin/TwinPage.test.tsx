@@ -6,9 +6,11 @@ import { parseImportSummary } from "@/features/digitalTwin/twinImport";
 import { useAuthStore } from "@/shared/state/auth-store";
 import { useWorkspaceStore } from "@/shared/state/workspace-store";
 import { useLiveStore } from "@/features/realtime/store";
+import { useUiStore } from "@/shared/state/ui-store";
 
 const mockUseTopologyGraph = vi.fn();
 const mockUseTopologyNode = vi.fn();
+const mockUpdateDeviceSpatialRefMutateAsync = vi.fn();
 
 const navigateMock = vi.fn();
 
@@ -23,6 +25,13 @@ vi.mock("react-router-dom", async () => {
 vi.mock("@/features/topology/hooks", () => ({
   useTopologyGraph: (...args: unknown[]) => mockUseTopologyGraph(...args),
   useTopologyNode: (...args: unknown[]) => mockUseTopologyNode(...args),
+}));
+
+vi.mock("@/features/networks/hooks", () => ({
+  useUpdateDeviceSpatialRef: () => ({
+    mutateAsync: mockUpdateDeviceSpatialRefMutateAsync,
+    isPending: false,
+  }),
 }));
 
 vi.mock("@/features/digitalTwin/TwinScene", () => ({
@@ -45,6 +54,10 @@ function queryResult<T>(data: T | null, options?: { isLoading?: boolean; isError
     data,
     refetch: options?.refetch ?? vi.fn(),
   };
+}
+
+async function waitForTwinScene() {
+  return screen.findByTestId("twin-scene");
 }
 
 describe("TwinPage", () => {
@@ -93,6 +106,11 @@ describe("TwinPage", () => {
       alertsStatus: "closed",
       digitalTwinStatus: "open",
     });
+    useUiStore.setState({
+      commandPaletteOpen: false,
+      toasts: [],
+    });
+    mockUpdateDeviceSpatialRefMutateAsync.mockResolvedValue({});
   });
 
   it("renders loading state", () => {
@@ -162,6 +180,7 @@ describe("TwinPage", () => {
 
     render(<TwinPage />);
 
+    await waitForTwinScene();
     expect(screen.getByText("Congestion legend")).toBeInTheDocument();
     expect(screen.getByTestId("twin-scene")).toHaveTextContent("congestion=true");
 
@@ -193,6 +212,7 @@ describe("TwinPage", () => {
     mockUseTopologyNode.mockReturnValue(queryResult(null));
 
     render(<TwinPage />);
+    await waitForTwinScene();
 
     const modelInput = screen.getByLabelText("Campus model file") as HTMLInputElement;
 
@@ -238,11 +258,73 @@ describe("TwinPage", () => {
     );
 
     render(<TwinPage />);
+    await waitForTwinScene();
 
     await user.selectOptions(screen.getByLabelText("Inspect node"), "00000000-0000-0000-0000-000000000444");
     await user.click(screen.getByRole("button", { name: "Configure in Intent Workflow" }));
 
-    expect(navigateMock).toHaveBeenCalledWith("/ops/intent");
+    const call = navigateMock.mock.calls[0]?.[0];
+    expect(typeof call).toBe("string");
+    expect(call).toContain("/ops/intent?");
+    expect(call).toContain("source=digital-twin");
+    expect(call).toContain("action=optimize_wireless_capacity");
+    expect(call).toContain("scope=");
+    expect(call).toContain("constraints=");
+  });
+
+  it("persists imported mapping with existing update device API path", async () => {
+    const user = userEvent.setup();
+    const twinImportModule = await import("@/features/digitalTwin/twinImport");
+    const parseImportSummarySpy = vi.spyOn(twinImportModule, "parseImportSummary").mockResolvedValue({
+      modelFileName: "campus.glb",
+      modelType: "glb",
+      mappingFileName: "mapping.json",
+      totalRows: 1,
+      matched: 1,
+      unmatched: 0,
+      duplicateKeys: [],
+      mappingByDeviceId: {
+        "00000000-0000-0000-0000-000000000444": "campus-a/building-1/floor-1/rack-2/device-1",
+      },
+    });
+
+    mockUseTopologyGraph.mockReturnValue(
+      queryResult({
+        data: {
+          nodes: [
+            {
+              device_id: "00000000-0000-0000-0000-000000000444",
+              hostname: "edge-1",
+              device_type: "switch",
+              status: "active",
+              spatial_ref_id: null,
+            },
+          ],
+          edges: [],
+        },
+      }),
+    );
+    mockUseTopologyNode.mockReturnValue(queryResult(null));
+
+    render(<TwinPage />);
+    await waitForTwinScene();
+
+    await user.upload(screen.getByLabelText("Campus model file"), new File(["binary"], "campus.glb", { type: "model/gltf-binary" }));
+    expect(await screen.findByText(/model GLB/i)).toBeInTheDocument();
+    expect(parseImportSummarySpy).toHaveBeenCalled();
+
+    await user.selectOptions(screen.getByLabelText("Inspect node"), "00000000-0000-0000-0000-000000000444");
+    const persistButton = await screen.findByRole("button", { name: "Persist Mapping to Device" });
+    expect(persistButton).toBeEnabled();
+
+    await user.click(persistButton);
+
+    expect(mockUpdateDeviceSpatialRefMutateAsync).toHaveBeenCalledWith({
+      deviceId: "00000000-0000-0000-0000-000000000444",
+      spatialRefId: "campus-a/building-1/floor-1/rack-2/device-1",
+    });
+
+    parseImportSummarySpy.mockRestore();
   });
 
   it("parses sidecar mapping and reports duplicates/unmatched deterministically", async () => {

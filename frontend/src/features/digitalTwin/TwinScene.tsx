@@ -170,7 +170,7 @@ function OverlaysLayer({ overlays, showLabels }: { overlays: TwinOverlayObject[]
   return (
     <group>
       {overlays.slice(0, 160).map((overlay) => (
-        <group key={`${overlay.id}:${overlay.status ?? overlay.state ?? "unknown"}`} position={[overlay.x, overlay.y, overlay.z]}>
+        <group key={overlay.id} position={[overlay.x, overlay.y, overlay.z]}>
           <mesh>
             <octahedronGeometry args={[0.34, 0]} />
             <meshStandardMaterial color={overlayColor(overlay)} emissive="#12263d" emissiveIntensity={0.2} roughness={0.34} metalness={0.08} />

@@ -31,6 +31,15 @@
 - Validation evidence: `npm run lint` ✅, `npm run typecheck` ✅, `npm run test` ✅ (`25 files, 97 tests`), `npm run test:e2e` ✅ (`19/19`), `npm run build` ✅ (existing large `three` chunk warning unchanged), `npm run perf:bundle` ✅ (`twin_page_chunk_gzip_kb=6.56`, bounded check true).
 - Residual risks (accepted in Phase 1): congestion severity heuristics depend on available metric names/units; no 3D model render/persistence path yet (import metadata is local session only by design); simulation terminal-event producer parity remains an existing backend residual outside this frontend-only slice.
 
+## Enhancement Slice — Digital Twin 3D as Primary Operations Surface (Frontend-Only, Phase 2)
+
+- Status: **COMPLETE** (2026-08-18).
+- Scope boundaries: frontend-only changes; no backend API/event/websocket-channel expansion; canonical envelope and existing contract semantics preserved.
+- Delivered: canonical congestion policy `v2.0.0` with deterministic rule priority (`loss > latency > util > cpu`) and optional telemetry policy-hint support, bounded congestion aggregation caps for telemetry-burst safety, deterministic overlay ordering (`simulation_state` before `intent_state`) with stable overlay identity rendering, per-device spatial mapping persistence via existing device update API (`PATCH /api/v1/networks/{network_id}/devices/{device_id}`), enriched configure handoff query prefill into existing `/ops/intent`, and route-level Twin scene lazy loading (`React.lazy` + `Suspense`) for performance-safe render path continuity.
+- Contract/governance evidence: published Contract and Capability Matrix with explicit citations in `docs/project/DigitalTwinPhase2ContractCapabilityMatrix.md`; no undocumented API/event/channel additions.
+- Validation evidence: `npm run lint` ✅, `npm run typecheck` ✅, `npm run test` ✅ (`25 files, 100 tests`), `npm run test:e2e` ✅ (`19/19`), `npm run build` ✅ (existing large `three` chunk warning unchanged), `npm run perf:bundle` ✅ (`total_js_gzip_kb=404.85`, `largest_chunk_gzip_kb=248.61`, `largest_non_three_chunk_gzip_kb=52.79`, `three_chunk_gzip_kb=248.61`, `twin_page_chunk_gzip_kb=6.68`; bounded checks true).
+- Residual risks (accepted in Phase 2): imported model/mapping remains session-local until explicit per-node persist action; binary 3D model persistence is still out-of-scope without approved backend surface/ADR; simulation terminal-event producer parity remains a separate backend residual.
+
 ## VS21 — Global Audit + Remaining Work Completion
 
 - Status: **IN PROGRESS** (checkpoint updated 2026-08-16; in-scope remediations + command-gate evidence recorded, with explicit residual high-risk blockers pending follow-on scope decision).

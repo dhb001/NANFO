@@ -3,6 +3,34 @@
 Lightweight chronological notes for decisions that do not require a full ADR.
 
 ## 2026-08-18
+### Digital Twin Primary Operations Surface (Frontend-Only Phase 2): Approve Canonical Congestion Policy, Existing-Contract Mapping Persist, and Intent Handoff Enrichment
+Decision: Complete Digital Twin Phase 2 in frontend scope by adding canonical congestion policy governance and deterministic adapter bounds, enabling per-device mapping persistence via the existing network device PATCH surface, and enriching the existing `/ops/intent` handoff without adding any new API/event/channel contracts.
+Reason:
+- Architecture guardrails prohibit undocumented REST/WebSocket/event expansion; Phase 2 objectives are reachable through existing topology/telemetry/digital-twin and network-device contracts.
+- Congestion behavior required deterministic and auditable rule precedence across heterogeneous telemetry metrics while maintaining fail-open neutral behavior when required metrics are unavailable.
+- Imported mapping needed an explicit persisted path for operator workflows while preserving session-only defaults and avoiding backend schema expansion.
+Impact:
+- Added canonical congestion policy constants/rules and deterministic bounded aggregation in `frontend/src/features/digitalTwin/sceneAdapter.ts`.
+- Extended Digital Twin hooks to pass newest-first telemetry key ordering into scene adapter mapping in `frontend/src/features/digitalTwin/hooks.ts`.
+- Added per-node persist action UX and existing-contract mutation wiring in `frontend/src/features/digitalTwin/TwinPage.tsx` and `frontend/src/features/networks/hooks.ts`.
+- Added intent handoff query prefill consumption and one-time URL cleanup in `frontend/src/features/intent/IntentPage.tsx`.
+- Added route-level lazy loading (`React.lazy` + `Suspense`) for Twin scene path in `frontend/src/features/digitalTwin/TwinPage.tsx`.
+- Added/updated regression coverage in `frontend/src/features/digitalTwin/sceneAdapter.test.ts`, `frontend/src/features/digitalTwin/hooks.test.ts`, `frontend/src/features/digitalTwin/TwinPage.test.tsx`, `frontend/src/features/intent/IntentPage.test.tsx`, and `frontend/tests/e2e/vs5-digital-twin.spec.ts`.
+- Published contract/governance evidence matrix in `docs/project/DigitalTwinPhase2ContractCapabilityMatrix.md`.
+Assumptions:
+- `metric.tags.congestion_policy` is optional metadata and is consumed as a hint only when it maps to canonical policy ids with matching unit semantics.
+- Session-local import remains the default behavior; persistence occurs only when the operator explicitly invokes "Persist Mapping to Device" per selected node.
+- Binary model persistence remains out-of-scope until approved backend API/ADR scope exists.
+Related:
+- `docs/project/DigitalTwinPhase2ContractCapabilityMatrix.md`
+- `frontend/src/features/digitalTwin/sceneAdapter.ts`
+- `frontend/src/features/digitalTwin/TwinPage.tsx`
+- `frontend/src/features/digitalTwin/TwinScene.tsx`
+- `frontend/src/features/digitalTwin/hooks.ts`
+- `frontend/src/features/networks/hooks.ts`
+- `frontend/src/features/intent/IntentPage.tsx`
+- `frontend/tests/e2e/vs5-digital-twin.spec.ts`
+
 ### Digital Twin Primary Operations Surface (Frontend-Only Phase 1): Approve Deterministic Adapter + Session-Only Import Within Existing Contracts
 Decision: Implement Digital Twin Phase 1 entirely in frontend scope by introducing a deterministic scene adapter and operator UX enrichments while reusing existing REST/WebSocket/event contracts and preserving current backend surfaces.
 Reason:

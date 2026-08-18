@@ -82,14 +82,19 @@ test.describe("VS5 digital twin realtime resilience", () => {
 
     await page.getByLabel("Inspect node").selectOption("00000000-0000-0000-0000-000000000444");
     await page.getByRole("button", { name: "Configure in Intent Workflow" }).click();
-    await expect(page).toHaveURL(/\/ops\/intent$/);
+    await expect(page).toHaveURL(/\/ops\/intent(\?.*)?$/);
   });
 
   test("renders congestion controls and supports local import happy path", async ({ page }) => {
     const state = createDefaultSessionState();
     await installSessionMocks(page, state);
 
+    let persistedSpatialRefByDeviceId: Record<string, string | null> = {
+      "00000000-0000-0000-0000-000000000444": null,
+    };
+
     await page.route("**/api/v1/topology/graph?network_id=00000000-0000-0000-0000-000000000333&limit=200", async (route) => {
+      const persistedSpatialRef = persistedSpatialRefByDeviceId["00000000-0000-0000-0000-000000000444"];
       await route.fulfill({
         status: 200,
         contentType: "application/json",
@@ -102,7 +107,7 @@ test.describe("VS5 digital twin realtime resilience", () => {
                 hostname: "edge-1",
                 device_type: "switch",
                 status: "active",
-                spatial_ref_id: null,
+                spatial_ref_id: persistedSpatialRef,
               },
             ],
             edges: [],
@@ -112,6 +117,41 @@ test.describe("VS5 digital twin realtime resilience", () => {
             timestamp: "2026-08-13T10:50:00Z",
             execution_time_ms: 2,
             next_cursor: null,
+          },
+          errors: null,
+        }),
+      });
+    });
+
+    await page.route("**/api/v1/networks/00000000-0000-0000-0000-000000000333/devices/00000000-0000-0000-0000-000000000444", async (route) => {
+      const requestBody = route.request().postDataJSON() as { spatial_ref_id?: string | null };
+      persistedSpatialRefByDeviceId = {
+        ...persistedSpatialRefByDeviceId,
+        "00000000-0000-0000-0000-000000000444": requestBody.spatial_ref_id ?? null,
+      };
+
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          success: true,
+          data: {
+            device_id: "00000000-0000-0000-0000-000000000444",
+            network_id: "00000000-0000-0000-0000-000000000333",
+            hostname: "edge-1",
+            ip_address: null,
+            device_type: "switch",
+            vendor: null,
+            model: null,
+            location_hint: null,
+            spatial_ref_id: requestBody.spatial_ref_id ?? null,
+            status: "active",
+            created_at: "2026-08-18T09:00:00Z",
+          },
+          meta: {
+            request_id: "req-vs5-device-patch",
+            timestamp: "2026-08-18T09:00:02Z",
+            execution_time_ms: 4,
           },
           errors: null,
         }),
@@ -162,6 +202,11 @@ test.describe("VS5 digital twin realtime resilience", () => {
     await expect(page.getByText("matched 1", { exact: true })).toBeVisible();
     await expect(page.getByText("unmatched 1", { exact: true })).toBeVisible();
     await expect(page.getByText("duplicates 1", { exact: true })).toBeVisible();
+
+    await page.getByLabel("Inspect node").selectOption("00000000-0000-0000-0000-000000000444");
+    await expect(page.getByRole("button", { name: "Persist Mapping to Device" })).toBeVisible();
+    await page.getByRole("button", { name: "Persist Mapping to Device" }).click();
+    await expect(page.getByRole("button", { name: "Persist Mapping to Device" })).toBeDisabled();
   });
 
   test("shows import validation error for invalid model file", async ({ page }) => {

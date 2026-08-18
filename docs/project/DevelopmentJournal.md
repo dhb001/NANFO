@@ -1,5 +1,19 @@
 # Development Journal
 
+## [2026-08-18] - Digital Twin 3D Primary Operations Surface (Frontend-Only, Phase 2)
+
+- **Completed:** Delivered frontend-only Phase 2 enhancement pass for Digital Twin primary operations behavior while preserving all existing backend contracts.
+- **Canonical congestion policy:** Added deterministic policy framework (`v2.0.0`) with explicit rule ordering and thresholds (`packet_loss_percent`, `latency_ms`, `link_utilization_percent`, `cpu_utilization_percent`) plus optional `metric.tags.congestion_policy` hint alignment in `frontend/src/features/digitalTwin/sceneAdapter.ts`.
+- **Burst-safe deterministic aggregation:** Added bounded telemetry selection (`MAX_CONGESTION_KEYS=240`) and per-device congestion metric cap (`MAX_CONGESTION_METRICS_PER_DEVICE=12`) keyed from newest-first telemetry indexes for predictable render pressure control.
+- **Overlay/render determinism:** Enforced deterministic overlay ordering (`simulation_state` before `intent_state`) and stable overlay identity keying in `frontend/src/features/digitalTwin/sceneAdapter.ts` and `frontend/src/features/digitalTwin/TwinScene.tsx`.
+- **Spatial mapping persistence path:** Added inspector action "Persist Mapping to Device" wired to existing device update contract only (`PATCH /api/v1/networks/{network_id}/devices/{device_id}`) through `useUpdateDeviceSpatialRef`, including targeted cache invalidation for topology node detail.
+- **Intent workflow handoff enrichment:** Extended existing configure handoff to `/ops/intent` with source/action/scope/constraints/context query prefill and one-time URL parameter consumption/cleanup in `frontend/src/features/digitalTwin/TwinPage.tsx` and `frontend/src/features/intent/IntentPage.tsx`.
+- **Route-level split update:** Switched Twin scene rendering path to `React.lazy` + `Suspense` for route-level code splitting continuity without changing runtime contracts.
+- **Coverage updates:** Updated/added tests across adapter/hooks/components/e2e (`sceneAdapter.test.ts`, `hooks.test.ts`, `TwinPage.test.tsx`, `IntentPage.test.tsx`, `vs5-digital-twin.spec.ts`), including lazy-load-safe component assertions via async scene wait helper.
+- **Validation evidence (post-lazy-load rerun):** `npm run lint` PASS, `npm run typecheck` PASS, `npm run test` PASS (`25 files, 100 tests`), `npm run test:e2e` PASS (`19/19`), `npm run build` PASS (existing large `three` chunk warning unchanged), `npm run perf:bundle` PASS (bounded checks true; `total_js_gzip_kb=404.85`, `largest_chunk_gzip_kb=248.61`, `largest_non_three_chunk_gzip_kb=52.79`, `three_chunk_gzip_kb=248.61`, `twin_page_chunk_gzip_kb=6.68`).
+- **Contract/governance artifact:** Added `docs/project/DigitalTwinPhase2ContractCapabilityMatrix.md` with capability-to-contract citation matrix confirming no REST/WebSocket/event surface expansion.
+- **Residuals:** Imported model + sidecar mapping remains session-local until explicit per-node persist action; binary model persistence remains blocked pending approved backend scope/ADR.
+
 ## [2026-08-18] - Digital Twin 3D Primary Operations Surface (Frontend-Only, Phase 1)
 
 - **Completed:** Delivered frontend-only Phase 1 enhancement for Digital Twin primary operations UX without backend contract changes.

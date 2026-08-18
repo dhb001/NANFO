@@ -55,7 +55,13 @@ describe("digital twin hooks", () => {
         y: 0,
         z: 0,
         spatialRefId: null,
-        congestion: { severity: "neutral", score: null, metrics: [] },
+        congestion: {
+          severity: "neutral",
+          score: null,
+          metrics: [],
+          policyVersion: "v2.0.0",
+          primaryPolicyId: null,
+        },
       },
       {
         id: "b",
@@ -66,7 +72,13 @@ describe("digital twin hooks", () => {
         y: 0,
         z: 1,
         spatialRefId: null,
-        congestion: { severity: "neutral", score: null, metrics: [] },
+        congestion: {
+          severity: "neutral",
+          score: null,
+          metrics: [],
+          policyVersion: "v2.0.0",
+          primaryPolicyId: null,
+        },
       },
     ];
 
@@ -113,8 +125,8 @@ describe("digital twin hooks", () => {
     const { result } = renderHook(() => useTwinSceneModel([], []));
 
     expect(result.current.overlays).toHaveLength(2);
-    expect(result.current.overlays[0].id).toBe("intent-state");
-    expect(result.current.overlays[0].spatialRefId).toBe("campus-a/building-1/floor-1/rack-9/intent-1");
-    expect(result.current.overlays[1].id).toBe("simulation-state");
+    expect(result.current.overlays[0].id).toBe("simulation-state");
+    expect(result.current.overlays[1].id).toBe("intent-state");
+    expect(result.current.overlays[1].spatialRefId).toBe("campus-a/building-1/floor-1/rack-9/intent-1");
   });
 });

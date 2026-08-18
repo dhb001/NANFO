@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useExecuteIntent, useIntentDetail, useValidateIntent } from "@/features/intent/hooks";
 import { useAuthStore } from "@/shared/state/auth-store";
 import { useWorkspaceStore } from "@/shared/state/workspace-store";
@@ -34,8 +34,10 @@ export function IntentPage() {
   const [intentId, setIntentId] = useState<string | null>(null);
   const [idempotencyKey, setIdempotencyKey] = useState(`intent-${Date.now()}`);
   const [validationError, setValidationError] = useState<string | null>(null);
+  const [handoffSummary, setHandoffSummary] = useState<string | null>(null);
   const pushToast = useUiStore((state) => state.pushToast);
   const isNarrowViewport = useIsNarrowViewport();
+  const appliedHandoffRef = useRef(false);
 
   const validateMutation = useValidateIntent(token);
   const executeMutation = useExecuteIntent(token);
@@ -156,9 +158,68 @@ export function IntentPage() {
 
   const terminalState = isIntentTerminalStatus(detailQuery.data?.status);
 
+  useEffect(() => {
+    if (appliedHandoffRef.current) {
+      return;
+    }
+
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const searchParams = new URLSearchParams(window.location.search);
+    if (searchParams.get("source") !== "digital-twin") {
+      return;
+    }
+
+    appliedHandoffRef.current = true;
+
+    const actionParam = searchParams.get("action");
+    const scopeParam = searchParams.get("scope");
+    const constraintsParam = searchParams.get("constraints");
+    const contextSummaryParam = searchParams.get("context_summary");
+
+    if (actionParam?.trim()) {
+      setAction(actionParam.trim());
+    }
+    if (scopeParam?.trim()) {
+      setScopeJson(scopeParam);
+    }
+    if (constraintsParam?.trim()) {
+      setConstraintsJson(constraintsParam);
+    }
+    if (contextSummaryParam?.trim()) {
+      setHandoffSummary(contextSummaryParam.trim());
+    }
+
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.delete("source");
+    nextParams.delete("action");
+    nextParams.delete("scope");
+    nextParams.delete("constraints");
+    nextParams.delete("context_summary");
+    const nextQuery = nextParams.toString();
+    const nextUrl = nextQuery ? `${window.location.pathname}?${nextQuery}` : window.location.pathname;
+    window.history.replaceState(null, "", nextUrl);
+  }, []);
+
   return (
     <div style={{ display: "grid", gap: "1rem" }}>
       <Panel title="Intent Validate and Execute" subtitle="VS8 explainability, confidence, lifecycle transitions">
+        {handoffSummary ? (
+          <div
+            style={{
+              border: "1px solid var(--line-soft)",
+              borderRadius: "9px",
+              padding: "0.45rem 0.5rem",
+              marginBottom: "0.7rem",
+              color: "var(--ink-2)",
+              fontSize: "0.85rem",
+            }}
+          >
+            Prefilled from Digital Twin: {handoffSummary}
+          </div>
+        ) : null}
         <form onSubmit={validate} style={{ display: "grid", gap: "0.7rem" }}>
           <div
             style={{

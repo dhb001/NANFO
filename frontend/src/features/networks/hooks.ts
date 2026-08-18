@@ -75,9 +75,10 @@ export function useUpdateDeviceSpatialRef(token: string | null, networkId: strin
       );
       return response.data;
     },
-    onSuccess: () => {
+    onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: ["devices", token, networkId] });
       queryClient.invalidateQueries({ queryKey: ["topology", token, networkId] });
+      queryClient.invalidateQueries({ queryKey: ["topology-node", token, variables.deviceId] });
     },
   });
 }

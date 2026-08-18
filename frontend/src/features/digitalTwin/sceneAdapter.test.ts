@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  CONGESTION_POLICY_VERSION,
   buildTwinSceneModel,
   deriveDeterministicPlacement,
   deriveDeviceCongestion,
@@ -69,6 +70,8 @@ describe("digital twin scene adapter", () => {
     expect(congestion.severity).toBe("neutral");
     expect(congestion.score).toBeNull();
     expect(congestion.metrics).toHaveLength(0);
+    expect(congestion.policyVersion).toBe(CONGESTION_POLICY_VERSION);
+    expect(congestion.primaryPolicyId).toBeNull();
   });
 
   it("derives high congestion from recognized telemetry metrics", () => {
@@ -102,6 +105,41 @@ describe("digital twin scene adapter", () => {
     expect(congestion.severity).toBe("high");
     expect(congestion.score).not.toBeNull();
     expect(congestion.metrics.length).toBeGreaterThan(0);
+    expect(congestion.primaryPolicyId).toBe("cpu_utilization_percent");
+  });
+
+  it("uses policy priority and tag hint with deterministic tie-breaking", () => {
+    const congestion = deriveDeviceCongestion([
+      {
+        event_id: "evt-1",
+        device_id: "device-1",
+        network_id: "network-1",
+        workspace_id: "workspace-1",
+        metric: "custom-score",
+        value: 2,
+        unit: "%",
+        observed_at: "2026-08-18T10:00:00Z",
+        source: "runtime",
+        tags: { congestion_policy: "packet_loss_percent" },
+      },
+      {
+        event_id: "evt-2",
+        device_id: "device-1",
+        network_id: "network-1",
+        workspace_id: "workspace-1",
+        metric: "cpu_usage",
+        value: 95,
+        unit: "%",
+        observed_at: "2026-08-18T10:01:00Z",
+        source: "runtime",
+        tags: {},
+      },
+    ]);
+
+    expect(congestion.severity).toBe("high");
+    expect(congestion.primaryPolicyId).toBe("cpu_utilization_percent");
+    expect(congestion.metrics[0]?.policyId).toBe("cpu_utilization_percent");
+    expect(congestion.metrics[1]?.policyId).toBe("packet_loss_percent");
   });
 
   it("builds deterministic scene model with overlays", () => {
@@ -138,6 +176,7 @@ describe("digital twin scene adapter", () => {
           tags: {},
         },
       },
+      telemetryKeysNewestFirst: ["device-1:cpu_usage"],
       sceneObjects: {
         "intent-1": {
           id: "intent-1",
@@ -147,13 +186,20 @@ describe("digital twin scene adapter", () => {
             spatial_ref_id: "campus-a/building-1/floor-1/rack-2/intent-1",
           },
         },
+        "simulation-1": {
+          id: "simulation-1",
+          object_type: "simulation_state",
+          status: "running",
+        },
       },
-      sceneObjectIdsNewestFirst: ["intent-1"],
+      sceneObjectIdsNewestFirst: ["intent-1", "simulation-1"],
     });
 
     expect(model.nodes).toHaveLength(1);
     expect(model.links).toHaveLength(1);
-    expect(model.overlays).toHaveLength(1);
+    expect(model.overlays).toHaveLength(2);
+    expect(model.overlays[0]?.objectType).toBe("simulation_state");
+    expect(model.overlays[1]?.objectType).toBe("intent_state");
     expect(model.nodeById["device-1"]?.congestion.severity).toBe("low");
   });
 });

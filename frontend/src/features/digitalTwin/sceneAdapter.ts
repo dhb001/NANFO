@@ -9,6 +9,65 @@ export const CONGESTION_THRESHOLDS = {
   latencyReferenceMs: 120,
 } as const;
 
+export const CONGESTION_POLICY_VERSION = "v2.0.0";
+
+interface CongestionPolicyRule {
+  id: string;
+  label: string;
+  priority: number;
+  unit: "%" | "ms";
+  metricIncludes: string[];
+  lowUpperExclusive: number;
+  mediumUpperExclusive: number;
+  normalizeReference: number;
+}
+
+export const CONGESTION_POLICY_RULES: readonly CongestionPolicyRule[] = [
+  {
+    id: "packet_loss_percent",
+    label: "Packet loss",
+    priority: 400,
+    unit: "%",
+    metricIncludes: ["packet_loss", "loss"],
+    lowUpperExclusive: 1,
+    mediumUpperExclusive: 3,
+    normalizeReference: 10,
+  },
+  {
+    id: "latency_ms",
+    label: "Latency",
+    priority: 300,
+    unit: "ms",
+    metricIncludes: ["latency", "rtt"],
+    lowUpperExclusive: 40,
+    mediumUpperExclusive: 90,
+    normalizeReference: 140,
+  },
+  {
+    id: "link_utilization_percent",
+    label: "Link utilization",
+    priority: 200,
+    unit: "%",
+    metricIncludes: ["utilization", "bandwidth", "throughput"],
+    lowUpperExclusive: 40,
+    mediumUpperExclusive: 75,
+    normalizeReference: 100,
+  },
+  {
+    id: "cpu_utilization_percent",
+    label: "CPU utilization",
+    priority: 100,
+    unit: "%",
+    metricIncludes: ["cpu"],
+    lowUpperExclusive: 40,
+    mediumUpperExclusive: 75,
+    normalizeReference: 100,
+  },
+] as const;
+
+const MAX_CONGESTION_METRICS_PER_DEVICE = 12;
+const MAX_CONGESTION_KEYS = 240;
+
 export interface TwinMetricSnapshot {
   metric: string;
   value: number;
@@ -16,12 +75,19 @@ export interface TwinMetricSnapshot {
   observedAt: string;
   source: string;
   normalizedScore: number;
+  severity: Exclude<CongestionSeverity, "neutral">;
+  policyId: string;
+  policyPriority: number;
+  lowUpperExclusive: number;
+  mediumUpperExclusive: number;
 }
 
 export interface TwinCongestion {
   severity: CongestionSeverity;
   score: number | null;
   metrics: TwinMetricSnapshot[];
+  policyVersion: string;
+  primaryPolicyId: string | null;
 }
 
 export interface TwinNode {
@@ -82,6 +148,7 @@ interface SceneAdapterInput {
   baseEdges: TopologyEdge[];
   liveNodesByDeviceId: Record<string, TopologyDeltaData["node"]>;
   telemetryByDeviceMetric: Record<string, TelemetryDeltaData["metric"]>;
+  telemetryKeysNewestFirst: string[];
   sceneObjects: Record<string, DigitalTwinDeltaData["scene_object"]>;
   sceneObjectIdsNewestFirst: string[];
   importedSpatialRefByDeviceId?: Record<string, string>;
@@ -225,30 +292,77 @@ function normalizeMetricName(metric: string) {
   return metric.trim().toLowerCase();
 }
 
+function toCongestionPolicyHint(tags: Record<string, unknown> | undefined): string | null {
+  if (!tags || typeof tags !== "object") {
+    return null;
+  }
+
+  const hint = tags.congestion_policy;
+  if (typeof hint !== "string") {
+    return null;
+  }
+
+  const normalized = hint.trim().toLowerCase();
+  return normalized || null;
+}
+
+function resolveCongestionPolicyRule(metric: TelemetryDeltaData["metric"]): CongestionPolicyRule | null {
+  const unit = (metric.unit ?? "").trim().toLowerCase();
+  const metricName = normalizeMetricName(metric.metric);
+  const policyHint = toCongestionPolicyHint(metric.tags);
+
+  if (policyHint) {
+    const hintedRule = CONGESTION_POLICY_RULES.find((rule) => rule.id === policyHint);
+    if (hintedRule && hintedRule.unit === unit) {
+      return hintedRule;
+    }
+  }
+
+  return (
+    CONGESTION_POLICY_RULES.find((rule) => {
+      if (rule.unit !== unit) {
+        return false;
+      }
+      return rule.metricIncludes.some((needle) => metricName.includes(needle));
+    }) ?? null
+  );
+}
+
+function mapCongestionSeverityForRule(value: number, rule: CongestionPolicyRule): Exclude<CongestionSeverity, "neutral"> {
+  if (value < rule.lowUpperExclusive) {
+    return "low";
+  }
+  if (value < rule.mediumUpperExclusive) {
+    return "medium";
+  }
+  return "high";
+}
+
+function congestionSeverityRank(severity: CongestionSeverity): number {
+  if (severity === "high") {
+    return 3;
+  }
+  if (severity === "medium") {
+    return 2;
+  }
+  if (severity === "low") {
+    return 1;
+  }
+  return 0;
+}
+
 function toCongestionMetricScore(metric: TelemetryDeltaData["metric"]): TwinMetricSnapshot | null {
   if (!isFiniteNumber(metric.value)) {
     return null;
   }
 
-  const metricName = normalizeMetricName(metric.metric);
-  const unit = (metric.unit ?? "").trim().toLowerCase();
-
-  const isPercentCongestionMetric =
-    unit === "%" &&
-    (metricName.includes("utilization") ||
-      metricName.includes("cpu") ||
-      metricName.includes("bandwidth") ||
-      metricName.includes("loss"));
-
-  const isLatencyCongestionMetric = unit === "ms" && metricName.includes("latency");
-
-  if (!isPercentCongestionMetric && !isLatencyCongestionMetric) {
+  const policyRule = resolveCongestionPolicyRule(metric);
+  if (!policyRule) {
     return null;
   }
 
-  const normalizedScore = isPercentCongestionMetric
-    ? Math.max(0, Math.min(1, metric.value / 100))
-    : Math.max(0, Math.min(1, metric.value / CONGESTION_THRESHOLDS.latencyReferenceMs));
+  const normalizedScore = Math.max(0, Math.min(1, metric.value / policyRule.normalizeReference));
+  const severity = mapCongestionSeverityForRule(metric.value, policyRule);
 
   return {
     metric: metric.metric,
@@ -257,6 +371,11 @@ function toCongestionMetricScore(metric: TelemetryDeltaData["metric"]): TwinMetr
     observedAt: metric.observed_at,
     source: metric.source,
     normalizedScore,
+    severity,
+    policyId: policyRule.id,
+    policyPriority: policyRule.priority,
+    lowUpperExclusive: policyRule.lowUpperExclusive,
+    mediumUpperExclusive: policyRule.mediumUpperExclusive,
   };
 }
 
@@ -278,10 +397,24 @@ export function deriveDeviceCongestion(metrics: TelemetryDeltaData["metric"][]):
     .map(toCongestionMetricScore)
     .filter((item): item is TwinMetricSnapshot => item !== null)
     .sort((left, right) => {
+      const severityDelta = congestionSeverityRank(right.severity) - congestionSeverityRank(left.severity);
+      if (severityDelta !== 0) {
+        return severityDelta;
+      }
+
+      const policyDelta = right.policyPriority - left.policyPriority;
+      if (policyDelta !== 0) {
+        return policyDelta;
+      }
+
       const leftTs = Date.parse(left.observedAt);
       const rightTs = Date.parse(right.observedAt);
       if (Number.isNaN(leftTs) && Number.isNaN(rightTs)) {
-        return left.metric.localeCompare(right.metric);
+        const metricDelta = left.metric.localeCompare(right.metric);
+        if (metricDelta !== 0) {
+          return metricDelta;
+        }
+        return left.policyId.localeCompare(right.policyId);
       }
       if (Number.isNaN(leftTs)) {
         return 1;
@@ -289,7 +422,16 @@ export function deriveDeviceCongestion(metrics: TelemetryDeltaData["metric"][]):
       if (Number.isNaN(rightTs)) {
         return -1;
       }
-      return rightTs - leftTs;
+      if (rightTs !== leftTs) {
+        return rightTs - leftTs;
+      }
+
+      const metricDelta = left.metric.localeCompare(right.metric);
+      if (metricDelta !== 0) {
+        return metricDelta;
+      }
+
+      return left.policyId.localeCompare(right.policyId);
     });
 
   if (candidates.length === 0) {
@@ -297,14 +439,18 @@ export function deriveDeviceCongestion(metrics: TelemetryDeltaData["metric"][]):
       severity: "neutral",
       score: null,
       metrics: [],
+      policyVersion: CONGESTION_POLICY_VERSION,
+      primaryPolicyId: null,
     };
   }
 
-  const score = candidates.reduce((maxScore, item) => Math.max(maxScore, item.normalizedScore), 0);
+  const primary = candidates[0];
   return {
-    severity: mapCongestionSeverity(score),
-    score,
+    severity: primary.severity,
+    score: primary.normalizedScore,
     metrics: candidates.slice(0, 6),
+    policyVersion: CONGESTION_POLICY_VERSION,
+    primaryPolicyId: primary.policyId,
   };
 }
 
@@ -328,15 +474,27 @@ function getSceneObjectSpatialRef(sceneObject: DigitalTwinDeltaData["scene_objec
 export function buildTwinSceneModel(input: SceneAdapterInput): TwinSceneModel {
   const mergedNodes = mergeCanonicalNodes(input.baseNodes, Object.values(input.liveNodesByDeviceId));
 
-  const telemetryByDeviceId = Object.values(input.telemetryByDeviceMetric).reduce<Record<string, TelemetryDeltaData["metric"][]>>(
-    (acc, metric) => {
+  const telemetryByDeviceId = (
+    input.telemetryKeysNewestFirst.length > 0
+      ? input.telemetryKeysNewestFirst
+      : Object.keys(input.telemetryByDeviceMetric).sort()
+  )
+    .slice(0, MAX_CONGESTION_KEYS)
+    .reduce<Record<string, TelemetryDeltaData["metric"][]>>((acc, telemetryKey) => {
+      const metric = input.telemetryByDeviceMetric[telemetryKey];
+      if (!metric) {
+        return acc;
+      }
+
       const bucket = acc[metric.device_id] ?? [];
+      if (bucket.length >= MAX_CONGESTION_METRICS_PER_DEVICE) {
+        return acc;
+      }
+
       bucket.push(metric);
       acc[metric.device_id] = bucket;
       return acc;
-    },
-    {},
-  );
+    }, {});
 
   const nodes = mergedNodes.map((node) => {
     const id = node.device_id;
@@ -416,6 +574,16 @@ export function buildTwinSceneModel(input: SceneAdapterInput): TwinSceneModel {
       z: placement.z,
     });
   }
+
+  overlays.sort((left, right) => {
+    const leftPriority = left.objectType === "simulation_state" ? 0 : left.objectType === "intent_state" ? 1 : 2;
+    const rightPriority = right.objectType === "simulation_state" ? 0 : right.objectType === "intent_state" ? 1 : 2;
+    if (leftPriority !== rightPriority) {
+      return leftPriority - rightPriority;
+    }
+
+    return left.id.localeCompare(right.id);
+  });
 
   const nodeById = nodes.reduce<Record<string, TwinNode>>((acc, node) => {
     acc[node.id] = node;

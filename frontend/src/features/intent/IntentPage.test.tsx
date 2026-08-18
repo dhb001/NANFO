@@ -40,6 +40,7 @@ function detailQuery(data: unknown) {
 describe("IntentPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    window.history.replaceState(null, "", "/ops/intent");
     mockUseIntentDetail.mockReturnValue(detailQuery(null));
 
     useAuthStore.setState({
@@ -74,6 +75,31 @@ describe("IntentPage", () => {
     render(<IntentPage />);
     expect(screen.getByText("Intent Validate and Execute")).toBeInTheDocument();
     expect(screen.getByText("No intent selected")).toBeInTheDocument();
+  });
+
+  it("prefills intent form from digital twin handoff query params", () => {
+    const scope = JSON.stringify({
+      source: "digital_twin",
+      device_id: "device-1",
+      congestion: { severity: "high" },
+    });
+    const constraints = JSON.stringify({ max_downtime: 0, simulation_required: true });
+    const params = new URLSearchParams({
+      source: "digital-twin",
+      action: "throttle_qos",
+      scope,
+      constraints,
+      context_summary: "device=edge-1 | severity=high | policy=cpu_utilization_percent",
+    });
+    window.history.replaceState(null, "", `/ops/intent?${params.toString()}`);
+
+    render(<IntentPage />);
+
+    expect(screen.getByDisplayValue("throttle_qos")).toBeInTheDocument();
+    expect(screen.getByDisplayValue(scope)).toBeInTheDocument();
+    expect(screen.getByDisplayValue(constraints)).toBeInTheDocument();
+    expect(screen.getByText(/Prefilled from Digital Twin:/)).toBeInTheDocument();
+    expect(window.location.search).toBe("");
   });
 
   it("shows validation error for malformed JSON and does not submit", async () => {

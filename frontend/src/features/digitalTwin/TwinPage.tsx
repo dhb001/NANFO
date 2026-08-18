@@ -1,8 +1,7 @@
-import { ChangeEvent, useMemo, useState } from "react";
+import { ChangeEvent, Suspense, lazy, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { TwinScene } from "@/features/digitalTwin/TwinScene";
 import { useTwinSceneModel } from "@/features/digitalTwin/hooks";
-import { CONGESTION_THRESHOLDS } from "@/features/digitalTwin/sceneAdapter";
+import { CONGESTION_POLICY_VERSION } from "@/features/digitalTwin/sceneAdapter";
 import type { TwinMetricSnapshot } from "@/features/digitalTwin/sceneAdapter";
 import type { ImportSummary } from "@/features/digitalTwin/twinImport";
 import { Panel } from "@/shared/ui/Panel";
@@ -16,6 +15,8 @@ import { Button } from "@/shared/ui/Button";
 import { usePrefersReducedMotion } from "@/shared/lib/reduced-motion";
 import { useIsNarrowViewport } from "@/shared/lib/viewport";
 import { formatNumber, formatTimestamp } from "@/shared/lib/format";
+import { useUpdateDeviceSpatialRef } from "@/features/networks/hooks";
+import { useUiStore } from "@/shared/state/ui-store";
 
 interface LayerState {
   showLinks: boolean;
@@ -23,6 +24,19 @@ interface LayerState {
   showCongestion: boolean;
   showOverlays: boolean;
 }
+
+interface IntentHandoffPrefill {
+  source: "digital-twin";
+  action: string;
+  scopeJson: string;
+  constraintsJson: string;
+  contextSummary: string;
+}
+
+const TwinScene = lazy(async () => {
+  const module = await import("@/features/digitalTwin/TwinScene");
+  return { default: module.TwinScene };
+});
 
 const DEFAULT_LAYERS: LayerState = {
   showLinks: true,
@@ -69,7 +83,7 @@ function MetricSnapshotList({ metrics }: { metrics: TwinMetricSnapshot[] }) {
             </span>
           </div>
           <div className="mono" style={{ color: "var(--ink-3)", fontSize: "0.72rem" }}>
-            score {formatNumber(metric.normalizedScore * 100, 0)}% | {metric.source}
+            score {formatNumber(metric.normalizedScore * 100, 0)}% | {metric.policyId} {metric.severity} | {metric.source}
           </div>
           <div style={{ color: "var(--ink-3)", fontSize: "0.74rem" }}>{formatTimestamp(metric.observedAt)}</div>
         </div>
@@ -78,10 +92,79 @@ function MetricSnapshotList({ metrics }: { metrics: TwinMetricSnapshot[] }) {
   );
 }
 
+function recommendIntentAction(severity: "low" | "medium" | "high" | "neutral") {
+  if (severity === "high") {
+    return "throttle_qos";
+  }
+  if (severity === "medium") {
+    return "optimize_wireless_capacity";
+  }
+  return "reroute_path";
+}
+
+function buildIntentHandoffFromNode(
+  node: {
+    id: string;
+    hostname: string;
+    type: string;
+    spatialRefId: string | null;
+    congestion: {
+      severity: "low" | "medium" | "high" | "neutral";
+      score: number | null;
+      policyVersion: string;
+      primaryPolicyId: string | null;
+      metrics: TwinMetricSnapshot[];
+    };
+  },
+): IntentHandoffPrefill {
+  const action = recommendIntentAction(node.congestion.severity);
+  const topMetric = node.congestion.metrics[0] ?? null;
+  const scope = {
+    source: "digital_twin",
+    device_id: node.id,
+    spatial_ref_id: node.spatialRefId,
+    congestion: {
+      severity: node.congestion.severity,
+      score: node.congestion.score,
+      policy_id: node.congestion.primaryPolicyId,
+      metric: topMetric
+        ? {
+            name: topMetric.metric,
+            value: topMetric.value,
+            unit: topMetric.unit,
+            severity: topMetric.severity,
+          }
+        : null,
+    },
+  };
+
+  const constraints = {
+    max_downtime: 0,
+    preserve_connectivity: true,
+    simulation_required: true,
+    context_source: "digital_twin",
+  };
+
+  const summary = [
+    `device=${node.hostname}`,
+    `severity=${node.congestion.severity}`,
+    `policy=${node.congestion.primaryPolicyId ?? "none"}`,
+  ].join(" | ");
+
+  return {
+    source: "digital-twin",
+    action,
+    scopeJson: JSON.stringify(scope),
+    constraintsJson: JSON.stringify(constraints),
+    contextSummary: summary,
+  };
+}
+
 export function TwinPage() {
   const navigate = useNavigate();
   const token = useAuthStore((state) => state.accessToken);
   const networkId = useWorkspaceStore((state) => state.networkId);
+  const pushToast = useUiStore((state) => state.pushToast);
 
   const graphQuery = useTopologyGraph(token, networkId);
   const baseGraph = graphQuery.data?.data;
@@ -92,12 +175,14 @@ export function TwinPage() {
   const [importError, setImportError] = useState<string | null>(null);
   const [isImporting, setIsImporting] = useState(false);
   const [modelFileName, setModelFileName] = useState<string | null>(null);
+  const [pendingPersistDeviceId, setPendingPersistDeviceId] = useState<string | null>(null);
 
   const prefersReducedMotion = usePrefersReducedMotion();
   const isNarrowViewport = useIsNarrowViewport();
 
   const topologyStatus = useLiveStore((state) => state.topologyStatus);
   const digitalTwinStatus = useLiveStore((state) => state.digitalTwinStatus);
+  const updateSpatialRefMutation = useUpdateDeviceSpatialRef(token, networkId);
 
   const sceneModel = useTwinSceneModel(baseGraph?.nodes ?? [], baseGraph?.edges ?? [], importSummary?.mappingByDeviceId);
 
@@ -120,12 +205,77 @@ export function TwinPage() {
 
   const selectedNode = selectedNodeId ? sceneModel.nodeById[selectedNodeId] : null;
 
+  const selectedNodePersistedSpatialRef = useMemo(() => {
+    if (!selectedNodeId) {
+      return null;
+    }
+    const raw = baseGraph?.nodes.find((node) => node.device_id === selectedNodeId)?.spatial_ref_id;
+    return typeof raw === "string" && raw.trim() ? raw.trim() : null;
+  }, [baseGraph?.nodes, selectedNodeId]);
+
   const graphNodes = useMemo(() => {
     return (baseGraph?.nodes ?? []).map((node) => ({
       device_id: node.device_id,
       spatial_ref_id: node.spatial_ref_id,
     }));
   }, [baseGraph?.nodes]);
+
+  const hasImportedSpatialRef = selectedNode
+    ? Boolean(importSummary?.mappingByDeviceId[selectedNode.id])
+    : false;
+  const hasPersistedSpatialRef = Boolean(selectedNodePersistedSpatialRef);
+  const canPersistSelectedNodeSpatialRef = Boolean(
+    selectedNode &&
+      hasImportedSpatialRef &&
+      selectedNode.spatialRefId &&
+      selectedNode.spatialRefId !== selectedNodePersistedSpatialRef &&
+      token &&
+      networkId,
+  );
+
+  async function persistSelectedNodeSpatialRef() {
+    if (!selectedNode || !selectedNode.spatialRefId || !token || !networkId) {
+      return;
+    }
+
+    setPendingPersistDeviceId(selectedNode.id);
+    try {
+      await updateSpatialRefMutation.mutateAsync({
+        deviceId: selectedNode.id,
+        spatialRefId: selectedNode.spatialRefId,
+      });
+      pushToast({
+        tone: "ok",
+        title: "Spatial mapping persisted",
+        description: `${selectedNode.hostname} now uses spatial_ref_id ${selectedNode.spatialRefId}.`,
+      });
+    } catch (error) {
+      const description = error instanceof Error ? error.message : "Could not persist spatial mapping.";
+      pushToast({
+        tone: "danger",
+        title: "Spatial mapping persist failed",
+        description,
+      });
+    } finally {
+      setPendingPersistDeviceId(null);
+    }
+  }
+
+  function handleConfigureIntentWorkflow() {
+    if (!selectedNode) {
+      navigate("/ops/intent");
+      return;
+    }
+
+    const handoff = buildIntentHandoffFromNode(selectedNode);
+    const query = new URLSearchParams();
+    query.set("source", handoff.source);
+    query.set("action", handoff.action);
+    query.set("scope", handoff.scopeJson);
+    query.set("constraints", handoff.constraintsJson);
+    query.set("context_summary", handoff.contextSummary);
+    navigate(`/ops/intent?${query.toString()}`);
+  }
 
   async function onCampusImport(modelFile: File | null, mappingFile: File | null) {
     if (!modelFile) {
@@ -260,31 +410,45 @@ export function TwinPage() {
               >
                 <strong style={{ fontSize: "0.9rem" }}>Congestion legend</strong>
                 <div style={{ display: "flex", gap: "0.35rem", flexWrap: "wrap" }}>
-                  <Badge text={`low < ${formatNumber(CONGESTION_THRESHOLDS.lowUpperExclusive * 100, 0)}%`} tone="ok" />
-                  <Badge
-                    text={`medium ${formatNumber(CONGESTION_THRESHOLDS.lowUpperExclusive * 100, 0)}-${formatNumber(
-                      CONGESTION_THRESHOLDS.mediumUpperExclusive * 100,
-                      0,
-                    )}%`}
-                    tone="warn"
-                  />
-                  <Badge text={`high >= ${formatNumber(CONGESTION_THRESHOLDS.mediumUpperExclusive * 100, 0)}%`} tone="danger" />
+                  <Badge text={`policy ${CONGESTION_POLICY_VERSION}`} tone="info" />
+                  <Badge text="priority loss>latency>util>cpu" tone="neutral" />
                   <Badge text="neutral unavailable metrics" tone="neutral" />
                 </div>
                 <div style={{ color: "var(--ink-3)", fontSize: "0.78rem" }}>
-                  Based on existing telemetry only (recognized percent utilization/loss/cpu/bandwidth or latency ms metrics).
+                  Uses existing telemetry metric+unit and optional `metric.tags.congestion_policy` hints.
                 </div>
               </div>
 
-              <TwinScene
-                nodes={sceneModel.nodes}
-                links={sceneModel.links}
-                overlays={sceneModel.overlays}
-                selectedNodeId={selectedNodeId}
-                onSelectNode={setSelectedNodeId}
-                reducedMotion={prefersReducedMotion}
-                layers={layers}
-              />
+              <div
+                style={{
+                  border: "1px solid var(--line-soft)",
+                  borderRadius: "10px",
+                  padding: "0.48rem 0.56rem",
+                  display: "grid",
+                  gap: "0.3rem",
+                }}
+              >
+                <strong style={{ fontSize: "0.9rem" }}>Spatial mapping state</strong>
+                <div style={{ display: "flex", gap: "0.35rem", flexWrap: "wrap" }}>
+                  <Badge text="persisted spatial_ref_id from topology" tone="ok" />
+                  <Badge text="session mapping from import sidecar" tone="warn" />
+                </div>
+                <div style={{ color: "var(--ink-3)", fontSize: "0.78rem" }}>
+                  Session mapping is local-only until persisted using existing device update API.
+                </div>
+              </div>
+
+              <Suspense fallback={<div style={{ color: "var(--ink-3)" }}>Loading 3D scene...</div>}>
+                <TwinScene
+                  nodes={sceneModel.nodes}
+                  links={sceneModel.links}
+                  overlays={sceneModel.overlays}
+                  selectedNodeId={selectedNodeId}
+                  onSelectNode={setSelectedNodeId}
+                  reducedMotion={prefersReducedMotion}
+                  layers={layers}
+                />
+              </Suspense>
             </div>
           )}
         </QueryState>
@@ -326,14 +490,34 @@ export function TwinPage() {
                 <div className="mono" style={{ color: "var(--ink-3)", fontSize: "0.74rem", marginTop: "0.2rem" }}>
                   spatial_ref_id: {selectedNode.spatialRefId ?? "none"}
                 </div>
+                <div style={{ marginTop: "0.2rem", display: "flex", gap: "0.35rem", flexWrap: "wrap" }}>
+                  <Badge text={hasPersistedSpatialRef ? "persisted" : "not persisted"} tone={hasPersistedSpatialRef ? "ok" : "warn"} />
+                  {hasImportedSpatialRef ? <Badge text="session import" tone="warn" /> : null}
+                </div>
                 <div className="mono" style={{ color: "var(--ink-3)", fontSize: "0.74rem", marginTop: "0.12rem" }}>
                   congestion_score: {selectedNode.congestion.score === null ? "neutral" : `${formatNumber(selectedNode.congestion.score * 100, 0)}%`}
                 </div>
+                {selectedNode.congestion.primaryPolicyId ? (
+                  <div className="mono" style={{ color: "var(--ink-3)", fontSize: "0.74rem", marginTop: "0.12rem" }}>
+                    congestion_policy: {selectedNode.congestion.primaryPolicyId} ({selectedNode.congestion.policyVersion})
+                  </div>
+                ) : null}
               </div>
 
               <MetricSnapshotList metrics={selectedNode.congestion.metrics} />
 
-              <Button type="button" tone="ghost" onClick={() => navigate("/ops/intent")}>Configure in Intent Workflow</Button>
+              {hasImportedSpatialRef ? (
+                <Button
+                  type="button"
+                  tone="ghost"
+                  disabled={!canPersistSelectedNodeSpatialRef || pendingPersistDeviceId === selectedNode.id}
+                  onClick={persistSelectedNodeSpatialRef}
+                >
+                  {pendingPersistDeviceId === selectedNode.id ? "Persisting mapping..." : "Persist Mapping to Device"}
+                </Button>
+              ) : null}
+
+              <Button type="button" tone="ghost" onClick={handleConfigureIntentWorkflow}>Configure in Intent Workflow</Button>
             </div>
           ) : null}
 
@@ -459,6 +643,10 @@ export function TwinPage() {
               ) : null}
               <div style={{ color: "var(--ink-3)", fontSize: "0.82rem" }}>
                 Imported mapping is kept in local session state only and is cleared on page reload.
+              </div>
+
+              <div style={{ color: "var(--ink-3)", fontSize: "0.82rem" }}>
+                Use "Persist Mapping to Device" in Inspector to save an imported mapping with the existing device update API.
               </div>
             </div>
           ) : null}

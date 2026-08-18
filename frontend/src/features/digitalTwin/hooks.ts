@@ -15,19 +15,29 @@ export function useTwinNodes(baseNodes: TopologyNode[] = []) {
   const baseEdges = useMemo(() => [], []);
   const topologyByDeviceId = useLiveStore((state) => state.topologyByDeviceId);
   const telemetryByDeviceMetric = useLiveStore((state) => state.telemetryByDeviceMetric);
+  const telemetryKeysNewestFirst = useLiveStore((state) => state.telemetryKeysNewestFirst);
   const sceneObjects = useLiveStore((state) => state.sceneObjects);
   const sceneObjectIdsNewestFirst = useLiveStore((state) => state.sceneObjectIdsNewestFirst);
 
   return useMemo(() => {
     return buildTwinSceneModel({
       baseNodes,
-      baseEdges,
-      liveNodesByDeviceId: topologyByDeviceId,
-      telemetryByDeviceMetric,
-      sceneObjects,
-      sceneObjectIdsNewestFirst,
-    }).nodes;
-  }, [baseNodes, baseEdges, topologyByDeviceId, telemetryByDeviceMetric, sceneObjects, sceneObjectIdsNewestFirst]);
+        baseEdges,
+        liveNodesByDeviceId: topologyByDeviceId,
+        telemetryByDeviceMetric,
+        telemetryKeysNewestFirst,
+        sceneObjects,
+        sceneObjectIdsNewestFirst,
+      }).nodes;
+  }, [
+    baseNodes,
+    baseEdges,
+    topologyByDeviceId,
+    telemetryByDeviceMetric,
+    telemetryKeysNewestFirst,
+    sceneObjects,
+    sceneObjectIdsNewestFirst,
+  ]);
 }
 
 export function useTwinSceneModel(
@@ -37,23 +47,26 @@ export function useTwinSceneModel(
 ) {
   const topologyByDeviceId = useLiveStore((state) => state.topologyByDeviceId);
   const telemetryByDeviceMetric = useLiveStore((state) => state.telemetryByDeviceMetric);
+  const telemetryKeysNewestFirst = useLiveStore((state) => state.telemetryKeysNewestFirst);
   const sceneObjects = useLiveStore((state) => state.sceneObjects);
   const sceneObjectIdsNewestFirst = useLiveStore((state) => state.sceneObjectIdsNewestFirst);
 
   return useMemo(() => {
     return buildTwinSceneModel({
       baseNodes,
-      baseEdges,
-      liveNodesByDeviceId: topologyByDeviceId,
-      telemetryByDeviceMetric,
-      sceneObjects,
-      sceneObjectIdsNewestFirst,
-      importedSpatialRefByDeviceId,
+        baseEdges,
+        liveNodesByDeviceId: topologyByDeviceId,
+        telemetryByDeviceMetric,
+        telemetryKeysNewestFirst,
+        sceneObjects,
+        sceneObjectIdsNewestFirst,
+        importedSpatialRefByDeviceId,
     });
   }, [
     baseEdges,
     baseNodes,
     importedSpatialRefByDeviceId,
+    telemetryKeysNewestFirst,
     sceneObjectIdsNewestFirst,
     sceneObjects,
     telemetryByDeviceMetric,
