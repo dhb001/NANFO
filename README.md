@@ -10,6 +10,33 @@ NANFO (Network AI & Neural Fabric Orchestrator) is a modular-monolith platform f
 
 This repository contains both backend and frontend code, plus architecture, API, and project-tracking documentation.
 
+## Start On Localhost (Quick Start)
+
+From repository root:
+
+```bash
+./scripts/dev-start.sh
+cp backend/.env.example backend/.env
+cp frontend/.env.example frontend/.env
+cd backend && poetry install && poetry run alembic -c alembic/alembic.ini upgrade head
+poetry run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+In a second terminal:
+
+```bash
+cd frontend
+npm install
+npm run dev -- --host 0.0.0.0 --port 5173
+```
+
+Open:
+
+- Frontend: `http://127.0.0.1:5173`
+- Backend API docs: `http://127.0.0.1:8000/api/docs`
+
+Note: You must create a bootstrap user first (see "Create a Local Bootstrap User" in this README) because there is no public registration endpoint.
+
 ## Current Status
 
 - Vertical Slices VS1 through VS20 are marked complete in `docs/project/CurrentSprint.md`.
