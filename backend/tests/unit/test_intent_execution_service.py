@@ -130,6 +130,7 @@ async def test_execute_intent_completes_lifecycle_and_publishes_started_and_comp
     assert mock_publish.await_args_list[1].kwargs["event_type"] == "intent.execution_completed"
     assert mock_publish.await_args_list[1].kwargs["source"] == "intent"
     assert mock_hypervisor_execute.called
+    mock_db.refresh.assert_awaited_once_with(intent)
     mock_db.commit.assert_awaited_once()
 
 
@@ -232,6 +233,7 @@ async def test_execute_intent_idempotent_replay_returns_existing_result(mock_db,
     assert result["status"] == "execution_started"
     assert result["idempotent_replay"] is True
     mock_publish.assert_not_awaited()
+    mock_db.refresh.assert_awaited_once_with(intent)
     mock_db.commit.assert_not_awaited()
 
 
@@ -539,6 +541,7 @@ async def test_get_intent_detail_returns_record_for_workspace(mock_db, fake_redi
     assert result["workspace_id"] == str(workspace_id)
     assert result["status"] == "validated"
     assert result["confidence"]["approval_required"] is True
+    mock_db.refresh.assert_awaited_once_with(intent)
 
 
 @pytest.mark.asyncio

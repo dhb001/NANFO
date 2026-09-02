@@ -74,6 +74,15 @@ class WorkspaceRepository:
         )
         return result.scalar_one_or_none()
 
+    async def get_org_id_for_workspace(self, workspace_id: uuid.UUID) -> uuid.UUID | None:
+        result = await self._db.execute(
+            select(Workspace.org_id).where(
+                Workspace.workspace_id == workspace_id,
+                Workspace.deleted_at.is_(None),
+            )
+        )
+        return result.scalar_one_or_none()
+
     async def list_for_org(self, org_id: uuid.UUID, page: int = 1, page_size: int = 20) -> tuple[list[Workspace], int]:
         q = select(Workspace).where(Workspace.org_id == org_id, Workspace.deleted_at.is_(None))
         total = (await self._db.execute(select(func.count()).select_from(q.subquery()))).scalar_one()

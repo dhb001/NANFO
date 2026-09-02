@@ -78,7 +78,7 @@ test.describe("VS5 digital twin realtime resilience", () => {
     await expect(page.getByText(/topology\s+(open|connecting|closed)/i)).toBeVisible();
     await expect(page.getByText(/digital twin\s+(open|connecting|closed)/i)).toBeVisible();
     await expect(page.getByText("Congestion legend")).toBeVisible();
-    await expect(page.getByText(/neutral unavailable metrics/i)).toBeVisible();
+    await expect(page.getByText(/priority loss>latency>util>cpu/i)).toBeVisible();
 
     await page.getByLabel("Inspect node").selectOption("00000000-0000-0000-0000-000000000444");
     await page.getByRole("button", { name: "Configure in Intent Workflow" }).click();

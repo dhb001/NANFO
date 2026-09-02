@@ -100,3 +100,50 @@ export interface TopologyReconcileResult {
   workspace_backfilled_nodes: number;
   warning: string | null;
 }
+
+export interface CampusBuildingRecord {
+  campus_building_id: string;
+  network_id: string;
+  building_id: string;
+  campus_key: string;
+  building_key: string;
+  label: string;
+  geometry: "box" | "extrude";
+  x: number;
+  z: number;
+  base_y: number;
+  width: number;
+  depth: number;
+  height: number;
+  floors: number;
+  footprint: Array<[number, number]>;
+  wall_material: string | null;
+  attenuation_db: number | null;
+  source: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CampusBuildingList {
+  items: CampusBuildingRecord[];
+  total: number;
+}
+
+export interface UpsertCampusBuildingInput {
+  building_id: string;
+  campus_key: string;
+  building_key: string;
+  label: string;
+  geometry: "box" | "extrude";
+  x: number;
+  z: number;
+  base_y: number;
+  width: number;
+  depth: number;
+  height: number;
+  floors: number;
+  footprint: Array<[number, number]>;
+  wall_material?: string | null;
+  attenuation_db?: number | null;
+  source?: string | null;
+}

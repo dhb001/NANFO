@@ -62,24 +62,30 @@ class TestOrgService:
     @pytest.mark.asyncio
     async def test_create_org_success(self, org_svc):
         org = _make_org()
+        actor_id = str(uuid.uuid4())
         with (
             patch.object(org_svc._repo, "get_by_slug", return_value=None),
             patch.object(org_svc._repo, "create", return_value=org),
+            patch.object(org_svc._member_repo, "add_member", new_callable=AsyncMock) as mock_add_member,
             patch("app.modules.organization.service.publish_event", new_callable=AsyncMock),
         ):
             result = await org_svc.create_org(
                 req=CreateOrgRequest(name="Test Org", slug="test-org"),
-                actor_id=str(uuid.uuid4()),
+                actor_id=actor_id,
                 correlation_id=str(uuid.uuid4()),
             )
         assert result.slug == "test-org"
+        assert mock_add_member.await_count == 1
+        assert mock_add_member.await_args.kwargs["org_role"] == "Admin"
 
     @pytest.mark.asyncio
     async def test_create_org_event_publish_failure_is_fail_open(self, org_svc):
         org = _make_org()
+        actor_id = str(uuid.uuid4())
         with (
             patch.object(org_svc._repo, "get_by_slug", return_value=None),
             patch.object(org_svc._repo, "create", return_value=org),
+            patch.object(org_svc._member_repo, "add_member", new_callable=AsyncMock) as mock_add_member,
             patch(
                 "app.modules.organization.service.publish_event",
                 new_callable=AsyncMock,
@@ -88,11 +94,12 @@ class TestOrgService:
         ):
             result = await org_svc.create_org(
                 req=CreateOrgRequest(name="Test Org", slug="test-org"),
-                actor_id=str(uuid.uuid4()),
+                actor_id=actor_id,
                 correlation_id=str(uuid.uuid4()),
             )
 
         assert result.slug == "test-org"
+        assert mock_add_member.await_count == 1
 
     @pytest.mark.asyncio
     async def test_create_org_slug_conflict_raises_409(self, org_svc):
@@ -168,15 +175,18 @@ class TestWorkspaceService:
     async def test_create_workspace_success(self, ws_svc):
         org = _make_org()
         ws = _make_workspace(org_id=org.org_id)
+        actor_user_id = str(uuid.uuid4())
         with (
             patch.object(ws_svc._org_repo, "get_by_id", return_value=org),
+            patch.object(ws_svc._member_repo, "get_member", return_value=_make_member(org.org_id, uuid.UUID(actor_user_id))),
             patch.object(ws_svc._repo, "create", return_value=ws),
             patch("app.modules.organization.service.publish_event", new_callable=AsyncMock),
         ):
             result = await ws_svc.create_workspace(
                 org_id=org.org_id,
                 req=CreateWorkspaceRequest(name="WS1"),
-                actor_id="u1",
+                actor_id=actor_user_id,
+                user_id=actor_user_id,
                 correlation_id=str(uuid.uuid4()),
             )
         assert result.workspace_id == ws.workspace_id
@@ -185,8 +195,10 @@ class TestWorkspaceService:
     async def test_create_workspace_event_publish_failure_is_fail_open(self, ws_svc):
         org = _make_org()
         ws = _make_workspace(org_id=org.org_id)
+        actor_user_id = str(uuid.uuid4())
         with (
             patch.object(ws_svc._org_repo, "get_by_id", return_value=org),
+            patch.object(ws_svc._member_repo, "get_member", return_value=_make_member(org.org_id, uuid.UUID(actor_user_id))),
             patch.object(ws_svc._repo, "create", return_value=ws),
             patch(
                 "app.modules.organization.service.publish_event",
@@ -197,7 +209,8 @@ class TestWorkspaceService:
             result = await ws_svc.create_workspace(
                 org_id=org.org_id,
                 req=CreateWorkspaceRequest(name="WS1"),
-                actor_id="u1",
+                actor_id=actor_user_id,
+                user_id=actor_user_id,
                 correlation_id=str(uuid.uuid4()),
             )
 
@@ -212,10 +225,26 @@ class TestWorkspaceService:
             await ws_svc.create_workspace(
                 org_id=uuid.uuid4(),
                 req=CreateWorkspaceRequest(name="WS1"),
-                actor_id="u1",
+                actor_id=str(uuid.uuid4()),
+                user_id=str(uuid.uuid4()),
                 correlation_id=str(uuid.uuid4()),
             )
         assert exc_info.value.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_list_workspaces_requires_membership(self, ws_svc):
+        org_id = uuid.uuid4()
+        with (
+            patch.object(ws_svc._member_repo, "get_member", return_value=None),
+            pytest.raises(HTTPException) as exc_info,
+        ):
+            await ws_svc.list_workspaces(
+                org_id=org_id,
+                user_id=str(uuid.uuid4()),
+                page=1,
+                page_size=20,
+            )
+        assert exc_info.value.status_code == 403
 
     @pytest.mark.asyncio
     async def test_get_active_workspace_not_found_raises_404(self, ws_svc):
@@ -235,10 +264,54 @@ class TestWorkspaceService:
         assert result is ws
 
     @pytest.mark.asyncio
+    async def test_get_active_workspace_with_user_id_enforces_org_membership(self, ws_svc):
+        ws = _make_workspace()
+        user_id = str(uuid.uuid4())
+        with (
+            patch.object(ws_svc._repo, "get_by_id", return_value=ws),
+            patch.object(ws_svc, "_assert_org_membership", new_callable=AsyncMock) as mock_assert,
+        ):
+            result = await ws_svc.get_active_workspace(ws.workspace_id, user_id=user_id)
+
+        mock_assert.assert_awaited_once_with(org_id=ws.org_id, user_id=user_id)
+        assert result is ws
+
+    @pytest.mark.asyncio
+    async def test_get_active_workspace_claim_org_mismatch_raises_403(self, ws_svc):
+        ws = _make_workspace()
+        with (
+            patch.object(ws_svc._repo, "get_by_id", return_value=ws),
+            pytest.raises(HTTPException) as exc_info,
+        ):
+            await ws_svc.get_active_workspace(ws.workspace_id, claim_org_id=uuid.uuid4())
+
+        assert exc_info.value.status_code == 403
+
+    @pytest.mark.asyncio
+    async def test_assert_workspace_membership_returns_workspace(self, ws_svc):
+        ws = _make_workspace()
+        user_id = str(uuid.uuid4())
+        with (
+            patch.object(ws_svc, "get_active_workspace", new_callable=AsyncMock, return_value=ws) as mock_get,
+        ):
+            result = await ws_svc.assert_workspace_membership(workspace_id=ws.workspace_id, user_id=user_id)
+
+        mock_get.assert_awaited_once_with(ws.workspace_id, user_id=user_id)
+        assert result is ws
+
+    @pytest.mark.asyncio
     async def test_get_workspace_for_org_returns_workspace(self, ws_svc):
         ws = _make_workspace()
-        with patch.object(ws_svc._repo, "get_by_org_and_id", return_value=ws):
-            result = await ws_svc.get_workspace_for_org(org_id=ws.org_id, workspace_id=ws.workspace_id)
+        actor_user_id = str(uuid.uuid4())
+        with (
+            patch.object(ws_svc._member_repo, "get_member", return_value=_make_member(ws.org_id, uuid.UUID(actor_user_id))),
+            patch.object(ws_svc._repo, "get_by_org_and_id", return_value=ws),
+        ):
+            result = await ws_svc.get_workspace_for_org(
+                org_id=ws.org_id,
+                workspace_id=ws.workspace_id,
+                user_id=actor_user_id,
+            )
         assert result.workspace_id == ws.workspace_id
 
     @pytest.mark.asyncio
@@ -246,6 +319,7 @@ class TestWorkspaceService:
         ws = _make_workspace()
         actor_id = str(uuid.uuid4())
         with (
+            patch.object(ws_svc._member_repo, "get_member", return_value=_make_member(ws.org_id, uuid.UUID(actor_id))),
             patch.object(ws_svc._repo, "get_by_org_and_id", return_value=ws),
             patch.object(ws_svc._repo, "update", return_value=ws),
             patch("app.modules.organization.service.publish_event", new_callable=AsyncMock) as mock_publish,
@@ -256,6 +330,7 @@ class TestWorkspaceService:
                 name="Updated Workspace",
                 description="Updated description",
                 actor_id=actor_id,
+                user_id=actor_id,
                 correlation_id=str(uuid.uuid4()),
             )
 
@@ -268,6 +343,7 @@ class TestWorkspaceService:
         ws = _make_workspace()
         actor_id = str(uuid.uuid4())
         with (
+            patch.object(ws_svc._member_repo, "get_member", return_value=_make_member(ws.org_id, uuid.UUID(actor_id))),
             patch.object(ws_svc._repo, "get_by_org_and_id", return_value=ws),
             patch.object(ws_svc._repo, "soft_delete", new_callable=AsyncMock),
             patch("app.modules.organization.service.publish_event", new_callable=AsyncMock) as mock_publish,
@@ -276,6 +352,7 @@ class TestWorkspaceService:
                 org_id=ws.org_id,
                 workspace_id=ws.workspace_id,
                 actor_id=actor_id,
+                user_id=actor_id,
                 correlation_id=str(uuid.uuid4()),
             )
 
@@ -287,8 +364,10 @@ class TestMemberService:
     @pytest.mark.asyncio
     async def test_add_member_validates_identity_user_exists(self, member_svc):
         org = _make_org()
+        actor_user_id = str(uuid.uuid4())
         with (
             patch.object(member_svc._org_repo, "get_by_id", return_value=org),
+            patch.object(member_svc._repo, "get_member", return_value=_make_member(org.org_id, uuid.UUID(actor_user_id))),
             patch.object(member_svc._identity_directory, "user_exists", return_value=False),
             pytest.raises(HTTPException) as exc_info,
         ):
@@ -296,7 +375,8 @@ class TestMemberService:
                 org_id=org.org_id,
                 user_id=uuid.uuid4(),
                 org_role="Operator",
-                actor_id="u1",
+                actor_id=actor_user_id,
+                actor_user_id=actor_user_id,
                 correlation_id=str(uuid.uuid4()),
             )
 
@@ -308,11 +388,13 @@ class TestMemberService:
         org = _make_org()
         user_id = uuid.uuid4()
         member = _make_member(org.org_id, user_id)
+        actor_user_id = str(uuid.uuid4())
+        actor_member = _make_member(org.org_id, uuid.UUID(actor_user_id))
 
         with (
             patch.object(member_svc._org_repo, "get_by_id", return_value=org),
             patch.object(member_svc._identity_directory, "user_exists", return_value=True),
-            patch.object(member_svc._repo, "get_member", return_value=None),
+            patch.object(member_svc._repo, "get_member", side_effect=[actor_member, None]),
             patch.object(member_svc._repo, "add_member", return_value=member),
             patch("app.modules.organization.service.publish_event", new_callable=AsyncMock),
         ):
@@ -320,7 +402,8 @@ class TestMemberService:
                 org_id=org.org_id,
                 user_id=user_id,
                 org_role="Admin",
-                actor_id="u1",
+                actor_id=actor_user_id,
+                actor_user_id=actor_user_id,
                 correlation_id=str(uuid.uuid4()),
             )
 
@@ -332,11 +415,13 @@ class TestMemberService:
         org = _make_org()
         user_id = uuid.uuid4()
         member = _make_member(org.org_id, user_id)
+        actor_user_id = str(uuid.uuid4())
+        actor_member = _make_member(org.org_id, uuid.UUID(actor_user_id))
 
         with (
             patch.object(member_svc._org_repo, "get_by_id", return_value=org),
             patch.object(member_svc._identity_directory, "user_exists", return_value=True),
-            patch.object(member_svc._repo, "get_member", return_value=None),
+            patch.object(member_svc._repo, "get_member", side_effect=[actor_member, None]),
             patch.object(member_svc._repo, "add_member", return_value=member),
             patch(
                 "app.modules.organization.service.publish_event",
@@ -348,20 +433,39 @@ class TestMemberService:
                 org_id=org.org_id,
                 user_id=user_id,
                 org_role="Admin",
-                actor_id="u1",
+                actor_id=actor_user_id,
+                actor_user_id=actor_user_id,
                 correlation_id=str(uuid.uuid4()),
             )
 
         assert result.user_id == user_id
 
     @pytest.mark.asyncio
+    async def test_list_members_requires_actor_membership(self, member_svc):
+        org_id = uuid.uuid4()
+        with (
+            patch.object(member_svc._repo, "get_member", return_value=None),
+            pytest.raises(HTTPException) as exc_info,
+        ):
+            await member_svc.list_members(
+                org_id=org_id,
+                actor_user_id=str(uuid.uuid4()),
+                page=1,
+                page_size=20,
+            )
+
+        assert exc_info.value.status_code == 403
+
+    @pytest.mark.asyncio
     async def test_remove_member_event_publish_failure_is_fail_open(self, member_svc):
         org_id = uuid.uuid4()
         user_id = uuid.uuid4()
         member = _make_member(org_id, user_id)
+        actor_user_id = str(uuid.uuid4())
+        actor_member = _make_member(org_id, uuid.UUID(actor_user_id))
 
         with (
-            patch.object(member_svc._repo, "get_member", return_value=member),
+            patch.object(member_svc._repo, "get_member", side_effect=[actor_member, member]),
             patch.object(member_svc._repo, "remove_member", new_callable=AsyncMock),
             patch(
                 "app.modules.organization.service.publish_event",
@@ -372,6 +476,7 @@ class TestMemberService:
             await member_svc.remove_member(
                 org_id=org_id,
                 user_id=user_id,
-                actor_id="u1",
+                actor_id=actor_user_id,
+                actor_user_id=actor_user_id,
                 correlation_id=str(uuid.uuid4()),
             )

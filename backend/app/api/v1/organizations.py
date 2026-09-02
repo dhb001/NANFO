@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.dependencies import (
     RequestMeta,
     TokenClaims,
+    enforce_org_scope,
     get_current_user,
     get_db,
     get_redis,
@@ -79,8 +80,9 @@ async def get_org(
     redis: Annotated[aioredis.Redis, Depends(get_redis)],
 ):
     started = time.monotonic()
+    scoped_org_id = enforce_org_scope(claims=claims, org_id=org_id)
     svc = OrgService(db=db, redis=redis)
-    result = await svc.get_org(org_id=org_id, user_id=claims.user_id)
+    result = await svc.get_org(org_id=scoped_org_id, user_id=claims.user_id)
     return success_response(result, meta.request_id, started, meta.timestamp)
 
 
@@ -94,9 +96,10 @@ async def update_org(
     redis: Annotated[aioredis.Redis, Depends(get_redis)],
 ):
     started = time.monotonic()
+    scoped_org_id = enforce_org_scope(claims=claims, org_id=org_id)
     svc = OrgService(db=db, redis=redis)
     result = await svc.update_org(
-        org_id=org_id,
+        org_id=scoped_org_id,
         user_id=claims.user_id,
         name=req.name,
         actor_id=claims.user_id,
@@ -113,9 +116,10 @@ async def delete_org(
     db: Annotated[AsyncSession, Depends(get_db)],
     redis: Annotated[aioredis.Redis, Depends(get_redis)],
 ):
+    scoped_org_id = enforce_org_scope(claims=claims, org_id=org_id)
     svc = OrgService(db=db, redis=redis)
     await svc.delete_org(
-        org_id=org_id,
+        org_id=scoped_org_id,
         user_id=claims.user_id,
         actor_id=claims.user_id,
         correlation_id=meta.request_id,
@@ -134,8 +138,15 @@ async def create_workspace(
     redis: Annotated[aioredis.Redis, Depends(get_redis)],
 ):
     started = time.monotonic()
+    scoped_org_id = enforce_org_scope(claims=claims, org_id=org_id)
     svc = WorkspaceService(db=db, redis=redis)
-    result = await svc.create_workspace(org_id=org_id, req=req, actor_id=claims.user_id, correlation_id=meta.request_id)
+    result = await svc.create_workspace(
+        org_id=scoped_org_id,
+        req=req,
+        actor_id=claims.user_id,
+        user_id=claims.user_id,
+        correlation_id=meta.request_id,
+    )
     return success_response(result, meta.request_id, started, meta.timestamp)
 
 
@@ -150,8 +161,14 @@ async def list_workspaces(
     page_size: int = 20,
 ):
     started = time.monotonic()
+    scoped_org_id = enforce_org_scope(claims=claims, org_id=org_id)
     svc = WorkspaceService(db=db, redis=redis)
-    result = await svc.list_workspaces(org_id=org_id, page=page, page_size=page_size)
+    result = await svc.list_workspaces(
+        org_id=scoped_org_id,
+        user_id=claims.user_id,
+        page=page,
+        page_size=page_size,
+    )
     return success_response(result, meta.request_id, started, meta.timestamp)
 
 
@@ -164,10 +181,14 @@ async def get_workspace(
     db: Annotated[AsyncSession, Depends(get_db)],
     redis: Annotated[aioredis.Redis, Depends(get_redis)],
 ):
-    _ = claims
     started = time.monotonic()
+    scoped_org_id = enforce_org_scope(claims=claims, org_id=org_id)
     svc = WorkspaceService(db=db, redis=redis)
-    result = await svc.get_workspace_for_org(org_id=org_id, workspace_id=workspace_id)
+    result = await svc.get_workspace_for_org(
+        org_id=scoped_org_id,
+        workspace_id=workspace_id,
+        user_id=claims.user_id,
+    )
     return success_response(result, meta.request_id, started, meta.timestamp)
 
 
@@ -182,13 +203,15 @@ async def update_workspace(
     redis: Annotated[aioredis.Redis, Depends(get_redis)],
 ):
     started = time.monotonic()
+    scoped_org_id = enforce_org_scope(claims=claims, org_id=org_id)
     svc = WorkspaceService(db=db, redis=redis)
     result = await svc.update_workspace(
-        org_id=org_id,
+        org_id=scoped_org_id,
         workspace_id=workspace_id,
         name=req.name,
         description=req.description,
         actor_id=claims.user_id,
+        user_id=claims.user_id,
         correlation_id=meta.request_id,
     )
     return success_response(result, meta.request_id, started, meta.timestamp)
@@ -203,11 +226,13 @@ async def delete_workspace(
     db: Annotated[AsyncSession, Depends(get_db)],
     redis: Annotated[aioredis.Redis, Depends(get_redis)],
 ):
+    scoped_org_id = enforce_org_scope(claims=claims, org_id=org_id)
     svc = WorkspaceService(db=db, redis=redis)
     await svc.delete_workspace(
-        org_id=org_id,
+        org_id=scoped_org_id,
         workspace_id=workspace_id,
         actor_id=claims.user_id,
+        user_id=claims.user_id,
         correlation_id=meta.request_id,
     )
 
@@ -224,8 +249,16 @@ async def add_member(
     redis: Annotated[aioredis.Redis, Depends(get_redis)],
 ):
     started = time.monotonic()
+    scoped_org_id = enforce_org_scope(claims=claims, org_id=org_id)
     svc = MemberService(db=db, redis=redis)
-    result = await svc.add_member(org_id=org_id, user_id=req.user_id, org_role=req.org_role, actor_id=claims.user_id, correlation_id=meta.request_id)
+    result = await svc.add_member(
+        org_id=scoped_org_id,
+        user_id=req.user_id,
+        org_role=req.org_role,
+        actor_id=claims.user_id,
+        actor_user_id=claims.user_id,
+        correlation_id=meta.request_id,
+    )
     return success_response(result, meta.request_id, started, meta.timestamp)
 
 
@@ -240,8 +273,14 @@ async def list_members(
     page_size: int = 20,
 ):
     started = time.monotonic()
+    scoped_org_id = enforce_org_scope(claims=claims, org_id=org_id)
     svc = MemberService(db=db, redis=redis)
-    result = await svc.list_members(org_id=org_id, page=page, page_size=page_size)
+    result = await svc.list_members(
+        org_id=scoped_org_id,
+        actor_user_id=claims.user_id,
+        page=page,
+        page_size=page_size,
+    )
     return success_response(result, meta.request_id, started, meta.timestamp)
 
 
@@ -254,5 +293,12 @@ async def remove_member(
     db: Annotated[AsyncSession, Depends(get_db)],
     redis: Annotated[aioredis.Redis, Depends(get_redis)],
 ):
+    scoped_org_id = enforce_org_scope(claims=claims, org_id=org_id)
     svc = MemberService(db=db, redis=redis)
-    await svc.remove_member(org_id=org_id, user_id=user_id, actor_id=claims.user_id, correlation_id=meta.request_id)
+    await svc.remove_member(
+        org_id=scoped_org_id,
+        user_id=user_id,
+        actor_id=claims.user_id,
+        actor_user_id=claims.user_id,
+        correlation_id=meta.request_id,
+    )

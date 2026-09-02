@@ -77,6 +77,7 @@ async def _push_telemetry_delta(event: dict, payload: dict) -> None:
         metric=metric_delta,
         correlation_id=str(event.get("correlation_id", "")),
         timestamp=str(event.get("timestamp", datetime.now(UTC).isoformat())),
+        workspace_id=str(payload.get("workspace_id", "")).strip() or None,
     )
 
 

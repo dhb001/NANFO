@@ -53,7 +53,13 @@ class OrgService:
                 detail={"code": "ORG_SLUG_CONFLICT", "message": f"Slug '{req.slug}' is already taken."},
             )
 
+        try:
+            actor_user_id = uuid.UUID(actor_id)
+        except (TypeError, ValueError, AttributeError):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions.")
+
         org = await self._repo.create(name=req.name, slug=req.slug)
+        await self._member_repo.add_member(org_id=org.org_id, user_id=actor_user_id, org_role="Admin")
         await self._db.commit()
         await self._db.refresh(org)
 
@@ -181,14 +187,40 @@ class WorkspaceService:
         self._redis = redis
         self._repo = WorkspaceRepository(db)
         self._org_repo = OrganizationRepository(db)
+        self._member_repo = OrgMemberRepository(db)
+
+    async def _assert_org_membership(self, *, org_id: uuid.UUID, user_id: str) -> None:
+        try:
+            actor_user_id = uuid.UUID(user_id)
+        except (TypeError, ValueError, AttributeError):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions.")
+
+        member = await self._member_repo.get_member(org_id, actor_user_id)
+        if member is None:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions.")
+
+    async def assert_workspace_membership(self, *, workspace_id: uuid.UUID, user_id: str) -> Workspace:
+        """Resolve workspace and enforce that the user is a member of its org.
+
+        This centralizes the `workspace -> org -> org_membership` ownership chain check
+        for callers that only have a workspace identifier.
+        """
+        return await self.get_active_workspace(workspace_id, user_id=user_id)
 
     async def create_workspace(
-        self, org_id: uuid.UUID, req: CreateWorkspaceRequest, actor_id: str, correlation_id: str
+        self,
+        org_id: uuid.UUID,
+        req: CreateWorkspaceRequest,
+        actor_id: str,
+        user_id: str,
+        correlation_id: str,
     ) -> WorkspaceResponse:
         # Verify org exists
         org = await self._org_repo.get_by_id(org_id)
         if org is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Organization not found.")
+
+        await self._assert_org_membership(org_id=org_id, user_id=user_id)
 
         ws = await self._repo.create(org_id=org_id, name=req.name, description=req.description)
         await self._db.commit()
@@ -216,11 +248,26 @@ class WorkspaceService:
             )
         return WorkspaceResponse.model_validate(ws)
 
-    async def list_workspaces(self, org_id: uuid.UUID, page: int, page_size: int) -> WorkspaceListResponse:
+    async def list_workspaces(
+        self,
+        *,
+        org_id: uuid.UUID,
+        user_id: str,
+        page: int,
+        page_size: int,
+    ) -> WorkspaceListResponse:
+        await self._assert_org_membership(org_id=org_id, user_id=user_id)
         rows, total = await self._repo.list_for_org(org_id, page=page, page_size=page_size)
         return WorkspaceListResponse(items=[WorkspaceResponse.model_validate(r) for r in rows], total=total)
 
-    async def get_workspace_for_org(self, *, org_id: uuid.UUID, workspace_id: uuid.UUID) -> WorkspaceResponse:
+    async def get_workspace_for_org(
+        self,
+        *,
+        org_id: uuid.UUID,
+        workspace_id: uuid.UUID,
+        user_id: str,
+    ) -> WorkspaceResponse:
+        await self._assert_org_membership(org_id=org_id, user_id=user_id)
         ws = await self._repo.get_by_org_and_id(org_id=org_id, workspace_id=workspace_id)
         if ws is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workspace not found.")
@@ -234,8 +281,11 @@ class WorkspaceService:
         name: str | None,
         description: str | None,
         actor_id: str,
+        user_id: str,
         correlation_id: str,
     ) -> WorkspaceResponse:
+        await self._assert_org_membership(org_id=org_id, user_id=user_id)
+
         ws = await self._repo.get_by_org_and_id(org_id=org_id, workspace_id=workspace_id)
         if ws is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workspace not found.")
@@ -279,8 +329,11 @@ class WorkspaceService:
         org_id: uuid.UUID,
         workspace_id: uuid.UUID,
         actor_id: str,
+        user_id: str,
         correlation_id: str,
     ) -> None:
+        await self._assert_org_membership(org_id=org_id, user_id=user_id)
+
         ws = await self._repo.get_by_org_and_id(org_id=org_id, workspace_id=workspace_id)
         if ws is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workspace not found.")
@@ -314,7 +367,13 @@ class WorkspaceService:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workspace not found.")
         return WorkspaceResponse.model_validate(ws)
 
-    async def get_active_workspace(self, workspace_id: uuid.UUID) -> Workspace:
+    async def get_active_workspace(
+        self,
+        workspace_id: uuid.UUID,
+        *,
+        user_id: str | None = None,
+        claim_org_id: uuid.UUID | None = None,
+    ) -> Workspace:
         """C5: Called by NetworkService to validate workspace existence before network creation.
 
         Returns the active Workspace object, or raises HTTP 404.
@@ -327,6 +386,13 @@ class WorkspaceService:
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail={"code": "WORKSPACE_NOT_FOUND", "message": "Workspace not found or has been deleted."},
             )
+
+        if user_id is not None:
+            await self._assert_org_membership(org_id=ws.org_id, user_id=user_id)
+
+        if claim_org_id is not None and ws.org_id != claim_org_id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions.")
+
         return ws
 
 
@@ -339,12 +405,30 @@ class MemberService:
         self._org_repo = OrganizationRepository(db)
         self._identity_directory = IdentityDirectoryService(db)
 
+    async def _assert_actor_membership(self, *, org_id: uuid.UUID, actor_user_id: str) -> None:
+        try:
+            actor_id = uuid.UUID(actor_user_id)
+        except (TypeError, ValueError, AttributeError):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions.")
+
+        member = await self._repo.get_member(org_id, actor_id)
+        if member is None:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions.")
+
     async def add_member(
-        self, org_id: uuid.UUID, user_id: uuid.UUID, org_role: str, actor_id: str, correlation_id: str
+        self,
+        org_id: uuid.UUID,
+        user_id: uuid.UUID,
+        org_role: str,
+        actor_id: str,
+        actor_user_id: str,
+        correlation_id: str,
     ) -> MemberResponse:
         org = await self._org_repo.get_by_id(org_id)
         if org is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Organization not found.")
+
+        await self._assert_actor_membership(org_id=org_id, actor_user_id=actor_user_id)
 
         user_exists = await self._identity_directory.user_exists(user_id)
         if not user_exists:
@@ -382,13 +466,28 @@ class MemberService:
             )
         return MemberResponse.model_validate(member)
 
-    async def list_members(self, org_id: uuid.UUID, page: int, page_size: int) -> MemberListResponse:
+    async def list_members(
+        self,
+        *,
+        org_id: uuid.UUID,
+        actor_user_id: str,
+        page: int,
+        page_size: int,
+    ) -> MemberListResponse:
+        await self._assert_actor_membership(org_id=org_id, actor_user_id=actor_user_id)
         rows, total = await self._repo.list_members(org_id, page=page, page_size=page_size)
         return MemberListResponse(items=[MemberResponse.model_validate(r) for r in rows], total=total)
 
     async def remove_member(
-        self, org_id: uuid.UUID, user_id: uuid.UUID, actor_id: str, correlation_id: str
+        self,
+        org_id: uuid.UUID,
+        user_id: uuid.UUID,
+        actor_id: str,
+        actor_user_id: str,
+        correlation_id: str,
     ) -> None:
+        await self._assert_actor_membership(org_id=org_id, actor_user_id=actor_user_id)
+
         member = await self._repo.get_member(org_id, user_id)
         if member is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Member not found.")

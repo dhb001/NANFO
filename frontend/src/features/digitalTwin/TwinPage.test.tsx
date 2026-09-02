@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { TwinPage } from "@/features/digitalTwin/TwinPage";
 import { parseImportSummary } from "@/features/digitalTwin/twinImport";
@@ -11,6 +11,9 @@ import { useUiStore } from "@/shared/state/ui-store";
 const mockUseTopologyGraph = vi.fn();
 const mockUseTopologyNode = vi.fn();
 const mockUpdateDeviceSpatialRefMutateAsync = vi.fn();
+const mockUpsertCampusBuildingsMutateAsync = vi.fn();
+const mockUseCampusBuildings = vi.fn();
+const mockUseUpsertCampusBuildings = vi.fn();
 
 const navigateMock = vi.fn();
 
@@ -32,14 +35,34 @@ vi.mock("@/features/networks/hooks", () => ({
     mutateAsync: mockUpdateDeviceSpatialRefMutateAsync,
     isPending: false,
   }),
+  useCampusBuildings: (...args: unknown[]) => mockUseCampusBuildings(...args),
+  useUpsertCampusBuildings: (...args: unknown[]) => mockUseUpsertCampusBuildings(...args),
 }));
 
+const twinScenePropsSpy = vi.fn();
+
 vi.mock("@/features/digitalTwin/TwinScene", () => ({
-  TwinScene: (props: { layers: Record<string, boolean>; nodes: unknown[]; links: unknown[]; overlays: unknown[] }) => (
+  TwinScene: (props: {
+    layers: Record<string, boolean>;
+    nodes: unknown[];
+    links: unknown[];
+    overlays: unknown[];
+    alerts?: Array<{ event_type: string; payload: Record<string, unknown> }>;
+    buildingViewState?: {
+      selectedBuildingId?: string | null;
+      selectedFloorKey?: string | null;
+      floorFilterEnabled?: boolean;
+      visibleBuildingIds?: ReadonlySet<string>;
+    };
+    onSelectBuilding?: (buildingId: string) => void;
+  }) => {
+    twinScenePropsSpy(props);
+    return (
     <div data-testid="twin-scene">
       scene nodes={props.nodes.length} links={props.links.length} overlays={props.overlays.length} congestion={String(props.layers.showCongestion)}
     </div>
-  ),
+    );
+  },
 }));
 
 vi.mock("@/features/digitalTwin/twinImport", async () => {
@@ -64,6 +87,10 @@ describe("TwinPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     navigateMock.mockReset();
+    twinScenePropsSpy.mockReset();
+    mockUseCampusBuildings.mockReset();
+    mockUseUpsertCampusBuildings.mockReset();
+    mockUpsertCampusBuildingsMutateAsync.mockReset();
 
     useAuthStore.setState({
       accessToken: "token-1",
@@ -111,18 +138,32 @@ describe("TwinPage", () => {
       toasts: [],
     });
     mockUpdateDeviceSpatialRefMutateAsync.mockResolvedValue({});
+    mockUpsertCampusBuildingsMutateAsync.mockResolvedValue({
+      items: [],
+      total: 0,
+    });
+    mockUseCampusBuildings.mockReturnValue(
+      queryResult({
+        items: [],
+        total: 0,
+      }),
+    );
+    mockUseUpsertCampusBuildings.mockReturnValue({
+      mutateAsync: mockUpsertCampusBuildingsMutateAsync,
+      isPending: false,
+    });
   });
 
-  it("renders loading state", () => {
+  it("renders loading state", async () => {
     mockUseTopologyGraph.mockReturnValue(queryResult(null, { isLoading: true }));
     mockUseTopologyNode.mockReturnValue(queryResult(null));
 
     render(<TwinPage />);
 
-    expect(screen.getByText("Loading")).toBeInTheDocument();
+    expect(await screen.findByText("Loading")).toBeInTheDocument();
   });
 
-  it("renders empty state", () => {
+  it("renders empty state", async () => {
     mockUseTopologyGraph.mockReturnValue(
       queryResult({
         data: {
@@ -135,16 +176,16 @@ describe("TwinPage", () => {
 
     render(<TwinPage />);
 
-    expect(screen.getByText("Topology graph is empty")).toBeInTheDocument();
+    expect(await screen.findByText("Topology graph is empty")).toBeInTheDocument();
   });
 
-  it("renders error state", () => {
+  it("renders error state", async () => {
     mockUseTopologyGraph.mockReturnValue(queryResult(null, { isError: true }));
     mockUseTopologyNode.mockReturnValue(queryResult(null));
 
     render(<TwinPage />);
 
-    expect(screen.getByText("Request failed")).toBeInTheDocument();
+    expect(await screen.findByText("Request failed")).toBeInTheDocument();
   });
 
   it("renders success state and toggles overlays", async () => {
@@ -191,6 +232,122 @@ describe("TwinPage", () => {
     expect(screen.getByRole("button", { name: "Simulation/Intent" })).toHaveAttribute("aria-pressed", "false");
   });
 
+  it("applies building/floor focus controls and forwards view state to scene", async () => {
+    const user = userEvent.setup();
+    mockUseTopologyGraph.mockReturnValue(
+      queryResult({
+        data: {
+          nodes: [
+            {
+              device_id: "00000000-0000-0000-0000-000000000444",
+              hostname: "edge-1",
+              device_type: "switch",
+              status: "active",
+              spatial_ref_id: "campus-a/building-1/f01/rack-1/device-1",
+            },
+            {
+              device_id: "00000000-0000-0000-0000-000000000445",
+              hostname: "edge-2",
+              device_type: "switch",
+              status: "active",
+              spatial_ref_id: "campus-a/building-1/f02/rack-1/device-2",
+            },
+            {
+              device_id: "00000000-0000-0000-0000-000000000446",
+              hostname: "edge-3",
+              device_type: "switch",
+              status: "active",
+              spatial_ref_id: "campus-a/building-2/f01/rack-1/device-3",
+            },
+          ],
+          edges: [],
+        },
+      }),
+    );
+    mockUseTopologyNode.mockReturnValue(queryResult(null));
+
+    render(<TwinPage />);
+    await waitForTwinScene();
+
+    await user.selectOptions(screen.getByLabelText("Twin building focus"), "campus-a:building-1");
+    await user.click(screen.getByRole("button", { name: "Focus building only" }));
+    await user.selectOptions(screen.getByLabelText("Twin floor focus"), "f01");
+    await user.click(screen.getByRole("button", { name: "Filter selected floor" }));
+
+    const latestTwinSceneProps = twinScenePropsSpy.mock.calls.at(-1)?.[0] as {
+      buildingViewState?: {
+        selectedBuildingId?: string | null;
+        selectedFloorKey?: string | null;
+        floorFilterEnabled?: boolean;
+        visibleBuildingIds?: ReadonlySet<string>;
+      };
+    };
+
+    expect(latestTwinSceneProps.buildingViewState?.selectedBuildingId).toBe("campus-a:building-1");
+    expect(latestTwinSceneProps.buildingViewState?.selectedFloorKey).toBe("f01");
+    expect(latestTwinSceneProps.buildingViewState?.floorFilterEnabled).toBe(true);
+    expect(latestTwinSceneProps.buildingViewState?.visibleBuildingIds?.has("campus-a:building-1")).toBe(true);
+
+    await user.click(screen.getByRole("button", { name: "Reset focus" }));
+    const afterResetProps = twinScenePropsSpy.mock.calls.at(-1)?.[0] as {
+      buildingViewState?: unknown;
+    };
+    expect(afterResetProps.buildingViewState).toBeUndefined();
+  });
+
+  it("shows device type legend and forwards live alerts to the scene", async () => {
+    mockUseTopologyGraph.mockReturnValue(
+      queryResult({
+        data: {
+          nodes: [
+            {
+              device_id: "00000000-0000-0000-0000-000000000444",
+              hostname: "edge-1",
+              device_type: "switch",
+              status: "active",
+              spatial_ref_id: "campus-a/building-1/floor-1/rack-2/device-1",
+            },
+            {
+              device_id: "00000000-0000-0000-0000-000000000445",
+              hostname: "core-1",
+              device_type: "router",
+              status: "active",
+              spatial_ref_id: "campus-a/building-1/floor-1/rack-1/device-1",
+            },
+          ],
+          edges: [],
+        },
+      }),
+    );
+    mockUseTopologyNode.mockReturnValue(queryResult(null));
+
+    useLiveStore.setState((state) => ({
+      ...state,
+      alerts: [
+        {
+          event_id: "alert-1",
+          event_type: "alert.generated",
+          source: "telemetry",
+          payload: { device_id: "00000000-0000-0000-0000-000000000444" },
+        },
+      ],
+    }));
+
+    render(<TwinPage />);
+    await waitForTwinScene();
+
+    expect(screen.getByText("Device type legend")).toBeInTheDocument();
+    expect(screen.getByText(/Core router/i)).toBeInTheDocument();
+    expect(screen.getByText(/Access switch/i)).toBeInTheDocument();
+
+    const latestTwinSceneProps = twinScenePropsSpy.mock.calls.at(-1)?.[0] as {
+      alerts?: Array<{ event_type: string; payload: Record<string, unknown> }>;
+    };
+    expect(latestTwinSceneProps.alerts).toHaveLength(1);
+    expect(latestTwinSceneProps.alerts?.[0]?.event_type).toBe("alert.generated");
+    expect(latestTwinSceneProps.alerts?.[0]?.payload.device_id).toBe("00000000-0000-0000-0000-000000000444");
+  });
+
   it("validates invalid import files and shows import summary for valid model", async () => {
     const user = userEvent.setup({ applyAccept: false });
     mockUseTopologyGraph.mockReturnValue(
@@ -223,7 +380,7 @@ describe("TwinPage", () => {
     const validModel = new File(["binary"], "campus.glb", { type: "model/gltf-binary" });
     await user.upload(modelInput, validModel);
     expect(await screen.findByText(/model GLB/i)).toBeInTheDocument();
-    expect(screen.getByText(/Imported mapping is kept in local session state only/i)).toBeInTheDocument();
+    expect(screen.getByText(/Imported mapping is session-only/i)).toBeInTheDocument();
   });
 
   it("routes configure action to existing intent workflow", async () => {
@@ -262,6 +419,10 @@ describe("TwinPage", () => {
 
     await user.selectOptions(screen.getByLabelText("Inspect node"), "00000000-0000-0000-0000-000000000444");
     await user.click(screen.getByRole("button", { name: "Configure in Intent Workflow" }));
+
+    await waitFor(() => {
+      expect(navigateMock).toHaveBeenCalled();
+    });
 
     const call = navigateMock.mock.calls[0]?.[0];
     expect(typeof call).toBe("string");

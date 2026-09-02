@@ -7,8 +7,8 @@ networks.workspace_id is a logical reference to Organization module — NO SQL F
 import uuid
 from datetime import datetime
 
-from sqlalchemy import TIMESTAMP, ForeignKey, Text, func
-from sqlalchemy.dialects.postgresql import INET, UUID
+from sqlalchemy import TIMESTAMP, Float, ForeignKey, Integer, Text, func
+from sqlalchemy.dialects.postgresql import INET, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.postgres import Base
@@ -54,3 +54,31 @@ class Device(Base):
     deleted_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True), nullable=True)
 
     network: Mapped["Network"] = relationship(back_populates="devices")
+
+
+class CampusBuildingRecord(Base):
+    __tablename__ = "campus_buildings"
+
+    campus_building_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    network_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("networks.network_id", ondelete="CASCADE"), nullable=False
+    )
+    building_id: Mapped[str] = mapped_column(Text, nullable=False)
+    campus_key: Mapped[str] = mapped_column(Text, nullable=False)
+    building_key: Mapped[str] = mapped_column(Text, nullable=False)
+    label: Mapped[str] = mapped_column(Text, nullable=False)
+    geometry: Mapped[str] = mapped_column(Text, nullable=False)
+    x: Mapped[float] = mapped_column(Float, nullable=False)
+    z: Mapped[float] = mapped_column(Float, nullable=False)
+    base_y: Mapped[float] = mapped_column(Float, nullable=False)
+    width: Mapped[float] = mapped_column(Float, nullable=False)
+    depth: Mapped[float] = mapped_column(Float, nullable=False)
+    height: Mapped[float] = mapped_column(Float, nullable=False)
+    floors: Mapped[int] = mapped_column(Integer, nullable=False)
+    footprint: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    wall_material: Mapped[str | None] = mapped_column(Text, nullable=True)
+    attenuation_db: Mapped[float | None] = mapped_column(Float, nullable=True)
+    source: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now())
+    deleted_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True), nullable=True)

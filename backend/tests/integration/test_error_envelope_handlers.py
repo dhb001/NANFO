@@ -101,3 +101,23 @@ def test_unhandled_exception_uses_canonical_envelope(client):
     assert body["data"] is None
     assert isinstance(body["meta"], dict)
     assert body["errors"]["code"] == "INTERNAL_ERROR"
+
+
+def test_unhandled_exception_includes_allowed_origin_cors_headers(client):
+    headers = {
+        "Authorization": f"Bearer {_make_token()}",
+        "Origin": "http://127.0.0.1:5173",
+    }
+    with patch(
+        "app.modules.organization.service.OrgService.create_org",
+        new=AsyncMock(side_effect=Exception("boom")),
+    ):
+        response = client.post(
+            "/api/v1/organizations",
+            json={"name": "Example", "slug": "example-org"},
+            headers=headers,
+        )
+
+    assert response.status_code == 500
+    assert response.headers.get("access-control-allow-origin") == "http://127.0.0.1:5173"
+    assert response.headers.get("access-control-allow-credentials") == "true"

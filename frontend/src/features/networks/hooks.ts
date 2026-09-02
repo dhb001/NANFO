@@ -2,8 +2,10 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   createDevice,
   createNetwork,
+  listCampusBuildings,
   listDevices,
   listNetworks,
+  upsertCampusBuildings,
   updateDeviceSpatialRef,
 } from "@/features/networks/api";
 
@@ -79,6 +81,53 @@ export function useUpdateDeviceSpatialRef(token: string | null, networkId: strin
       queryClient.invalidateQueries({ queryKey: ["devices", token, networkId] });
       queryClient.invalidateQueries({ queryKey: ["topology", token, networkId] });
       queryClient.invalidateQueries({ queryKey: ["topology-node", token, variables.deviceId] });
+    },
+  });
+}
+
+export function useCampusBuildings(token: string | null, networkId: string | null) {
+  return useQuery({
+    queryKey: ["campus-buildings", token, networkId],
+    queryFn: async () => {
+      const response = await listCampusBuildings(token as string, networkId as string);
+      return response.data;
+    },
+    enabled: Boolean(token && networkId),
+  });
+}
+
+export function useUpsertCampusBuildings(token: string | null, networkId: string | null) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: {
+      buildings: Array<{
+        building_id: string;
+        campus_key: string;
+        building_key: string;
+        label: string;
+        geometry: "box" | "extrude";
+        x: number;
+        z: number;
+        base_y: number;
+        width: number;
+        depth: number;
+        height: number;
+        floors: number;
+        footprint: Array<[number, number]>;
+        wall_material?: string | null;
+        attenuation_db?: number | null;
+        source?: string | null;
+      }>;
+      replaceExisting?: boolean;
+    }) => {
+      if (!token || !networkId) {
+        throw new Error("Network context is required to update campus buildings.");
+      }
+      const response = await upsertCampusBuildings(token, networkId, input);
+      return response.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["campus-buildings", token, networkId] });
     },
   });
 }

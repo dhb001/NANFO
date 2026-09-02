@@ -17,7 +17,7 @@ from app.core.dependencies import (
     RequestMeta,
     TokenClaims,
     enforce_workspace_scope,
-    get_current_user,
+    get_claim_org_scope,
     get_db,
     get_redis,
     get_request_meta,
@@ -25,6 +25,7 @@ from app.core.dependencies import (
 )
 from app.core.responses import APIResponse, success_response
 from app.modules.network.schemas import (
+    CampusBuildingListResponse,
     CreateDeviceRequest,
     CreateNetworkRequest,
     DeviceListResponse,
@@ -32,8 +33,13 @@ from app.modules.network.schemas import (
     NetworkListResponse,
     NetworkResponse,
     UpdateDeviceRequest,
+    UpsertCampusBuildingsRequest,
 )
-from app.modules.network.service import DeviceService, NetworkService
+from app.modules.network.service import (
+    CampusBuildingService,
+    DeviceService,
+    NetworkService,
+)
 
 router = APIRouter(prefix="/api/v1/networks", tags=["Networks"])
 
@@ -56,6 +62,7 @@ async def create_network(
         actor_id=claims.user_id,
         correlation_id=meta.request_id,
         requested_workspace_id=scoped_workspace_id,
+        claim_org_id=get_claim_org_scope(claims=claims),
     )
     return success_response(result, meta.request_id, started, meta.timestamp)
 
@@ -75,9 +82,11 @@ async def list_networks(
     svc = NetworkService(db=db, redis=redis)
     result = await svc.list_networks(
         workspace_id=workspace_id,
+        actor_user_id=claims.user_id,
         page=page,
         page_size=page_size,
         requested_workspace_id=scoped_workspace_id,
+        claim_org_id=get_claim_org_scope(claims=claims),
     )
     return success_response(result, meta.request_id, started, meta.timestamp)
 
@@ -102,6 +111,7 @@ async def add_device(
         actor_id=claims.user_id,
         correlation_id=meta.request_id,
         requested_workspace_id=requested_workspace_id,
+        claim_org_id=get_claim_org_scope(claims=claims),
     )
     return success_response(result, meta.request_id, started, meta.timestamp)
 
@@ -121,9 +131,11 @@ async def list_devices(
     svc = DeviceService(db=db, redis=redis)
     result = await svc.list_devices(
         network_id=network_id,
+        actor_user_id=claims.user_id,
         page=page,
         page_size=page_size,
         requested_workspace_id=requested_workspace_id,
+        claim_org_id=get_claim_org_scope(claims=claims),
     )
     return success_response(result, meta.request_id, started, meta.timestamp)
 
@@ -148,5 +160,57 @@ async def update_device(
         actor_id=claims.user_id,
         correlation_id=meta.request_id,
         requested_workspace_id=requested_workspace_id,
+        claim_org_id=get_claim_org_scope(claims=claims),
+    )
+    return success_response(result, meta.request_id, started, meta.timestamp)
+
+
+# ── Campus Building Persistence (Phase 5D+) ──────────────────────────────────
+
+@router.get(
+    "/{network_id}/campus/buildings",
+    response_model=APIResponse[CampusBuildingListResponse],
+    status_code=status.HTTP_200_OK,
+)
+async def list_campus_buildings(
+    network_id: uuid.UUID,
+    claims: Annotated[TokenClaims, Depends(require_permissions("read:topology"))],
+    meta: Annotated[RequestMeta, Depends(get_request_meta)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    redis: Annotated[aioredis.Redis, Depends(get_redis)],
+):
+    started = time.monotonic()
+    requested_workspace_id = enforce_workspace_scope(claims=claims, workspace_id=None)
+    result = await CampusBuildingService(db=db, redis=redis).list_buildings(
+        network_id=network_id,
+        actor_user_id=claims.user_id,
+        requested_workspace_id=requested_workspace_id,
+        claim_org_id=get_claim_org_scope(claims=claims),
+    )
+    return success_response(result, meta.request_id, started, meta.timestamp)
+
+
+@router.post(
+    "/{network_id}/campus/buildings",
+    response_model=APIResponse[CampusBuildingListResponse],
+    status_code=status.HTTP_200_OK,
+)
+async def upsert_campus_buildings(
+    network_id: uuid.UUID,
+    req: UpsertCampusBuildingsRequest,
+    claims: Annotated[TokenClaims, Depends(require_permissions("write:config"))],
+    meta: Annotated[RequestMeta, Depends(get_request_meta)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    redis: Annotated[aioredis.Redis, Depends(get_redis)],
+):
+    started = time.monotonic()
+    requested_workspace_id = enforce_workspace_scope(claims=claims, workspace_id=None)
+    result = await CampusBuildingService(db=db, redis=redis).upsert_buildings(
+        network_id=network_id,
+        req=req,
+        actor_id=claims.user_id,
+        correlation_id=meta.request_id,
+        requested_workspace_id=requested_workspace_id,
+        claim_org_id=get_claim_org_scope(claims=claims),
     )
     return success_response(result, meta.request_id, started, meta.timestamp)

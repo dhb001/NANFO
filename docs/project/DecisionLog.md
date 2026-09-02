@@ -2,6 +2,148 @@
 
 Lightweight chronological notes for decisions that do not require a full ADR.
 
+## 2026-09-02
+### Strathmore Digital Twin Phase 5D: Approve Network-Owned Campus Building Persistence and Deterministic GeoJSON/OSM Ingest Under Existing Contracts
+Decision: Close Digital Twin Phase 5D by introducing network-owned campus-building persistence and deterministic GeoJSON/OSM campus import handling under the existing `/api/v1/networks/{network_id}` contract surface, while retaining canonical API envelopes and avoiding undocumented event/channel expansion.
+Reason:
+- Phase 5A/5B/5C left a known deferred gap for procedural campus-building ingest and persistence.
+- Architecture guardrails require approved/documented API surfaces and prohibit invented event names; existing implementation had campus-building endpoints in code but no dedicated Network PRD record.
+- Wireless coverage needed explicit policy hardening to consume material attenuation metadata while staying clearly synthetic.
+Impact:
+- Added `docs/features/Network.md` as the authoritative Network PRD covering network/device plus campus-building persistence contracts (`GET|POST /api/v1/networks/{network_id}/campus/buildings`).
+- Retained backend campus-building REST handlers and persistence implementation (`backend/app/api/v1/networks.py`, `backend/app/modules/network/models.py`, `backend/app/modules/network/repository.py`, `backend/app/modules/network/schemas.py`, `backend/app/modules/network/service.py`, `backend/alembic/versions/0009_campus_building_persistence_baseline.py`).
+- Removed undocumented `network.campus.buildings.updated` event publication from campus upsert flow; no websocket routing/event-table changes required.
+- Added deterministic campus import provider behavior (`frontend/src/features/digitalTwin/campusImportProvider.ts`) and Twin-page import/persist orchestration (`frontend/src/features/digitalTwin/TwinPageContent.tsx`) with provider id `deterministic.geojson.osm.v1`.
+- Updated wireless coverage policy/version to `rf.material_attenuation.v1` and integrated campus-building material attenuation metadata into coverage-cell derivation (`frontend/src/features/digitalTwin/wirelessCoverage.ts`).
+- Added/updated focused regression coverage across backend services/endpoints and frontend provider/coverage/Twin-page integration tests.
+Assumptions:
+- GeoJSON/OSM-derived building geometry and attenuation values remain deterministic operator-imported metadata, not authoritative BIM/RF physics outputs.
+- Campus-building state distribution is REST-based in this phase; no dedicated domain event/channel is required for current scope.
+- Existing `spatial_ref_id` conventions and compatibility remain unchanged.
+Related:
+- `docs/features/Network.md`
+- `backend/app/api/v1/networks.py`
+- `backend/app/modules/network/models.py`
+- `backend/app/modules/network/repository.py`
+- `backend/app/modules/network/schemas.py`
+- `backend/app/modules/network/service.py`
+- `backend/alembic/versions/0009_campus_building_persistence_baseline.py`
+- `backend/tests/integration/test_network_endpoints.py`
+- `backend/tests/unit/test_network_service.py`
+- `frontend/src/features/digitalTwin/campusImportProvider.ts`
+- `frontend/src/features/digitalTwin/campusImportProvider.test.ts`
+- `frontend/src/features/digitalTwin/TwinPageContent.tsx`
+- `frontend/src/features/digitalTwin/TwinPage.test.tsx`
+- `frontend/src/features/digitalTwin/wirelessCoverage.ts`
+- `frontend/src/features/digitalTwin/wirelessCoverage.test.ts`
+
+### Strathmore Digital Twin Phase 5A/5B/5C: Deliver Projection Provider Abstraction, Session GLB Render Path, and AP-Centric Synthetic Coverage Without Contract Expansion
+Decision: Implement the next Strathmore Digital Twin increment as a frontend-only Phase 5A/5B/5C bundle that (a) introduces a dedicated coordinate/projection provider abstraction and routes current deterministic placement through it, (b) enables real GLB/GLTF scene rendering in-session while preserving current sidecar/session mapping semantics, and (c) adds an AP-centric wireless coverage overlay explicitly labeled as a synthetic estimate.
+Reason:
+- The next planned capabilities required closing known frontend-only gaps without violating architecture guardrails (no unapproved REST/WebSocket/event/schema expansion).
+- Existing deterministic `spatial_ref_id` logic had to remain behaviorally stable while becoming provider-driven so later projection strategies can be introduced without renderer coupling.
+- The model import path already validated GLB/GLTF and sidecar mappings; adding render consumption in-scene is the smallest safe continuation.
+- Wireless context enhancement was requested, but current backend does not expose RF-physics coverage contracts; explicit synthetic labeling avoids over-claiming fidelity.
+Impact:
+- Added `frontend/src/features/digitalTwin/spatialProjection.ts` and routed `sceneAdapter` + `campusBuildings` spatial parsing/placement through that provider boundary.
+- Added GLB/GLTF model loading/rendering in `frontend/src/features/digitalTwin/TwinScene.tsx` (`GLTFLoader`) with normalized model framing and non-blocking raycast behavior; wired session model URL/status controls in `frontend/src/features/digitalTwin/TwinPageContent.tsx`.
+- Added AP-centric coverage derivation in `frontend/src/features/digitalTwin/wirelessCoverage.ts` and rendered coverage cells/rings in `TwinScene.tsx` with in-scene label text `AP coverage (synthetic estimate)` and policy identifier `synthetic.ap.v1`.
+- Added focused deterministic tests: `frontend/src/features/digitalTwin/spatialProjection.test.ts`, `frontend/src/features/digitalTwin/wirelessCoverage.test.ts`.
+- Updated Strathmore manual evidence wording to classify historical `edges=0` as pre-materialization and include refreshed run evidence (`edges=338`).
+Assumptions:
+- GLB/GLTF assets remain session-local in frontend memory/object URLs; no backend model persistence contract exists in this slice.
+- Coverage overlay is an operational estimate derived from AP nodes + congestion metrics and is not a physics-engine RF coverage output.
+- OSM ingestion remains deferred to Phase 5D unless separately approved.
+Related:
+- `frontend/src/features/digitalTwin/spatialProjection.ts`
+- `frontend/src/features/digitalTwin/sceneAdapter.ts`
+- `frontend/src/features/digitalTwin/campusBuildings.ts`
+- `frontend/src/features/digitalTwin/TwinScene.tsx`
+- `frontend/src/features/digitalTwin/TwinPageContent.tsx`
+- `frontend/src/features/digitalTwin/wirelessCoverage.ts`
+- `frontend/src/features/digitalTwin/spatialProjection.test.ts`
+- `frontend/src/features/digitalTwin/wirelessCoverage.test.ts`
+- `docs/project/Strathmore-Demo-Manual-and-Execution-Guide.md`
+- `docs/project/CurrentSprint.md`
+- `docs/project/DevelopmentJournal.md`
+
+### Strathmore Evidence Refresh: Classify Legacy Zero-Edge Snapshot as Pre-Materialization and Record Phase 5+ Deferred Boundaries
+Decision: Refresh Strathmore evidence tracking to explicitly classify the legacy `nodes=339 edges=0` result as a pre-materialization snapshot, record the current live apply confirmation (`edges=338` after synthetic materialization), and document the exact Digital Twin Phase 5+ deferred boundaries without contract expansion.
+Reason:
+- Current sprint/journal entries preserved a historically correct but now stale topology snapshot line that can be misread as final outcome.
+- The latest live apply run with unchanged approved contracts demonstrates complete end-to-end behavior: projection settle, synthetic edge planning/writing, and non-zero graph re-check.
+- A clear deferred matrix is required to prevent over-claiming of not-yet-delivered capabilities (procedural OSM ingestion, projection-provider abstraction, RF heatmaps, full GLB render path).
+Impact:
+- Updated `docs/project/CurrentSprint.md` and `docs/project/DevelopmentJournal.md` to include refreshed validation evidence and explicit live apply outcome (`planned_edges=338`, `written=338`, re-check `edges=338`).
+- Added explicit closure note that the old zero-edge line reflects pre-materialization state in the earlier run.
+- Recorded precise Phase 5+ deferred boundaries tied to current implementation files (`sceneAdapter.ts`, `twinImport.ts`).
+Assumptions:
+- Existing architecture guardrails remain unchanged: no new REST/WebSocket/event/channel/schema surface added for this evidence refresh.
+- Synthetic topology remains demo-data provenance only (`synthetic=true`, generator metadata), not discovered campus infrastructure.
+Related:
+- `docs/project/CurrentSprint.md`
+- `docs/project/DevelopmentJournal.md`
+- `backend/scripts/prepare_strathmore_demo.py`
+- `backend/app/modules/network/synthetic_topology.py`
+- `backend/app/modules/network/topology.py`
+- `frontend/src/features/digitalTwin/sceneAdapter.ts`
+- `frontend/src/features/digitalTwin/twinImport.ts`
+- `/tmp/opencode/strathmore-apply-context-20260902.json`
+
+### Strathmore Digital Twin Phase 4: Add Building/ Floor Focus and Topology Cursor Aggregation Without Contract Expansion
+Decision: Implement Phase 4 as a frontend-only increment that (a) adds explicit building/floor focus controls with deterministic camera fly-to + floor filtering in Digital Twin, and (b) aggregates paginated topology graph cursor pages client-side so Twin/Topology views are not capped at first-page `limit=200` results.
+Reason:
+- The next operator workflow step required direct campus navigation control (building and floor) while preserving the centralized single-twin model and existing backend-owned contracts.
+- Current topology graph consumption read only the first page; Strathmore-sized datasets risk incomplete Twin scene/context unless cursor pages are merged.
+- Architecture guardrails prohibit net-new REST/channel/event/schema additions for this slice, so the smallest safe path is deterministic frontend orchestration and API-client aggregation over existing endpoint behavior.
+Impact:
+- Added `frontend/src/features/digitalTwin/CampusFocusControls.tsx` and wired new focus state through `frontend/src/features/digitalTwin/TwinPageContent.tsx` (route shell in `frontend/src/features/digitalTwin/TwinPage.tsx`) and `frontend/src/features/digitalTwin/TwinScene.tsx`.
+- Extended `frontend/src/features/digitalTwin/campusBuildings.ts` with floor-aware visibility/focus helpers and camera-focus resolution semantics.
+- Added client-side cursor aggregation with bounded page guard in `frontend/src/features/topology/api.ts` (`getTopologyGraphAll`) and switched graph query hook usage in `frontend/src/features/topology/hooks.ts`.
+- Added/updated focused tests in `frontend/src/features/digitalTwin/TwinPage.test.tsx`, `frontend/src/features/digitalTwin/campusBuildings.test.ts`, and `frontend/src/features/topology/api.test.ts`.
+- Added Twin-route continuity hardening in same slice (`frontend/src/features/digitalTwin/TwinPage.tsx`, `frontend/src/features/digitalTwin/TwinPageContent.tsx`, `frontend/src/features/digitalTwin/TwinScene.tsx`) to preserve VS19 perf-bound checks after feature growth.
+Assumptions:
+- Building/floor targeting remains derived from `spatial_ref_id` path conventions; nodes without parseable campus/building/floor segments are intentionally excluded from focused building semantics.
+- Topology cursor aggregation remains bounded (`maxPages=64` default) to prevent unbounded client loops while still closing the `limit=200` visibility gap for current expected graph scales.
+- Scene visual simplification applied for continuity (removal of non-essential environment/sparkle effects) is acceptable within current demo quality goals and does not change operational contract behavior.
+Related:
+- `frontend/src/features/digitalTwin/CampusFocusControls.tsx`
+- `frontend/src/features/digitalTwin/TwinPage.tsx`
+- `frontend/src/features/digitalTwin/TwinPageContent.tsx`
+- `frontend/src/features/digitalTwin/TwinScene.tsx`
+- `frontend/src/features/digitalTwin/campusBuildings.ts`
+- `frontend/src/features/topology/api.ts`
+- `frontend/src/features/topology/hooks.ts`
+- `frontend/src/features/topology/api.test.ts`
+- `frontend/src/features/digitalTwin/TwinPage.test.tsx`
+- `frontend/src/features/digitalTwin/campusBuildings.test.ts`
+- `docs/project/CurrentSprint.md`
+- `docs/project/DevelopmentJournal.md`
+
+### Strathmore Digital Twin Phase 3: Add Data-Driven CampusBuildings Layer from Existing Spatial Contracts
+Decision: Implement Phase 3 as a frontend-only Digital Twin scene enhancement that derives campus building shells from existing `spatial_ref_id` values and renders them via a dedicated building layer (`box`/`extrude` primitives), while preserving all backend REST/WebSocket/event/schema contracts.
+Reason:
+- The next planned slice required richer campus context in-scene, but architecture guardrails prohibit backend contract expansion without ADR and prohibit hardcoded campus geometry in renderer logic.
+- Existing node identity + `spatial_ref_id` hierarchy already provide enough structured signal to derive stable building metadata deterministically.
+- The smallest safe implementation is to keep aggregation logic in a pure utility module and keep rendering concerns in a dedicated scene component, preserving adapter/renderer separation and avoiding `TwinScene` contract drift.
+Impact:
+- Added `frontend/src/features/digitalTwin/campusBuildings.ts` for deterministic building aggregation, geometry selection (`box`/`extrude`), footprint metadata, visibility/highlight helpers, and node-to-building index mapping.
+- Added `frontend/src/features/digitalTwin/CampusBuildings.tsx` for reusable building rendering with optional selection callback and label display.
+- Updated `frontend/src/features/digitalTwin/TwinScene.tsx` to include building layer composition and selected-node -> selected-building highlight inference.
+- Added `frontend/src/features/digitalTwin/campusBuildings.test.ts` to lock deterministic derivation behavior and helper semantics.
+- Executed baseline + closure validation chain with all required gates green, including full backend regression baseline (`736 passed`) and frontend build/perf/e2e passes.
+Assumptions:
+- `spatial_ref_id` path convention remains `campus/building/...`; nodes lacking this convention are intentionally excluded from building shell derivation.
+- Building geometry is demonstrative and synthetic by design; it does not claim authoritative BIM/OSM fidelity.
+- Future building selection/fly-to/floor-filter UX can reuse the new `CampusBuildingViewState` and index helpers without changing backend contracts.
+Related:
+- `frontend/src/features/digitalTwin/campusBuildings.ts`
+- `frontend/src/features/digitalTwin/CampusBuildings.tsx`
+- `frontend/src/features/digitalTwin/TwinScene.tsx`
+- `frontend/src/features/digitalTwin/campusBuildings.test.ts`
+- `docs/project/CurrentSprint.md`
+- `docs/project/DevelopmentJournal.md`
+
 ## 2026-08-21
 ### VS21 Step 5: Close Simulation Terminal-Event Producer Parity with Deterministic Terminal Publication and Tenancy-Safe Fanout
 Decision: Finalize VS21 Step 5 by keeping simulation terminal event production centralized in the existing `simulation.started` consumer path, persisting terminal simulation state before publication, and emitting deterministic terminal events (`simulation.completed` / `simulation.cancelled`) with workspace-scoped fanout filtering.

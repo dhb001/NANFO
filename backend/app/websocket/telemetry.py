@@ -7,14 +7,25 @@ telemetry delta delivery over /ws/telemetry.
 from __future__ import annotations
 
 import json
+import uuid
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect, status
+from fastapi import (
+    APIRouter,
+    HTTPException,
+    Query,
+    WebSocket,
+    WebSocketDisconnect,
+    status,
+)
 from jose import JWTError
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
 from app.core.security import decode_token
+from app.db.postgres import AsyncSessionLocal
 from app.db.redis import get_redis_client
+from app.modules.network.service import NetworkService
 from app.websocket.manager import telemetry_ws_manager
 
 logger = get_logger(__name__)
@@ -35,6 +46,57 @@ _INVALID_FILTER_FRAME = json.dumps({
     "event": "error",
     "data": {"code": "WS_INVALID_FILTER", "message": "network_id filter is required for telemetry channel."},
 })
+
+_FORBIDDEN_FILTER_FRAME = json.dumps({
+    "event": "error",
+    "data": {"code": "WS_INVALID_FILTER", "message": "Unauthorized network scope for telemetry channel."},
+})
+
+
+async def _resolve_telemetry_subscription_scope(
+    *,
+    db: AsyncSession,
+    claims: dict,
+    network_id: str,
+) -> tuple[str, str] | None:
+    try:
+        parsed_network_id = uuid.UUID(str(network_id))
+    except (TypeError, ValueError, AttributeError):
+        return None
+
+    claim_workspace_id = claims.get("workspace_id")
+    requested_workspace_id: uuid.UUID | None = None
+    if claim_workspace_id is not None:
+        try:
+            requested_workspace_id = uuid.UUID(str(claim_workspace_id))
+        except (TypeError, ValueError, AttributeError):
+            return None
+
+    claim_org_id = claims.get("org_id")
+    parsed_claim_org_id: uuid.UUID | None = None
+    if claim_org_id is not None:
+        try:
+            parsed_claim_org_id = uuid.UUID(str(claim_org_id))
+        except (TypeError, ValueError, AttributeError):
+            return None
+
+    user_id_raw = claims.get("sub")
+    try:
+        user_id = str(uuid.UUID(str(user_id_raw)))
+    except (TypeError, ValueError, AttributeError):
+        return None
+
+    try:
+        network = await NetworkService(db=db, redis=get_redis_client()).assert_network_workspace_access(
+            network_id=parsed_network_id,
+            requested_workspace_id=requested_workspace_id,
+            actor_user_id=user_id,
+            claim_org_id=parsed_claim_org_id,
+        )
+    except HTTPException:
+        return None
+
+    return str(network.network_id), str(network.workspace_id)
 
 
 @router.websocket("/ws/telemetry")
@@ -77,6 +139,20 @@ async def telemetry_websocket(
             await websocket.close()
             return
 
+        async with AsyncSessionLocal() as db:
+            scope = await _resolve_telemetry_subscription_scope(
+                db=db,
+                claims=claims,
+                network_id=network_id,
+            )
+
+        if scope is None:
+            await websocket.send_text(_FORBIDDEN_FILTER_FRAME)
+            await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+            return
+
+        network_id, workspace_id = scope
+
         ack = json.dumps({
             "event": "subscribed",
             "channel": "telemetry",
@@ -90,6 +166,7 @@ async def telemetry_websocket(
             websocket,
             token_exp=claims.get("exp"),
             token_jti=claims.get("jti"),
+            workspace_id=workspace_id,
         )
 
         while True:

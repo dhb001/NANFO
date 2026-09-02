@@ -5,15 +5,18 @@ Dependencies overridden with mocks.
 """
 
 import uuid
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from app.core.dependencies import get_db, get_redis
 from app.core.security import create_access_token
 from app.main import app
 from app.modules.network.schemas import (
+    CampusBuildingListResponse,
     TopologyDeviceNeighboursResponse,
     TopologyGraphResponse,
     TopologyImpactResponse,
@@ -30,12 +33,13 @@ def _make_token():
     return token
 
 
-def _make_token_with_workspace(*, permissions: list[str], workspace_id: uuid.UUID) -> str:
+def _make_token_with_workspace(*, permissions: list[str], workspace_id: uuid.UUID, org_id: uuid.UUID | None = None) -> str:
     token, _ = create_access_token(
         user_id=str(uuid.uuid4()),
         email="test@example.com",
         roles=["Admin"],
         permissions=permissions,
+        org_id=str(org_id) if org_id is not None else None,
         workspace_id=str(workspace_id),
     )
     return token
@@ -80,6 +84,21 @@ def token():
 @pytest.fixture
 def headers(token):
     return {"Authorization": f"Bearer {token}"}
+
+
+@pytest.fixture(autouse=True)
+def _patch_topology_scope_resolution():
+    async def _resolve_network_scope(*, network_id, claims, db, redis):
+        return network_id, uuid.uuid4()
+
+    async def _resolve_device_scope(*, device_id, claims, db, redis):
+        return uuid.uuid4(), uuid.uuid4()
+
+    with (
+        patch("app.api.v1.topology._resolve_network_scope", side_effect=_resolve_network_scope),
+        patch("app.api.v1.topology._resolve_device_scope", side_effect=_resolve_device_scope),
+    ):
+        yield
 
 
 class TestNetworkEndpointsAuth:
@@ -140,6 +159,25 @@ class TestNetworkEndpointsAuth:
         )
         assert response.status_code == 403
 
+    def test_list_campus_buildings_missing_read_topology_permission_returns_403(self, client):
+        token = _make_token_without_permission()
+        headers = {"Authorization": f"Bearer {token}"}
+        response = client.get(
+            f"/api/v1/networks/{uuid.uuid4()}/campus/buildings",
+            headers=headers,
+        )
+        assert response.status_code == 403
+
+    def test_upsert_campus_buildings_missing_write_permission_returns_403(self, client):
+        token = _make_token_without_permission()
+        headers = {"Authorization": f"Bearer {token}"}
+        response = client.post(
+            f"/api/v1/networks/{uuid.uuid4()}/campus/buildings",
+            json={"buildings": []},
+            headers=headers,
+        )
+        assert response.status_code == 403
+
     def test_list_networks_workspace_scope_mismatch_returns_403(self, client):
         token_workspace_id = uuid.uuid4()
         request_workspace_id = uuid.uuid4()
@@ -170,6 +208,52 @@ class TestNetworkEndpointsAuth:
         )
         assert response.status_code == 403
 
+    def test_list_networks_org_claim_mismatch_returns_403(self, client):
+        token_workspace_id = uuid.uuid4()
+        token_org_id = uuid.uuid4()
+        token = _make_token_with_workspace(
+            permissions=["write:config", "read:topology"],
+            workspace_id=token_workspace_id,
+            org_id=token_org_id,
+        )
+        headers = {"Authorization": f"Bearer {token}"}
+
+        with patch(
+            "app.modules.network.service.OrgWorkspaceService.assert_workspace_membership",
+            new_callable=AsyncMock,
+            return_value=SimpleNamespace(workspace_id=token_workspace_id, org_id=uuid.uuid4()),
+        ):
+            response = client.get(
+                "/api/v1/networks",
+                params={"workspace_id": str(token_workspace_id)},
+                headers=headers,
+            )
+
+        assert response.status_code == 403
+
+    def test_create_network_org_claim_mismatch_returns_403(self, client):
+        token_workspace_id = uuid.uuid4()
+        token_org_id = uuid.uuid4()
+        token = _make_token_with_workspace(
+            permissions=["write:config", "read:topology"],
+            workspace_id=token_workspace_id,
+            org_id=token_org_id,
+        )
+        headers = {"Authorization": f"Bearer {token}"}
+
+        with patch(
+            "app.modules.network.service.OrgWorkspaceService.assert_workspace_membership",
+            new_callable=AsyncMock,
+            return_value=SimpleNamespace(workspace_id=token_workspace_id, org_id=uuid.uuid4()),
+        ):
+            response = client.post(
+                "/api/v1/networks",
+                json={"workspace_id": str(token_workspace_id), "name": "DeniedOrg"},
+                headers=headers,
+            )
+
+        assert response.status_code == 403
+
 
 class TestCreateNetwork:
     def test_create_network_missing_workspace_id_returns_422(self, client, headers):
@@ -190,7 +274,6 @@ class TestCreateNetwork:
 
     def test_create_network_invalid_workspace_returns_404(self, client, headers):
         """C5: invalid workspace_id must propagate 404 from WorkspaceService."""
-        from fastapi import HTTPException
         ws_id = uuid.uuid4()
         with patch(
             "app.modules.network.service.NetworkService.create_network",
@@ -302,8 +385,6 @@ class TestDeviceEndpoints:
         assert body["data"]["spatial_ref_id"] == "campus-a/building-1/floor-2/room-204/rack-3/device-router-01"
 
     def test_update_device_spatial_ref_not_found_propagates_404(self, client, headers):
-        from fastapi import HTTPException
-
         network_id = uuid.uuid4()
         device_id = uuid.uuid4()
 
@@ -314,6 +395,173 @@ class TestDeviceEndpoints:
             response = client.patch(
                 f"/api/v1/networks/{network_id}/devices/{device_id}",
                 json={"spatial_ref_id": "campus-a/device-404"},
+                headers=headers,
+            )
+
+        assert response.status_code == 404
+
+
+class TestCampusBuildingEndpoints:
+    def test_list_campus_buildings_returns_envelope(self, client, headers):
+        from datetime import UTC, datetime
+
+        network_id = uuid.uuid4()
+        payload = CampusBuildingListResponse(
+            items=[
+                {
+                    "campus_building_id": str(uuid.uuid4()),
+                    "network_id": str(network_id),
+                    "building_id": "campus-a:building-1",
+                    "campus_key": "campus-a",
+                    "building_key": "building-1",
+                    "label": "Building 1",
+                    "geometry": "box",
+                    "x": 4.0,
+                    "z": -3.0,
+                    "base_y": -2.3,
+                    "width": 12.0,
+                    "depth": 9.0,
+                    "height": 8.5,
+                    "floors": 3,
+                    "footprint": [[-1.0, -1.0], [1.0, -1.0], [1.0, 1.0]],
+                    "wall_material": "concrete",
+                    "attenuation_db": 14.0,
+                    "source": "geojson",
+                    "created_at": datetime.now(UTC).isoformat(),
+                    "updated_at": datetime.now(UTC).isoformat(),
+                }
+            ],
+            total=1,
+        )
+
+        with patch(
+            "app.modules.network.service.CampusBuildingService.list_buildings",
+            return_value=payload,
+        ):
+            response = client.get(
+                f"/api/v1/networks/{network_id}/campus/buildings",
+                headers=headers,
+            )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["success"] is True
+        assert "data" in body
+        assert "meta" in body
+        assert "errors" in body
+        assert body["data"]["total"] == 1
+        assert body["data"]["items"][0]["building_id"] == "campus-a:building-1"
+
+    def test_upsert_campus_buildings_returns_envelope(self, client, headers):
+        from datetime import UTC, datetime
+
+        network_id = uuid.uuid4()
+        payload = CampusBuildingListResponse(
+            items=[
+                {
+                    "campus_building_id": str(uuid.uuid4()),
+                    "network_id": str(network_id),
+                    "building_id": "campus-a:building-1",
+                    "campus_key": "campus-a",
+                    "building_key": "building-1",
+                    "label": "Building 1",
+                    "geometry": "box",
+                    "x": 4.0,
+                    "z": -3.0,
+                    "base_y": -2.3,
+                    "width": 12.0,
+                    "depth": 9.0,
+                    "height": 8.5,
+                    "floors": 3,
+                    "footprint": [[-1.0, -1.0], [1.0, -1.0], [1.0, 1.0]],
+                    "wall_material": "concrete",
+                    "attenuation_db": 14.0,
+                    "source": "geojson",
+                    "created_at": datetime.now(UTC).isoformat(),
+                    "updated_at": datetime.now(UTC).isoformat(),
+                }
+            ],
+            total=1,
+        )
+
+        with patch(
+            "app.modules.network.service.CampusBuildingService.upsert_buildings",
+            return_value=payload,
+        ):
+            response = client.post(
+                f"/api/v1/networks/{network_id}/campus/buildings",
+                json={
+                    "replace_existing": True,
+                    "buildings": [
+                        {
+                            "building_id": "campus-a:building-1",
+                            "campus_key": "campus-a",
+                            "building_key": "building-1",
+                            "label": "Building 1",
+                            "geometry": "box",
+                            "x": 4.0,
+                            "z": -3.0,
+                            "base_y": -2.3,
+                            "width": 12.0,
+                            "depth": 9.0,
+                            "height": 8.5,
+                            "floors": 3,
+                            "footprint": [[-1.0, -1.0], [1.0, -1.0], [1.0, 1.0]],
+                            "wall_material": "concrete",
+                            "attenuation_db": 14.0,
+                            "source": "geojson",
+                        }
+                    ],
+                },
+                headers=headers,
+            )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["success"] is True
+        assert "data" in body
+        assert "meta" in body
+        assert "errors" in body
+        assert body["data"]["total"] == 1
+        assert body["data"]["items"][0]["geometry"] == "box"
+
+    def test_upsert_campus_buildings_invalid_geometry_returns_422(self, client, headers):
+        response = client.post(
+            f"/api/v1/networks/{uuid.uuid4()}/campus/buildings",
+            json={
+                "replace_existing": True,
+                "buildings": [
+                    {
+                        "building_id": "campus-a:building-1",
+                        "campus_key": "campus-a",
+                        "building_key": "building-1",
+                        "label": "Building 1",
+                        "geometry": "invalid-shape",
+                        "x": 4.0,
+                        "z": -3.0,
+                        "base_y": -2.3,
+                        "width": 12.0,
+                        "depth": 9.0,
+                        "height": 8.5,
+                        "floors": 3,
+                        "footprint": [[-1.0, -1.0], [1.0, -1.0], [1.0, 1.0]],
+                    }
+                ],
+            },
+            headers=headers,
+        )
+
+        assert response.status_code == 422
+
+    def test_upsert_campus_buildings_not_found_propagates_404(self, client, headers):
+        network_id = uuid.uuid4()
+        with patch(
+            "app.modules.network.service.CampusBuildingService.upsert_buildings",
+            side_effect=HTTPException(status_code=404, detail="Network not found."),
+        ):
+            response = client.post(
+                f"/api/v1/networks/{network_id}/campus/buildings",
+                json={"buildings": []},
                 headers=headers,
             )
 
@@ -492,6 +740,167 @@ class TestTopologyRouteSurface:
 
         assert response.status_code != 404
 
+    def test_topology_graph_denied_on_unresolved_scope_returns_403(self, client, headers):
+        with (
+            patch(
+            "app.api.v1.topology._resolve_network_scope",
+            side_effect=HTTPException(status_code=403, detail="Insufficient scope."),
+            ),
+            patch("app.api.v1.topology.get_neo4j_driver") as mock_driver,
+        ):
+            mock_driver.return_value = AsyncMock()
+            response = client.get(
+                "/api/v1/topology/graph",
+                params={"network_id": str(uuid.uuid4())},
+                headers=headers,
+            )
+
+        assert response.status_code == 403
+
+    def test_topology_node_denied_on_unresolved_scope_returns_403(self, client, headers):
+        with (
+            patch(
+            "app.api.v1.topology._resolve_device_scope",
+            side_effect=HTTPException(status_code=403, detail="Insufficient scope."),
+            ),
+            patch("app.api.v1.topology.get_neo4j_driver") as mock_driver,
+        ):
+            mock_driver.return_value = AsyncMock()
+            response = client.get(
+                f"/api/v1/topology/nodes/{uuid.uuid4()}",
+                headers=headers,
+            )
+
+        assert response.status_code == 403
+
+    def test_topology_neighbors_denied_on_unresolved_scope_returns_403(self, client, headers):
+        with (
+            patch(
+            "app.api.v1.topology._resolve_device_scope",
+            side_effect=HTTPException(status_code=403, detail="Insufficient scope."),
+            ),
+            patch("app.api.v1.topology.get_neo4j_driver") as mock_driver,
+        ):
+            mock_driver.return_value = AsyncMock()
+            response = client.get(
+                f"/api/v1/topology/device/{uuid.uuid4()}/neighbors",
+                headers=headers,
+            )
+
+        assert response.status_code == 403
+
+    def test_topology_impact_denied_on_unresolved_scope_returns_403(self, client, headers):
+        with (
+            patch(
+            "app.api.v1.topology._resolve_device_scope",
+            side_effect=HTTPException(status_code=403, detail="Insufficient scope."),
+            ),
+            patch("app.api.v1.topology.get_neo4j_driver") as mock_driver,
+        ):
+            mock_driver.return_value = AsyncMock()
+            response = client.get(
+                f"/api/v1/topology/impact/{uuid.uuid4()}",
+                headers=headers,
+            )
+
+        assert response.status_code == 403
+
+    def test_topology_reconcile_denied_on_unresolved_scope_returns_403(self, client, headers):
+        with (
+            patch(
+            "app.api.v1.topology._resolve_network_scope",
+            side_effect=HTTPException(status_code=403, detail="Insufficient scope."),
+            ),
+            patch("app.api.v1.topology.get_neo4j_driver") as mock_driver,
+        ):
+            mock_driver.return_value = AsyncMock()
+            response = client.post(
+                "/api/v1/topology/reconcile",
+                json={"network_id": str(uuid.uuid4())},
+                headers=headers,
+            )
+
+        assert response.status_code == 403
+
+    def test_topology_graph_scope_resolution_includes_claim_org_and_workspace(self, client):
+        token_workspace_id = uuid.uuid4()
+        token_org_id = uuid.uuid4()
+        token = _make_token_with_workspace(
+            permissions=["read:topology", "write:config"],
+            workspace_id=token_workspace_id,
+            org_id=token_org_id,
+        )
+        headers = {"Authorization": f"Bearer {token}"}
+
+        request_network_id = uuid.uuid4()
+
+        async def _resolve_scope(*, network_id, claims, db, redis):
+            assert claims.workspace_id == str(token_workspace_id)
+            assert claims.org_id == str(token_org_id)
+            return network_id, token_workspace_id
+
+        with (
+            patch("app.api.v1.topology._resolve_network_scope", side_effect=_resolve_scope),
+            patch(
+                "app.modules.network.topology.TopologyQueryService.get_graph",
+                return_value=(TopologyGraphResponse(nodes=[], edges=[]), None),
+            ),
+            patch("app.api.v1.topology.get_neo4j_driver") as mock_driver,
+        ):
+            mock_driver.return_value = AsyncMock()
+            response = client.get(
+                "/api/v1/topology/graph",
+                params={"network_id": str(request_network_id)},
+                headers=headers,
+            )
+
+        assert response.status_code != 403
+        assert response.status_code == 200
+
+    def test_topology_node_scope_resolution_includes_claim_org_and_workspace(self, client):
+        token_workspace_id = uuid.uuid4()
+        token_org_id = uuid.uuid4()
+        token = _make_token_with_workspace(
+            permissions=["read:topology", "write:config"],
+            workspace_id=token_workspace_id,
+            org_id=token_org_id,
+        )
+        headers = {"Authorization": f"Bearer {token}"}
+
+        request_device_id = uuid.uuid4()
+
+        async def _resolve_scope(*, device_id, claims, db, redis):
+            assert device_id == request_device_id
+            assert claims.workspace_id == str(token_workspace_id)
+            assert claims.org_id == str(token_org_id)
+            return uuid.uuid4(), token_workspace_id
+
+        with (
+            patch("app.api.v1.topology._resolve_device_scope", side_effect=_resolve_scope),
+            patch(
+                "app.modules.network.topology.TopologyQueryService.get_node_with_neighbours",
+                return_value={
+                    "node": {
+                        "device_id": str(request_device_id),
+                        "hostname": "n1",
+                        "device_type": "router",
+                        "status": "active",
+                        "spatial_ref_id": None,
+                    },
+                    "neighbours": [],
+                },
+            ),
+            patch("app.api.v1.topology.get_neo4j_driver") as mock_driver,
+        ):
+            mock_driver.return_value = AsyncMock()
+            response = client.get(
+                f"/api/v1/topology/nodes/{request_device_id}",
+                headers=headers,
+            )
+
+        assert response.status_code != 403
+        assert response.status_code == 200
+
 
 class TestTopologyGraphPagination:
     def test_topology_graph_accepts_limit_and_cursor(self, client, headers):
@@ -600,6 +1009,37 @@ class TestTopologyNodeEndpoint:
         assert body["data"]["neighbours"][0]["edge_type"] == "connected_to"
         assert body["data"]["neighbours"][0]["direction"] == "inbound"
 
+    def test_topology_nodes_success_with_origin_returns_cors_header(self, client, headers):
+        payload = {
+            "node": {
+                "device_id": "device-1",
+                "hostname": "core-1",
+                "device_type": "router",
+                "status": "active",
+                "spatial_ref_id": "campus-a/core-1",
+            },
+            "neighbours": [],
+        }
+
+        with (
+            patch(
+                "app.modules.network.topology.TopologyQueryService.get_node_with_neighbours",
+                return_value=payload,
+            ),
+            patch("app.api.v1.topology.get_neo4j_driver") as mock_driver,
+        ):
+            mock_driver.return_value = AsyncMock()
+            response = client.get(
+                f"/api/v1/topology/nodes/{uuid.uuid4()}",
+                headers={
+                    **headers,
+                    "Origin": "http://127.0.0.1:5173",
+                },
+            )
+
+        assert response.status_code == 200
+        assert response.headers.get("access-control-allow-origin") == "http://127.0.0.1:5173"
+
     def test_topology_graph_envelope_can_carry_spatial_ref_id_when_present(self, client, headers):
         payload = TopologyGraphResponse(
             nodes=[
@@ -682,6 +1122,29 @@ class TestTopologyNodeEndpoint:
             )
 
         assert response.status_code == 404
+
+    def test_topology_nodes_endpoint_unhandled_error_returns_500_with_cors_header(self, client, headers):
+        with (
+            patch(
+                "app.modules.network.topology.TopologyQueryService.get_node_with_neighbours",
+                side_effect=RuntimeError("unexpected topology failure"),
+            ),
+            patch("app.api.v1.topology.get_neo4j_driver") as mock_driver,
+        ):
+            mock_driver.return_value = AsyncMock()
+            response = client.get(
+                f"/api/v1/topology/nodes/{uuid.uuid4()}",
+                headers={
+                    **headers,
+                    "Origin": "http://127.0.0.1:5173",
+                },
+            )
+
+        assert response.status_code == 500
+        body = response.json()
+        assert body["success"] is False
+        assert body["errors"]["code"] == "INTERNAL_ERROR"
+        assert response.headers.get("access-control-allow-origin") == "http://127.0.0.1:5173"
 
 
 class TestTopologyAnalysisEndpoints:

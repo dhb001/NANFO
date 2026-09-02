@@ -18,12 +18,13 @@ from app.core.security import create_access_token
 from app.main import app
 
 
-def _make_token(roles=None):
+def _make_token(roles=None, org_id: str | None = None):
     token, _ = create_access_token(
         user_id=str(uuid.uuid4()),
         email="test@example.com",
         roles=roles or ["Admin"],
         permissions=["write:config"],
+        org_id=org_id,
     )
     return token
 
@@ -194,6 +195,60 @@ class TestWorkspaceEndpoints:
             )
 
         assert response.status_code == 204
+
+    def test_get_workspace_rejects_mismatched_org_scope_claim(self, client):
+        org_id = uuid.uuid4()
+        workspace_id = uuid.uuid4()
+        token = _make_token(roles=["Admin"], org_id=str(uuid.uuid4()))
+        headers = {"Authorization": f"Bearer {token}"}
+
+        response = client.get(
+            f"/api/v1/organizations/{org_id}/workspaces/{workspace_id}",
+            headers=headers,
+        )
+
+        assert response.status_code == 403
+        body = response.json()
+        assert body["errors"]["code"] == "FORBIDDEN"
+
+
+class TestOrgScopedMembershipAuthorization:
+    def test_create_workspace_forbidden_when_actor_not_org_member(self, client, admin_token):
+        org_id = uuid.uuid4()
+        headers = {"Authorization": f"Bearer {admin_token}"}
+
+        with patch(
+            "app.modules.organization.service.WorkspaceService.create_workspace",
+            new_callable=AsyncMock,
+            side_effect=HTTPException(status_code=403, detail="Insufficient permissions."),
+        ):
+            response = client.post(
+                f"/api/v1/organizations/{org_id}/workspaces",
+                json={"name": "Ops"},
+                headers=headers,
+            )
+
+        assert response.status_code == 403
+        body = response.json()
+        assert body["errors"]["code"] == "FORBIDDEN"
+
+    def test_list_members_forbidden_when_actor_not_org_member(self, client, admin_token):
+        org_id = uuid.uuid4()
+        headers = {"Authorization": f"Bearer {admin_token}"}
+
+        with patch(
+            "app.modules.organization.service.MemberService.list_members",
+            new_callable=AsyncMock,
+            side_effect=HTTPException(status_code=403, detail="Insufficient permissions."),
+        ):
+            response = client.get(
+                f"/api/v1/organizations/{org_id}/members",
+                headers=headers,
+            )
+
+        assert response.status_code == 403
+        body = response.json()
+        assert body["errors"]["code"] == "FORBIDDEN"
 
 
 class TestMemberEndpoints:

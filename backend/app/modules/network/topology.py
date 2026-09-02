@@ -12,6 +12,7 @@ VS10 extends this service with:
 from __future__ import annotations
 
 import uuid
+from collections.abc import Sequence
 from datetime import UTC, datetime
 
 import redis.asyncio as aioredis
@@ -30,8 +31,31 @@ from app.modules.network.schemas import (
     TopologyNeighbourEdge,
     TopologyNode,
 )
+from app.modules.network.synthetic_topology import PlannedEdge
 
 logger = get_logger(__name__)
+
+
+def _record_int(record: object, key: str, default: int = 0) -> int:
+    """Read an integer column from a Neo4j record safely.
+
+    Why this exists: ``neo4j.Record`` subclasses ``tuple``, so ``"key" in record``
+    tests membership against the record's *values*, not its keys, and is therefore
+    almost always ``False``. Using that idiom silently produced zeroed counters.
+    Indexing by key works on both ``neo4j.Record`` and plain dicts.
+    """
+    if record is None:
+        return default
+    try:
+        value = record[key]  # type: ignore[index]
+    except (KeyError, IndexError, TypeError):
+        return default
+    if value is None:
+        return default
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
 
 
 class TopologyQueryService:
@@ -42,6 +66,7 @@ class TopologyQueryService:
     async def get_graph(
         self,
         network_id: uuid.UUID,
+        workspace_id: uuid.UUID,
         depth: int = 2,
         limit: int = 100,
         cursor: str | None = None,
@@ -52,7 +77,7 @@ class TopologyQueryService:
         `next_cursor` is the last device_id in the current page when more rows exist.
         """
         node_query = """
-        MATCH (d:Device {network_id: $network_id})
+        MATCH (d:Device {network_id: $network_id, workspace_id: $workspace_id})
         WHERE $cursor IS NULL OR d.device_id > $cursor
         RETURN d.device_id AS device_id,
                d.hostname AS hostname,
@@ -64,11 +89,12 @@ class TopologyQueryService:
         """
 
         edge_query = """
-        MATCH (s:Device {network_id: $network_id})-[e:CONNECTED_TO]->(t:Device {network_id: $network_id})
+        MATCH (s:Device {network_id: $network_id, workspace_id: $workspace_id})-[e:CONNECTED_TO]->(t:Device {network_id: $network_id, workspace_id: $workspace_id})
         WHERE s.device_id IN $device_ids AND t.device_id IN $device_ids
         RETURN DISTINCT
             s.device_id AS source_id,
-            t.device_id AS target_id
+            t.device_id AS target_id,
+            properties(e) AS edge_properties
         ORDER BY source_id ASC, target_id ASC
         """
 
@@ -77,6 +103,7 @@ class TopologyQueryService:
             node_result = await session.run(
                 node_query,
                 network_id=str(network_id),
+                workspace_id=str(workspace_id),
                 cursor=cursor,
                 fetch_limit=fetch_limit,
             )
@@ -93,6 +120,7 @@ class TopologyQueryService:
             edge_result = await session.run(
                 edge_query,
                 network_id=str(network_id),
+                workspace_id=str(workspace_id),
                 device_ids=device_ids,
             )
             raw_edges = await edge_result.data()
@@ -107,20 +135,33 @@ class TopologyQueryService:
             )
             for n in page_rows
         ]
-        edges = [
-            TopologyEdge(
-                source_id=e["source_id"],
-                target_id=e["target_id"],
-                edge_type="connected_to",
-                metadata={},
+        # Deduplicate defensively: MERGE keeps one CONNECTED_TO per ordered pair, but a
+        # legacy/imported graph could hold more than one. Ordering stays deterministic.
+        edges: list[TopologyEdge] = []
+        seen_edge_keys: set[tuple[str, str]] = set()
+        for e in raw_edges:
+            edge_key = (e["source_id"], e["target_id"])
+            if edge_key in seen_edge_keys:
+                continue
+            seen_edge_keys.add(edge_key)
+
+            raw_properties = e.get("edge_properties")
+            metadata = dict(raw_properties) if isinstance(raw_properties, dict) else {}
+            edges.append(
+                TopologyEdge(
+                    source_id=e["source_id"],
+                    target_id=e["target_id"],
+                    edge_type="connected_to",
+                    metadata=metadata,
+                )
             )
-            for e in raw_edges
-        ]
         return TopologyGraphResponse(nodes=nodes, edges=edges), next_cursor
 
     async def get_node_with_neighbours(
         self,
         device_id: uuid.UUID,
+        network_id: uuid.UUID,
+        workspace_id: uuid.UUID,
         depth: int = 1,
     ) -> dict | None:
         """Return one device node with deterministic direct neighbours.
@@ -131,8 +172,8 @@ class TopologyQueryService:
             depth = 1
 
         query = """
-        MATCH (d:Device {device_id: $device_id})
-        OPTIONAL MATCH (d)-[:CONNECTED_TO]->(n_out:Device)
+        MATCH (d:Device {device_id: $device_id, network_id: $network_id, workspace_id: $workspace_id})
+        OPTIONAL MATCH (d)-[:CONNECTED_TO]->(n_out:Device {network_id: $network_id, workspace_id: $workspace_id})
         WHERE n_out.device_id <> d.device_id
         WITH d, collect(DISTINCT {
             device_id: n_out.device_id,
@@ -143,9 +184,9 @@ class TopologyQueryService:
             edge_type: 'connected_to',
             direction: 'outbound'
         }) AS outbound
-        OPTIONAL MATCH (n_in:Device)-[:CONNECTED_TO]->(d)
+        OPTIONAL MATCH (n_in:Device {network_id: $network_id, workspace_id: $workspace_id})-[:CONNECTED_TO]->(d)
         WHERE n_in.device_id <> d.device_id
-        WITH d, outbound + collect(DISTINCT {
+        WITH d, outbound, collect(DISTINCT {
             device_id: n_in.device_id,
             hostname: n_in.hostname,
             device_type: n_in.device_type,
@@ -153,7 +194,8 @@ class TopologyQueryService:
             spatial_ref_id: n_in.spatial_ref_id,
             edge_type: 'connected_to',
             direction: 'inbound'
-        }) AS neighbours
+        }) AS inbound
+        WITH d, outbound + inbound AS neighbours
         RETURN {
             device_id: d.device_id,
             hostname: d.hostname,
@@ -165,7 +207,12 @@ class TopologyQueryService:
         """
 
         async with self._driver.session() as session:
-            result = await session.run(query, device_id=str(device_id))
+            result = await session.run(
+                query,
+                device_id=str(device_id),
+                network_id=str(network_id),
+                workspace_id=str(workspace_id),
+            )
             record = await result.single()
 
         if record is None or record["node"] is None:
@@ -185,6 +232,7 @@ class TopologyQueryService:
         self,
         *,
         network_id: uuid.UUID,
+        workspace_id: uuid.UUID,
         db: AsyncSession,
         redis: aioredis.Redis,
         actor_id: str,
@@ -200,8 +248,10 @@ class TopologyQueryService:
         """
         network_repo = NetworkRepository(db)
         workspace_map = await network_repo.get_workspace_ids_for_network_ids([str(network_id)])
-        workspace_id = workspace_map.get(str(network_id))
-        if workspace_id is None:
+        expected_workspace_id = workspace_map.get(str(network_id))
+        if expected_workspace_id is None:
+            return None
+        if expected_workspace_id != str(workspace_id):
             return None
 
         reconcile_id = str(uuid.uuid4())
@@ -209,7 +259,7 @@ class TopologyQueryService:
         requested_payload = {
             "reconcile_id": reconcile_id,
             "network_id": str(network_id),
-            "workspace_id": workspace_id,
+            "workspace_id": str(workspace_id),
             "status": "requested",
             "actor_id": actor_id,
             "requested_at": datetime.now(UTC).isoformat(),
@@ -255,9 +305,15 @@ class TopologyQueryService:
 
         try:
             async with self._driver.session() as session:
-                node_result = await session.run(node_count_query, network_id=str(network_id))
+                node_result = await session.run(
+                    node_count_query,
+                    network_id=str(network_id),
+                )
                 node_record = await node_result.single()
-                edge_result = await session.run(edge_count_query, network_id=str(network_id))
+                edge_result = await session.run(
+                    edge_count_query,
+                    network_id=str(network_id),
+                )
                 edge_record = await edge_result.single()
                 missing_result = await session.run(
                     missing_workspace_count_query,
@@ -267,14 +323,14 @@ class TopologyQueryService:
                 backfill_result = await session.run(
                     backfill_workspace_query,
                     network_id=str(network_id),
-                    workspace_id=workspace_id,
+                    workspace_id=str(workspace_id),
                 )
                 backfill_record = await backfill_result.single()
         except Exception as exc:
             failed_payload = {
                 "reconcile_id": reconcile_id,
                 "network_id": str(network_id),
-                "workspace_id": workspace_id,
+                "workspace_id": str(workspace_id),
                 "status": "failed",
                 "actor_id": actor_id,
                 "error": str(exc),
@@ -298,23 +354,15 @@ class TopologyQueryService:
                 )
             raise
 
-        node_count = int(node_record["node_count"]) if node_record and "node_count" in node_record else 0
-        edge_count = int(edge_record["edge_count"]) if edge_record and "edge_count" in edge_record else 0
-        missing_workspace_nodes = (
-            int(missing_record["missing_workspace_nodes"])
-            if missing_record and "missing_workspace_nodes" in missing_record
-            else 0
-        )
-        workspace_backfilled_nodes = (
-            int(backfill_record["workspace_backfilled_nodes"])
-            if backfill_record and "workspace_backfilled_nodes" in backfill_record
-            else 0
-        )
+        node_count = _record_int(node_record, "node_count")
+        edge_count = _record_int(edge_record, "edge_count")
+        missing_workspace_nodes = _record_int(missing_record, "missing_workspace_nodes")
+        workspace_backfilled_nodes = _record_int(backfill_record, "workspace_backfilled_nodes")
 
         completed_payload = {
             "reconcile_id": reconcile_id,
             "network_id": str(network_id),
-            "workspace_id": workspace_id,
+            "workspace_id": str(workspace_id),
             "status": "completed",
             "actor_id": actor_id,
             "checked_nodes": node_count,
@@ -357,6 +405,8 @@ class TopologyQueryService:
         self,
         *,
         device_id: uuid.UUID,
+        network_id: uuid.UUID,
+        workspace_id: uuid.UUID,
         depth: int = 1,
         limit: int = 200,
     ) -> TopologyDeviceNeighboursResponse | None:
@@ -367,7 +417,7 @@ class TopologyQueryService:
         bounded_depth = max(1, min(depth, 6))
 
         root_query = """
-        MATCH (d:Device {device_id: $device_id})
+        MATCH (d:Device {device_id: $device_id, network_id: $network_id, workspace_id: $workspace_id})
         RETURN d.device_id AS device_id,
                d.hostname AS hostname,
                d.device_type AS device_type,
@@ -376,10 +426,10 @@ class TopologyQueryService:
         """
 
         neighbours_query = """
-        MATCH (d:Device {device_id: $device_id})
+        MATCH (d:Device {device_id: $device_id, network_id: $network_id, workspace_id: $workspace_id})
         CALL {
             WITH d
-            MATCH path = (d)-[r:CONNECTED_TO*1..__DEPTH__]-(n:Device)
+            MATCH path = (d)-[r:CONNECTED_TO*1..__DEPTH__]-(n:Device {network_id: $network_id, workspace_id: $workspace_id})
             WHERE n.device_id <> d.device_id
             WITH n,
                  d,
@@ -422,7 +472,12 @@ class TopologyQueryService:
         neighbours_query = neighbours_query.replace("__DEPTH__", str(bounded_depth))
 
         async with self._driver.session() as session:
-            root_result = await session.run(root_query, device_id=str(device_id))
+            root_result = await session.run(
+                root_query,
+                device_id=str(device_id),
+                network_id=str(network_id),
+                workspace_id=str(workspace_id),
+            )
             root_record = await root_result.single()
             if root_record is None:
                 return None
@@ -430,6 +485,8 @@ class TopologyQueryService:
             neighbours_result = await session.run(
                 neighbours_query,
                 device_id=str(device_id),
+                network_id=str(network_id),
+                workspace_id=str(workspace_id),
                 limit=limit,
             )
             neighbour_rows = await neighbours_result.data()
@@ -471,6 +528,8 @@ class TopologyQueryService:
         self,
         *,
         device_id: uuid.UUID,
+        network_id: uuid.UUID,
+        workspace_id: uuid.UUID,
         max_hops: int = 3,
         limit: int = 500,
     ) -> TopologyImpactResponse | None:
@@ -481,7 +540,7 @@ class TopologyQueryService:
         bounded_hops = max(1, min(max_hops, 8))
 
         root_query = """
-        MATCH (d:Device {device_id: $device_id})
+        MATCH (d:Device {device_id: $device_id, network_id: $network_id, workspace_id: $workspace_id})
         RETURN d.device_id AS device_id,
                d.hostname AS hostname,
                d.device_type AS device_type,
@@ -490,8 +549,8 @@ class TopologyQueryService:
         """
 
         impact_query = """
-        MATCH (d:Device {device_id: $device_id})
-        MATCH path = (d)-[:CONNECTED_TO*1..__MAX_HOPS__]-(n:Device)
+        MATCH (d:Device {device_id: $device_id, network_id: $network_id, workspace_id: $workspace_id})
+        MATCH path = (d)-[:CONNECTED_TO*1..__MAX_HOPS__]-(n:Device {network_id: $network_id, workspace_id: $workspace_id})
         WHERE n.device_id <> d.device_id
         WITH n.device_id AS device_id,
              min(length(path)) AS hop_depth,
@@ -511,7 +570,12 @@ class TopologyQueryService:
         impact_query = impact_query.replace("__MAX_HOPS__", str(bounded_hops))
 
         async with self._driver.session() as session:
-            root_result = await session.run(root_query, device_id=str(device_id))
+            root_result = await session.run(
+                root_query,
+                device_id=str(device_id),
+                network_id=str(network_id),
+                workspace_id=str(workspace_id),
+            )
             root_record = await root_result.single()
             if root_record is None:
                 return None
@@ -519,6 +583,8 @@ class TopologyQueryService:
             impact_result = await session.run(
                 impact_query,
                 device_id=str(device_id),
+                network_id=str(network_id),
+                workspace_id=str(workspace_id),
                 limit=limit,
             )
             impact_rows = await impact_result.data()
@@ -589,6 +655,152 @@ class TopologyQueryService:
             )
         logger.info("topology_node_created", device_id=device_id, network_id=network_id)
 
+    async def merge_device_edges(
+        self,
+        *,
+        network_id: str,
+        workspace_id: str,
+        edges: Sequence[PlannedEdge],
+    ) -> int:
+        """Create or merge ``CONNECTED_TO`` relationships between existing Device nodes.
+
+        Counterpart to :meth:`create_device_node`, which only ever wrote nodes. Without
+        this, ``get_graph`` can never return edges.
+
+        Contract:
+        - Idempotent. ``MERGE`` on the relationship pattern means replaying the same
+          plan does not create duplicates.
+        - Scoped. Both endpoints must already exist inside ``network_id`` /
+          ``workspace_id``; unmatched pairs are silently skipped rather than
+          fabricating nodes.
+        - Self-links are rejected.
+        - Relationship properties are flat primitives only (Neo4j constraint).
+
+        Returns the number of relationships written.
+        """
+        payload: list[dict[str, object]] = []
+        for edge in edges:
+            if not edge.source_id or not edge.target_id:
+                continue
+            if edge.source_id == edge.target_id:
+                continue
+            properties = {
+                key: value
+                for key, value in (edge.metadata or {}).items()
+                if isinstance(value, (str, int, float, bool))
+            }
+            payload.append(
+                {
+                    "source_id": edge.source_id,
+                    "target_id": edge.target_id,
+                    "properties": properties,
+                }
+            )
+
+        if not payload:
+            logger.info(
+                "topology_edges_merge_skipped",
+                network_id=network_id,
+                reason="empty_payload",
+            )
+            return 0
+
+        query = """
+        UNWIND $edges AS edge
+        MATCH (s:Device {device_id: edge.source_id, network_id: $network_id, workspace_id: $workspace_id})
+        MATCH (t:Device {device_id: edge.target_id, network_id: $network_id, workspace_id: $workspace_id})
+        WHERE s.device_id <> t.device_id
+        MERGE (s)-[r:CONNECTED_TO]->(t)
+        SET r += edge.properties
+        RETURN count(r) AS written
+        """
+
+        async with self._driver.session() as session:
+            result = await session.run(
+                query,
+                edges=payload,
+                network_id=network_id,
+                workspace_id=workspace_id,
+            )
+            record = await result.single()
+
+        written = _record_int(record, "written")
+        logger.info(
+            "topology_edges_merged",
+            network_id=network_id,
+            requested_edges=len(payload),
+            written_edges=written,
+        )
+        return written
+
+    async def prune_synthetic_device_edges(
+        self,
+        *,
+        network_id: str,
+        workspace_id: str,
+        generator: str,
+    ) -> int:
+        """Delete previously generated synthetic edges for one network.
+
+        Only relationships explicitly tagged ``synthetic = true`` **and** matching
+        ``generator`` are removed, so discovered/real topology is never touched.
+
+        This exists because a regenerated plan is not necessarily a superset of the
+        previous one: if the device set differs (for example because Neo4j projection
+        was still catching up), parent selection legitimately changes and a plain
+        ``MERGE`` would leave stale uplinks behind, inflating the edge count.
+        """
+        query = """
+        MATCH (s:Device {network_id: $network_id, workspace_id: $workspace_id})
+              -[r:CONNECTED_TO]->
+              (t:Device {network_id: $network_id, workspace_id: $workspace_id})
+        WHERE r.synthetic = true AND r.generator = $generator
+        DELETE r
+        RETURN count(r) AS deleted
+        """
+        async with self._driver.session() as session:
+            result = await session.run(
+                query,
+                network_id=network_id,
+                workspace_id=workspace_id,
+                generator=generator,
+            )
+            record = await result.single()
+
+        deleted = _record_int(record, "deleted")
+        logger.info(
+            "topology_synthetic_edges_pruned",
+            network_id=network_id,
+            generator=generator,
+            deleted_edges=deleted,
+        )
+        return deleted
+
+    async def replace_synthetic_device_edges(
+        self,
+        *,
+        network_id: str,
+        workspace_id: str,
+        edges: Sequence[PlannedEdge],
+        generator: str,
+    ) -> tuple[int, int]:
+        """Make the synthetic edge set for a network exactly match ``edges``.
+
+        Returns ``(deleted, written)``. Safe to re-run: the result depends only on the
+        supplied plan, not on how many times seeding has happened before.
+        """
+        deleted = await self.prune_synthetic_device_edges(
+            network_id=network_id,
+            workspace_id=workspace_id,
+            generator=generator,
+        )
+        written = await self.merge_device_edges(
+            network_id=network_id,
+            workspace_id=workspace_id,
+            edges=edges,
+        )
+        return deleted, written
+
     async def backfill_missing_workspace_ids(self, db: AsyncSession, correlation_id: str = "") -> int:
         """Fill missing Device.workspace_id in Neo4j using Network module ownership data.
 
@@ -638,7 +850,7 @@ class TopologyQueryService:
                     workspace_id=workspace_id,
                 )
                 record = await update_result.single()
-                updated = int(record["updated"]) if record and "updated" in record else 0
+                updated = _record_int(record, "updated")
                 updated_total += updated
 
         logger.info(

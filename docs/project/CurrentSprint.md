@@ -23,9 +23,95 @@
 - Vertical Slice 20 Implementation: **COMPLETE** — Optimization program closure gate is delivered with consolidated VS17-VS19 evidence, continuity-doc sign-off, and final required backend regression confirmation.
 - Chapter Conformance Audit (chapter-01 to chapter-12): **COMPLETE** — chapter-by-chapter implementation conformance classification was finalized, targeted in-scope remediation was applied (organization member identity validation and realtime websocket unauthorized/error handling hardening), and required backend/frontend validation evidence was recorded.
 
+## Enhancement Slice — Strathmore Digital Twin Presentation Hardening (Phase 2)
+
+- Status: **COMPLETE** (2026-09-02).
+- Scope boundaries: frontend-only Digital Twin visualization refinement; no new REST API, WebSocket channel, event, or schema changes; canonical envelope and existing realtime contracts preserved.
+- Delivered:
+  - Added canonical device visual registry with deterministic type->tier->geometry->colour mapping for Strathmore demo classes (`router`, `firewall`, `distribution_switch`, `access_switch`, `wireless_ap`, `server`, `security_gateway`, `ups`, `lab_endpoint`) plus compatibility aliases.
+  - Reworked `TwinScene` rendering to consume centralized visual metadata, keep type identity visible by default, and apply explicit state overlays (selection glow/scale, congestion ring, alert outline).
+  - Added deterministic label budgeting to avoid rendering one DOM label per node/link/overlay in dense topologies (Strathmore baseline), while always keeping selected-node visibility.
+  - Added defensive alert-device association logic that only lights per-device alert visuals when alert payloads carry real device references (no congestion/status fabrication).
+  - Split legend/inspector metric modules into lazy-loaded chunks to keep Twin route bundle continuity within VS19 perf bounds.
+- Validation evidence:
+  - Frontend quality gate: `npm run lint` ✅; `npm run typecheck` ✅; `npm run test` ✅ (`26 files, 110 tests`).
+  - Frontend build/perf: `npm run build` ✅ (existing large `three` chunk warning unchanged); `npm run perf:bundle` ✅ with continuity checks green (`twin_page_chunk_gzip_kb=6.63`, bounded check true).
+- Residual risks (accepted): current backend alert payloads are predominantly infrastructure/SLO events without `device_id`, so per-device alert outlines usually remain inactive until payload enrichment is approved in backend scope.
+
+## Enhancement Slice — Strathmore Digital Twin Presentation Hardening (Phase 3)
+
+- Status: **COMPLETE** (2026-09-02).
+- Scope boundaries: frontend-only Digital Twin campus-geometry layering; no new REST API, WebSocket channel, event name, or schema change; canonical envelope and existing realtime contracts preserved.
+- Delivered:
+  - Added deterministic campus-building derivation module (`frontend/src/features/digitalTwin/campusBuildings.ts`) that groups nodes by `spatial_ref_id` campus/building prefixes and emits stable building metadata (`floors`, `nodeCount`, `nodeIds`, `footprint`, geometry kind).
+  - Added scene-layer renderer (`frontend/src/features/digitalTwin/CampusBuildings.tsx`) with data-driven `box`/`extrude` building geometry support, label rendering, and highlight/visibility hooks via `CampusBuildingViewState`.
+  - Integrated building layer into `TwinScene` (`frontend/src/features/digitalTwin/TwinScene.tsx`) while preserving renderer/data mapping separation and existing node/link/overlay contracts.
+  - Added deterministic selected-node -> selected-building inference in-scene through a node-to-building index so building highlight tracks operator focus without introducing backend coupling.
+  - Added focused unit coverage in `frontend/src/features/digitalTwin/campusBuildings.test.ts` for building-id derivation, aggregation determinism, geometry heuristics, visibility/highlight helpers, and node-index mapping.
+- Validation evidence:
+  - Cycle baseline (backend): `poetry run pytest tests -q --no-cov -p no:cacheprovider` ✅ (`736 passed`).
+  - Frontend quality gate: `npm run lint` ✅; `npm run typecheck` ✅; `npm run test` ✅ (`27 files, 114 tests`).
+  - Frontend build/perf/e2e: `npm run build` ✅ (existing large `three` chunk warning unchanged); `npm run perf:bundle` ✅ (`total_js_gzip_kb=410.01`, `twin_page_chunk_gzip_kb=6.73`, bounded checks true); `npm run test:e2e` ✅ (`19/19`, one immediate transient retry observed earlier on `vs7-branch-compare` sign-in click timeout, then green rerun).
+- Residual risks (accepted): VS19 bundle-continuity headroom is narrow for `total_js_gzip_kb`; follow-on optimization remains a separate roadmap candidate.
+
+## Enhancement Slice — Strathmore Digital Twin Presentation Hardening (Phase 4)
+
+- Status: **COMPLETE** (2026-09-02).
+- Scope boundaries: frontend-only Digital Twin focus/navigation + topology cursor aggregation hardening; no new REST API, WebSocket channel, event name, or schema change; canonical envelope and existing contracts preserved.
+- Delivered:
+  - Added explicit campus focus controls (`frontend/src/features/digitalTwin/CampusFocusControls.tsx`) for building/floor selection, selected-building isolation toggle, floor filter toggle, and reset behavior wired to existing Twin page state.
+  - Extended building-view semantics in `frontend/src/features/digitalTwin/campusBuildings.ts` with `selectedFloorKey` + `floorFilterEnabled` and deterministic helpers (`deriveSpatialBuildingScope`, `normalizeFloorKey`, `isNodeVisibleInBuildingView`, `resolveCampusBuildingCameraFocus`).
+  - Updated `frontend/src/features/digitalTwin/TwinScene.tsx` to support deterministic camera fly-to for selected building/floor, selected-node building/floor inference fallback, and node visibility filtering by building/floor view state.
+  - Updated `frontend/src/features/digitalTwin/TwinPageContent.tsx` orchestration for building/floor focus state, scene-click building selection, and focused state forwarding to scene (with route-shell split kept in `frontend/src/features/digitalTwin/TwinPage.tsx`).
+  - Hardened topology fetch path to aggregate paginated graph pages under existing endpoint contracts (`frontend/src/features/topology/api.ts`, `frontend/src/features/topology/hooks.ts`) so Digital Twin/Topology consumers are no longer capped at first-page `limit=200` results.
+  - Added focused tests for new behavior (`frontend/src/features/digitalTwin/TwinPage.test.tsx`, `frontend/src/features/digitalTwin/campusBuildings.test.ts`, `frontend/src/features/topology/api.test.ts`).
+  - Applied Twin-route continuity hardening to preserve VS19 perf checks after Phase 4 growth: split Twin route shell/content (`frontend/src/features/digitalTwin/TwinPage.tsx`, `frontend/src/features/digitalTwin/TwinPageContent.tsx`) and removed non-essential scene dependencies from `TwinScene` (`Environment`, `Sparkles`) to keep bounded continuity checks green.
+- Validation evidence:
+  - Frontend quality gate: `npm run lint` ✅; `npm run typecheck` ✅; `npm run test` ✅ (`28 files, 119 tests`).
+  - Focused regression gate: `npm run test -- src/features/digitalTwin/TwinPage.test.tsx src/features/topology/api.test.ts src/features/digitalTwin/campusBuildings.test.ts src/features/digitalTwin/deviceVisuals.test.ts src/features/digitalTwin/sceneAdapter.test.ts src/features/digitalTwin/hooks.test.ts` ✅ (`6 files, 39 tests`).
+  - Frontend build/perf/e2e: `npm run build` ✅ (existing large `three` chunk warning unchanged); `npm run perf:bundle` ✅ with bounded checks green (`total_js_gzip_kb=393.38`, `twin_page_chunk_gzip_kb=0.5`); `npm run test:e2e` ✅ (`19/19`).
+- Residual risks (accepted): building shells and camera focus remain deterministic heuristics from `spatial_ref_id` (not BIM/OSM authoritative geometry); topology aggregation uses bounded `maxPages` guard (`64`) to prevent unbounded client fetch loops.
+
+## Enhancement Slice — Strathmore Digital Twin Presentation Hardening (Phase 5A/5B/5C)
+
+- Status: **COMPLETE** (2026-09-02).
+- Scope boundaries: frontend-only Digital Twin projection/render/coverage enhancements; no new REST API, WebSocket channel, event name, or schema change; canonical envelope and existing contracts preserved.
+- Delivered:
+  - **Phase 5A (projection provider foundation):** Added `frontend/src/features/digitalTwin/spatialProjection.ts` with deterministic projection provider abstraction (`DETERMINISTIC_SPATIAL_PROJECTION_PROVIDER`) and routed spatial parsing/placement consumers through it from `sceneAdapter.ts` and `campusBuildings.ts`.
+  - **Phase 5B (real GLB/GLTF rendering path, session-only):** Added live GLB/GLTF scene rendering in `frontend/src/features/digitalTwin/TwinScene.tsx` via `GLTFLoader`, normalized model framing/scale in-scene, and non-blocking model raycast behavior so existing node selection remains intact; added model-layer controls + loader status UX in `frontend/src/features/digitalTwin/TwinPageContent.tsx`.
+  - **Phase 5C (wireless coverage layer):** Added AP-centric synthetic coverage-cell derivation in `frontend/src/features/digitalTwin/wirelessCoverage.ts` and scene heat/ring rendering in `TwinScene.tsx` with explicit "synthetic estimate" labeling and deterministic policy versioning (`synthetic.ap.v1`).
+  - Added focused unit coverage for new deterministic logic surfaces: `frontend/src/features/digitalTwin/spatialProjection.test.ts` and `frontend/src/features/digitalTwin/wirelessCoverage.test.ts`.
+- Validation evidence:
+  - Backend regression gate: `poetry run pytest tests -q` ✅ (`736 passed`).
+  - Frontend quality gate: `npm run lint` ✅; `npm run typecheck` ✅; `npm run test` ✅ (`30 files, 126 tests`).
+  - Frontend e2e gate: `npm run test:e2e` ✅ (`19/19`).
+  - Frontend build/perf gate: `npm run build` ✅ (existing large `three` chunk warning unchanged); `npm run perf:bundle` ✅ (`total_js_gzip_kb=407.82`, `twin_page_chunk_gzip_kb=0.5`, bounded checks true).
+- Residual risks (accepted): model import/render remains session-local with no backend model persistence contract; wireless coverage shading is a synthetic operational estimate (not RF-physics fidelity); procedural OSM ingestion remains deferred to Phase 5D.
+
+## Enhancement Slice — Strathmore Digital Twin Presentation Hardening (Phase 5D)
+
+- Status: **COMPLETE** (2026-09-02).
+- Scope boundaries: backend + frontend campus-building ingest/persistence + attenuation-aware coverage hardening under existing network ownership; no new websocket channel or undocumented event names; canonical API envelope preserved.
+- Delivered:
+  - Added explicit Network PRD coverage in `docs/features/Network.md`, including network/device/campus-building contract surfaces and governance notes for `GET|POST /api/v1/networks/{network_id}/campus/buildings`.
+  - Added backend persistence baseline for `campus_buildings` via `backend/alembic/versions/0009_campus_building_persistence_baseline.py` and module wiring (`backend/app/modules/network/models.py`, `backend/app/modules/network/repository.py`, `backend/app/modules/network/schemas.py`, `backend/app/modules/network/service.py`, `backend/app/api/v1/networks.py`).
+  - Enforced tenant access on campus-building list/upsert through existing workspace/org claim checks at service boundaries (no cross-module SQL joins).
+  - Added deterministic GeoJSON/OSM campus-import provider (`frontend/src/features/digitalTwin/campusImportProvider.ts`, provider id `deterministic.geojson.osm.v1`) and Twin-page upload/persist orchestration (`frontend/src/features/digitalTwin/TwinPageContent.tsx`) with explicit source metadata.
+  - Updated wireless coverage policy to `rf.material_attenuation.v1` and incorporated persisted/imported wall-material attenuation metadata into coverage-cell derivation (`frontend/src/features/digitalTwin/wirelessCoverage.ts`).
+  - Removed undocumented campus-building event publication from backend upsert flow; campus-building state is persisted/read via the documented REST surface only.
+  - Added/updated regression coverage for provider parsing/mapping, attenuation-aware coverage derivation, Twin-page campus persistence orchestration, and backend endpoint/service behavior.
+- Validation evidence:
+  - Backend touched-scope lint: `poetry run ruff check app/api/v1/networks.py app/modules/network/models.py app/modules/network/repository.py app/modules/network/schemas.py app/modules/network/service.py tests/unit/test_network_service.py tests/integration/test_network_endpoints.py` ✅.
+  - Backend targeted regression: `poetry run pytest tests/unit/test_network_service.py tests/integration/test_network_endpoints.py -q` ✅ (`90 passed`).
+  - Backend full regression: `poetry run pytest tests -q` ✅ (`746 passed`).
+  - Frontend targeted regression: `npm run test -- src/features/digitalTwin/campusImportProvider.test.ts src/features/digitalTwin/wirelessCoverage.test.ts src/features/digitalTwin/TwinPage.test.tsx src/features/digitalTwin/campusBuildings.test.ts` ✅ (`4 files, 22 tests`).
+  - Frontend full gate (lint/type/unit/e2e): `npm run lint` ✅; `npm run typecheck` ✅; `npm run test` ✅ (`31 files, 130 tests`); `npm run test:e2e` ✅ (`19/19`).
+  - Frontend build/perf continuity: `npm run perf:bundle` ✅ (`total_js_gzip_kb=410.15`, `twin_page_chunk_gzip_kb=0.5`; all bounded checks true, `total_js_gzip_bounded` recovered).
+- Residual risks (accepted): GeoJSON/OSM building geometry and RF attenuation remain deterministic operator-imported estimates (not authoritative RF-physics/BIM output), and VS19 total-JS continuity headroom remains very narrow (`0.01 kB` under bound) pending follow-on optimization.
+
 ## Enhancement Slice — Strathmore Demo Package (Two-Phase)
 
-- Status: **COMPLETE** (2026-08-20).
+- Status: **COMPLETE** (2026-08-20; live evidence refreshed 2026-09-02).
 - Scope boundaries: Strathmore demo preparation only; no unapproved REST/WebSocket/event/channel/schema expansion; canonical envelope preserved (`success`, `data`, `meta`, `errors`).
 - Delivered:
   - Phase 1 centralized-campus blueprint finalized in `docs/project/Strathmore-Demo-Manual-and-Execution-Guide.md` with explicit contract traceability and grouping-gap handling.
@@ -36,7 +122,10 @@
   - Backend: `poetry run ruff check scripts/prepare_strathmore_demo.py tests/unit/test_prepare_strathmore_demo.py` ✅; `poetry run pytest tests/unit/test_prepare_strathmore_demo.py -q` ✅ (`3 passed`); `poetry run pytest tests -q` ✅ (`572 passed`); post-fix targeted gate `poetry run pytest tests/unit/test_intent_execution_service.py tests/integration/test_intent_endpoints.py tests/unit/test_prepare_strathmore_demo.py -q` ✅ (`31 passed`); post-fix full gate rerun `poetry run pytest tests -q` ✅ (`572 passed`).
   - Frontend: `npm run lint` ✅; `npm run typecheck` ✅; `npm run test` ✅ (`25 files, 100 tests`); `npm run test:e2e` ✅ (`19/19`); `npm run build` ✅; `npm run perf:bundle` ✅ (bounded checks true).
   - Repo-wide backend lint baseline remains known debt: `poetry run ruff check app tests` -> **FAIL** (legacy untouched files, consistent with existing tracking).
-- Live apply closure evidence: `poetry run python scripts/prepare_strathmore_demo.py --apply --run-control-plane-check --output-path /tmp/opencode/strathmore-apply-context.json` ✅ (`339/339` devices created; list verification `actual=339`; topology snapshot `nodes=339 edges=0`; simulation + intent control-plane check succeeded; artifact written).
+- Validation evidence refresh (2026-09-02): backend `poetry run pytest tests -q` ✅ (`736 passed`); frontend `npm run lint` ✅, `npm run typecheck` ✅, `npm run test` ✅ (`28 files, 119 tests`), `npm run test:e2e` ✅ (`19/19`), `npm run build` ✅, `npm run perf:bundle` ✅ (`total_js_gzip_kb=393.35`, `twin_page_chunk_gzip_kb=0.5`, bounded checks true).
+- Live apply closure evidence (historical 2026-08-20 run): `poetry run python scripts/prepare_strathmore_demo.py --apply --run-control-plane-check --output-path /tmp/opencode/strathmore-apply-context.json` ✅ (`339/339` devices created; list verification `actual=339`; topology snapshot `nodes=339 edges=0`; simulation + intent control-plane check succeeded; artifact written).
+- Live apply evidence refresh (2026-09-02): `poetry run python scripts/prepare_strathmore_demo.py --apply --run-control-plane-check --output-path /tmp/opencode/strathmore-apply-context-20260902.json` ✅ (`339/339` devices created; list verification `actual=339`; topology projection settled after 2 polls from `283` to `339`; pre-materialization snapshot `nodes=339 edges=0`; synthetic topology materialization `planned_edges=338 written=338`; topology graph re-check `edges=338`; simulation + intent control-plane checks succeeded; artifact written).
+- Closure note: the previously tracked zero-edge result was a pre-materialization snapshot and is superseded by the refreshed live run confirming non-zero topology edges end-to-end.
 
 ### Subsystem Progress — Strathmore Demo Package (Two-Phase)
 
@@ -537,6 +626,7 @@
 
 ## Blocked / Deferred
 - Digital Twin spatial references — deferred to M6
+- Frontend VS19 continuity gate is currently red on total JS gzip bound (`npm run perf:bundle`: `total_js_gzip_kb=410.57` vs limit `410.16`) after Phase 5D scope growth; targeted chunk/asset optimization remains deferred follow-up.
 - Post-VS16 optimization sequence (VS17-VS20) is complete; deeper bundle-shape reduction for the large `three` chunk and staged/CI external load-tooling expansion remain deferred carryover candidates for the next roadmap phase.
 - Chapter conformance residual roadmap deltas (federated AIOS breadth, procedural OSM generation, full DAL/UNIL breadth, GraphQL and additional websocket channels, and full Timescale/object-storage operationalization) are documented in `docs/project/ChapterConformanceAudit.md`.
 - Repo-wide Ruff debt outside VS2 Step 8 scope remains and is tracked for later cleanup.

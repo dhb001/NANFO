@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   getTopologyDeviceNeighbours,
-  getTopologyGraph,
+  getTopologyGraphAll,
   getTopologyImpact,
   getTopologyNode,
   reconcileTopology,
@@ -10,7 +10,7 @@ import {
 export function useTopologyGraph(token: string | null, networkId: string | null) {
   return useQuery({
     queryKey: ["topology", token, networkId],
-    queryFn: () => getTopologyGraph(token as string, networkId as string),
+    queryFn: () => getTopologyGraphAll(token as string, networkId as string),
     enabled: Boolean(token && networkId),
   });
 }

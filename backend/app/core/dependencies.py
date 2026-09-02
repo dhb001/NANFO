@@ -143,6 +143,37 @@ def require_permissions(*required_perms: str):
     return _check
 
 
+def _parse_optional_scope_uuid(raw_value: object | None) -> uuid.UUID | None:
+    if raw_value is None:
+        return None
+
+    try:
+        return uuid.UUID(str(raw_value))
+    except (TypeError, ValueError, AttributeError):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Insufficient permissions.",
+        )
+
+
+def get_claim_org_scope(*, claims: TokenClaims) -> uuid.UUID | None:
+    """Return validated org UUID from claims when present.
+
+    Missing claim is allowed and returns None.
+    Invalid claim format is rejected with HTTP 403.
+    """
+    return _parse_optional_scope_uuid(claims.org_id)
+
+
+def get_claim_workspace_scope(*, claims: TokenClaims) -> uuid.UUID | None:
+    """Return validated workspace UUID from claims when present.
+
+    Missing claim is allowed and returns None.
+    Invalid claim format is rejected with HTTP 403.
+    """
+    return _parse_optional_scope_uuid(claims.workspace_id)
+
+
 def enforce_workspace_scope(
     *,
     claims: TokenClaims,
@@ -154,17 +185,9 @@ def enforce_workspace_scope(
     returned unchanged. If the token carries a workspace claim, mismatches are
     rejected with 403 and missing request workspace_id is bound to the claim.
     """
-    claim_workspace_raw = claims.workspace_id
-    if claim_workspace_raw is None:
+    claim_workspace_id = get_claim_workspace_scope(claims=claims)
+    if claim_workspace_id is None:
         return workspace_id
-
-    try:
-        claim_workspace_id = uuid.UUID(str(claim_workspace_raw))
-    except (TypeError, ValueError, AttributeError):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Insufficient permissions.",
-        )
 
     if workspace_id is None:
         return claim_workspace_id
@@ -176,3 +199,26 @@ def enforce_workspace_scope(
         )
 
     return workspace_id
+
+
+def enforce_org_scope(
+    *,
+    claims: TokenClaims,
+    org_id: uuid.UUID,
+) -> uuid.UUID:
+    """Enforce optional token org scope against an org-scoped request path.
+
+    If the token does not carry an org claim, the requested org_id is accepted.
+    If the token carries an org claim, mismatches are rejected with HTTP 403.
+    """
+    claim_org_id = get_claim_org_scope(claims=claims)
+    if claim_org_id is None:
+        return org_id
+
+    if org_id != claim_org_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Insufficient permissions.",
+        )
+
+    return org_id

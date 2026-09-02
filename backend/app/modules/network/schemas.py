@@ -8,8 +8,9 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from math import isfinite
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 
 # ── Network schemas ───────────────────────────────────────────────────────────
 
@@ -82,6 +83,94 @@ class DeviceListResponse(BaseModel):
     total: int
     page: int
     page_size: int
+
+
+class UpsertCampusBuildingInput(BaseModel):
+    building_id: str = Field(min_length=1, max_length=160)
+    campus_key: str = Field(min_length=1, max_length=120)
+    building_key: str = Field(min_length=1, max_length=120)
+    label: str = Field(min_length=1, max_length=160)
+    geometry: str = Field(min_length=1, max_length=32)
+    x: float
+    z: float
+    base_y: float
+    width: float = Field(gt=0)
+    depth: float = Field(gt=0)
+    height: float = Field(gt=0)
+    floors: int = Field(ge=1, le=128)
+    footprint: list[list[float]]
+    wall_material: str | None = Field(default=None, max_length=64)
+    attenuation_db: float | None = None
+    source: str | None = Field(default=None, max_length=32)
+
+    @field_validator("geometry")
+    @classmethod
+    def validate_geometry(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if normalized not in {"box", "extrude"}:
+            raise ValueError("geometry must be one of: box, extrude")
+        return normalized
+
+    @field_validator("footprint")
+    @classmethod
+    def validate_footprint(cls, value: list[list[float]]) -> list[list[float]]:
+        if len(value) < 3:
+            raise ValueError("footprint must include at least three coordinate points")
+
+        normalized: list[list[float]] = []
+        for point in value:
+            if not isinstance(point, list) or len(point) != 2:
+                raise ValueError("footprint points must be [x, z]")
+            x = float(point[0])
+            z = float(point[1])
+            if not all(isfinite(coord) for coord in (x, z)):
+                raise ValueError("footprint coordinates must be finite numbers")
+            normalized.append([x, z])
+        return normalized
+
+    @field_validator("attenuation_db")
+    @classmethod
+    def validate_attenuation_db(cls, value: float | None) -> float | None:
+        if value is None:
+            return None
+        if value < 0 or value > 80:
+            raise ValueError("attenuation_db must be within [0, 80]")
+        return float(value)
+
+
+class UpsertCampusBuildingsRequest(BaseModel):
+    buildings: list[UpsertCampusBuildingInput] = Field(default_factory=list, max_length=1000)
+    replace_existing: bool = True
+
+
+class CampusBuildingResponse(BaseModel):
+    campus_building_id: uuid.UUID
+    network_id: uuid.UUID
+    building_id: str
+    campus_key: str
+    building_key: str
+    label: str
+    geometry: str
+    x: float
+    z: float
+    base_y: float
+    width: float
+    depth: float
+    height: float
+    floors: int
+    footprint: list[list[float]]
+    wall_material: str | None
+    attenuation_db: float | None
+    source: str | None
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class CampusBuildingListResponse(BaseModel):
+    items: list[CampusBuildingResponse]
+    total: int
 
 
 # ── Topology schemas ──────────────────────────────────────────────────────────

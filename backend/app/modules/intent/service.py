@@ -316,6 +316,24 @@ class IntentExecutionService:
         self._repo = IntentRepository(db)
         self._workspace_svc = OrgWorkspaceService(db=db, redis=redis)
 
+    async def _serialize_with_fresh_timestamps(
+        self,
+        intent,
+        *,
+        idempotent_replay: bool,
+        confidence_override: dict[str, Any],
+        detail_mode: bool = False,
+    ) -> dict[str, Any]:
+        # Ensure ORM-backed response attributes are loaded before sync serialization.
+        # Refreshing all mapped columns prevents async lazy-load attempts (MissingGreenlet).
+        await self._db.refresh(intent)
+        return _serialize_intent(
+            intent,
+            idempotent_replay=idempotent_replay,
+            confidence_override=confidence_override,
+            detail_mode=detail_mode,
+        )
+
     async def execute_intent(
         self,
         *,
@@ -362,7 +380,7 @@ class IntentExecutionService:
                     "execution_completed",
                     "execution_failed",
                 }:
-                    return _serialize_intent(
+                    return await self._serialize_with_fresh_timestamps(
                         existing_by_key,
                         idempotent_replay=True,
                         confidence_override={
@@ -389,7 +407,7 @@ class IntentExecutionService:
 
         if intent.status == "execution_started":
             if normalized_idempotency_key and intent.idempotency_key == normalized_idempotency_key:
-                return _serialize_intent(
+                return await self._serialize_with_fresh_timestamps(
                     intent,
                     idempotent_replay=True,
                     confidence_override={
@@ -619,7 +637,7 @@ class IntentExecutionService:
         )
         await self._db.commit()
 
-        return _serialize_intent(
+        return await self._serialize_with_fresh_timestamps(
             intent,
             idempotent_replay=False,
             confidence_override={
@@ -642,7 +660,7 @@ class IntentExecutionService:
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail={"code": "INTENT_NOT_FOUND", "message": "Intent not found."},
             )
-        return _serialize_intent(
+        return await self._serialize_with_fresh_timestamps(
             intent,
             idempotent_replay=False,
             confidence_override={

@@ -22,7 +22,7 @@ from app.modules.identity.models import (  # noqa: F401
     UserRole,
 )
 from app.modules.intent.models import Intent  # noqa: F401
-from app.modules.network.models import Device, Network  # noqa: F401
+from app.modules.network.models import CampusBuildingRecord, Device, Network  # noqa: F401
 from app.modules.plugin.models import PluginRecord  # noqa: F401
 from app.modules.organization.models import (  # noqa: F401
     Organization,

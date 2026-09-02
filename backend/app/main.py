@@ -283,6 +283,22 @@ def _http_error_code(status_code: int) -> str:
     }.get(status_code, f"HTTP_{status_code}")
 
 
+def _error_response_headers(request: Request, existing: dict[str, str] | None = None) -> dict[str, str] | None:
+    """Apply a narrow CORS fallback for error responses when Origin is allowed.
+
+    CORSMiddleware can miss internal error responses depending on where exceptions
+    are raised in the middleware stack. This fallback keeps allowed browser
+    clients from seeing opaque CORS failures when a real API error occurs.
+    """
+    headers = dict(existing or {})
+    origin = request.headers.get("Origin")
+    if origin and origin in _settings.CORS_ALLOW_ORIGINS_LIST:
+        headers.setdefault("Access-Control-Allow-Origin", origin)
+        headers.setdefault("Access-Control-Allow-Credentials", "true")
+
+    return headers or None
+
+
 @app.exception_handler(StarletteHTTPException)
 async def http_exception_handler(request: Request, exc: StarletteHTTPException):
     """Wrap all HTTPException responses in the canonical API envelope (API_STANDARD.md §2).
@@ -301,7 +317,7 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
 
     return JSONResponse(
         status_code=exc.status_code,
-        headers=getattr(exc, "headers", None),
+        headers=_error_response_headers(request, getattr(exc, "headers", None)),
         content={
             "success": False,
             "data": None,
@@ -318,6 +334,7 @@ async def request_validation_exception_handler(request: Request, exc: RequestVal
     message = first_error.get("msg") if isinstance(first_error, dict) else None
     return JSONResponse(
         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        headers=_error_response_headers(request),
         content={
             "success": False,
             "data": None,
@@ -336,6 +353,7 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
     logger.error("unhandled_exception", path=request.url.path, error=str(exc))
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        headers=_error_response_headers(request),
         content={
             "success": False,
             "data": None,

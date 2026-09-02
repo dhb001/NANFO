@@ -20,8 +20,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.dependencies import (
     RequestMeta,
     TokenClaims,
+    get_claim_org_scope,
+    get_claim_workspace_scope,
     require_permissions,
-    get_current_user,
     get_db,
     get_redis,
     get_request_meta,
@@ -33,6 +34,7 @@ from app.modules.network.schemas import (
     TopologyGraphResponse,
     TopologyImpactResponse,
 )
+from app.modules.network.service import NetworkService
 from app.modules.network.topology import TopologyQueryService
 
 router = APIRouter(prefix="/api/v1/topology", tags=["Topology"])
@@ -115,11 +117,44 @@ class TopologyReconcileAPIResponse(BaseModel):
     errors: ErrorDetail | None
 
 
+async def _resolve_network_scope(
+    *,
+    network_id: uuid.UUID,
+    claims: TokenClaims,
+    db: AsyncSession,
+    redis: aioredis.Redis,
+) -> tuple[uuid.UUID, uuid.UUID]:
+    network = await NetworkService(db=db, redis=redis).assert_network_workspace_access(
+        network_id=network_id,
+        requested_workspace_id=get_claim_workspace_scope(claims=claims),
+        actor_user_id=claims.user_id,
+        claim_org_id=get_claim_org_scope(claims=claims),
+    )
+    return network.network_id, network.workspace_id
+
+
+async def _resolve_device_scope(
+    *,
+    device_id: uuid.UUID,
+    claims: TokenClaims,
+    db: AsyncSession,
+    redis: aioredis.Redis,
+) -> tuple[uuid.UUID, uuid.UUID]:
+    return await NetworkService(db=db, redis=redis).assert_device_workspace_access(
+        device_id=device_id,
+        requested_workspace_id=get_claim_workspace_scope(claims=claims),
+        actor_user_id=claims.user_id,
+        claim_org_id=get_claim_org_scope(claims=claims),
+    )
+
+
 @router.get("/graph", response_model=TopologyGraphAPIResponse, status_code=status.HTTP_200_OK)
 async def get_topology_graph(
     network_id: uuid.UUID,
     claims: Annotated[TokenClaims, Depends(require_permissions("read:topology"))],
     meta: Annotated[RequestMeta, Depends(get_request_meta)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    redis: Annotated[aioredis.Redis, Depends(get_redis)],
     depth: int = 2,
     limit: int = Query(default=100, ge=1, le=500),
     cursor: str | None = None,
@@ -132,10 +167,18 @@ async def get_topology_graph(
 
     """
     started = time.monotonic()
+    _, workspace_id = await _resolve_network_scope(
+        network_id=network_id,
+        claims=claims,
+        db=db,
+        redis=redis,
+    )
+
     driver = get_neo4j_driver()
     svc = TopologyQueryService(driver=driver)
     result, next_cursor = await svc.get_graph(
         network_id=network_id,
+        workspace_id=workspace_id,
         depth=depth,
         limit=limit,
         cursor=cursor,
@@ -159,12 +202,26 @@ async def get_topology_node_with_neighbours(
     device_id: uuid.UUID,
     claims: Annotated[TokenClaims, Depends(require_permissions("read:topology"))],
     meta: Annotated[RequestMeta, Depends(get_request_meta)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    redis: Annotated[aioredis.Redis, Depends(get_redis)],
     depth: int = Query(default=1, ge=1),
 ):
     started = time.monotonic()
+    network_id, workspace_id = await _resolve_device_scope(
+        device_id=device_id,
+        claims=claims,
+        db=db,
+        redis=redis,
+    )
+
     driver = get_neo4j_driver()
     svc = TopologyQueryService(driver=driver)
-    result = await svc.get_node_with_neighbours(device_id=device_id, depth=depth)
+    result = await svc.get_node_with_neighbours(
+        device_id=device_id,
+        depth=depth,
+        network_id=network_id,
+        workspace_id=workspace_id,
+    )
     if result is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Topology node not found.")
 
@@ -186,13 +243,28 @@ async def get_topology_device_neighbours(
     device_id: uuid.UUID,
     claims: Annotated[TokenClaims, Depends(require_permissions("read:topology"))],
     meta: Annotated[RequestMeta, Depends(get_request_meta)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    redis: Annotated[aioredis.Redis, Depends(get_redis)],
     depth: int = Query(default=1, ge=1, le=6),
     limit: int = Query(default=200, ge=1, le=1000),
 ):
     started = time.monotonic()
+    network_id, workspace_id = await _resolve_device_scope(
+        device_id=device_id,
+        claims=claims,
+        db=db,
+        redis=redis,
+    )
+
     driver = get_neo4j_driver()
     svc = TopologyQueryService(driver=driver)
-    result = await svc.get_device_neighbours(device_id=device_id, depth=depth, limit=limit)
+    result = await svc.get_device_neighbours(
+        device_id=device_id,
+        depth=depth,
+        limit=limit,
+        network_id=network_id,
+        workspace_id=workspace_id,
+    )
     if result is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Topology node not found.")
 
@@ -214,13 +286,28 @@ async def get_topology_impact(
     device_id: uuid.UUID,
     claims: Annotated[TokenClaims, Depends(require_permissions("read:topology"))],
     meta: Annotated[RequestMeta, Depends(get_request_meta)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    redis: Annotated[aioredis.Redis, Depends(get_redis)],
     max_hops: int = Query(default=3, ge=1, le=8),
     limit: int = Query(default=500, ge=1, le=2000),
 ):
     started = time.monotonic()
+    network_id, workspace_id = await _resolve_device_scope(
+        device_id=device_id,
+        claims=claims,
+        db=db,
+        redis=redis,
+    )
+
     driver = get_neo4j_driver()
     svc = TopologyQueryService(driver=driver)
-    result = await svc.get_impact_analysis(device_id=device_id, max_hops=max_hops, limit=limit)
+    result = await svc.get_impact_analysis(
+        device_id=device_id,
+        max_hops=max_hops,
+        limit=limit,
+        network_id=network_id,
+        workspace_id=workspace_id,
+    )
     if result is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Topology node not found.")
 
@@ -246,10 +333,18 @@ async def reconcile_topology(
     redis: Annotated[aioredis.Redis, Depends(get_redis)],
 ):
     started = time.monotonic()
+    network_id, workspace_id = await _resolve_network_scope(
+        network_id=req.network_id,
+        claims=claims,
+        db=db,
+        redis=redis,
+    )
+
     driver = get_neo4j_driver()
     svc = TopologyQueryService(driver=driver)
     result = await svc.reconcile_network(
-        network_id=req.network_id,
+        network_id=network_id,
+        workspace_id=workspace_id,
         db=db,
         redis=redis,
         actor_id=claims.user_id,

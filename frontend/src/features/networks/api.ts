@@ -1,5 +1,12 @@
 import { apiRequest } from "@/shared/lib/api";
-import { Device, DeviceList, Network, NetworkList } from "@/shared/types/network";
+import {
+  CampusBuildingList,
+  Device,
+  DeviceList,
+  Network,
+  NetworkList,
+  UpsertCampusBuildingInput,
+} from "@/shared/types/network";
 
 interface CreateNetworkInput {
   workspace_id: string;
@@ -52,6 +59,30 @@ export function updateDeviceSpatialRef(token: string, networkId: string, deviceI
   return apiRequest<Device>(`/api/v1/networks/${networkId}/devices/${deviceId}`, {
     method: "PATCH",
     body: { spatial_ref_id: spatialRefId },
+    token,
+  });
+}
+
+export function listCampusBuildings(token: string, networkId: string) {
+  return apiRequest<CampusBuildingList>(`/api/v1/networks/${networkId}/campus/buildings`, {
+    token,
+  });
+}
+
+export function upsertCampusBuildings(
+  token: string,
+  networkId: string,
+  input: {
+    buildings: UpsertCampusBuildingInput[];
+    replaceExisting?: boolean;
+  },
+) {
+  return apiRequest<CampusBuildingList>(`/api/v1/networks/${networkId}/campus/buildings`, {
+    method: "POST",
+    body: {
+      buildings: input.buildings,
+      replace_existing: input.replaceExisting ?? true,
+    },
     token,
   });
 }

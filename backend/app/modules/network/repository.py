@@ -7,11 +7,12 @@ networks.workspace_id is a stored UUID reference — no SQL join to Organization
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.network.models import Device, Network
+from app.modules.network.models import CampusBuildingRecord, Device, Network
 
 
 class NetworkRepository:
@@ -127,3 +128,126 @@ class DeviceRepository:
         total = (await self._db.execute(select(func.count()).select_from(q.subquery()))).scalar_one()
         rows = (await self._db.execute(q.offset((page - 1) * page_size).limit(page_size))).scalars().all()
         return list(rows), total
+
+
+class CampusBuildingRepository:
+
+    def __init__(self, db: AsyncSession):
+        self._db = db
+
+    async def list_for_network(self, network_id: uuid.UUID) -> list[CampusBuildingRecord]:
+        result = await self._db.execute(
+            select(CampusBuildingRecord)
+            .where(
+                CampusBuildingRecord.network_id == network_id,
+                CampusBuildingRecord.deleted_at.is_(None),
+            )
+            .order_by(CampusBuildingRecord.building_id.asc())
+        )
+        return list(result.scalars().all())
+
+    async def get_active_by_network_and_building_id(
+        self,
+        *,
+        network_id: uuid.UUID,
+        building_id: str,
+    ) -> CampusBuildingRecord | None:
+        result = await self._db.execute(
+            select(CampusBuildingRecord).where(
+                CampusBuildingRecord.network_id == network_id,
+                CampusBuildingRecord.building_id == building_id,
+                CampusBuildingRecord.deleted_at.is_(None),
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def soft_delete_for_network(self, network_id: uuid.UUID) -> int:
+        rows = await self.list_for_network(network_id)
+        now = datetime.now(UTC)
+        for row in rows:
+            row.deleted_at = now
+        await self._db.flush()
+        return len(rows)
+
+    async def create(
+        self,
+        *,
+        network_id: uuid.UUID,
+        building_id: str,
+        campus_key: str,
+        building_key: str,
+        label: str,
+        geometry: str,
+        x: float,
+        z: float,
+        base_y: float,
+        width: float,
+        depth: float,
+        height: float,
+        floors: int,
+        footprint: list,
+        wall_material: str | None,
+        attenuation_db: float | None,
+        source: str | None,
+    ) -> CampusBuildingRecord:
+        row = CampusBuildingRecord(
+            network_id=network_id,
+            building_id=building_id,
+            campus_key=campus_key,
+            building_key=building_key,
+            label=label,
+            geometry=geometry,
+            x=x,
+            z=z,
+            base_y=base_y,
+            width=width,
+            depth=depth,
+            height=height,
+            floors=floors,
+            footprint=footprint,
+            wall_material=wall_material,
+            attenuation_db=attenuation_db,
+            source=source,
+        )
+        self._db.add(row)
+        await self._db.flush()
+        return row
+
+    async def update(
+        self,
+        row: CampusBuildingRecord,
+        *,
+        campus_key: str,
+        building_key: str,
+        label: str,
+        geometry: str,
+        x: float,
+        z: float,
+        base_y: float,
+        width: float,
+        depth: float,
+        height: float,
+        floors: int,
+        footprint: list,
+        wall_material: str | None,
+        attenuation_db: float | None,
+        source: str | None,
+    ) -> CampusBuildingRecord:
+        row.campus_key = campus_key
+        row.building_key = building_key
+        row.label = label
+        row.geometry = geometry
+        row.x = x
+        row.z = z
+        row.base_y = base_y
+        row.width = width
+        row.depth = depth
+        row.height = height
+        row.floors = floors
+        row.footprint = footprint
+        row.wall_material = wall_material
+        row.attenuation_db = attenuation_db
+        row.source = source
+        row.deleted_at = None
+        await self._db.flush()
+        return row

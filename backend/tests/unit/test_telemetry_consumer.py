@@ -68,11 +68,12 @@ async def test_telemetry_consumer_persists_event_and_commits():
         patch("app.events.consumers.telemetry_consumer.get_redis_client") as mock_get_redis,
         patch("app.events.consumers.telemetry_consumer.telemetry_ws_manager") as mock_ws_manager,
     ):
+        event = _telemetry_event()
         fake_redis = AsyncMock()
         fake_redis.incr = AsyncMock(return_value=1)
         mock_get_redis.return_value = fake_redis
         mock_ws_manager.push_delta = AsyncMock()
-        await handle_telemetry_event(_telemetry_event())
+        await handle_telemetry_event(event)
 
     db.commit.assert_awaited_once()
     db.flush.assert_awaited_once()
@@ -82,6 +83,7 @@ async def test_telemetry_consumer_persists_event_and_commits():
     fanout_kwargs = mock_ws_manager.push_delta.call_args.kwargs
     assert fanout_kwargs["event_type"] == "telemetry.metric.ingested"
     assert fanout_kwargs["metric"]["metric"] == "packet_loss"
+    assert fanout_kwargs["workspace_id"] == event["payload"]["workspace_id"]
 
 
 @pytest.mark.asyncio
