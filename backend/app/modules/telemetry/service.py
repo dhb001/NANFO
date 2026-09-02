@@ -1122,12 +1122,16 @@ class TelemetryQueryService:
         self,
         *,
         device_id: uuid.UUID,
+        network_id: uuid.UUID,
+        workspace_id: uuid.UUID,
         metric: str | None,
         page: int,
         page_size: int,
     ) -> TelemetryDeviceHistoryResponse:
         rows, total = await self._repo.list_for_device(
             device_id=device_id,
+            network_id=network_id,
+            workspace_id=workspace_id,
             metric=metric,
             page=page,
             page_size=page_size,
@@ -1268,6 +1272,7 @@ class TelemetryQueryService:
             current_alert_active = self._resolve_runtime_adapter_slo_alert_active(
                 rollup_severity=rollup_severity
             )
+            latest_workspace_id, latest_network_id = await self._safe_get_latest_alert_scope()
             await self._safe_handle_runtime_adapter_slo_alert_state_transition(
                 previous_alert_active=runtime_adapter_slo_alert_active,
                 current_alert_active=current_alert_active,
@@ -1275,6 +1280,8 @@ class TelemetryQueryService:
                 anomaly_reason_flags=anomaly_reason_flags,
                 rollup_severity=rollup_severity,
                 rollup_severity_reason=rollup_severity_reason,
+                latest_workspace_id=latest_workspace_id,
+                latest_network_id=latest_network_id,
             )
         except Exception as exc:  # noqa: BLE001
             logger.warning(
@@ -2136,6 +2143,8 @@ class TelemetryQueryService:
         anomaly_reason_flags: list[str],
         rollup_severity: str,
         rollup_severity_reason: str,
+        latest_workspace_id: str | None,
+        latest_network_id: str | None,
     ) -> None:
         await self._persist_runtime_adapter_slo_alert_active(active=current_alert_active)
 
@@ -2161,6 +2170,8 @@ class TelemetryQueryService:
             rollup_severity=rollup_severity,
             rollup_severity_reason=rollup_severity_reason,
             runbook_playbook=runbook_playbook,
+            latest_workspace_id=latest_workspace_id,
+            latest_network_id=latest_network_id,
         )
 
         if self._event_redis is None:
@@ -2197,6 +2208,17 @@ class TelemetryQueryService:
                 correlation_id=correlation_id,
                 error=str(exc),
             )
+
+    async def _safe_get_latest_alert_scope(self) -> tuple[str | None, str | None]:
+        try:
+            workspace_id, network_id = await self._repo.get_latest_scope()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("telemetry_health_runtime_adapter_alert_scope_resolution_failed", error=str(exc))
+            return None, None
+
+        latest_workspace_id = str(workspace_id) if workspace_id is not None else None
+        latest_network_id = str(network_id) if network_id is not None else None
+        return latest_workspace_id, latest_network_id
 
     async def _persist_runtime_adapter_slo_alert_active(self, *, active: bool) -> None:
         if self._counter_service is None:
@@ -2246,8 +2268,10 @@ class TelemetryQueryService:
         rollup_severity: str,
         rollup_severity_reason: str,
         runbook_playbook: str,
+        latest_workspace_id: str | None,
+        latest_network_id: str | None,
     ) -> dict[str, Any]:
-        return {
+        payload = {
             "alert_key": "telemetry_runtime_adapter_slo_threshold_breach",
             "event_type": event_type,
             "severity": rollup_severity,
@@ -2274,6 +2298,13 @@ class TelemetryQueryService:
             "runbook_playbook": runbook_playbook,
             "observed_at": datetime.now(UTC).isoformat(),
         }
+
+        if latest_workspace_id is not None:
+            payload["workspace_id"] = latest_workspace_id
+        if latest_network_id is not None:
+            payload["network_id"] = latest_network_id
+
+        return payload
 
     def _log_runtime_adapter_slo_health_rollup(
         self,

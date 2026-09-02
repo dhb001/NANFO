@@ -24,6 +24,8 @@ from app.modules.alert.schemas import (
     AlertListResponse,
     AlertRecordResponse,
 )
+from app.modules.network.service import NetworkService
+from app.modules.organization.service import WorkspaceService as OrgWorkspaceService
 
 logger = get_logger(__name__)
 
@@ -76,6 +78,62 @@ class AlertService:
         self._db = db
         self._redis = redis
         self._repo = AlertRepository(db)
+        self._network_svc = NetworkService(db=db, redis=redis)
+        self._workspace_svc = OrgWorkspaceService(db=db, redis=redis)
+
+    @staticmethod
+    def _extract_alert_scope_uuid(payload: dict[str, Any], key: str) -> uuid.UUID | None:
+        raw_value = payload.get(key)
+        if raw_value is None:
+            scope = payload.get("scope")
+            if isinstance(scope, dict):
+                raw_value = scope.get(key)
+
+        if raw_value is None:
+            return None
+
+        parsed = _coerce_uuid(raw_value)
+        if parsed is None:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions.")
+        return parsed
+
+    async def _assert_alert_access(
+        self,
+        *,
+        alert,
+        actor_user_id: str,
+        requested_workspace_id: uuid.UUID | None,
+        claim_org_id: uuid.UUID | None,
+    ) -> None:
+        payload = alert.payload if isinstance(alert.payload, dict) else {}
+        payload_network_id = self._extract_alert_scope_uuid(payload, "network_id")
+        payload_workspace_id = self._extract_alert_scope_uuid(payload, "workspace_id")
+        payload_org_id = self._extract_alert_scope_uuid(payload, "org_id")
+
+        if payload_network_id is not None:
+            await self._network_svc.assert_network_workspace_access(
+                network_id=payload_network_id,
+                requested_workspace_id=requested_workspace_id,
+                actor_user_id=actor_user_id,
+                claim_org_id=claim_org_id,
+            )
+            return
+
+        if payload_workspace_id is not None:
+            if requested_workspace_id is not None and payload_workspace_id != requested_workspace_id:
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions.")
+            await self._workspace_svc.get_active_workspace(
+                payload_workspace_id,
+                user_id=actor_user_id,
+                claim_org_id=claim_org_id,
+            )
+            return
+
+        if claim_org_id is not None and payload_org_id is not None and payload_org_id != claim_org_id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions.")
+
+        if requested_workspace_id is not None or claim_org_id is not None:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions.")
 
     async def list_alerts(
         self,
@@ -86,6 +144,9 @@ class AlertService:
         correlation_id_filter: uuid.UUID | None,
         search_filter: str | None,
         limit: int,
+        actor_user_id: str | None = None,
+        requested_workspace_id: uuid.UUID | None = None,
+        claim_org_id: uuid.UUID | None = None,
     ) -> AlertListResponse:
         normalized_status = _normalize_status(status_filter)
         if normalized_status is not None and normalized_status not in _ALERT_STATUSES:
@@ -111,13 +172,30 @@ class AlertService:
             limit=bounded_limit,
         )
 
+        scoped_rows = rows
+        if actor_user_id is not None:
+            scoped_rows = []
+            for row in rows:
+                try:
+                    await self._assert_alert_access(
+                        alert=row,
+                        actor_user_id=actor_user_id,
+                        requested_workspace_id=requested_workspace_id,
+                        claim_org_id=claim_org_id,
+                    )
+                except HTTPException as exc:
+                    if exc.status_code == status.HTTP_403_FORBIDDEN:
+                        continue
+                    raise
+                scoped_rows.append(row)
+
         status_counts = {
             _ALERT_STATUS_ACTIVE: 0,
             _ALERT_STATUS_ACKNOWLEDGED: 0,
             _ALERT_STATUS_RESOLVED: 0,
         }
         items: list[AlertRecordResponse] = []
-        for row in rows:
+        for row in scoped_rows:
             status_value = _normalize_status(row.status) or _ALERT_STATUS_ACTIVE
             if status_value in status_counts:
                 status_counts[status_value] += 1
@@ -135,6 +213,8 @@ class AlertService:
         alert_id: uuid.UUID,
         correlation_id: str,
         requested_by_user_id: str,
+        requested_workspace_id: uuid.UUID | None = None,
+        claim_org_id: uuid.UUID | None = None,
     ) -> AlertActionResponse:
         alert = await self._repo.get_by_id(alert_id)
         if alert is None:
@@ -142,6 +222,13 @@ class AlertService:
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail={"code": "ALERT_NOT_FOUND", "message": "Alert not found."},
             )
+
+        await self._assert_alert_access(
+            alert=alert,
+            actor_user_id=requested_by_user_id,
+            requested_workspace_id=requested_workspace_id,
+            claim_org_id=claim_org_id,
+        )
 
         current_status = _normalize_status(alert.status) or _ALERT_STATUS_ACTIVE
         if current_status == _ALERT_STATUS_RESOLVED:
@@ -203,6 +290,8 @@ class AlertService:
         alert_id: uuid.UUID,
         correlation_id: str,
         requested_by_user_id: str,
+        requested_workspace_id: uuid.UUID | None = None,
+        claim_org_id: uuid.UUID | None = None,
     ) -> AlertActionResponse:
         alert = await self._repo.get_by_id(alert_id)
         if alert is None:
@@ -210,6 +299,13 @@ class AlertService:
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail={"code": "ALERT_NOT_FOUND", "message": "Alert not found."},
             )
+
+        await self._assert_alert_access(
+            alert=alert,
+            actor_user_id=requested_by_user_id,
+            requested_workspace_id=requested_workspace_id,
+            claim_org_id=claim_org_id,
+        )
 
         current_status = _normalize_status(alert.status) or _ALERT_STATUS_ACTIVE
         if current_status == _ALERT_STATUS_RESOLVED:

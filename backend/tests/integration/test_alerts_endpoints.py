@@ -129,6 +129,9 @@ def test_list_alerts_returns_envelope_with_status_counts(client):
     assert call_kwargs["source_filter"] == "telemetry"
     assert call_kwargs["search_filter"] == "threshold"
     assert call_kwargs["limit"] == 50
+    assert call_kwargs["actor_user_id"]
+    assert call_kwargs["requested_workspace_id"] is None
+    assert call_kwargs["claim_org_id"] is None
 
 
 def test_list_alerts_invalid_status_returns_400_with_error_envelope(client):
@@ -310,5 +313,120 @@ def test_alert_mutations_require_write_config_permission(client):
     ack_response = client.post(f"/api/v1/alerts/{uuid.uuid4()}/ack", headers=headers)
     resolve_response = client.post(f"/api/v1/alerts/{uuid.uuid4()}/resolve", headers=headers)
 
+    assert ack_response.status_code == 403
+    assert resolve_response.status_code == 403
+
+
+def test_alert_endpoints_forward_workspace_and_org_claim_scope(client):
+    workspace_id = uuid.uuid4()
+    org_id = uuid.uuid4()
+    token, _ = create_access_token(
+        user_id=str(uuid.uuid4()),
+        email="alerts-scoped@example.com",
+        roles=["Admin"],
+        permissions=["read:telemetry", "write:config"],
+        workspace_id=str(workspace_id),
+        org_id=str(org_id),
+    )
+    headers = {"Authorization": f"Bearer {token}"}
+    alert_id = uuid.uuid4()
+    now = datetime.now(UTC)
+    list_payload = {
+        "items": [],
+        "total": 0,
+        "status_counts": {
+            "active": 0,
+            "acknowledged": 0,
+            "resolved": 0,
+        },
+    }
+    action_payload = {
+        "alert_id": alert_id,
+        "alert_key": "telemetry_runtime_adapter_slo_threshold_breach",
+        "source": "telemetry",
+        "status": "acknowledged",
+        "severity": "critical",
+        "correlation_id": uuid.uuid4(),
+        "payload": {
+            "alert_id": str(alert_id),
+            "alert_key": "telemetry_runtime_adapter_slo_threshold_breach",
+            "status": "acknowledged",
+            "severity": "critical",
+        },
+        "acknowledged_by_user_id": str(uuid.uuid4()),
+        "resolved_by_user_id": None,
+        "acknowledged_at": now,
+        "resolved_at": None,
+        "created_at": now,
+        "updated_at": now,
+        "queue_status": "queued",
+        "stream_entry_id": "200-0",
+        "warning": None,
+        "idempotent_replay": False,
+    }
+
+    with (
+        patch(
+            "app.modules.alert.service.AlertService.list_alerts",
+            new=AsyncMock(return_value=list_payload),
+        ) as mock_list,
+        patch(
+            "app.modules.alert.service.AlertService.acknowledge_alert",
+            new=AsyncMock(return_value=action_payload),
+        ) as mock_ack,
+        patch(
+            "app.modules.alert.service.AlertService.resolve_alert",
+            new=AsyncMock(return_value={**action_payload, "status": "resolved"}),
+        ) as mock_resolve,
+    ):
+        list_response = client.get("/api/v1/alerts", headers=headers)
+        ack_response = client.post(f"/api/v1/alerts/{alert_id}/ack", headers=headers)
+        resolve_response = client.post(f"/api/v1/alerts/{alert_id}/resolve", headers=headers)
+
+    assert list_response.status_code == 200
+    assert ack_response.status_code == 200
+    assert resolve_response.status_code == 200
+    assert mock_list.await_args.kwargs["requested_workspace_id"] == workspace_id
+    assert mock_list.await_args.kwargs["claim_org_id"] == org_id
+    assert mock_ack.await_args.kwargs["requested_workspace_id"] == workspace_id
+    assert mock_ack.await_args.kwargs["claim_org_id"] == org_id
+    assert mock_resolve.await_args.kwargs["requested_workspace_id"] == workspace_id
+    assert mock_resolve.await_args.kwargs["claim_org_id"] == org_id
+
+
+def test_alert_endpoints_reject_invalid_workspace_claim(client):
+    token, _ = create_access_token(
+        user_id=str(uuid.uuid4()),
+        email="alerts-invalid-scope@example.com",
+        roles=["Admin"],
+        permissions=["read:telemetry", "write:config"],
+        workspace_id="not-a-uuid",
+    )
+    headers = {"Authorization": f"Bearer {token}"}
+
+    list_response = client.get("/api/v1/alerts", headers=headers)
+    ack_response = client.post(f"/api/v1/alerts/{uuid.uuid4()}/ack", headers=headers)
+    resolve_response = client.post(f"/api/v1/alerts/{uuid.uuid4()}/resolve", headers=headers)
+
+    assert list_response.status_code == 403
+    assert ack_response.status_code == 403
+    assert resolve_response.status_code == 403
+
+
+def test_alert_endpoints_reject_invalid_org_claim(client):
+    token, _ = create_access_token(
+        user_id=str(uuid.uuid4()),
+        email="alerts-invalid-org@example.com",
+        roles=["Admin"],
+        permissions=["read:telemetry", "write:config"],
+        org_id="not-a-uuid",
+    )
+    headers = {"Authorization": f"Bearer {token}"}
+
+    list_response = client.get("/api/v1/alerts", headers=headers)
+    ack_response = client.post(f"/api/v1/alerts/{uuid.uuid4()}/ack", headers=headers)
+    resolve_response = client.post(f"/api/v1/alerts/{uuid.uuid4()}/resolve", headers=headers)
+
+    assert list_response.status_code == 403
     assert ack_response.status_code == 403
     assert resolve_response.status_code == 403

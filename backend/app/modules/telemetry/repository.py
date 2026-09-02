@@ -5,6 +5,7 @@ Persistence operations for telemetry_records.
 
 from __future__ import annotations
 
+import inspect
 import uuid
 from datetime import datetime
 
@@ -87,11 +88,17 @@ class TelemetryRecordRepository:
         self,
         *,
         device_id: uuid.UUID,
+        network_id: uuid.UUID,
+        workspace_id: uuid.UUID,
         metric: str | None = None,
         page: int = 1,
         page_size: int = 50,
     ) -> tuple[list[TelemetryRecord], int]:
-        query = select(TelemetryRecord).where(TelemetryRecord.device_id == device_id)
+        query = select(TelemetryRecord).where(
+            TelemetryRecord.device_id == device_id,
+            TelemetryRecord.network_id == network_id,
+            TelemetryRecord.workspace_id == workspace_id,
+        )
         if metric:
             query = query.where(TelemetryRecord.metric == metric)
 
@@ -108,6 +115,20 @@ class TelemetryRecordRepository:
     async def get_latest_observed_at(self) -> datetime | None:
         result = await self._db.execute(select(func.max(TelemetryRecord.observed_at)))
         return result.scalar_one_or_none()
+
+    async def get_latest_scope(self) -> tuple[uuid.UUID | None, uuid.UUID | None]:
+        query = (
+            select(TelemetryRecord.workspace_id, TelemetryRecord.network_id)
+            .order_by(TelemetryRecord.observed_at.desc(), TelemetryRecord.record_id.desc())
+            .limit(1)
+        )
+        result = await self._db.execute(query)
+        row = result.first()
+        if inspect.isawaitable(row):
+            row = await row
+        if row is None:
+            return None, None
+        return row[0], row[1]
 
     async def count_all(self) -> int:
         result = await self._db.execute(select(func.count()).select_from(TelemetryRecord))

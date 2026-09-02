@@ -40,6 +40,7 @@ async def publish_event(
     source: str,
     payload: dict,
     correlation_id: str,
+    event_id: str | None = None,
     version: str = "1",
 ) -> str:
     """Publish a domain event to the appropriate Redis Stream.
@@ -53,8 +54,14 @@ async def publish_event(
     if stream_key is None:
         raise ValueError(f"No stream registered for module '{module}'. event_type={event_type!r}")
 
+    normalized_event_id: str
+    if event_id is None:
+        normalized_event_id = str(uuid.uuid4())
+    else:
+        normalized_event_id = str(uuid.UUID(str(event_id)))
+
     envelope = {
-        "event_id": str(uuid.uuid4()),
+        "event_id": normalized_event_id,
         "event_type": event_type,
         "timestamp": datetime.now(UTC).isoformat(),
         "source": source,

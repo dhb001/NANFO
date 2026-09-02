@@ -67,3 +67,25 @@ async def test_alerts_ws_manager_unsubscribes_dead_connections():
 
     assert dead.send_text.await_count == 1
     assert alive.send_text.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_alerts_ws_manager_filters_delivery_by_workspace_scope_when_provided():
+    manager = AlertsWSManager()
+    ws_workspace_a = AsyncMock()
+    ws_workspace_b = AsyncMock()
+
+    await manager.subscribe(ws_workspace_a, allowed_workspace_ids={"workspace-a"})
+    await manager.subscribe(ws_workspace_b, allowed_workspace_ids={"workspace-b"})
+
+    await manager.push_delta(
+        event_type="alert.generated",
+        delta_type="add",
+        alert={"event_id": "evt-4", "payload": {"severity": "critical"}},
+        correlation_id="corr-4",
+        timestamp="2026-08-10T00:00:03+00:00",
+        workspace_id="workspace-a",
+    )
+
+    ws_workspace_a.send_text.assert_awaited_once()
+    ws_workspace_b.send_text.assert_not_awaited()

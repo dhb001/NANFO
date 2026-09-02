@@ -35,6 +35,8 @@ _WS_UNAUTHORIZED_FRAME = json.dumps({
 class _ConnectionAuth:
     token_exp: int | None
     token_jti: str | None
+    workspace_id: str | None = None
+    allowed_workspace_ids: frozenset[str] | None = None
 
 
 def _coerce_token_exp(value: object) -> int | None:
@@ -51,6 +53,27 @@ def _coerce_token_jti(value: object) -> str | None:
         return None
     token_jti = str(value).strip()
     return token_jti or None
+
+
+def _coerce_workspace_id(value: object) -> str | None:
+    if value is None:
+        return None
+    workspace_id = str(value).strip()
+    return workspace_id or None
+
+
+def _coerce_allowed_workspace_ids(value: object) -> frozenset[str] | None:
+    if value is None:
+        return None
+    if not isinstance(value, (set, frozenset, list, tuple)):
+        return frozenset()
+
+    normalized = {
+        workspace_id
+        for item in value
+        if (workspace_id := _coerce_workspace_id(item)) is not None
+    }
+    return frozenset(normalized)
 
 
 def _is_token_expired(auth: _ConnectionAuth | None) -> bool:
@@ -134,12 +157,14 @@ class TopologyWSManager:
         *,
         token_exp: int | None = None,
         token_jti: str | None = None,
+        workspace_id: str | None = None,
     ) -> None:
         async with self._lock:
             self._subscriptions[network_id].add(websocket)
             self._connection_auth[websocket] = _ConnectionAuth(
                 token_exp=_coerce_token_exp(token_exp),
                 token_jti=_coerce_token_jti(token_jti),
+                workspace_id=_coerce_workspace_id(workspace_id),
             )
         logger.info("ws_subscribed", network_id=network_id)
 
@@ -155,7 +180,16 @@ class TopologyWSManager:
                 self._connection_auth.pop(websocket, None)
         logger.info("ws_unsubscribed", network_id=network_id)
 
-    async def push_delta(self, network_id: str, event_type: str, delta_type: str, node: dict, correlation_id: str, timestamp: str) -> None:
+    async def push_delta(
+        self,
+        network_id: str,
+        event_type: str,
+        delta_type: str,
+        node: dict,
+        correlation_id: str,
+        timestamp: str,
+        workspace_id: str | None = None,
+    ) -> None:
         """Push a topology delta to all subscribers of a network_id.
 
         Per WebSocket.md §4.1: delta_type in {add, update, remove}.
@@ -172,6 +206,7 @@ class TopologyWSManager:
             },
         })
 
+        event_workspace_id = _coerce_workspace_id(workspace_id)
         dead_connections: list[tuple[str, WebSocket]] = []
         async with self._lock:
             targets = {
@@ -180,6 +215,14 @@ class TopologyWSManager:
             }
 
         for ws, auth in targets.items():
+            if (
+                event_workspace_id is not None
+                and auth is not None
+                and auth.workspace_id is not None
+                and auth.workspace_id != event_workspace_id
+            ):
+                continue
+
             if _is_token_expired(auth) or await _is_token_revoked(auth):
                 try:
                     await ws.send_text(_WS_UNAUTHORIZED_FRAME)
@@ -225,12 +268,14 @@ class TelemetryWSManager:
         *,
         token_exp: int | None = None,
         token_jti: str | None = None,
+        workspace_id: str | None = None,
     ) -> None:
         async with self._lock:
             self._subscriptions[network_id].add(websocket)
             self._connection_auth[websocket] = _ConnectionAuth(
                 token_exp=_coerce_token_exp(token_exp),
                 token_jti=_coerce_token_jti(token_jti),
+                workspace_id=_coerce_workspace_id(workspace_id),
             )
         logger.info("ws_telemetry_subscribed", network_id=network_id)
 
@@ -253,6 +298,7 @@ class TelemetryWSManager:
         metric: dict,
         correlation_id: str,
         timestamp: str,
+        workspace_id: str | None = None,
     ) -> None:
         """Push a telemetry metric delta to all subscribers of a network_id."""
         message = json.dumps({
@@ -265,6 +311,7 @@ class TelemetryWSManager:
             },
         })
 
+        event_workspace_id = _coerce_workspace_id(workspace_id)
         dead_connections: list[tuple[str, WebSocket]] = []
         async with self._lock:
             targets = {
@@ -273,6 +320,14 @@ class TelemetryWSManager:
             }
 
         for ws, auth in targets.items():
+            if (
+                event_workspace_id is not None
+                and auth is not None
+                and auth.workspace_id is not None
+                and auth.workspace_id != event_workspace_id
+            ):
+                continue
+
             if _is_token_expired(auth) or await _is_token_revoked(auth):
                 try:
                     await ws.send_text(_WS_UNAUTHORIZED_FRAME)
@@ -317,12 +372,14 @@ class DigitalTwinWSManager:
         *,
         token_exp: int | None = None,
         token_jti: str | None = None,
+        workspace_id: str | None = None,
     ) -> None:
         async with self._lock:
             self._subscriptions[network_id].add(websocket)
             self._connection_auth[websocket] = _ConnectionAuth(
                 token_exp=_coerce_token_exp(token_exp),
                 token_jti=_coerce_token_jti(token_jti),
+                workspace_id=_coerce_workspace_id(workspace_id),
             )
         logger.info("ws_digital_twin_subscribed", network_id=network_id)
 
@@ -347,6 +404,7 @@ class DigitalTwinWSManager:
         scene_object: dict,
         correlation_id: str,
         timestamp: str,
+        workspace_id: str | None = None,
     ) -> None:
         """Push a digital twin scene-object delta to all subscribers of a network."""
         message = json.dumps({
@@ -359,6 +417,7 @@ class DigitalTwinWSManager:
             },
         })
 
+        event_workspace_id = _coerce_workspace_id(workspace_id)
         dead_connections: list[tuple[str, WebSocket]] = []
         async with self._lock:
             targets = {
@@ -367,6 +426,14 @@ class DigitalTwinWSManager:
             }
 
         for ws, auth in targets.items():
+            if (
+                event_workspace_id is not None
+                and auth is not None
+                and auth.workspace_id is not None
+                and auth.workspace_id != event_workspace_id
+            ):
+                continue
+
             if _is_token_expired(auth):
                 await _record_security_close_reason(
                     reason="expired",
@@ -438,12 +505,14 @@ class AlertsWSManager:
         *,
         token_exp: int | None = None,
         token_jti: str | None = None,
+        allowed_workspace_ids: set[str] | None = None,
     ) -> None:
         async with self._lock:
             self._subscribers.add(websocket)
             self._connection_auth[websocket] = _ConnectionAuth(
                 token_exp=_coerce_token_exp(token_exp),
                 token_jti=_coerce_token_jti(token_jti),
+                allowed_workspace_ids=_coerce_allowed_workspace_ids(allowed_workspace_ids),
             )
         logger.info("ws_alerts_subscribed")
 
@@ -462,6 +531,7 @@ class AlertsWSManager:
         alert: dict,
         correlation_id: str,
         timestamp: str,
+        workspace_id: str | None = None,
     ) -> None:
         """Push an alert lifecycle delta to all alert subscribers."""
         message = json.dumps({
@@ -481,7 +551,17 @@ class AlertsWSManager:
                 for ws in self._subscribers
             }
 
+        event_workspace_id = _coerce_workspace_id(workspace_id)
+
         for ws, auth in targets.items():
+            if (
+                event_workspace_id is not None
+                and auth is not None
+                and auth.allowed_workspace_ids is not None
+                and event_workspace_id not in auth.allowed_workspace_ids
+            ):
+                continue
+
             if _is_token_expired(auth) or await _is_token_revoked(auth):
                 try:
                     await ws.send_text(_WS_UNAUTHORIZED_FRAME)

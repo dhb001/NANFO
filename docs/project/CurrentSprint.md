@@ -23,6 +23,28 @@
 - Vertical Slice 20 Implementation: **COMPLETE** — Optimization program closure gate is delivered with consolidated VS17-VS19 evidence, continuity-doc sign-off, and final required backend regression confirmation.
 - Chapter Conformance Audit (chapter-01 to chapter-12): **COMPLETE** — chapter-by-chapter implementation conformance classification was finalized, targeted in-scope remediation was applied (organization member identity validation and realtime websocket unauthorized/error handling hardening), and required backend/frontend validation evidence was recorded.
 
+## Enhancement Slice — Strathmore Demo Package (Two-Phase)
+
+- Status: **COMPLETE** (2026-08-20).
+- Scope boundaries: Strathmore demo preparation only; no unapproved REST/WebSocket/event/channel/schema expansion; canonical envelope preserved (`success`, `data`, `meta`, `errors`).
+- Delivered:
+  - Phase 1 centralized-campus blueprint finalized in `docs/project/Strathmore-Demo-Manual-and-Execution-Guide.md` with explicit contract traceability and grouping-gap handling.
+  - Phase 2 implementation package added: deterministic Strathmore dataset bootstrap script (`backend/scripts/prepare_strathmore_demo.py`) and focused unit coverage (`backend/tests/unit/test_prepare_strathmore_demo.py`).
+  - Master Strathmore guide extended with environment commands, bootstrap/login checks, click-by-click operator script, test evidence, and demo-day 15-minute/30-minute run orders.
+  - Intent execute runtime failure resolved for live apply path by refreshing ORM state before serialization in `backend/app/modules/intent/service.py` to prevent async lazy-load `MissingGreenlet` failures after commit.
+- Validation evidence:
+  - Backend: `poetry run ruff check scripts/prepare_strathmore_demo.py tests/unit/test_prepare_strathmore_demo.py` ✅; `poetry run pytest tests/unit/test_prepare_strathmore_demo.py -q` ✅ (`3 passed`); `poetry run pytest tests -q` ✅ (`572 passed`); post-fix targeted gate `poetry run pytest tests/unit/test_intent_execution_service.py tests/integration/test_intent_endpoints.py tests/unit/test_prepare_strathmore_demo.py -q` ✅ (`31 passed`); post-fix full gate rerun `poetry run pytest tests -q` ✅ (`572 passed`).
+  - Frontend: `npm run lint` ✅; `npm run typecheck` ✅; `npm run test` ✅ (`25 files, 100 tests`); `npm run test:e2e` ✅ (`19/19`); `npm run build` ✅; `npm run perf:bundle` ✅ (bounded checks true).
+  - Repo-wide backend lint baseline remains known debt: `poetry run ruff check app tests` -> **FAIL** (legacy untouched files, consistent with existing tracking).
+- Live apply closure evidence: `poetry run python scripts/prepare_strathmore_demo.py --apply --run-control-plane-check --output-path /tmp/opencode/strathmore-apply-context.json` ✅ (`339/339` devices created; list verification `actual=339`; topology snapshot `nodes=339 edges=0`; simulation + intent control-plane check succeeded; artifact written).
+
+### Subsystem Progress — Strathmore Demo Package (Two-Phase)
+
+- [x] Step 1: Finalize Phase 1 centralized Strathmore blueprint with no-hallucination traceability and grouping-gap contract-safe alternative.
+- [x] Step 2: Implement Phase 2 dataset/setup tooling and regression tests using existing contracts only.
+- [x] Step 3: Extend master guide with environment setup, operator manual, command checklist, and validation evidence.
+- [x] Closure Gate: Execute live `--apply` Strathmore bootstrap against a running local backend and capture execution artifact.
+
 ## Enhancement Slice — Digital Twin 3D as Primary Operations Surface (Frontend-Only, Phase 1)
 
 - Status: **COMPLETE** (2026-08-18).
@@ -42,13 +64,13 @@
 
 ## VS21 — Global Audit + Remaining Work Completion
 
-- Status: **IN PROGRESS** (checkpoint updated 2026-08-16; in-scope remediations + command-gate evidence recorded, with explicit residual high-risk blockers pending follow-on scope decision).
+- Status: **COMPLETE** (checkpoint updated 2026-08-22; staged simulation + alerts + telemetry-health tenancy hardening increments plus bounded simulation terminal-event producer parity are complete with refreshed command-gate evidence).
 - Scope boundaries: no unapproved endpoint/channel expansion, preserve canonical envelope (`success`, `data`, `meta`, `errors`), preserve C5 org/workspace guardrails, preserve C6 deferred-topology guardrails, preserve fail-open realtime/event behavior.
 - [x] Step 1: Contract + surface audit (REST/WebSocket/event parity, frontend enum/state parity against backend-owned workflows).
 - [x] Step 2: Backend architecture/behavior audit (module boundaries, service/repository layering, auth/RBAC/tenant checks, migration/schema parity, fail-open publication/consumption behavior).
 - [x] Step 3: Frontend architecture/behavior audit (feature ownership, async-state completeness, realtime malformed/reconnect handling on `/ws/topology`, `/ws/alerts`, `/ws/digital-twin`, `/ws/telemetry`, accessibility/responsiveness continuity).
 - [x] Step 4: Testing/evidence audit and gap severity matrix (identify false-positive coverage claims and missing tests/contracts).
-- [ ] Step 5: Implement confirmed gaps in smallest safe increments with regression tests.
+- [x] Step 5: Implement confirmed gaps in smallest safe increments with regression tests.
 - [x] Step 6: Run required backend/frontend command gates and capture evidence (including immediate rerun if transient/flaky).
 - [x] Step 7: Publish VS21 audit summary table + closure rationale in `CurrentSprint.md`, `DevelopmentJournal.md`, and `DecisionLog.md`.
 
@@ -64,8 +86,8 @@
 | Frontend auth session consistency | Login flow could persist unstable session state before `/auth/me` success. | **Closed** (persist session only after profile success; clear+toast on profile failure). | `frontend/src/features/auth/LoginPage.tsx`, `frontend/src/features/auth/LoginPage.test.tsx` |
 | Frontend plugin permission drift | Frontend allowlist pre-block could diverge from backend policy source-of-truth. | **Closed** (removed pre-block; backend remains authority). | `frontend/src/features/plugins/PluginsPage.tsx`, `frontend/src/features/plugins/PluginsPage.test.tsx` |
 | Frontend websocket unauthorized lifecycle | Unauthorized close handling could reconnect-loop in some branches. | **Closed** (unauthorized close path exits reconnect and triggers callback). | `frontend/src/shared/realtime/useManagedWebSocket.ts`, `frontend/src/shared/realtime/useManagedWebSocket.test.tsx` |
-| Global tenant/RBAC enforcement breadth | Several APIs still rely primarily on auth presence without consistent tenant/RBAC boundary enforcement across all route families. | **Open (high risk)** — requires approved cross-module hardening slice to avoid contract/behavior drift. | See `backend/app/api/v1/*.py` and domain services listed in VS21 Decision/Journal entries. |
-| Simulation terminal-event producer parity | `simulation.completed` / `simulation.cancelled` are consumed/mapped but currently lack producer path in active simulation lifecycle service. | **Open (high risk)** — requires approved lifecycle producer scope (likely new transition source, not currently implemented). | `backend/app/modules/simulation/service.py`, `backend/app/events/consumers/ws_push_consumer.py`, `backend/app/events/consumers/audit_consumer.py` |
+| Global tenant/RBAC enforcement breadth | Several APIs still rely primarily on auth presence without consistent tenant/RBAC boundary enforcement across all route families. | **Closed** (staged scope hardening complete) — simulation, alerts REST/WS, telemetry reads, and topology/telemetry websocket tenancy paths now enforce claim-aware scope and membership boundaries without contract drift. | `backend/app/api/v1/simulation.py`, `backend/app/modules/simulation/service.py`, `backend/app/api/v1/alerts.py`, `backend/app/modules/alert/service.py`, `backend/app/websocket/alerts.py`, `backend/app/websocket/manager.py`, `backend/app/api/v1/telemetry.py`, `backend/app/modules/telemetry/service.py`, `backend/tests/integration/test_simulation_endpoints.py`, `backend/tests/integration/test_alerts_endpoints.py`, `backend/tests/integration/test_alerts_ws_endpoint.py`, `backend/tests/integration/test_telemetry_endpoints.py` |
+| Simulation terminal-event producer parity | `simulation.completed` / `simulation.cancelled` were consumed/mapped but lacked a bounded, tenancy-safe terminal producer implementation with explicit idempotency controls. | **Closed** — terminal producer now transitions persisted records from `simulation.started` into deterministic terminal outcomes, emits one terminal event per lifecycle outcome via deterministic `event_id`, and propagates workspace scope for WS fanout filtering. | `backend/app/modules/simulation/service.py`, `backend/app/events/publisher.py`, `backend/app/events/consumers/simulation_consumer.py`, `backend/app/events/consumers/ws_push_consumer.py`, `backend/app/websocket/digital_twin.py`, `backend/app/websocket/manager.py`, `backend/tests/unit/test_simulation_service.py`, `backend/tests/unit/test_event_publisher.py`, `backend/tests/integration/test_digital_twin_ws_endpoint.py` |
 
 ### VS21 Validation Evidence (2026-08-16)
 
@@ -75,6 +97,31 @@
 - Frontend gate: `npm run lint` -> **PASS**; `npm run typecheck` -> **PASS**; `npm run test` -> **PASS** (`23 files, 81 tests`).
 - Frontend e2e gate: `npm run test:e2e` -> first run **transient flaky** (`16 passed`, `1 flaky` in `vs4-simulation`), immediate rerun **PASS** (`17/17`).
 - Frontend build/perf: `npm run build` -> **PASS** (existing large `three` chunk warning unchanged); `npm run perf:bundle` -> **PASS** (all bounded checks true, `total_js_gzip_kb=398.37`, `largest_chunk_gzip_kb=248.61`, `largest_non_three_chunk_gzip_kb=52.79`, `three_chunk_gzip_kb=248.61`, `twin_page_chunk_gzip_kb=3.11`).
+
+### VS21 Validation Evidence Refresh (2026-08-21)
+
+- Backend touched-scope lint gate: `poetry run ruff check app/api/v1/alerts.py app/api/v1/telemetry.py app/events/consumers/ws_push_consumer.py app/modules/alert/service.py app/modules/telemetry/repository.py app/modules/telemetry/service.py app/websocket/alerts.py app/websocket/manager.py tests/integration/test_alerts_endpoints.py tests/integration/test_alerts_ws_endpoint.py tests/integration/test_telemetry_endpoints.py tests/unit/test_alert_service.py tests/unit/test_telemetry_query_service.py tests/unit/test_telemetry_repository.py tests/unit/test_websocket_alerts.py tests/unit/test_websocket_auth_revalidation.py tests/unit/test_ws_push_consumer.py` -> **PASS**.
+- Backend targeted regression gate (alerts/telemetry residual scope): `poetry run pytest tests/unit/test_alert_service.py tests/unit/test_websocket_alerts.py tests/unit/test_websocket_auth_revalidation.py tests/unit/test_ws_push_consumer.py tests/unit/test_telemetry_query_service.py tests/unit/test_telemetry_repository.py tests/integration/test_alerts_endpoints.py tests/integration/test_alerts_ws_endpoint.py tests/integration/test_telemetry_endpoints.py -q` -> **PASS** (`141 passed`).
+- Backend full regression gate: `poetry run pytest tests -q` -> **PASS** (`650 passed`).
+
+### VS21 Validation Evidence Refresh (2026-08-22)
+
+- Backend touched-scope lint gate (simulation terminal-event parity scope): `poetry run ruff check app/events/publisher.py app/modules/simulation/service.py app/websocket/digital_twin.py app/websocket/manager.py app/events/consumers/ws_push_consumer.py tests/unit/test_event_publisher.py tests/unit/test_simulation_service.py tests/unit/test_ws_push_consumer.py tests/unit/test_websocket_digital_twin.py tests/integration/test_simulation_event_ws_flow.py tests/integration/test_digital_twin_ws_endpoint.py` -> **PASS**.
+- Backend targeted regression gate (simulation terminal-event parity scope): `poetry run pytest tests/unit/test_simulation_service.py tests/integration/test_simulation_endpoints.py tests/integration/test_simulation_event_ws_flow.py tests/unit/test_simulation_consumer.py tests/unit/test_ws_push_consumer.py tests/integration/test_digital_twin_ws_endpoint.py tests/unit/test_websocket_digital_twin.py tests/unit/test_websocket_digital_twin_auth.py tests/unit/test_event_publisher.py -q` -> **PASS** (`99 passed`).
+- Backend full regression gate: `poetry run pytest tests -q` -> **PASS** (`658 passed`).
+
+### VS21 Step 5 Progress (2026-08-21)
+
+- Simulation tenancy/RBAC hardening is now applied in scoped increments without API contract changes.
+- `POST /api/v1/simulations/start` now resolves optional claim scope (`workspace_id`, `org_id`) and enforces resource ownership via `NetworkService.assert_network_workspace_access(...)`.
+- `POST /api/v1/simulations/pause`, `POST /api/v1/simulations/branch`, `GET /api/v1/simulations/{id}`, and `GET /api/v1/simulations/{id}/compare/{baselineId}` now enforce workspace membership plus optional org-claim mismatch rejection (`403`) before lifecycle processing.
+- Alerts tenancy/RBAC hardening is now applied without API contract changes: `GET /api/v1/alerts`, `POST /api/v1/alerts/{id}/ack`, and `POST /api/v1/alerts/{id}/resolve` forward optional claim scope and enforce service-level workspace/org access before mutation and during list filtering.
+- `/ws/alerts` now enforces claim-scoped subscription membership and workspace-filtered fanout (`WS_INVALID_FILTER` + close `1008` on invalid scoped subscriptions) while preserving existing channel/event contracts.
+- `GET /api/v1/telemetry/health` now enforces optional claim workspace/org scope via existing workspace membership boundaries, and runtime adapter SLO alert payloads now enrich `workspace_id`/`network_id` from latest telemetry scope when available (fail-open if scope resolution is unavailable).
+- Simulation terminal-event producer parity is now implemented as a bounded `simulation.started` terminalization path: `SimulationTerminalEventService` persists terminal state first, then emits exactly one deterministic terminal event (`simulation.completed` or `simulation.cancelled`) per outcome using stable `event_id` derivation (`uuid5(simulation_id, event_type)`) and includes `workspace_id` in terminal payload for tenancy-safe consumer fanout.
+- `/ws/digital-twin` now applies the same claim-aware network/workspace/org subscription scope validation pattern used by topology and carries workspace-scoped fanout filtering in manager push-path to prevent cross-workspace terminal-event delivery.
+- Validation evidence: simulation scope checks `poetry run ruff check app/api/v1/simulation.py app/modules/simulation/service.py tests/integration/test_simulation_endpoints.py tests/unit/test_simulation_service.py` ✅ + `poetry run pytest tests/unit/test_simulation_service.py tests/integration/test_simulation_endpoints.py tests/integration/test_simulation_event_ws_flow.py tests/unit/test_simulation_consumer.py tests/unit/test_ws_push_consumer.py -q` ✅ (`79 passed`); alerts/telemetry scope checks and refreshed full backend regression are recorded in `VS21 Validation Evidence Refresh (2026-08-21)` above.
+- Validation evidence: terminal-event parity checks `poetry run ruff check app/events/publisher.py app/modules/simulation/service.py app/websocket/digital_twin.py app/websocket/manager.py app/events/consumers/ws_push_consumer.py tests/unit/test_event_publisher.py tests/unit/test_simulation_service.py tests/unit/test_ws_push_consumer.py tests/unit/test_websocket_digital_twin.py tests/integration/test_simulation_event_ws_flow.py tests/integration/test_digital_twin_ws_endpoint.py` ✅ + `poetry run pytest tests/unit/test_simulation_service.py tests/integration/test_simulation_endpoints.py tests/integration/test_simulation_event_ws_flow.py tests/unit/test_simulation_consumer.py tests/unit/test_ws_push_consumer.py tests/integration/test_digital_twin_ws_endpoint.py tests/unit/test_websocket_digital_twin.py tests/unit/test_websocket_digital_twin_auth.py tests/unit/test_event_publisher.py -q` ✅ (`99 passed`) + full regression `poetry run pytest tests -q` ✅ (`658 passed`).
 
 ## Subsystem Progress — Vertical Slice 8
 

@@ -123,6 +123,32 @@ async def test_ws_alert_consumer_pushes_acknowledged_event_to_alerts_channel():
 
 
 @pytest.mark.asyncio
+async def test_ws_alert_consumer_propagates_workspace_scope_to_manager():
+    workspace_id = str(uuid.uuid4())
+    event = _alert_event(
+        "alert.generated",
+        payload={
+            "severity": "critical",
+            "message": "degraded",
+            "workspace_id": workspace_id,
+        },
+    )
+
+    with (
+        patch("app.events.consumers.ws_push_consumer.alerts_ws_manager") as mock_alerts_ws_manager,
+        patch("app.events.consumers.ws_push_consumer.get_redis_client") as mock_get_redis,
+    ):
+        fake_redis = AsyncMock()
+        fake_redis.incr = AsyncMock(return_value=1)
+        mock_get_redis.return_value = fake_redis
+        mock_alerts_ws_manager.push_delta = AsyncMock()
+        await handle_ws_alert_event(event)
+
+    kwargs = mock_alerts_ws_manager.push_delta.await_args.kwargs
+    assert kwargs["workspace_id"] == workspace_id
+
+
+@pytest.mark.asyncio
 async def test_ws_alert_consumer_push_failure_is_fail_open():
     event = _alert_event("alert.generated")
 
@@ -199,6 +225,24 @@ async def test_ws_topology_update_delta_includes_changed_fields_for_spatial_ref_
     }
 
 
+@pytest.mark.asyncio
+async def test_ws_topology_update_delta_propagates_workspace_scope_to_manager():
+    payload = {
+        "device_id": str(uuid.uuid4()),
+        "network_id": str(uuid.uuid4()),
+        "workspace_id": str(uuid.uuid4()),
+        "changed_fields": {"status": "offline"},
+    }
+    event = _topology_event("network.device.updated", payload)
+
+    with patch("app.events.consumers.ws_push_consumer.topology_ws_manager") as mock_topology_ws_manager:
+        mock_topology_ws_manager.push_delta = AsyncMock()
+        await handle_ws_push_event(event)
+
+    kwargs = mock_topology_ws_manager.push_delta.await_args.kwargs
+    assert kwargs["workspace_id"] == payload["workspace_id"]
+
+
 def test_ws_push_handlers_include_alert_lifecycle_events():
     assert "alert.generated" in WS_PUSH_HANDLERS
     assert "alert.acknowledged" in WS_PUSH_HANDLERS
@@ -234,7 +278,20 @@ def _simulation_event(
 
 @pytest.mark.asyncio
 async def test_ws_digital_twin_consumer_pushes_simulation_started_delta():
-    event = _simulation_event("simulation.started")
+    workspace_id = str(uuid.uuid4())
+    event = _simulation_event(
+        "simulation.started",
+        payload={
+            "network_id": str(uuid.uuid4()),
+            "workspace_id": workspace_id,
+            "simulation_id": str(uuid.uuid4()),
+            "scenario_id": str(uuid.uuid4()),
+            "scene_object_id": "simulation-state",
+            "state": "queued",
+            "status": "queued",
+            "risk_gate": "required",
+        },
+    )
 
     with patch("app.events.consumers.ws_push_consumer.digital_twin_ws_manager") as mock_digital_twin_ws_manager:
         mock_digital_twin_ws_manager.push_delta = AsyncMock()
@@ -247,11 +304,25 @@ async def test_ws_digital_twin_consumer_pushes_simulation_started_delta():
     assert kwargs["delta_type"] == "update"
     assert kwargs["scene_object"]["object_type"] == "simulation_state"
     assert kwargs["scene_object"]["simulation_id"] == event["payload"]["simulation_id"]
+    assert kwargs["workspace_id"] == workspace_id
 
 
 @pytest.mark.asyncio
 async def test_ws_digital_twin_consumer_pushes_simulation_completed_delta():
-    event = _simulation_event("simulation.completed")
+    workspace_id = str(uuid.uuid4())
+    event = _simulation_event(
+        "simulation.completed",
+        payload={
+            "network_id": str(uuid.uuid4()),
+            "workspace_id": workspace_id,
+            "simulation_id": str(uuid.uuid4()),
+            "scenario_id": str(uuid.uuid4()),
+            "scene_object_id": "simulation-state",
+            "state": "completed",
+            "status": "completed",
+            "risk_gate": "passed",
+        },
+    )
 
     with patch("app.events.consumers.ws_push_consumer.digital_twin_ws_manager") as mock_digital_twin_ws_manager:
         mock_digital_twin_ws_manager.push_delta = AsyncMock()
@@ -260,6 +331,31 @@ async def test_ws_digital_twin_consumer_pushes_simulation_completed_delta():
     kwargs = mock_digital_twin_ws_manager.push_delta.await_args.kwargs
     assert kwargs["event_type"] == "simulation.completed"
     assert kwargs["delta_type"] == "update"
+    assert kwargs["workspace_id"] == workspace_id
+
+
+@pytest.mark.asyncio
+async def test_ws_digital_twin_consumer_invalid_workspace_id_uses_unscoped_delivery():
+    event = _simulation_event(
+        "simulation.completed",
+        payload={
+            "network_id": str(uuid.uuid4()),
+            "workspace_id": "not-a-uuid",
+            "simulation_id": str(uuid.uuid4()),
+            "scenario_id": str(uuid.uuid4()),
+            "scene_object_id": "simulation-state",
+            "state": "completed",
+            "status": "completed",
+            "risk_gate": "passed",
+        },
+    )
+
+    with patch("app.events.consumers.ws_push_consumer.digital_twin_ws_manager") as mock_digital_twin_ws_manager:
+        mock_digital_twin_ws_manager.push_delta = AsyncMock()
+        await handle_ws_digital_twin_event(event)
+
+    kwargs = mock_digital_twin_ws_manager.push_delta.await_args.kwargs
+    assert kwargs["workspace_id"] is None
 
 
 @pytest.mark.asyncio

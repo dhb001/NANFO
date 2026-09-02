@@ -7,14 +7,18 @@ alert delta delivery over /ws/alerts.
 from __future__ import annotations
 
 import json
+import uuid
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect, status
 from jose import JWTError
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
 from app.core.security import decode_token
+from app.db.postgres import AsyncSessionLocal
 from app.db.redis import get_redis_client
+from app.modules.organization.service import WorkspaceService
 from app.websocket.manager import alerts_ws_manager
 
 logger = get_logger(__name__)
@@ -30,6 +34,50 @@ _UNKNOWN_CHANNEL_FRAME = json.dumps({
     "event": "error",
     "data": {"code": "WS_UNKNOWN_CHANNEL", "message": "Channel not registered."},
 })
+
+_FORBIDDEN_FILTER_FRAME = json.dumps({
+    "event": "error",
+    "data": {"code": "WS_INVALID_FILTER", "message": "Unauthorized workspace scope for alerts channel."},
+})
+
+
+async def _resolve_alert_subscription_workspaces(
+    *,
+    db: AsyncSession,
+    claims: dict,
+) -> set[str] | None:
+    claim_workspace_id = claims.get("workspace_id")
+    if claim_workspace_id is not None:
+        try:
+            parsed_workspace_id = uuid.UUID(str(claim_workspace_id))
+        except (TypeError, ValueError, AttributeError):
+            return None
+
+        claim_org_id = claims.get("org_id")
+        parsed_claim_org_id: uuid.UUID | None = None
+        if claim_org_id is not None:
+            try:
+                parsed_claim_org_id = uuid.UUID(str(claim_org_id))
+            except (TypeError, ValueError, AttributeError):
+                return None
+
+        user_id_raw = claims.get("sub")
+        try:
+            user_id = str(uuid.UUID(str(user_id_raw)))
+        except (TypeError, ValueError, AttributeError):
+            return None
+
+        try:
+            workspace = await WorkspaceService(db=db, redis=get_redis_client()).get_active_workspace(
+                parsed_workspace_id,
+                user_id=user_id,
+                claim_org_id=parsed_claim_org_id,
+            )
+        except Exception:  # noqa: BLE001
+            return None
+        return {str(workspace.workspace_id)}
+
+    return None
 
 
 @router.websocket("/ws/alerts")
@@ -65,6 +113,18 @@ async def alerts_websocket(
             await websocket.close()
             return
 
+        async with AsyncSessionLocal() as db:
+            allowed_workspace_ids = await _resolve_alert_subscription_workspaces(
+                db=db,
+                claims=claims,
+            )
+
+        claim_workspace_id = claims.get("workspace_id")
+        if claim_workspace_id is not None and (allowed_workspace_ids is None or not allowed_workspace_ids):
+            await websocket.send_text(_FORBIDDEN_FILTER_FRAME)
+            await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+            return
+
         ack = json.dumps({
             "event": "subscribed",
             "channel": "alerts",
@@ -77,6 +137,7 @@ async def alerts_websocket(
             websocket,
             token_exp=claims.get("exp"),
             token_jti=claims.get("jti"),
+            allowed_workspace_ids=allowed_workspace_ids,
         )
         subscribed = True
 

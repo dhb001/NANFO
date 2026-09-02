@@ -70,3 +70,26 @@ async def test_digital_twin_ws_manager_unsubscribes_dead_connections():
 
     assert dead.send_text.await_count == 1
     assert alive.send_text.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_digital_twin_ws_manager_filters_by_workspace_scope_when_present():
+    manager = DigitalTwinWSManager()
+    ws_workspace_a = AsyncMock()
+    ws_workspace_b = AsyncMock()
+
+    await manager.subscribe("network-1", ws_workspace_a, workspace_id="workspace-a")
+    await manager.subscribe("network-1", ws_workspace_b, workspace_id="workspace-b")
+
+    await manager.push_delta(
+        network_id="network-1",
+        event_type="simulation.completed",
+        delta_type="update",
+        scene_object={"id": "simulation-state", "state": "completed"},
+        correlation_id="corr-workspace",
+        timestamp="2026-08-12T00:00:03+00:00",
+        workspace_id="workspace-a",
+    )
+
+    ws_workspace_a.send_text.assert_awaited_once()
+    ws_workspace_b.send_text.assert_not_awaited()

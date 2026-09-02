@@ -13,6 +13,8 @@ from pydantic import BaseModel, Field
 from app.core.dependencies import (
     RequestMeta,
     TokenClaims,
+    get_claim_org_scope,
+    get_claim_workspace_scope,
     get_current_user,
     get_db,
     get_redis,
@@ -147,6 +149,8 @@ async def start_simulation(
     redis: Annotated[aioredis.Redis, Depends(get_redis)],
 ):
     started = time.monotonic()
+    requested_workspace_id = get_claim_workspace_scope(claims=claims)
+    claim_org_id = get_claim_org_scope(claims=claims)
     result = await SimulationStartService(db=db, redis=redis).start_simulation(
         network_id=req.network_id,
         scenario_name=req.scenario_name,
@@ -154,6 +158,8 @@ async def start_simulation(
         validation_checks=req.validation_checks,
         correlation_id=meta.request_id,
         requested_by_user_id=claims.user_id,
+        requested_workspace_id=requested_workspace_id,
+        claim_org_id=claim_org_id,
     )
 
     handoff_data = {
@@ -175,10 +181,14 @@ async def pause_simulation(
     redis: Annotated[aioredis.Redis, Depends(get_redis)],
 ):
     started = time.monotonic()
+    requested_workspace_id = get_claim_workspace_scope(claims=claims)
+    claim_org_id = get_claim_org_scope(claims=claims)
     result = await SimulationStartService(db=db, redis=redis).pause_simulation(
         simulation_id=req.simulation_id,
         correlation_id=meta.request_id,
         requested_by_user_id=claims.user_id,
+        requested_workspace_id=requested_workspace_id,
+        claim_org_id=claim_org_id,
     )
     payload = PauseSimulationResponse.model_validate(result)
     return success_response(payload, meta.request_id, started, meta.timestamp)
@@ -193,11 +203,15 @@ async def branch_simulation(
     redis: Annotated[aioredis.Redis, Depends(get_redis)],
 ):
     started = time.monotonic()
+    requested_workspace_id = get_claim_workspace_scope(claims=claims)
+    claim_org_id = get_claim_org_scope(claims=claims)
     result = await SimulationStartService(db=db, redis=redis).branch_simulation(
         parent_simulation_id=req.parent_simulation_id,
         scenario_name=req.scenario_name,
         correlation_id=meta.request_id,
         requested_by_user_id=claims.user_id,
+        requested_workspace_id=requested_workspace_id,
+        claim_org_id=claim_org_id,
     )
     payload = BranchSimulationResponse.model_validate(result)
     return success_response(payload, meta.request_id, started, meta.timestamp)
@@ -212,9 +226,13 @@ async def get_simulation_detail(
     redis: Annotated[aioredis.Redis, Depends(get_redis)],
 ):
     started = time.monotonic()
+    requested_workspace_id = get_claim_workspace_scope(claims=claims)
+    claim_org_id = get_claim_org_scope(claims=claims)
     result = await SimulationStartService(db=db, redis=redis).get_simulation_detail(
         simulation_id=simulation_id,
         requested_by_user_id=claims.user_id,
+        requested_workspace_id=requested_workspace_id,
+        claim_org_id=claim_org_id,
     )
     payload = SimulationDetailResponse.model_validate(result)
     return success_response(payload, meta.request_id, started, meta.timestamp)
@@ -234,10 +252,14 @@ async def compare_simulations(
     redis: Annotated[aioredis.Redis, Depends(get_redis)],
 ):
     started = time.monotonic()
+    requested_workspace_id = get_claim_workspace_scope(claims=claims)
+    claim_org_id = get_claim_org_scope(claims=claims)
     result = await SimulationStartService(db=db, redis=redis).compare_simulations(
         simulation_id=simulation_id,
         baseline_simulation_id=baseline_id,
         requested_by_user_id=claims.user_id,
+        requested_workspace_id=requested_workspace_id,
+        claim_org_id=claim_org_id,
     )
     payload = SimulationCompareResponse.model_validate(result)
     return success_response(payload, meta.request_id, started, meta.timestamp)

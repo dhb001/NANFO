@@ -12,7 +12,8 @@ from fastapi import APIRouter, Depends, Query, status
 from app.core.dependencies import (
     RequestMeta,
     TokenClaims,
-    get_current_user,
+    get_claim_org_scope,
+    get_claim_workspace_scope,
     get_db,
     get_redis,
     get_request_meta,
@@ -40,6 +41,8 @@ async def list_alerts(
     limit: Annotated[int, Query(ge=1, le=500)] = 200,
 ):
     started = time.monotonic()
+    requested_workspace_id = get_claim_workspace_scope(claims=claims)
+    claim_org_id = get_claim_org_scope(claims=claims)
     payload = await AlertService(db=db, redis=redis).list_alerts(
         status_filter=status_filter,
         severity_filter=severity,
@@ -47,6 +50,9 @@ async def list_alerts(
         correlation_id_filter=correlation_id,
         search_filter=search,
         limit=limit,
+        actor_user_id=claims.user_id,
+        requested_workspace_id=requested_workspace_id,
+        claim_org_id=claim_org_id,
     )
     return success_response(payload, meta.request_id, started, meta.timestamp)
 
@@ -60,10 +66,14 @@ async def acknowledge_alert(
     redis: Annotated[aioredis.Redis, Depends(get_redis)],
 ):
     started = time.monotonic()
+    requested_workspace_id = get_claim_workspace_scope(claims=claims)
+    claim_org_id = get_claim_org_scope(claims=claims)
     payload = await AlertService(db=db, redis=redis).acknowledge_alert(
         alert_id=alert_id,
         correlation_id=meta.request_id,
         requested_by_user_id=claims.user_id,
+        requested_workspace_id=requested_workspace_id,
+        claim_org_id=claim_org_id,
     )
     return success_response(payload, meta.request_id, started, meta.timestamp)
 
@@ -77,9 +87,13 @@ async def resolve_alert(
     redis: Annotated[aioredis.Redis, Depends(get_redis)],
 ):
     started = time.monotonic()
+    requested_workspace_id = get_claim_workspace_scope(claims=claims)
+    claim_org_id = get_claim_org_scope(claims=claims)
     payload = await AlertService(db=db, redis=redis).resolve_alert(
         alert_id=alert_id,
         correlation_id=meta.request_id,
         requested_by_user_id=claims.user_id,
+        requested_workspace_id=requested_workspace_id,
+        claim_org_id=claim_org_id,
     )
     return success_response(payload, meta.request_id, started, meta.timestamp)

@@ -2,6 +2,134 @@
 
 Lightweight chronological notes for decisions that do not require a full ADR.
 
+## 2026-08-21
+### VS21 Step 5: Close Simulation Terminal-Event Producer Parity with Deterministic Terminal Publication and Tenancy-Safe Fanout
+Decision: Finalize VS21 Step 5 by keeping simulation terminal event production centralized in the existing `simulation.started` consumer path, persisting terminal simulation state before publication, and emitting deterministic terminal events (`simulation.completed` / `simulation.cancelled`) with workspace-scoped fanout filtering.
+Reason:
+- The remaining VS21 high-risk residual was producer parity: consumers/audit mappings existed for terminal simulation events, but authoritative runtime producer semantics needed bounded closure.
+- The smallest safe implementation is to retain a single producer location (`SimulationTerminalEventService.process_started_event`) instead of introducing parallel producers in API flows, preserving existing lifecycle boundaries.
+- Event bus delivery is at-least-once; deterministic producer `event_id` generation per `(simulation_id, event_type)` combined with existing event-bus dedup and terminal-state guard provides practical idempotency without architecture expansion.
+Impact:
+- `backend/app/modules/simulation/service.py` now derives deterministic terminal `event_id` (`uuid5(simulation_id, event_type)`), writes terminal state/status first, then publishes terminal lifecycle event with normalized terminal validation metadata and `workspace_id` included in payload.
+- `backend/app/events/publisher.py` now accepts optional `event_id` override so producer-side deterministic IDs can be applied without changing envelope contract shape.
+- `backend/app/websocket/digital_twin.py` now enforces claim-aware network/workspace/org scope validation on `/ws/digital-twin` subscriptions via existing `NetworkService.assert_network_workspace_access(...)` boundary.
+- `backend/app/websocket/manager.py` and `backend/app/events/consumers/ws_push_consumer.py` now propagate/apply workspace-filtered digital-twin fanout for simulation lifecycle events to prevent cross-workspace terminal-state delivery.
+- Added/updated parity and tenancy regression coverage across simulation service, publisher, ws-push translation, digital-twin websocket manager, and digital-twin websocket endpoint tests.
+Assumptions:
+- Current simulation lifecycle execution remains bounded to started-event consumer terminalization (queued/deferred -> completed/cancelled) until a future approved simulation runtime model introduces explicit running/executor transitions.
+- Workspace context is authoritative from persisted simulation ownership; producer uses persisted `workspace_id` instead of client-supplied terminal metadata.
+- Fail-open publication behavior remains unchanged: publish failure logs warning and does not roll back committed terminal state.
+Related:
+- `backend/app/modules/simulation/service.py`
+- `backend/app/events/publisher.py`
+- `backend/app/events/consumers/simulation_consumer.py`
+- `backend/app/events/consumers/ws_push_consumer.py`
+- `backend/app/websocket/digital_twin.py`
+- `backend/app/websocket/manager.py`
+- `backend/tests/unit/test_event_publisher.py`
+- `backend/tests/unit/test_simulation_service.py`
+- `backend/tests/unit/test_ws_push_consumer.py`
+- `backend/tests/unit/test_websocket_digital_twin.py`
+- `backend/tests/integration/test_simulation_event_ws_flow.py`
+- `backend/tests/integration/test_digital_twin_ws_endpoint.py`
+
+### VS21 Step 5: Complete Alerts + Telemetry-Health Tenant Scope Hardening with Existing Contracts
+Decision: Extend the VS21 Step 5 tenant/RBAC hardening slice to close alerts and telemetry-health residual scope by enforcing optional claim-aware workspace/org boundaries in alerts REST/WS and telemetry-health read paths, while preserving all existing REST/WebSocket/event/channel/schema contracts.
+Reason:
+- After simulation hardening, VS21 still had an explicit high-risk tenant-scope residual centered on alerts and telemetry-health policy consistency.
+- Existing scope helpers and service boundaries already provide the required primitives (`get_claim_workspace_scope`, `get_claim_org_scope`, `NetworkService.assert_network_workspace_access`, `WorkspaceService.get_active_workspace`, `WorkspaceService.list_workspaces`) to implement bounded enforcement without cross-module contract drift.
+- The smallest safe path is to apply scope validation at API/service/ws-manager boundaries and keep fail-open behavior only for non-authority realtime enrichment paths.
+Impact:
+- Updated `backend/app/api/v1/alerts.py` + `backend/app/modules/alert/service.py` so alerts list/ack/resolve enforce claim-aware workspace/org boundaries and deny scoped access when alert scope metadata is unresolved.
+- Updated `backend/app/websocket/alerts.py`, `backend/app/websocket/manager.py`, and `backend/app/events/consumers/ws_push_consumer.py` so `/ws/alerts` subscriptions are scope-validated and fanout is workspace-filtered per authorized subscriber.
+- Updated `backend/app/api/v1/telemetry.py`, `backend/app/modules/telemetry/repository.py`, and `backend/app/modules/telemetry/service.py` so `GET /api/v1/telemetry/health` enforces optional claim-scope membership and runtime adapter SLO alert payloads include latest telemetry scope metadata when available.
+- Added/updated focused integration/unit coverage for alerts/alerts-ws/telemetry-health/service/ws-fanout scope paths; refreshed targeted + full backend regression evidence (`141 passed` targeted, `650 passed` full suite).
+Assumptions:
+- Optional claim behavior remains unchanged: missing `workspace_id` / `org_id` claims keep existing membership-driven access checks, while present mismatched claims are denied (`403`).
+- Runtime adapter SLO alert scope enrichment remains fail-open metadata enrichment; inability to resolve latest scope does not block alert-state processing.
+Related:
+- `backend/app/api/v1/alerts.py`
+- `backend/app/modules/alert/service.py`
+- `backend/app/websocket/alerts.py`
+- `backend/app/websocket/manager.py`
+- `backend/app/events/consumers/ws_push_consumer.py`
+- `backend/app/api/v1/telemetry.py`
+- `backend/app/modules/telemetry/repository.py`
+- `backend/app/modules/telemetry/service.py`
+- `backend/tests/integration/test_alerts_endpoints.py`
+- `backend/tests/integration/test_alerts_ws_endpoint.py`
+- `backend/tests/integration/test_telemetry_endpoints.py`
+- `backend/tests/unit/test_alert_service.py`
+- `backend/tests/unit/test_websocket_alerts.py`
+- `backend/tests/unit/test_websocket_auth_revalidation.py`
+- `backend/tests/unit/test_ws_push_consumer.py`
+- `backend/tests/unit/test_telemetry_query_service.py`
+- `backend/tests/unit/test_telemetry_repository.py`
+
+### VS21 Step 5: Enforce Simulation Tenant Scope Through Existing Claims and Service Boundaries
+Decision: Harden all existing Simulation API flows (`start`, `pause`, `branch`, `detail`, `compare`) by enforcing optional token workspace/org scope and membership checks in service-layer boundaries, without adding routes/events/channels or changing response contracts.
+Reason:
+- VS21 identified broad tenant/RBAC enforcement inconsistency as a high-risk open finding across route families.
+- Simulation endpoints already carried auth/permission checks but did not consistently enforce claim-scoped tenant boundaries across all lifecycle/read paths.
+- The minimal safe fix is to reuse existing scope helpers (`get_claim_workspace_scope`, `get_claim_org_scope`) and existing domain boundary validators (`NetworkService.assert_network_workspace_access`, `WorkspaceService.get_active_workspace`) rather than introduce new contracts.
+Impact:
+- `backend/app/api/v1/simulation.py` now resolves claim scopes and passes `requested_workspace_id` + `claim_org_id` into service calls.
+- `backend/app/modules/simulation/service.py` now validates `start` through `NetworkService.assert_network_workspace_access(...)` and applies centralized simulation-record access checks for `resume`, `pause`, `branch`, `detail`, and `compare`.
+- Unauthorized scope mismatch now returns deterministic `403` before lifecycle state mutation; existing `404`/`409` semantics remain unchanged.
+- Added/updated focused tests in `backend/tests/unit/test_simulation_service.py` and `backend/tests/integration/test_simulation_endpoints.py`; retained simulation WS/event regression coverage.
+Assumptions:
+- Simulation route permission model remains unchanged (`get_current_user` + existing role/permission gates), with tenancy hardening layered beneath current auth contract.
+- Optional `org_id` claim behavior remains: absent claim allows membership-based resolution; present mismatched claim denies access (`403`).
+Related:
+- `backend/app/api/v1/simulation.py`
+- `backend/app/modules/simulation/service.py`
+- `backend/tests/unit/test_simulation_service.py`
+- `backend/tests/integration/test_simulation_endpoints.py`
+- `backend/tests/integration/test_simulation_event_ws_flow.py`
+- `backend/tests/unit/test_simulation_consumer.py`
+- `backend/tests/unit/test_ws_push_consumer.py`
+
+## 2026-08-20
+### Strathmore Closure: Fix Intent Execute MissingGreenlet on Live Apply Path
+Decision: Apply a minimal backend fix in Intent execution serialization to prevent async ORM lazy-load (`MissingGreenlet`) during `POST /api/v1/intents/execute` responses, then close Strathmore Phase 2 with live apply evidence.
+Reason:
+- Live apply repeatedly failed with HTTP 500 on `/api/v1/intents/execute` while lifecycle updates/events had already succeeded, indicating response-shaping failure rather than business-flow failure.
+- Traceback showed serialization touching expired ORM attributes after commit, causing async DB access in a non-greenlet context.
+- The smallest safe fix is to refresh intent ORM state before synchronous serialization without changing endpoint contracts or lifecycle semantics.
+Impact:
+- Updated `backend/app/modules/intent/service.py` to add refresh-before-serialize helper and use it across execute replay/success/detail response paths.
+- Updated `backend/tests/unit/test_intent_execution_service.py` with assertions that refresh is invoked before serialization.
+- Live Strathmore apply now succeeds end-to-end with artifact output at `/tmp/opencode/strathmore-apply-context.json`.
+Assumptions:
+- Existing intent lifecycle/event behavior remains unchanged; only response serialization safety is adjusted.
+- This is scoped to current Async SQLAlchemy session behavior and does not alter API envelopes or payload contracts.
+Related:
+- `backend/app/modules/intent/service.py`
+- `backend/tests/unit/test_intent_execution_service.py`
+- `/tmp/opencode/strathmore-backend.log`
+- `/tmp/opencode/strathmore-apply-context.json`
+
+### Strathmore Phase 2: Add Deterministic Dataset Bootstrap Script and Keep Grouping as Intent-Scope Convention
+Decision: Implement Strathmore Phase 2 using a script-and-runbook execution package that reuses existing contracts only, with no new REST/WebSocket/event/channel/schema additions; keep device grouping as an operator convention over `spatial_ref_id` + `device_type` + `intent.scope` selectors.
+Reason:
+- Architecture guardrails prohibit undocumented endpoint/channel/event expansion, and current repo contracts do not expose a native device-group resource.
+- The fastest safe route to demo readiness is deterministic seed generation and apply orchestration through existing org/workspace/network/device/simulation/intent APIs.
+- The Strathmore narrative requires centralized campus scale (`339` devices), which is best handled by reproducible scripted payload generation rather than manual UI entry.
+Impact:
+- Added `backend/scripts/prepare_strathmore_demo.py` with dry-run default and optional `--apply` flow, plus optional simulation+intent control-plane check.
+- Added focused unit coverage in `backend/tests/unit/test_prepare_strathmore_demo.py` for deterministic totals and group-scope payload shape.
+- Extended `docs/project/Strathmore-Demo-Manual-and-Execution-Guide.md` with full Phase 2 runbook, command checklist, evidence section, and demo-day run variants.
+- Updated sprint/journal tracking with Strathmore slice status and closure blocker (live apply run pending local backend runtime availability).
+Assumptions:
+- Group-target behavior is demonstrated as control-plane governance visibility (intent lifecycle/audit/twin overlays), not backend-native per-device fan-out mutation semantics.
+- Existing simulation terminal-event producer parity residual remains outside this Strathmore slice and is treated as an acknowledged demo risk.
+Related:
+- `backend/scripts/prepare_strathmore_demo.py`
+- `backend/tests/unit/test_prepare_strathmore_demo.py`
+- `docs/project/Strathmore-Demo-Manual-and-Execution-Guide.md`
+- `docs/project/CurrentSprint.md`
+- `docs/project/DevelopmentJournal.md`
+
 ## 2026-08-18
 ### Digital Twin Primary Operations Surface (Frontend-Only Phase 2): Approve Canonical Congestion Policy, Existing-Contract Mapping Persist, and Intent Handoff Enrichment
 Decision: Complete Digital Twin Phase 2 in frontend scope by adding canonical congestion policy governance and deterministic adapter bounds, enabling per-device mapping persistence via the existing network device PATCH surface, and enriching the existing `/ops/intent` handoff without adding any new API/event/channel contracts.

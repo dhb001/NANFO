@@ -55,8 +55,10 @@ async def test_simulation_handoff_event_is_fanned_out_to_digital_twin_ws(integra
 
 @pytest.mark.asyncio
 async def test_simulation_completed_event_payload_is_translated_to_scene_delta():
+    workspace_id = str(uuid.uuid4())
     payload = {
         "network_id": str(uuid.uuid4()),
+        "workspace_id": workspace_id,
         "simulation_id": str(uuid.uuid4()),
         "scenario_id": str(uuid.uuid4()),
         "scene_object_id": "simulation-state",
@@ -96,6 +98,7 @@ async def test_simulation_completed_event_payload_is_translated_to_scene_delta()
     assert decoded["data"]["scene_object"]["state"] == "completed"
     assert decoded["data"]["scene_object"]["status"] == "completed"
     assert decoded["data"]["scene_object"]["risk_gate"] == "passed"
+    assert kwargs["workspace_id"] == workspace_id
 
 
 @pytest.mark.asyncio
@@ -144,8 +147,10 @@ async def test_simulation_paused_event_payload_is_translated_to_scene_delta():
 
 @pytest.mark.asyncio
 async def test_simulation_cancelled_event_payload_is_translated_to_scene_delta():
+    workspace_id = str(uuid.uuid4())
     payload = {
         "network_id": str(uuid.uuid4()),
+        "workspace_id": workspace_id,
         "simulation_id": str(uuid.uuid4()),
         "scenario_id": str(uuid.uuid4()),
         "scene_object_id": "simulation-state",
@@ -184,6 +189,7 @@ async def test_simulation_cancelled_event_payload_is_translated_to_scene_delta()
     assert decoded["data"]["delta_type"] == "update"
     assert decoded["data"]["scene_object"]["state"] == "cancelled"
     assert decoded["data"]["scene_object"]["status"] == "cancelled"
+    assert kwargs["workspace_id"] == workspace_id
 
 
 @pytest.mark.asyncio

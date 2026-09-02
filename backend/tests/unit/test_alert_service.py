@@ -47,6 +47,7 @@ def _make_alert_row(
 @pytest.mark.asyncio
 async def test_list_alerts_normalizes_filters_and_returns_status_counts(mock_db, fake_redis):
     service = AlertService(db=mock_db, redis=fake_redis)
+    service._assert_alert_access = AsyncMock(return_value=None)
     service._repo.list_alerts = AsyncMock(
         return_value=[
             _make_alert_row(status="active"),
@@ -62,6 +63,9 @@ async def test_list_alerts_normalizes_filters_and_returns_status_counts(mock_db,
         correlation_id_filter=uuid.uuid4(),
         search_filter="  link down  ",
         limit=999,
+        actor_user_id=str(uuid.uuid4()),
+        requested_workspace_id=uuid.uuid4(),
+        claim_org_id=uuid.uuid4(),
     )
 
     assert result.total == 3
@@ -73,6 +77,37 @@ async def test_list_alerts_normalizes_filters_and_returns_status_counts(mock_db,
     assert service._repo.list_alerts.await_args.kwargs["source"] == "telemetry"
     assert service._repo.list_alerts.await_args.kwargs["search"] == "link down"
     assert service._repo.list_alerts.await_args.kwargs["limit"] == 500
+    assert service._assert_alert_access.await_count == 3
+
+
+@pytest.mark.asyncio
+async def test_list_alerts_filters_out_forbidden_alert_rows(mock_db, fake_redis):
+    service = AlertService(db=mock_db, redis=fake_redis)
+    allowed_row = _make_alert_row(status="active")
+    denied_row = _make_alert_row(status="resolved")
+    service._repo.list_alerts = AsyncMock(return_value=[allowed_row, denied_row])
+
+    async def _access_check(*, alert, actor_user_id, requested_workspace_id, claim_org_id):
+        if alert.alert_id == denied_row.alert_id:
+            raise HTTPException(status_code=403, detail="Insufficient permissions.")
+
+    service._assert_alert_access = AsyncMock(side_effect=_access_check)
+
+    result = await service.list_alerts(
+        status_filter=None,
+        severity_filter=None,
+        source_filter=None,
+        correlation_id_filter=None,
+        search_filter=None,
+        limit=50,
+        actor_user_id=str(uuid.uuid4()),
+        requested_workspace_id=uuid.uuid4(),
+        claim_org_id=uuid.uuid4(),
+    )
+
+    assert result.total == 1
+    assert len(result.items) == 1
+    assert result.items[0].alert_id == allowed_row.alert_id
 
 
 @pytest.mark.asyncio
@@ -113,6 +148,7 @@ async def test_acknowledge_alert_returns_404_when_not_found(mock_db, fake_redis)
 async def test_acknowledge_alert_rejects_resolved_alert(mock_db, fake_redis):
     service = AlertService(db=mock_db, redis=fake_redis)
     service._repo.get_by_id = AsyncMock(return_value=_make_alert_row(status="resolved"))
+    service._assert_alert_access = AsyncMock(return_value=None)
 
     with pytest.raises(HTTPException) as exc_info:
         await service.acknowledge_alert(
@@ -131,6 +167,7 @@ async def test_acknowledge_alert_returns_idempotent_replay_when_already_acknowle
     service = AlertService(db=mock_db, redis=fake_redis)
     service._repo.get_by_id = AsyncMock(return_value=row)
     service._repo.mark_acknowledged = AsyncMock()
+    service._assert_alert_access = AsyncMock(return_value=None)
 
     result = await service.acknowledge_alert(
         alert_id=row.alert_id,
@@ -149,6 +186,7 @@ async def test_acknowledge_alert_marks_state_and_publishes_event(mock_db, fake_r
     actor_id = str(uuid.uuid4())
     service = AlertService(db=mock_db, redis=fake_redis)
     service._repo.get_by_id = AsyncMock(return_value=row)
+    service._assert_alert_access = AsyncMock(return_value=None)
 
     async def _mark_ack(
         target,
@@ -192,6 +230,7 @@ async def test_resolve_alert_returns_idempotent_replay_when_already_resolved(moc
     service = AlertService(db=mock_db, redis=fake_redis)
     service._repo.get_by_id = AsyncMock(return_value=row)
     service._repo.mark_resolved = AsyncMock()
+    service._assert_alert_access = AsyncMock(return_value=None)
 
     result = await service.resolve_alert(
         alert_id=row.alert_id,
@@ -210,6 +249,7 @@ async def test_resolve_alert_publish_failure_is_fail_open(mock_db, fake_redis):
     actor_id = str(uuid.uuid4())
     service = AlertService(db=mock_db, redis=fake_redis)
     service._repo.get_by_id = AsyncMock(return_value=row)
+    service._assert_alert_access = AsyncMock(return_value=None)
 
     async def _mark_resolved(
         target,
@@ -242,6 +282,50 @@ async def test_resolve_alert_publish_failure_is_fail_open(mock_db, fake_redis):
     assert result.status == "resolved"
     mock_db.commit.assert_awaited_once()
     mock_db.refresh.assert_awaited_once_with(row)
+
+
+@pytest.mark.asyncio
+async def test_acknowledge_alert_denied_when_scope_check_fails(mock_db, fake_redis):
+    row = _make_alert_row(status="active")
+    service = AlertService(db=mock_db, redis=fake_redis)
+    service._repo.get_by_id = AsyncMock(return_value=row)
+    service._assert_alert_access = AsyncMock(
+        side_effect=HTTPException(status_code=403, detail="Insufficient permissions.")
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await service.acknowledge_alert(
+            alert_id=row.alert_id,
+            correlation_id=str(uuid.uuid4()),
+            requested_by_user_id=str(uuid.uuid4()),
+            requested_workspace_id=uuid.uuid4(),
+            claim_org_id=uuid.uuid4(),
+        )
+
+    assert exc_info.value.status_code == 403
+    mock_db.commit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_resolve_alert_denied_when_scope_check_fails(mock_db, fake_redis):
+    row = _make_alert_row(status="active")
+    service = AlertService(db=mock_db, redis=fake_redis)
+    service._repo.get_by_id = AsyncMock(return_value=row)
+    service._assert_alert_access = AsyncMock(
+        side_effect=HTTPException(status_code=403, detail="Insufficient permissions.")
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await service.resolve_alert(
+            alert_id=row.alert_id,
+            correlation_id=str(uuid.uuid4()),
+            requested_by_user_id=str(uuid.uuid4()),
+            requested_workspace_id=uuid.uuid4(),
+            claim_org_id=uuid.uuid4(),
+        )
+
+    assert exc_info.value.status_code == 403
+    mock_db.commit.assert_not_awaited()
 
 
 @pytest.mark.asyncio

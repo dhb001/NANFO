@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
 from app.events.publisher import publish_event
-from app.modules.network.repository import NetworkRepository
+from app.modules.network.service import NetworkService
 from app.modules.organization.service import WorkspaceService as OrgWorkspaceService
 from app.modules.simulation.repository import SimulationRepository
 
@@ -28,6 +28,11 @@ logger = get_logger(__name__)
 
 _DEFAULT_SCENARIO_ID_NAMESPACE = "scenario"
 _DEFAULT_SIMULATION_OBJECT_ID = "simulation-state"
+
+
+def _derive_terminal_event_id(*, simulation_id: uuid.UUID, event_type: str) -> str:
+    """Return a deterministic terminal lifecycle event UUID for idempotent publication."""
+    return str(uuid.uuid5(simulation_id, event_type))
 
 
 def _coerce_non_empty_text(value: Any, fallback: str) -> str:
@@ -189,6 +194,7 @@ class SimulationEventService:
         event_type: str,
         payload: dict[str, Any],
         correlation_id: str,
+        event_id: str | None = None,
     ) -> str:
         return await publish_event(
             redis=self._redis,
@@ -196,6 +202,7 @@ class SimulationEventService:
             source="simulation",
             payload=payload,
             correlation_id=correlation_id,
+            event_id=event_id,
         )
 
 
@@ -252,6 +259,15 @@ class SimulationTerminalEventService:
             queue_status=simulation.queue_status,
             warning=simulation.warning,
         )
+
+        workspace_id = str(simulation.workspace_id)
+        if not workspace_id:
+            logger.warning(
+                "simulation_terminal_transition_missing_workspace_id",
+                simulation_id=str(simulation.simulation_id),
+            )
+            return
+
         await self._repo.update_state(
             simulation,
             state=terminal_state,
@@ -259,23 +275,36 @@ class SimulationTerminalEventService:
             risk_gate=terminal_risk_gate,
         )
 
+        normalized_validation = dict(simulation.validation) if isinstance(simulation.validation, dict) else {}
+        normalized_validation["pipeline_stage"] = "terminal"
+        normalized_validation["status"] = terminal_state
+        normalized_validation["terminal_event_type"] = terminal_event_type
+
         terminal_payload = {
             "simulation_id": str(simulation.simulation_id),
             "scenario_id": str(simulation.scenario_id),
             "network_id": str(simulation.network_id),
+            "workspace_id": workspace_id,
             "scene_object_id": _DEFAULT_SIMULATION_OBJECT_ID,
             "state": terminal_state,
             "status": terminal_state,
             "risk_gate": terminal_risk_gate,
-            "validation": dict(simulation.validation) if isinstance(simulation.validation, dict) else {},
+            "validation": normalized_validation,
         }
         correlation_id = _coerce_correlation_id(event.get("correlation_id"))
+        event_id = _derive_terminal_event_id(
+            simulation_id=simulation.simulation_id,
+            event_type=terminal_event_type,
+        )
+
+        await self._db.commit()
 
         try:
             await SimulationEventService(redis=self._redis).publish_lifecycle_event(
                 event_type=terminal_event_type,
                 payload=terminal_payload,
                 correlation_id=correlation_id,
+                event_id=event_id,
             )
         except Exception as exc:  # noqa: BLE001
             logger.warning(
@@ -286,8 +315,6 @@ class SimulationTerminalEventService:
                 error=str(exc),
             )
 
-        await self._db.commit()
-
 
 class SimulationStartService:
     """Simulation lifecycle service for start/resume/pause/branch flows."""
@@ -296,8 +323,25 @@ class SimulationStartService:
         self._db = db
         self._redis = redis
         self._repo = SimulationRepository(db)
-        self._network_repo = NetworkRepository(db)
+        self._network_svc = NetworkService(db=db, redis=redis)
         self._workspace_svc = OrgWorkspaceService(db=db, redis=redis)
+
+    async def _assert_simulation_workspace_access(
+        self,
+        *,
+        simulation,
+        requested_workspace_id: uuid.UUID | None,
+        actor_user_id: str,
+        claim_org_id: uuid.UUID | None,
+    ) -> None:
+        if requested_workspace_id is not None and simulation.workspace_id != requested_workspace_id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions.")
+
+        await self._workspace_svc.get_active_workspace(
+            simulation.workspace_id,
+            user_id=actor_user_id,
+            claim_org_id=claim_org_id,
+        )
 
     async def start_simulation(
         self,
@@ -308,20 +352,24 @@ class SimulationStartService:
         validation_checks: list[str],
         correlation_id: str,
         requested_by_user_id: str,
+        requested_workspace_id: uuid.UUID | None,
+        claim_org_id: uuid.UUID | None,
     ) -> dict[str, Any]:
         if simulation_id is not None:
             return await self._resume_simulation(
                 simulation_id=simulation_id,
                 correlation_id=correlation_id,
                 requested_by_user_id=requested_by_user_id,
+                requested_workspace_id=requested_workspace_id,
+                claim_org_id=claim_org_id,
             )
 
-        network = await self._network_repo.get_by_id(network_id)
-        if network is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Network not found.")
-
-        # C5-safe validation via Organization service boundary.
-        await self._workspace_svc.get_active_workspace(network.workspace_id)
+        network = await self._network_svc.assert_network_workspace_access(
+            network_id=network_id,
+            requested_workspace_id=requested_workspace_id,
+            actor_user_id=requested_by_user_id,
+            claim_org_id=claim_org_id,
+        )
 
         result = await queue_scenario_validation_handoff(
             redis=self._redis,
@@ -371,18 +419,25 @@ class SimulationStartService:
         simulation_id: uuid.UUID,
         correlation_id: str,
         requested_by_user_id: str,
+        requested_workspace_id: uuid.UUID | None,
+        claim_org_id: uuid.UUID | None,
     ) -> dict[str, Any]:
         simulation = await self._repo.get_by_id(simulation_id)
         if simulation is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Simulation not found.")
+
+        await self._assert_simulation_workspace_access(
+            simulation=simulation,
+            requested_workspace_id=requested_workspace_id,
+            actor_user_id=requested_by_user_id,
+            claim_org_id=claim_org_id,
+        )
 
         if simulation.state not in {"paused", "queued"}:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="Simulation is not resumable.",
             )
-
-        await self._workspace_svc.get_active_workspace(simulation.workspace_id)
 
         handoff = ScenarioValidationHandoffService().build_handoff_payload(
             network_id=simulation.network_id,
@@ -446,10 +501,19 @@ class SimulationStartService:
         simulation_id: uuid.UUID,
         correlation_id: str,
         requested_by_user_id: str,
+        requested_workspace_id: uuid.UUID | None,
+        claim_org_id: uuid.UUID | None,
     ) -> dict[str, Any]:
         simulation = await self._repo.get_by_id(simulation_id)
         if simulation is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Simulation not found.")
+
+        await self._assert_simulation_workspace_access(
+            simulation=simulation,
+            requested_workspace_id=requested_workspace_id,
+            actor_user_id=requested_by_user_id,
+            claim_org_id=claim_org_id,
+        )
 
         if simulation.state == "paused":
             return {
@@ -468,8 +532,6 @@ class SimulationStartService:
                 status_code=status.HTTP_409_CONFLICT,
                 detail="Simulation is not pausable.",
             )
-
-        await self._workspace_svc.get_active_workspace(simulation.workspace_id)
 
         await self._repo.update_state(
             simulation,
@@ -523,12 +585,19 @@ class SimulationStartService:
         scenario_name: str,
         correlation_id: str,
         requested_by_user_id: str,
+        requested_workspace_id: uuid.UUID | None,
+        claim_org_id: uuid.UUID | None,
     ) -> dict[str, Any]:
         parent = await self._repo.get_by_id(parent_simulation_id)
         if parent is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Simulation not found.")
 
-        await self._workspace_svc.get_active_workspace(parent.workspace_id)
+        await self._assert_simulation_workspace_access(
+            simulation=parent,
+            requested_workspace_id=requested_workspace_id,
+            actor_user_id=requested_by_user_id,
+            claim_org_id=claim_org_id,
+        )
 
         normalized_scenario_name = _coerce_non_empty_text(
             scenario_name,
@@ -650,13 +719,19 @@ class SimulationStartService:
         *,
         simulation_id: uuid.UUID,
         requested_by_user_id: str,
+        requested_workspace_id: uuid.UUID | None,
+        claim_org_id: uuid.UUID | None,
     ) -> dict[str, Any]:
-        _ = requested_by_user_id
         simulation = await self._repo.get_by_id(simulation_id)
         if simulation is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Simulation not found.")
 
-        await self._workspace_svc.get_active_workspace(simulation.workspace_id)
+        await self._assert_simulation_workspace_access(
+            simulation=simulation,
+            requested_workspace_id=requested_workspace_id,
+            actor_user_id=requested_by_user_id,
+            claim_org_id=claim_org_id,
+        )
 
         return {
             "simulation_id": str(simulation.simulation_id),
@@ -700,8 +775,9 @@ class SimulationStartService:
         simulation_id: uuid.UUID,
         baseline_simulation_id: uuid.UUID,
         requested_by_user_id: str,
+        requested_workspace_id: uuid.UUID | None,
+        claim_org_id: uuid.UUID | None,
     ) -> dict[str, Any]:
-        _ = requested_by_user_id
         simulation = await self._repo.get_by_id(simulation_id)
         if simulation is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Simulation not found.")
@@ -710,8 +786,18 @@ class SimulationStartService:
         if baseline is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Baseline simulation not found.")
 
-        await self._workspace_svc.get_active_workspace(simulation.workspace_id)
-        await self._workspace_svc.get_active_workspace(baseline.workspace_id)
+        await self._assert_simulation_workspace_access(
+            simulation=simulation,
+            requested_workspace_id=requested_workspace_id,
+            actor_user_id=requested_by_user_id,
+            claim_org_id=claim_org_id,
+        )
+        await self._assert_simulation_workspace_access(
+            simulation=baseline,
+            requested_workspace_id=requested_workspace_id,
+            actor_user_id=requested_by_user_id,
+            claim_org_id=claim_org_id,
+        )
 
         if simulation.network_id != baseline.network_id:
             raise HTTPException(

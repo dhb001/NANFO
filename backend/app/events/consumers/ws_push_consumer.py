@@ -159,6 +159,7 @@ async def handle_ws_push_event(event: dict) -> None:
         node=node,
         correlation_id=event.get("correlation_id", ""),
         timestamp=event.get("timestamp", datetime.now(UTC).isoformat()),
+        workspace_id=str(payload.get("workspace_id", "")).strip() or None,
     )
     logger.info("ws_delta_pushed", event_type=event_type, network_id=network_id, delta_type=delta_type)
 
@@ -177,6 +178,7 @@ async def handle_ws_alert_event(event: dict) -> None:
 
     payload_raw = event.get("payload")
     payload = payload_raw if isinstance(payload_raw, dict) else {}
+    workspace_id = str(payload.get("workspace_id", "")).strip() or None
     alert = {
         "event_id": event_id,
         "event_type": event_type,
@@ -191,6 +193,7 @@ async def handle_ws_alert_event(event: dict) -> None:
             alert=alert,
             correlation_id=correlation_id,
             timestamp=str(event.get("timestamp", datetime.now(UTC).isoformat())),
+            workspace_id=workspace_id,
         )
         success_counter = f"{_ALERT_WS_COUNTER_PREFIX}:{counter_label}:success"
         await _safe_increment_alert_counter(
@@ -234,6 +237,8 @@ async def handle_ws_digital_twin_event(event: dict) -> None:
     if not network_id:
         logger.warning("ws_digital_twin_missing_network_id", event_type=event_type)
         return
+
+    workspace_id = _extract_uuid_text(payload, "workspace_id")
 
     scene_object_id = str(payload.get("scene_object_id", "")).strip() or "simulation-state"
     state = str(payload.get("state", "unknown")).strip() or "unknown"
@@ -285,6 +290,7 @@ async def handle_ws_digital_twin_event(event: dict) -> None:
         scene_object=scene_object,
         correlation_id=str(event.get("correlation_id", "")),
         timestamp=str(event.get("timestamp", datetime.now(UTC).isoformat())),
+        workspace_id=workspace_id,
     )
     logger.info(
         "ws_digital_twin_delta_pushed",
