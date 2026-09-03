@@ -17,6 +17,8 @@ from app.core.security import create_access_token
 from app.main import app
 from app.modules.network.schemas import (
     CampusBuildingListResponse,
+    CampusModelAssetListResponse,
+    DeviceGroupListResponse,
     TopologyDeviceNeighboursResponse,
     TopologyGraphResponse,
     TopologyImpactResponse,
@@ -174,6 +176,51 @@ class TestNetworkEndpointsAuth:
         response = client.post(
             f"/api/v1/networks/{uuid.uuid4()}/campus/buildings",
             json={"buildings": []},
+            headers=headers,
+        )
+        assert response.status_code == 403
+
+    def test_list_campus_model_assets_missing_read_topology_permission_returns_403(self, client):
+        token = _make_token_without_permission()
+        headers = {"Authorization": f"Bearer {token}"}
+        response = client.get(
+            f"/api/v1/networks/{uuid.uuid4()}/campus/model-assets",
+            headers=headers,
+        )
+        assert response.status_code == 403
+
+    def test_upsert_campus_model_assets_missing_write_permission_returns_403(self, client):
+        token = _make_token_without_permission()
+        headers = {"Authorization": f"Bearer {token}"}
+        response = client.post(
+            f"/api/v1/networks/{uuid.uuid4()}/campus/model-assets",
+            json={
+                "model_file_name": "campus.glb",
+                "model_mime_type": "model/gltf-binary",
+                "model_data_base64": "YQ==",
+                "model_sha256": "ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb",
+                "model_size_bytes": 1,
+                "mapping_by_device_id": {},
+            },
+            headers=headers,
+        )
+        assert response.status_code == 403
+
+    def test_list_device_groups_missing_read_topology_permission_returns_403(self, client):
+        token = _make_token_without_permission()
+        headers = {"Authorization": f"Bearer {token}"}
+        response = client.get(
+            f"/api/v1/networks/{uuid.uuid4()}/device-groups",
+            headers=headers,
+        )
+        assert response.status_code == 403
+
+    def test_upsert_device_groups_missing_write_permission_returns_403(self, client):
+        token = _make_token_without_permission()
+        headers = {"Authorization": f"Bearer {token}"}
+        response = client.post(
+            f"/api/v1/networks/{uuid.uuid4()}/device-groups",
+            json={"groups": []},
             headers=headers,
         )
         assert response.status_code == 403
@@ -562,6 +609,273 @@ class TestCampusBuildingEndpoints:
             response = client.post(
                 f"/api/v1/networks/{network_id}/campus/buildings",
                 json={"buildings": []},
+                headers=headers,
+            )
+
+        assert response.status_code == 404
+
+
+class TestCampusModelAssetEndpoints:
+    def test_list_campus_model_assets_returns_envelope(self, client, headers):
+        from datetime import UTC, datetime
+
+        network_id = uuid.uuid4()
+        payload = CampusModelAssetListResponse(
+            items=[
+                {
+                    "campus_model_asset_id": str(uuid.uuid4()),
+                    "network_id": str(network_id),
+                    "model_file_name": "campus.glb",
+                    "model_mime_type": "model/gltf-binary",
+                    "model_data_base64": "YQ==",
+                    "model_sha256": "ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb",
+                    "model_size_bytes": 1,
+                    "mapping_by_device_id": {},
+                    "source": "manual_upload",
+                    "created_at": datetime.now(UTC).isoformat(),
+                    "updated_at": datetime.now(UTC).isoformat(),
+                }
+            ],
+            total=1,
+        )
+
+        with patch(
+            "app.modules.network.service.CampusModelAssetService.list_assets",
+            return_value=payload,
+        ):
+            response = client.get(
+                f"/api/v1/networks/{network_id}/campus/model-assets",
+                headers=headers,
+            )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["success"] is True
+        assert "data" in body
+        assert "meta" in body
+        assert "errors" in body
+        assert body["data"]["total"] == 1
+        assert body["data"]["items"][0]["model_file_name"] == "campus.glb"
+
+    def test_upsert_campus_model_assets_returns_envelope(self, client, headers):
+        from datetime import UTC, datetime
+
+        network_id = uuid.uuid4()
+        payload = CampusModelAssetListResponse(
+            items=[
+                {
+                    "campus_model_asset_id": str(uuid.uuid4()),
+                    "network_id": str(network_id),
+                    "model_file_name": "campus.glb",
+                    "model_mime_type": "model/gltf-binary",
+                    "model_data_base64": "YQ==",
+                    "model_sha256": "ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb",
+                    "model_size_bytes": 1,
+                    "mapping_by_device_id": {},
+                    "source": "manual_upload",
+                    "created_at": datetime.now(UTC).isoformat(),
+                    "updated_at": datetime.now(UTC).isoformat(),
+                }
+            ],
+            total=1,
+        )
+
+        with patch(
+            "app.modules.network.service.CampusModelAssetService.upsert_asset",
+            return_value=payload,
+        ):
+            response = client.post(
+                f"/api/v1/networks/{network_id}/campus/model-assets",
+                json={
+                    "model_file_name": "campus.glb",
+                    "model_mime_type": "model/gltf-binary",
+                    "model_data_base64": "YQ==",
+                    "model_sha256": "ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb",
+                    "model_size_bytes": 1,
+                    "mapping_by_device_id": {},
+                    "replace_existing": True,
+                },
+                headers=headers,
+            )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["success"] is True
+        assert "data" in body
+        assert "meta" in body
+        assert "errors" in body
+        assert body["data"]["total"] == 1
+        assert body["data"]["items"][0]["model_mime_type"] == "model/gltf-binary"
+
+    def test_upsert_campus_model_assets_invalid_payload_returns_422(self, client, headers):
+        response = client.post(
+            f"/api/v1/networks/{uuid.uuid4()}/campus/model-assets",
+            json={
+                "model_file_name": "campus.txt",
+                "model_mime_type": "model/gltf-binary",
+                "model_data_base64": "YQ==",
+                "model_sha256": "ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb",
+                "model_size_bytes": 1,
+                "mapping_by_device_id": {},
+            },
+            headers=headers,
+        )
+
+        assert response.status_code == 422
+
+    def test_upsert_campus_model_assets_not_found_propagates_404(self, client, headers):
+        network_id = uuid.uuid4()
+        with patch(
+            "app.modules.network.service.CampusModelAssetService.upsert_asset",
+            side_effect=HTTPException(status_code=404, detail="Network not found."),
+        ):
+            response = client.post(
+                f"/api/v1/networks/{network_id}/campus/model-assets",
+                json={
+                    "model_file_name": "campus.glb",
+                    "model_mime_type": "model/gltf-binary",
+                    "model_data_base64": "YQ==",
+                    "model_sha256": "ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb",
+                    "model_size_bytes": 1,
+                    "mapping_by_device_id": {},
+                },
+                headers=headers,
+            )
+
+        assert response.status_code == 404
+
+
+class TestDeviceGroupEndpoints:
+    def test_list_device_groups_returns_envelope(self, client, headers):
+        from datetime import UTC, datetime
+
+        network_id = uuid.uuid4()
+        payload = DeviceGroupListResponse(
+            items=[
+                {
+                    "device_group_id": str(uuid.uuid4()),
+                    "network_id": str(network_id),
+                    "group_key": "ssc-f02-wireless",
+                    "name": "SSC F02 Wireless",
+                    "group_type": "functional",
+                    "description": "Wireless access points on floor 2",
+                    "selector": {
+                        "site_prefix": "strathmore/ssc/f02",
+                        "functional_group": "wireless",
+                    },
+                    "device_ids": [str(uuid.uuid4())],
+                    "created_at": datetime.now(UTC).isoformat(),
+                    "updated_at": datetime.now(UTC).isoformat(),
+                }
+            ],
+            total=1,
+        )
+
+        with patch(
+            "app.modules.network.service.DeviceGroupService.list_groups",
+            return_value=payload,
+        ):
+            response = client.get(
+                f"/api/v1/networks/{network_id}/device-groups",
+                headers=headers,
+            )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["success"] is True
+        assert "data" in body
+        assert "meta" in body
+        assert "errors" in body
+        assert body["data"]["total"] == 1
+        assert body["data"]["items"][0]["group_key"] == "ssc-f02-wireless"
+
+    def test_upsert_device_groups_returns_envelope(self, client, headers):
+        from datetime import UTC, datetime
+
+        network_id = uuid.uuid4()
+        payload = DeviceGroupListResponse(
+            items=[
+                {
+                    "device_group_id": str(uuid.uuid4()),
+                    "network_id": str(network_id),
+                    "group_key": "ssc-f02-wireless",
+                    "name": "SSC F02 Wireless",
+                    "group_type": "functional",
+                    "description": "Wireless access points on floor 2",
+                    "selector": {
+                        "site_prefix": "strathmore/ssc/f02",
+                        "functional_group": "wireless",
+                    },
+                    "device_ids": [str(uuid.uuid4())],
+                    "created_at": datetime.now(UTC).isoformat(),
+                    "updated_at": datetime.now(UTC).isoformat(),
+                }
+            ],
+            total=1,
+        )
+
+        with patch(
+            "app.modules.network.service.DeviceGroupService.upsert_groups",
+            return_value=payload,
+        ):
+            response = client.post(
+                f"/api/v1/networks/{network_id}/device-groups",
+                json={
+                    "replace_existing": True,
+                    "groups": [
+                        {
+                            "group_key": "ssc-f02-wireless",
+                            "name": "SSC F02 Wireless",
+                            "group_type": "functional",
+                            "selector": {
+                                "site_prefix": "strathmore/ssc/f02",
+                                "functional_group": "wireless",
+                            },
+                            "device_ids": [str(uuid.uuid4())],
+                        }
+                    ],
+                },
+                headers=headers,
+            )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["success"] is True
+        assert "data" in body
+        assert "meta" in body
+        assert "errors" in body
+        assert body["data"]["total"] == 1
+        assert body["data"]["items"][0]["group_type"] == "functional"
+
+    def test_upsert_device_groups_invalid_payload_returns_422(self, client, headers):
+        response = client.post(
+            f"/api/v1/networks/{uuid.uuid4()}/device-groups",
+            json={
+                "replace_existing": False,
+                "groups": [
+                    {
+                        "group_key": "empty-group",
+                        "name": "Empty Group",
+                        "group_type": "custom",
+                        "selector": {},
+                        "device_ids": [],
+                    }
+                ],
+            },
+            headers=headers,
+        )
+
+        assert response.status_code == 422
+
+    def test_upsert_device_groups_not_found_propagates_404(self, client, headers):
+        network_id = uuid.uuid4()
+        with patch(
+            "app.modules.network.service.DeviceGroupService.upsert_groups",
+            side_effect=HTTPException(status_code=404, detail="Network not found."),
+        ):
+            response = client.post(
+                f"/api/v1/networks/{network_id}/device-groups",
+                json={"groups": []},
                 headers=headers,
             )
 

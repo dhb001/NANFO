@@ -1,5 +1,8 @@
 import { ChangeEvent, Suspense, lazy, useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { CampusFocusControls } from "@/features/digitalTwin/CampusFocusControls";
+import { DeviceLegendPanel } from "@/features/digitalTwin/DeviceLegendPanel";
+import { MetricSnapshotList } from "@/features/digitalTwin/MetricSnapshotList";
 import {
   deriveSpatialBuildingScope,
   type CampusBuildingViewState,
@@ -27,9 +30,13 @@ import { usePrefersReducedMotion } from "@/shared/lib/reduced-motion";
 import { useIsNarrowViewport } from "@/shared/lib/viewport";
 import { formatNumber } from "@/shared/lib/format";
 import {
+  useCampusModelAssets,
   useCampusBuildings,
+  useDeviceGroups,
   useUpdateDeviceSpatialRef,
+  useUpsertCampusModelAssets,
   useUpsertCampusBuildings,
+  useUpsertDeviceGroups,
 } from "@/features/networks/hooks";
 import { useUiStore } from "@/shared/state/ui-store";
 
@@ -48,21 +55,6 @@ type ImportedModelStatus = "idle" | "loading" | "ready" | "error";
 const TwinScene = lazy(async () => {
   const module = await import("@/features/digitalTwin/TwinScene");
   return { default: module.TwinScene };
-});
-
-const DeviceLegendPanel = lazy(async () => {
-  const module = await import("@/features/digitalTwin/DeviceLegendPanel");
-  return { default: module.DeviceLegendPanel };
-});
-
-const MetricSnapshotList = lazy(async () => {
-  const module = await import("@/features/digitalTwin/MetricSnapshotList");
-  return { default: module.MetricSnapshotList };
-});
-
-const CampusFocusControls = lazy(async () => {
-  const module = await import("@/features/digitalTwin/CampusFocusControls");
-  return { default: module.CampusFocusControls };
 });
 
 const DEFAULT_LAYERS: LayerState = {
@@ -94,6 +86,21 @@ function revokeSessionModelUrl(modelUrl: string | null): void {
   URL.revokeObjectURL(modelUrl);
 }
 
+function toBase64(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer);
+  let binary = "";
+  for (let index = 0; index < bytes.length; index += 1) {
+    binary += String.fromCharCode(bytes[index]);
+  }
+  return btoa(binary);
+}
+
+async function sha256Hex(buffer: ArrayBuffer): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", buffer);
+  const bytes = new Uint8Array(digest);
+  return Array.from(bytes, (value) => value.toString(16).padStart(2, "0")).join("");
+}
+
 function toSeverityTone(severity: "low" | "medium" | "high" | "neutral"): "ok" | "warn" | "danger" | "neutral" {
   if (severity === "low") {
     return "ok";
@@ -105,6 +112,37 @@ function toSeverityTone(severity: "low" | "medium" | "high" | "neutral"): "ok" |
     return "danger";
   }
   return "neutral";
+}
+
+function isWirelessDeviceType(deviceType: string): boolean {
+  const normalized = deviceType.trim().toLowerCase();
+  return normalized.includes("wireless") || normalized === "ap" || normalized.endsWith("_ap");
+}
+
+function pickMostCommonValue(values: Array<string | null>): string | null {
+  const counts = new Map<string, number>();
+  for (const value of values) {
+    if (!value) {
+      continue;
+    }
+    counts.set(value, (counts.get(value) ?? 0) + 1);
+  }
+
+  let selected: string | null = null;
+  let selectedCount = -1;
+  for (const [value, count] of counts.entries()) {
+    if (count > selectedCount || (count === selectedCount && (selected === null || value.localeCompare(selected) < 0))) {
+      selected = value;
+      selectedCount = count;
+    }
+  }
+
+  return selected;
+}
+
+function toSafeGroupToken(value: string): string {
+  const normalized = value.toLowerCase().replace(/[^a-z0-9:_-]+/g, "-").replace(/^-+|-+$/g, "");
+  return normalized || "scope";
 }
 
 export function TwinPageContent() {
@@ -131,10 +169,13 @@ export function TwinPageContent() {
   const [campusImportError, setCampusImportError] = useState<string | null>(null);
   const [isCampusImporting, setIsCampusImporting] = useState(false);
   const [isPersistingCampus, setIsPersistingCampus] = useState(false);
+  const [isPersistingModelAsset, setIsPersistingModelAsset] = useState(false);
+  const [isPersistingDeviceGroups, setIsPersistingDeviceGroups] = useState(false);
   const [selectedBuildingId, setSelectedBuildingId] = useState<string | null>(null);
   const [selectedFloorKey, setSelectedFloorKey] = useState<string | null>(null);
   const [focusSelectedBuildingOnly, setFocusSelectedBuildingOnly] = useState(false);
   const [filterSelectedFloorOnly, setFilterSelectedFloorOnly] = useState(false);
+  const [currentModelFile, setCurrentModelFile] = useState<File | null>(null);
 
   useEffect(() => {
     return () => {
@@ -150,7 +191,11 @@ export function TwinPageContent() {
   const liveAlerts = useLiveStore((state) => state.alerts);
   const updateSpatialRefMutation = useUpdateDeviceSpatialRef(token, networkId);
   const campusBuildingsQuery = useCampusBuildings(token, networkId);
+  const campusModelAssetsQuery = useCampusModelAssets(token, networkId);
+  const deviceGroupsQuery = useDeviceGroups(token, networkId);
   const upsertCampusBuildingsMutation = useUpsertCampusBuildings(token, networkId);
+  const upsertCampusModelAssetsMutation = useUpsertCampusModelAssets(token, networkId);
+  const upsertDeviceGroupsMutation = useUpsertDeviceGroups(token, networkId);
 
   const sceneModel = useTwinSceneModel(baseGraph?.nodes ?? [], baseGraph?.edges ?? [], importSummary?.mappingByDeviceId);
 
@@ -222,6 +267,11 @@ export function TwinPageContent() {
     const raw = baseGraph?.nodes.find((node) => node.device_id === selectedNodeId)?.spatial_ref_id;
     return typeof raw === "string" && raw.trim() ? raw.trim() : null;
   }, [baseGraph?.nodes, selectedNodeId]);
+
+  const latestPersistedModelAsset = useMemo(() => {
+    const items = campusModelAssetsQuery.data?.items ?? [];
+    return items.length > 0 ? items[items.length - 1] : null;
+  }, [campusModelAssetsQuery.data?.items]);
 
   const graphNodes = useMemo(() => {
     return (baseGraph?.nodes ?? []).map((node) => ({
@@ -349,6 +399,168 @@ export function TwinPageContent() {
     }
   }, [importedCampusBuildings, networkId, pushToast, token, upsertCampusBuildingsMutation]);
 
+  const persistImportedModelAsset = useCallback(async () => {
+    if (!networkId || !token || !currentModelFile || !importSummary) {
+      return;
+    }
+
+    if (typeof crypto === "undefined" || !crypto.subtle) {
+      pushToast({
+        tone: "danger",
+        title: "Model asset persist failed",
+        description: "This browser context does not support Web Crypto SHA-256.",
+      });
+      return;
+    }
+
+    setIsPersistingModelAsset(true);
+    try {
+      const modelBuffer = await currentModelFile.arrayBuffer();
+      const modelDataBase64 = toBase64(modelBuffer);
+      const modelSha256 = await sha256Hex(modelBuffer);
+
+      await upsertCampusModelAssetsMutation.mutateAsync({
+        model_file_name: currentModelFile.name,
+        model_mime_type: currentModelFile.type || "application/octet-stream",
+        model_data_base64: modelDataBase64,
+        model_sha256: modelSha256,
+        model_size_bytes: modelBuffer.byteLength,
+        mapping_by_device_id: importSummary.mappingByDeviceId,
+        source: "session_import",
+        replace_existing: true,
+      });
+
+      pushToast({
+        tone: "ok",
+        title: "Campus model asset persisted",
+        description: `${currentModelFile.name} saved for this network.`,
+      });
+    } catch (error) {
+      pushToast({
+        tone: "danger",
+        title: "Model asset persist failed",
+        description: error instanceof Error ? error.message : "Could not persist model asset.",
+      });
+    } finally {
+      setIsPersistingModelAsset(false);
+    }
+  }, [
+    currentModelFile,
+    importSummary,
+    networkId,
+    pushToast,
+    token,
+    upsertCampusModelAssetsMutation,
+  ]);
+
+  const persistDerivedDeviceGroups = useCallback(async () => {
+    if (!networkId || !token || sceneModel.nodes.length === 0) {
+      return;
+    }
+
+    setIsPersistingDeviceGroups(true);
+    try {
+      const nodesWithScope = sceneModel.nodes.map((node) => ({
+        node,
+        scope: deriveSpatialBuildingScope(node.spatialRefId),
+      }));
+
+      const scopedBuildingId = resolvedBuildingId ?? pickMostCommonValue(nodesWithScope.map(({ scope }) => scope.buildingId));
+      const scopedFloorKey =
+        resolvedFloorKey ??
+        pickMostCommonValue(
+          nodesWithScope
+            .filter(({ scope }) => !scopedBuildingId || scope.buildingId === scopedBuildingId)
+            .map(({ scope }) => scope.floorKey),
+        );
+
+      const scopedNodes = nodesWithScope
+        .filter(({ scope }) => {
+          if (scopedBuildingId && scope.buildingId !== scopedBuildingId) {
+            return false;
+          }
+          if (scopedFloorKey && scope.floorKey !== scopedFloorKey) {
+            return false;
+          }
+          return true;
+        })
+        .map(({ node }) => node);
+
+      const effectiveNodes = scopedNodes.length > 0 ? scopedNodes : sceneModel.nodes;
+      const wirelessDeviceIds = effectiveNodes
+        .filter((node) => isWirelessDeviceType(node.type))
+        .map((node) => node.id);
+      const scopedDeviceIds = effectiveNodes.map((node) => node.id);
+
+      const [scopeCampusKey, scopeBuildingKey] = scopedBuildingId?.split(":") ?? [];
+      const sitePrefix =
+        scopeCampusKey && scopeBuildingKey
+          ? scopedFloorKey
+            ? `${scopeCampusKey}/${scopeBuildingKey}/${scopedFloorKey}`
+            : `${scopeCampusKey}/${scopeBuildingKey}`
+          : null;
+
+      const scopeToken = toSafeGroupToken(sitePrefix ?? "network");
+      const scopeLabel = [scopeBuildingKey?.toUpperCase() ?? null, scopedFloorKey?.toUpperCase() ?? null]
+        .filter((part): part is string => Boolean(part))
+        .join(" ");
+
+      const wirelessSelector: Record<string, string> = {
+        functional_group: "wireless",
+      };
+      if (sitePrefix) {
+        wirelessSelector.site_prefix = sitePrefix;
+      }
+
+      const operationsSelector: Record<string, string> = {};
+      if (sitePrefix) {
+        operationsSelector.site_prefix = sitePrefix;
+      }
+
+      await upsertDeviceGroupsMutation.mutateAsync({
+        replaceExisting: true,
+        groups: [
+          {
+            group_key: `wireless-${scopeToken}`.slice(0, 160),
+            name: scopeLabel ? `${scopeLabel} Wireless` : "Wireless Devices",
+            group_type: "functional",
+            selector: wirelessSelector,
+            device_ids: wirelessDeviceIds,
+          },
+          {
+            group_key: `ops-${scopeToken}`.slice(0, 160),
+            name: scopeLabel ? `${scopeLabel} Operations` : "Operations Devices",
+            group_type: "operational",
+            selector: operationsSelector,
+            device_ids: scopedDeviceIds,
+          },
+        ],
+      });
+
+      pushToast({
+        tone: "ok",
+        title: "Device groups persisted",
+        description: "Native network device groups updated for this campus context.",
+      });
+    } catch (error) {
+      pushToast({
+        tone: "danger",
+        title: "Device group persist failed",
+        description: error instanceof Error ? error.message : "Could not persist device groups.",
+      });
+    } finally {
+      setIsPersistingDeviceGroups(false);
+    }
+  }, [
+    networkId,
+    pushToast,
+    resolvedBuildingId,
+    resolvedFloorKey,
+    sceneModel.nodes,
+    token,
+    upsertDeviceGroupsMutation,
+  ]);
+
   const handleConfigureIntentWorkflow = useCallback(async () => {
     if (!selectedNode) {
       navigate("/ops/intent");
@@ -405,6 +617,9 @@ export function TwinPageContent() {
       const summary = await importModule.parseImportSummary(modelFile, mappingFile, graphNodes);
       setImportSummary(summary);
       setModelFileName(modelFile.name);
+      if (options.replaceModelAsset) {
+        setCurrentModelFile(modelFile);
+      }
     } catch (error) {
       setImportError(error instanceof Error ? error.message : "Import validation failed.");
     } finally {
@@ -550,26 +765,22 @@ export function TwinPageContent() {
                 </Button>
               </div>
 
-              <Suspense fallback={null}>
-                <CampusFocusControls
-                  nodes={sceneModel.nodes}
-                  selectedBuildingId={selectedBuildingId}
-                  resolvedBuildingId={resolvedBuildingId}
-                  selectedFloorKey={selectedFloorKey}
-                  resolvedFloorKey={resolvedFloorKey}
-                  focusSelectedBuildingOnly={focusSelectedBuildingOnly}
-                  filterSelectedFloorOnly={filterSelectedFloorOnly}
-                  onSelectedBuildingChange={handleSelectedBuildingChange}
-                  onSelectedFloorKeyChange={setSelectedFloorKey}
-                  onFocusSelectedBuildingOnlyChange={setFocusSelectedBuildingOnly}
-                  onFilterSelectedFloorOnlyChange={setFilterSelectedFloorOnly}
-                  onReset={resetCampusFocus}
-                />
-              </Suspense>
+              <CampusFocusControls
+                nodes={sceneModel.nodes}
+                selectedBuildingId={selectedBuildingId}
+                resolvedBuildingId={resolvedBuildingId}
+                selectedFloorKey={selectedFloorKey}
+                resolvedFloorKey={resolvedFloorKey}
+                focusSelectedBuildingOnly={focusSelectedBuildingOnly}
+                filterSelectedFloorOnly={filterSelectedFloorOnly}
+                onSelectedBuildingChange={handleSelectedBuildingChange}
+                onSelectedFloorKeyChange={setSelectedFloorKey}
+                onFocusSelectedBuildingOnlyChange={setFocusSelectedBuildingOnly}
+                onFilterSelectedFloorOnlyChange={setFilterSelectedFloorOnly}
+                onReset={resetCampusFocus}
+              />
 
-              <Suspense fallback={null}>
-                <DeviceLegendPanel nodes={sceneModel.nodes} />
-              </Suspense>
+              <DeviceLegendPanel nodes={sceneModel.nodes} />
 
               <div
                 style={{
@@ -627,6 +838,25 @@ export function TwinPageContent() {
                     }
                   />
                   <Badge text={layers.showModel ? "layer visible" : "layer hidden"} tone={layers.showModel ? "ok" : "neutral"} />
+                  <Badge
+                    text={`persisted assets ${campusModelAssetsQuery.data?.total ?? 0}`}
+                    tone={(campusModelAssetsQuery.data?.total ?? 0) > 0 ? "ok" : "neutral"}
+                  />
+                </div>
+                {latestPersistedModelAsset ? (
+                  <div className="mono" style={{ color: "var(--ink-3)", fontSize: "0.74rem" }}>
+                    latest: {latestPersistedModelAsset.model_file_name} ({latestPersistedModelAsset.model_size_bytes} bytes)
+                  </div>
+                ) : null}
+                <div style={{ display: "flex", gap: "0.35rem", flexWrap: "wrap" }}>
+                  <Button
+                    type="button"
+                    tone="ghost"
+                    disabled={!currentModelFile || !importSummary || isPersistingModelAsset || !networkId || !token}
+                    onClick={persistImportedModelAsset}
+                  >
+                    {isPersistingModelAsset ? "Persisting model asset..." : "Persist Model Asset"}
+                  </Button>
                 </div>
                 {importedModelStatusMessage ? (
                   <div role="status" style={{ color: "var(--danger)", fontSize: "0.78rem" }}>
@@ -684,6 +914,32 @@ export function TwinPageContent() {
                     onClick={persistImportedCampusBuildings}
                   >
                     {isPersistingCampus ? "Persisting buildings..." : "Persist Buildings to Network"}
+                  </Button>
+                </div>
+              </div>
+
+              <div
+                style={{
+                  border: "1px solid var(--line-soft)",
+                  borderRadius: "10px",
+                  padding: "0.48rem 0.56rem",
+                  display: "grid",
+                  gap: "0.3rem",
+                }}
+              >
+                <strong style={{ fontSize: "0.9rem" }}>Device groups</strong>
+                <div style={{ display: "flex", gap: "0.35rem", flexWrap: "wrap" }}>
+                  <Badge text={`persisted ${deviceGroupsQuery.data?.total ?? 0}`} tone={(deviceGroupsQuery.data?.total ?? 0) > 0 ? "ok" : "neutral"} />
+                  <Badge text="native network groups" tone="info" />
+                </div>
+                <div style={{ display: "flex", gap: "0.35rem", flexWrap: "wrap" }}>
+                  <Button
+                    type="button"
+                    tone="ghost"
+                    disabled={sceneModel.nodes.length === 0 || isPersistingDeviceGroups || !networkId || !token}
+                    onClick={persistDerivedDeviceGroups}
+                  >
+                    {isPersistingDeviceGroups ? "Persisting groups..." : "Persist Device Groups"}
                   </Button>
                 </div>
               </div>
@@ -760,9 +1016,7 @@ export function TwinPageContent() {
                 ) : null}
               </div>
 
-              <Suspense fallback={null}>
-                <MetricSnapshotList metrics={selectedNode.congestion.metrics} />
-              </Suspense>
+              <MetricSnapshotList metrics={selectedNode.congestion.metrics} />
 
               {hasImportedSpatialRef ? (
                 <Button

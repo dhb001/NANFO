@@ -1,5 +1,16 @@
 # Development Journal
 
+## [2026-09-02] - Digital Twin Residual Closure (Campus Model Assets + Native Device Groups)
+
+- **Completed:** Closed the remaining Digital Twin backend residuals by implementing and validating network-native campus model asset and device-group lifecycle flows end-to-end (backend + frontend) under existing Network-module ownership and tenancy guardrails.
+- **Backend delivery:** Added migration `backend/alembic/versions/0010_campus_model_assets_and_device_groups.py` and module wiring in `backend/app/modules/network/models.py`, `backend/app/modules/network/repository.py`, `backend/app/modules/network/schemas.py`, `backend/app/modules/network/service.py`, and `backend/app/api/v1/networks.py` for `GET|POST /api/v1/networks/{network_id}/campus/model-assets` and `GET|POST /api/v1/networks/{network_id}/device-groups`.
+- **Validation hardening:** Enforced model payload integrity checks (`model_data_base64`, `model_sha256`, `model_size_bytes`) and network-scoped mapping/member checks for device references; preserved canonical response envelope and existing workspace/org claim enforcement through Organization service boundaries.
+- **Lifecycle integrity fix:** Device-group soft-delete now also soft-deletes active group members to preserve deterministic active-member semantics.
+- **Frontend integration:** Added network contracts/clients/hooks in `frontend/src/shared/types/network.ts`, `frontend/src/features/networks/api.ts`, and `frontend/src/features/networks/hooks.ts`; integrated Twin-page controls in `frontend/src/features/digitalTwin/TwinPageContent.tsx` for persisting imported model assets and derived native device groups.
+- **Campus-agnostic correction:** Removed hardcoded Strathmore-only selector defaults from device-group persist flow and switched to selected building/floor scope derivation with deterministic fallback to dominant scene scope; added focused test coverage in `frontend/src/features/digitalTwin/TwinPage.test.tsx`.
+- **Validation evidence:** Backend touched-scope Ruff PASS; backend targeted suite `poetry run pytest tests/unit/test_network_schemas.py tests/unit/test_network_service.py tests/integration/test_network_endpoints.py -q` PASS (`120 passed`); backend full `poetry run pytest tests -q` PASS (`775 passed`); frontend full gate PASS (`npm run lint`, `npm run typecheck`, `npm run test` `31 files, 131 tests`, `npm run build`, `npm run perf:bundle` with bounded checks true and `total_js_gzip_kb=409.92`, `npm run test:e2e` `19/19`).
+- **Residuals carried forward:** Procedural OSM ingestion automation, projection providers beyond deterministic baseline, and RF-physics-grade coverage remain deferred; synthetic labeling and current policy identifiers remain explicit (`deterministic.geojson.osm.v1`, `rf.material_attenuation.v1`, `CONGESTION_POLICY_VERSION=v2.0.0`, `syntheticEstimate=true`).
+
 ## [2026-09-02] - Strathmore Digital Twin Phase 5D Closure (Campus Ingest/Persistence + RF Attenuation Coverage)
 
 - **Completed:** Closed Phase 5D by adding governed campus-building ingest + persistence flow and attenuation-aware wireless coverage integration while keeping canonical REST envelopes and existing channel/event boundaries.

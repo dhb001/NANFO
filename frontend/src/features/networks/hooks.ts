@@ -3,11 +3,19 @@ import {
   createDevice,
   createNetwork,
   listCampusBuildings,
+  listCampusModelAssets,
+  listDeviceGroups,
   listDevices,
   listNetworks,
+  upsertCampusModelAssets,
   upsertCampusBuildings,
+  upsertDeviceGroups,
   updateDeviceSpatialRef,
 } from "@/features/networks/api";
+import type {
+  UpsertCampusModelAssetInput,
+  UpsertDeviceGroupInput,
+} from "@/shared/types/network";
 
 export function useNetworks(token: string | null, workspaceId: string | null) {
   return useQuery({
@@ -128,6 +136,63 @@ export function useUpsertCampusBuildings(token: string | null, networkId: string
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["campus-buildings", token, networkId] });
+    },
+  });
+}
+
+export function useCampusModelAssets(token: string | null, networkId: string | null) {
+  return useQuery({
+    queryKey: ["campus-model-assets", token, networkId],
+    queryFn: async () => {
+      const response = await listCampusModelAssets(token as string, networkId as string);
+      return response.data;
+    },
+    enabled: Boolean(token && networkId),
+  });
+}
+
+export function useUpsertCampusModelAssets(token: string | null, networkId: string | null) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: UpsertCampusModelAssetInput) => {
+      if (!token || !networkId) {
+        throw new Error("Network context is required to update campus model assets.");
+      }
+      const response = await upsertCampusModelAssets(token, networkId, input);
+      return response.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["campus-model-assets", token, networkId] });
+    },
+  });
+}
+
+export function useDeviceGroups(token: string | null, networkId: string | null) {
+  return useQuery({
+    queryKey: ["device-groups", token, networkId],
+    queryFn: async () => {
+      const response = await listDeviceGroups(token as string, networkId as string);
+      return response.data;
+    },
+    enabled: Boolean(token && networkId),
+  });
+}
+
+export function useUpsertDeviceGroups(token: string | null, networkId: string | null) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: {
+      groups: UpsertDeviceGroupInput[];
+      replaceExisting?: boolean;
+    }) => {
+      if (!token || !networkId) {
+        throw new Error("Network context is required to update device groups.");
+      }
+      const response = await upsertDeviceGroups(token, networkId, input);
+      return response.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["device-groups", token, networkId] });
     },
   });
 }

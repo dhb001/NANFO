@@ -9,6 +9,7 @@ Current status:
 - Phase 1 blueprint: complete.
 - Phase 2 implementation artifacts: complete (dataset prep script, unit tests, command checklist, operator manual sections, evidence log).
 - Phase 2 live apply evidence: historical run complete (`/tmp/opencode/strathmore-apply-context.json`, pre-materialization topology snapshot) and refreshed run complete (`/tmp/opencode/strathmore-apply-context-20260902.json`, synthetic topology materialization confirmed with topology re-check `edges=338`).
+- Status refresh (2026-09-02): native network-scoped device-group and campus-model-asset persistence endpoints are now available under the Network module (`GET|POST /api/v1/networks/{network_id}/device-groups`, `GET|POST /api/v1/networks/{network_id}/campus/model-assets`).
 
 ---
 
@@ -106,9 +107,9 @@ The repository inventory includes all required implementation surfaces for this 
 
 ### Unknowns / Gaps
 
-1. **No explicit device-group contract exists** (no device-group fields or group routes in current network API/type surfaces).
-2. Current sprint notes still list simulation terminal-event producer parity as a residual risk in `CurrentSprint.md`; demo should verify terminal-state behavior in dry runs.
-3. There is no documented backend persistence contract for binary 3D campus assets; Twin model import is session-local unless per-device spatial mapping is persisted through existing device PATCH.
+1. **Historical note (resolved):** During initial Phase 1 drafting, no explicit device-group contract existed; this is now closed by native network group endpoints (`GET|POST /api/v1/networks/{network_id}/device-groups`).
+2. **Historical note (resolved):** During initial Phase 1 drafting, simulation terminal-event producer parity was still open; this is now closed in current sprint tracking and backend implementation.
+3. **Historical note (resolved):** During initial Phase 1 drafting, there was no documented backend persistence contract for binary 3D campus assets; this is now closed by network-scoped campus model asset persistence (`GET|POST /api/v1/networks/{network_id}/campus/model-assets`).
 4. No documented bulk device-create endpoint exists; high-volume dataset creation must use repeated existing device-create calls.
 
 ---
@@ -242,23 +243,22 @@ No unsupported backend fields are introduced.
 
 ## 10) Device Grouping Capability Assessment (Required)
 
-### Evidence Review: Does Native Grouping Already Exist?
+### Evidence Review: Current Native Grouping Status
 
-Current repository contracts show **no explicit device-group primitive**:
+Current repository contracts now include an explicit native network-scoped device-group primitive:
 
-- No group fields in network device schema (`backend/app/modules/network/schemas.py:43`).
-- No group routes under networks API (`backend/app/api/v1/networks.py:38`).
-- No group types in frontend network contracts (`frontend/src/shared/types/network.ts:17`).
-- No group-specific network API client/hook surfaces (`frontend/src/features/networks/api.ts:11`, `frontend/src/features/networks/hooks.ts:45`).
-- Topology and Twin consume per-device and per-scene-object records, not group resources (`frontend/src/features/digitalTwin/sceneAdapter.ts:474`).
+- Network routes include native group lifecycle endpoints (`backend/app/api/v1/networks.py:277`, `backend/app/api/v1/networks.py:300`).
+- Network schemas include group request/response contracts (`backend/app/modules/network/schemas.py:291`, `backend/app/modules/network/schemas.py:378`).
+- Frontend network contracts include group types and payloads (`frontend/src/shared/types/network.ts:181`, `frontend/src/shared/types/network.ts:201`).
+- Frontend network API/hook surfaces include list/upsert group support (`frontend/src/features/networks/api.ts:117`, `frontend/src/features/networks/hooks.ts:170`).
 
-### Gap
+### Historical Phase 1 Gap (Now Closed)
 
-There is no backend-native `device_group` resource or group-target endpoint contract today.
+At original Phase 1 authoring time, native groups were not yet implemented; this document used a scope-selector fallback. That fallback remains contract-safe and backward-compatible.
 
-### Smallest Safe Alternative (Contract-Native, No New API)
+### Contract-Safe Grouping Patterns (Still Valid)
 
-Implement grouping as an **operator convention** over existing fields:
+Use scope selectors inside `intent.scope` for targeting semantics (with or without persisted native group definitions):
 
 1. **Site hierarchy groups** from `spatial_ref_id` prefixes:
    - Campus: `strathmore/*`
@@ -292,7 +292,7 @@ Use current intent validate/execute endpoints with scope object selectors:
 }
 ```
 
-This is contract-valid because intent `scope` is an object and action is from supported baseline actions. It is auditable via existing intent and audit event flows.
+This remains contract-valid because intent `scope` is an object and action is from supported baseline actions. It is auditable via existing intent and audit event flows.
 
 ### Governance Safety and Traceability
 
@@ -444,7 +444,7 @@ Note: per-device automatic fan-out mutations are not a current documented backen
 - [ ] Keeps one campus context (single org/workspace/network narrative).
 - [ ] Uses `spatial_ref_id` convention without adding schema fields.
 - [ ] Distinguishes real behavior vs demo assumptions.
-- [ ] Includes grouping gap statement and smallest safe alternative.
+- [ ] Includes native device-group status plus scope-selector compatibility guidance.
 - [ ] Includes traceability table with file references.
 
 ---
@@ -454,7 +454,7 @@ Note: per-device automatic fan-out mutations are not a current documented backen
 | Risk | Impact | Fallback |
 | --- | --- | --- |
 | Sparse telemetry in live demo window | Weak congestion/alert story | Use existing synthetic load tooling and pre-warm telemetry health/history before demo start |
-| No native device-group resource | Cannot claim backend-native group execution | Use scope-based grouping convention in intent payload; show governance and audit traceability |
+| Device-group definition drift from campus conventions | Inconsistent targeting behavior across demo runs | Reconcile native groups via `POST /api/v1/networks/{network_id}/device-groups` and keep intent scope selectors explicit in demo payloads |
 | Terminal simulation event parity uncertainty in sprint notes | Possible inconsistency in completed/cancelled showcase | Prioritize deterministic `simulation.started`, pause/branch/compare, and verify terminal behavior in rehearsal |
 | 3D model import mismatch | Visual inconsistency | Use deterministic spatial placement from `spatial_ref_id` with no external model dependency |
 | High device volume prep pressure | Time overrun | Keep 80/20 detail split; seed showcase floors first, then add light floors |
@@ -471,7 +471,7 @@ Note: per-device automatic fan-out mutations are not a current documented backen
 
 ### Demo Assumptions / Approximations
 
-- Group operations are represented through scope conventions, not a native `device_group` backend entity.
+- Native network device groups exist, but intent execution targeting remains scope-selector based in current demo payload patterns.
 - Campus geometry can be simplified; photorealistic building modeling is not required.
 - Intent execution impact is shown through lifecycle/audit/twin overlay visibility, not documented per-device mutation fan-out.
 
@@ -481,7 +481,7 @@ Note: per-device automatic fan-out mutations are not a current documented backen
 
 ### No-Hallucination Statement
 
-All routes, fields, channels, scripts, and behaviors in this Phase 1 blueprint are traced to repository files. Where contracts are missing (notably explicit device-group resources), this document marks the gap and uses the smallest safe alternative on existing contracts.
+All routes, fields, channels, scripts, and behaviors in this manual are traced to repository files. Historical contract gaps from the original Phase 1 authoring are explicitly marked and superseded by current repository status where those gaps have since been closed.
 
 ### Traceability Matrix
 
@@ -511,7 +511,7 @@ All routes, fields, channels, scripts, and behaviors in this Phase 1 blueprint a
 | Twin supports session-only import + optional mapping persistence via existing device PATCH | `frontend/src/features/digitalTwin/TwinPage.tsx:592`, `frontend/src/features/digitalTwin/TwinPage.tsx:236` |
 | Existing local flow check script validates route/websocket baseline | `backend/scripts/run_local_flow_check.py:101` |
 | Existing synthetic load script exists for telemetry demo conditioning | `backend/scripts/run_vs17_external_load.py:35` |
-| **Grouping gap evidence:** no explicit group route/field in network API/types | `backend/app/api/v1/networks.py:38`, `backend/app/modules/network/schemas.py:43`, `frontend/src/shared/types/network.ts:17` |
+| Native device-group lifecycle exists in current contracts | `backend/app/api/v1/networks.py:277`, `backend/app/api/v1/networks.py:300`, `backend/app/modules/network/schemas.py:291`, `frontend/src/shared/types/network.ts:181`, `frontend/src/features/networks/api.ts:117`, `frontend/src/features/networks/hooks.ts:170` |
 | Strathmore dataset bootstrap uses existing org/workspace/network/device/simulation/intent routes only | `backend/scripts/prepare_strathmore_demo.py:464`, `backend/scripts/prepare_strathmore_demo.py:703` |
 | Strathmore dataset totals are regression-checked by deterministic unit coverage | `backend/tests/unit/test_prepare_strathmore_demo.py:10` |
 
@@ -650,8 +650,8 @@ poetry run python scripts/prepare_strathmore_demo.py \
 
 ### Group Capability Status
 
-- Native backend `device_group` resource: **not present** in current contracts.
-- Implemented approach for demo operations: **scope convention** in `intent.scope` using:
+- Native backend `device_group` resource: **present** in current contracts (`GET|POST /api/v1/networks/{network_id}/device-groups`).
+- Compatible targeting approach for demo operations: `intent.scope` selectors using:
   - `site_prefix` (spatial hierarchy)
   - `functional_group` (device-type convention)
   - `operational_group` (operator policy label)
@@ -781,10 +781,10 @@ Use this exact route order in live demo:
 
 ### Known Limitations (Explicit)
 
-1. No backend-native device-group resource exists; scope-convention grouping is used.
-2. Binary 3D model persistence remains out-of-scope (session import + optional per-device mapping persist only).
-3. CurrentSprint residual: simulation terminal producer parity (`simulation.completed` / `simulation.cancelled`) remains a separate backend risk item.
-4. Topology edge richness depends on existing graph relationships; dataset seeding guarantees nodes and spatial mapping, not full physical cabling semantics.
+1. Intent payload contracts are still selector-based; there is no dedicated `device_group_id` binding field in current intent schema.
+2. This Phase 2 script package does not upload binary 3D campus model assets; optional model-asset persistence now exists in current Network contracts and Twin UI.
+3. Topology edge richness depends on existing graph relationships; dataset seeding guarantees nodes and spatial mapping, not full physical cabling semantics.
+4. Intent targeting payloads remain selector-based (`intent.scope`) and do not bind directly to a dedicated `device_group_id` field in current intent schemas.
 
 ### Demo-Day Command Checklist (Concise)
 
@@ -837,12 +837,13 @@ poetry run python scripts/run_vs17_external_load.py --profile local-smoke --base
 
 ### Group Capability Status (Proof)
 
-- Status: **did not already exist as native backend group entity**, and **no speculative group API was added**.
-- Implemented approach: group selectors in `intent.scope` with existing intent contracts.
+- Status: native backend group entity now exists and is exposed via the approved Network contract surface.
+- Compatible demo approach: group selectors in `intent.scope` remain valid with existing intent contracts.
 - Proof pointers:
-  - `backend/app/modules/network/schemas.py:43`
-  - `backend/app/api/v1/networks.py:38`
-  - `frontend/src/shared/types/network.ts:17`
+  - `backend/app/modules/network/schemas.py:291`
+  - `backend/app/api/v1/networks.py:277`
+  - `frontend/src/shared/types/network.ts:181`
+  - `frontend/src/features/networks/api.ts:117`
   - `backend/app/modules/intent/schemas.py:45`
   - `backend/scripts/prepare_strathmore_demo.py:332`
 

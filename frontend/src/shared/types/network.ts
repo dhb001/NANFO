@@ -147,3 +147,62 @@ export interface UpsertCampusBuildingInput {
   attenuation_db?: number | null;
   source?: string | null;
 }
+
+export interface CampusModelAssetRecord {
+  campus_model_asset_id: string;
+  network_id: string;
+  model_file_name: string;
+  model_mime_type: string;
+  model_data_base64: string;
+  model_sha256: string;
+  model_size_bytes: number;
+  mapping_by_device_id: Record<string, string>;
+  source: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CampusModelAssetList {
+  items: CampusModelAssetRecord[];
+  total: number;
+}
+
+export interface UpsertCampusModelAssetInput {
+  model_file_name: string;
+  model_mime_type: string;
+  model_data_base64: string;
+  model_sha256: string;
+  model_size_bytes: number;
+  mapping_by_device_id: Record<string, string>;
+  source?: string | null;
+  replace_existing?: boolean;
+}
+
+export type DeviceGroupType = "site_hierarchy" | "functional" | "operational" | "custom";
+
+export interface DeviceGroupRecord {
+  device_group_id: string;
+  network_id: string;
+  group_key: string;
+  name: string;
+  group_type: DeviceGroupType;
+  description: string | null;
+  selector: Record<string, string>;
+  device_ids: string[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DeviceGroupList {
+  items: DeviceGroupRecord[];
+  total: number;
+}
+
+export interface UpsertDeviceGroupInput {
+  group_key: string;
+  name: string;
+  group_type: DeviceGroupType;
+  description?: string | null;
+  selector?: Record<string, string>;
+  device_ids?: string[];
+}

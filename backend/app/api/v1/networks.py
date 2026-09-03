@@ -26,17 +26,23 @@ from app.core.dependencies import (
 from app.core.responses import APIResponse, success_response
 from app.modules.network.schemas import (
     CampusBuildingListResponse,
+    CampusModelAssetListResponse,
     CreateDeviceRequest,
     CreateNetworkRequest,
+    DeviceGroupListResponse,
     DeviceListResponse,
     DeviceResponse,
     NetworkListResponse,
     NetworkResponse,
     UpdateDeviceRequest,
     UpsertCampusBuildingsRequest,
+    UpsertCampusModelAssetRequest,
+    UpsertDeviceGroupsRequest,
 )
 from app.modules.network.service import (
     CampusBuildingService,
+    CampusModelAssetService,
+    DeviceGroupService,
     DeviceService,
     NetworkService,
 )
@@ -210,6 +216,106 @@ async def upsert_campus_buildings(
         req=req,
         actor_id=claims.user_id,
         correlation_id=meta.request_id,
+        requested_workspace_id=requested_workspace_id,
+        claim_org_id=get_claim_org_scope(claims=claims),
+    )
+    return success_response(result, meta.request_id, started, meta.timestamp)
+
+
+# ── Campus Model Asset Persistence (Digital Twin residual closure) ────────────
+
+@router.get(
+    "/{network_id}/campus/model-assets",
+    response_model=APIResponse[CampusModelAssetListResponse],
+    status_code=status.HTTP_200_OK,
+)
+async def list_campus_model_assets(
+    network_id: uuid.UUID,
+    claims: Annotated[TokenClaims, Depends(require_permissions("read:topology"))],
+    meta: Annotated[RequestMeta, Depends(get_request_meta)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    redis: Annotated[aioredis.Redis, Depends(get_redis)],
+):
+    started = time.monotonic()
+    requested_workspace_id = enforce_workspace_scope(claims=claims, workspace_id=None)
+    result = await CampusModelAssetService(db=db, redis=redis).list_assets(
+        network_id=network_id,
+        actor_user_id=claims.user_id,
+        requested_workspace_id=requested_workspace_id,
+        claim_org_id=get_claim_org_scope(claims=claims),
+    )
+    return success_response(result, meta.request_id, started, meta.timestamp)
+
+
+@router.post(
+    "/{network_id}/campus/model-assets",
+    response_model=APIResponse[CampusModelAssetListResponse],
+    status_code=status.HTTP_200_OK,
+)
+async def upsert_campus_model_assets(
+    network_id: uuid.UUID,
+    req: UpsertCampusModelAssetRequest,
+    claims: Annotated[TokenClaims, Depends(require_permissions("write:config"))],
+    meta: Annotated[RequestMeta, Depends(get_request_meta)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    redis: Annotated[aioredis.Redis, Depends(get_redis)],
+):
+    started = time.monotonic()
+    requested_workspace_id = enforce_workspace_scope(claims=claims, workspace_id=None)
+    result = await CampusModelAssetService(db=db, redis=redis).upsert_asset(
+        network_id=network_id,
+        req=req,
+        actor_id=claims.user_id,
+        requested_workspace_id=requested_workspace_id,
+        claim_org_id=get_claim_org_scope(claims=claims),
+    )
+    return success_response(result, meta.request_id, started, meta.timestamp)
+
+
+# ── Device Groups (Digital Twin + intent targeting) ───────────────────────────
+
+@router.get(
+    "/{network_id}/device-groups",
+    response_model=APIResponse[DeviceGroupListResponse],
+    status_code=status.HTTP_200_OK,
+)
+async def list_device_groups(
+    network_id: uuid.UUID,
+    claims: Annotated[TokenClaims, Depends(require_permissions("read:topology"))],
+    meta: Annotated[RequestMeta, Depends(get_request_meta)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    redis: Annotated[aioredis.Redis, Depends(get_redis)],
+):
+    started = time.monotonic()
+    requested_workspace_id = enforce_workspace_scope(claims=claims, workspace_id=None)
+    result = await DeviceGroupService(db=db, redis=redis).list_groups(
+        network_id=network_id,
+        actor_user_id=claims.user_id,
+        requested_workspace_id=requested_workspace_id,
+        claim_org_id=get_claim_org_scope(claims=claims),
+    )
+    return success_response(result, meta.request_id, started, meta.timestamp)
+
+
+@router.post(
+    "/{network_id}/device-groups",
+    response_model=APIResponse[DeviceGroupListResponse],
+    status_code=status.HTTP_200_OK,
+)
+async def upsert_device_groups(
+    network_id: uuid.UUID,
+    req: UpsertDeviceGroupsRequest,
+    claims: Annotated[TokenClaims, Depends(require_permissions("write:config"))],
+    meta: Annotated[RequestMeta, Depends(get_request_meta)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    redis: Annotated[aioredis.Redis, Depends(get_redis)],
+):
+    started = time.monotonic()
+    requested_workspace_id = enforce_workspace_scope(claims=claims, workspace_id=None)
+    result = await DeviceGroupService(db=db, redis=redis).upsert_groups(
+        network_id=network_id,
+        req=req,
+        actor_id=claims.user_id,
         requested_workspace_id=requested_workspace_id,
         claim_org_id=get_claim_org_scope(claims=claims),
     )

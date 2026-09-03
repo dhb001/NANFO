@@ -23,6 +23,24 @@
 - Vertical Slice 20 Implementation: **COMPLETE** — Optimization program closure gate is delivered with consolidated VS17-VS19 evidence, continuity-doc sign-off, and final required backend regression confirmation.
 - Chapter Conformance Audit (chapter-01 to chapter-12): **COMPLETE** — chapter-by-chapter implementation conformance classification was finalized, targeted in-scope remediation was applied (organization member identity validation and realtime websocket unauthorized/error handling hardening), and required backend/frontend validation evidence was recorded.
 
+## Enhancement Slice — Digital Twin Residual Closure (Campus Model Assets + Native Device Groups)
+
+- Status: **COMPLETE** (2026-09-02).
+- Scope boundaries: backend + frontend closure for existing approved Network PRD surfaces only; no new websocket channel/event contracts; canonical envelope preserved.
+- Delivered:
+  - Added and validated network-scoped campus model asset lifecycle endpoints and persistence wiring (`GET|POST /api/v1/networks/{network_id}/campus/model-assets`) with payload integrity validation (`base64`, `sha256`, `size`) and mapping-device scope checks.
+  - Added and validated network-scoped native device-group lifecycle endpoints and persistence wiring (`GET|POST /api/v1/networks/{network_id}/device-groups`) with selector/member validation and soft-delete/member-lifecycle consistency.
+  - Added migration `backend/alembic/versions/0010_campus_model_assets_and_device_groups.py` for `campus_model_assets`, `device_groups`, and `device_group_members` plus indexes/uniqueness constraints.
+  - Integrated Twin UI persistence controls for model assets and native device groups (`frontend/src/features/digitalTwin/TwinPageContent.tsx`) using existing networks hooks/clients/types.
+  - Removed hardcoded Strathmore selector defaults in frontend group derivation; group persistence now derives building/floor scope from selected context with deterministic fallback to dominant scene scope.
+  - Added focused frontend regression coverage for campus-agnostic device-group persist behavior (`frontend/src/features/digitalTwin/TwinPage.test.tsx`).
+- Validation evidence:
+  - Backend touched-scope lint: `poetry run ruff check app/api/v1/networks.py app/modules/network/models.py app/modules/network/repository.py app/modules/network/schemas.py app/modules/network/service.py tests/unit/test_network_schemas.py tests/unit/test_network_service.py tests/integration/test_network_endpoints.py` ✅.
+  - Backend targeted regression: `poetry run pytest tests/unit/test_network_schemas.py tests/unit/test_network_service.py tests/integration/test_network_endpoints.py -q` ✅ (`120 passed`).
+  - Backend full regression: `poetry run pytest tests -q` ✅ (`775 passed`).
+  - Frontend full gate: `npm run lint` ✅; `npm run typecheck` ✅; `npm run test` ✅ (`31 files, 131 tests`); `npm run build` ✅ (existing large `three` chunk warning unchanged); `npm run perf:bundle` ✅ (`total_js_gzip_kb=409.92`, all bounded checks true); `npm run test:e2e` ✅ (`19/19`).
+- Residual risks (accepted): procedural OSM ingestion automation remains deferred; projection providers beyond deterministic baseline remain deferred; wireless coverage remains synthetic (not RF-physics authoritative); model binary persistence is currently inline base64 and may later move to object storage under a separately approved contract.
+
 ## Enhancement Slice — Strathmore Digital Twin Presentation Hardening (Phase 2)
 
 - Status: **COMPLETE** (2026-09-02).
@@ -626,7 +644,7 @@
 
 ## Blocked / Deferred
 - Digital Twin spatial references — deferred to M6
-- Frontend VS19 continuity gate is currently red on total JS gzip bound (`npm run perf:bundle`: `total_js_gzip_kb=410.57` vs limit `410.16`) after Phase 5D scope growth; targeted chunk/asset optimization remains deferred follow-up.
+- Frontend VS19 continuity gate is currently green (`npm run perf:bundle`: `total_js_gzip_kb=409.92` vs limit `410.16`), but headroom remains narrow; targeted chunk/asset optimization remains deferred follow-up.
 - Post-VS16 optimization sequence (VS17-VS20) is complete; deeper bundle-shape reduction for the large `three` chunk and staged/CI external load-tooling expansion remain deferred carryover candidates for the next roadmap phase.
 - Chapter conformance residual roadmap deltas (federated AIOS breadth, procedural OSM generation, full DAL/UNIL breadth, GraphQL and additional websocket channels, and full Timescale/object-storage operationalization) are documented in `docs/project/ChapterConformanceAudit.md`.
 - Repo-wide Ruff debt outside VS2 Step 8 scope remains and is tracked for later cleanup.

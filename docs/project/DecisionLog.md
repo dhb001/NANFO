@@ -3,6 +3,34 @@
 Lightweight chronological notes for decisions that do not require a full ADR.
 
 ## 2026-09-02
+### Digital Twin Residual Closure: Approve Network-Native Device Groups and Campus Model Asset Persistence Under Existing Network Contracts
+Decision: Close the remaining backend Digital Twin residuals for native device-group support and persisted campus model asset lifecycle by extending the existing Network PRD surface with `GET|POST /api/v1/networks/{network_id}/device-groups` and `GET|POST /api/v1/networks/{network_id}/campus/model-assets`, while preserving canonical API envelopes and avoiding websocket/event contract expansion.
+Reason:
+- Residual tracking after Phase 5D still showed two high-impact gaps: no backend-native group primitive and no persisted campus-model binary lifecycle.
+- Architecture guardrails require approved/documented API contracts before adding endpoint surfaces.
+- The smallest safe closure is to keep ownership in the Network module and enforce existing workspace/org boundary checks at service level.
+Impact:
+- Expanded `docs/features/Network.md` to include campus model asset and device-group requirements, endpoints, data ownership, risks, and acceptance criteria.
+- Added network-owned persistence entities in `backend/app/modules/network/models.py` and migration `backend/alembic/versions/0010_campus_model_assets_and_device_groups.py` (`campus_model_assets`, `device_groups`, `device_group_members`).
+- Added repository/service/router wiring for list/upsert lifecycle flows under existing `/api/v1/networks/{network_id}` scope with canonical envelope responses.
+- Added schema validation for model payload integrity (`base64`, `size`, `sha256`), selector/member validation for device groups, and network-scoped active-device membership checks.
+- Added focused unit and integration coverage for new schemas/services/endpoints.
+Assumptions:
+- Campus model binary payload remains bounded inline base64 persistence in this slice; object-storage relocation requires a separate approved contract update.
+- Existing intent `scope` grouping convention remains valid and backward-compatible; native device-group resources are additive.
+- No dedicated domain events are required for these persistence paths in current scope.
+Related:
+- `docs/features/Network.md`
+- `backend/alembic/versions/0010_campus_model_assets_and_device_groups.py`
+- `backend/app/modules/network/models.py`
+- `backend/app/modules/network/repository.py`
+- `backend/app/modules/network/schemas.py`
+- `backend/app/modules/network/service.py`
+- `backend/app/api/v1/networks.py`
+- `backend/tests/unit/test_network_schemas.py`
+- `backend/tests/unit/test_network_service.py`
+- `backend/tests/integration/test_network_endpoints.py`
+
 ### Strathmore Digital Twin Phase 5D: Approve Network-Owned Campus Building Persistence and Deterministic GeoJSON/OSM Ingest Under Existing Contracts
 Decision: Close Digital Twin Phase 5D by introducing network-owned campus-building persistence and deterministic GeoJSON/OSM campus import handling under the existing `/api/v1/networks/{network_id}` contract surface, while retaining canonical API envelopes and avoiding undocumented event/channel expansion.
 Reason:

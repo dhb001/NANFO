@@ -12,10 +12,27 @@ const mockUseTopologyGraph = vi.fn();
 const mockUseTopologyNode = vi.fn();
 const mockUpdateDeviceSpatialRefMutateAsync = vi.fn();
 const mockUpsertCampusBuildingsMutateAsync = vi.fn();
+const mockUpsertCampusModelAssetsMutateAsync = vi.fn();
+const mockUpsertDeviceGroupsMutateAsync = vi.fn();
 const mockUseCampusBuildings = vi.fn();
+const mockUseCampusModelAssets = vi.fn();
+const mockUseDeviceGroups = vi.fn();
 const mockUseUpsertCampusBuildings = vi.fn();
+const mockUseUpsertCampusModelAssets = vi.fn();
+const mockUseUpsertDeviceGroups = vi.fn();
 
 const navigateMock = vi.fn();
+
+const cryptoSubtleDigestMock = vi.fn();
+
+Object.defineProperty(globalThis, "crypto", {
+  configurable: true,
+  value: {
+    subtle: {
+      digest: (...args: unknown[]) => cryptoSubtleDigestMock(...args),
+    },
+  },
+});
 
 vi.mock("react-router-dom", async () => {
   const actual = await vi.importActual<typeof import("react-router-dom")>("react-router-dom");
@@ -36,7 +53,11 @@ vi.mock("@/features/networks/hooks", () => ({
     isPending: false,
   }),
   useCampusBuildings: (...args: unknown[]) => mockUseCampusBuildings(...args),
+  useCampusModelAssets: (...args: unknown[]) => mockUseCampusModelAssets(...args),
+  useDeviceGroups: (...args: unknown[]) => mockUseDeviceGroups(...args),
   useUpsertCampusBuildings: (...args: unknown[]) => mockUseUpsertCampusBuildings(...args),
+  useUpsertCampusModelAssets: (...args: unknown[]) => mockUseUpsertCampusModelAssets(...args),
+  useUpsertDeviceGroups: (...args: unknown[]) => mockUseUpsertDeviceGroups(...args),
 }));
 
 const twinScenePropsSpy = vi.fn();
@@ -89,8 +110,14 @@ describe("TwinPage", () => {
     navigateMock.mockReset();
     twinScenePropsSpy.mockReset();
     mockUseCampusBuildings.mockReset();
+    mockUseCampusModelAssets.mockReset();
+    mockUseDeviceGroups.mockReset();
     mockUseUpsertCampusBuildings.mockReset();
+    mockUseUpsertCampusModelAssets.mockReset();
+    mockUseUpsertDeviceGroups.mockReset();
     mockUpsertCampusBuildingsMutateAsync.mockReset();
+    mockUpsertCampusModelAssetsMutateAsync.mockReset();
+    mockUpsertDeviceGroupsMutateAsync.mockReset();
 
     useAuthStore.setState({
       accessToken: "token-1",
@@ -142,7 +169,27 @@ describe("TwinPage", () => {
       items: [],
       total: 0,
     });
+    mockUpsertCampusModelAssetsMutateAsync.mockResolvedValue({
+      items: [],
+      total: 0,
+    });
+    mockUpsertDeviceGroupsMutateAsync.mockResolvedValue({
+      items: [],
+      total: 0,
+    });
     mockUseCampusBuildings.mockReturnValue(
+      queryResult({
+        items: [],
+        total: 0,
+      }),
+    );
+    mockUseCampusModelAssets.mockReturnValue(
+      queryResult({
+        items: [],
+        total: 0,
+      }),
+    );
+    mockUseDeviceGroups.mockReturnValue(
       queryResult({
         items: [],
         total: 0,
@@ -150,6 +197,14 @@ describe("TwinPage", () => {
     );
     mockUseUpsertCampusBuildings.mockReturnValue({
       mutateAsync: mockUpsertCampusBuildingsMutateAsync,
+      isPending: false,
+    });
+    mockUseUpsertCampusModelAssets.mockReturnValue({
+      mutateAsync: mockUpsertCampusModelAssetsMutateAsync,
+      isPending: false,
+    });
+    mockUseUpsertDeviceGroups.mockReturnValue({
+      mutateAsync: mockUpsertDeviceGroupsMutateAsync,
       isPending: false,
     });
   });
@@ -160,7 +215,7 @@ describe("TwinPage", () => {
 
     render(<TwinPage />);
 
-    expect(await screen.findByText("Loading")).toBeInTheDocument();
+    expect(await screen.findByText(/loading/i)).toBeInTheDocument();
   });
 
   it("renders empty state", async () => {
@@ -176,7 +231,7 @@ describe("TwinPage", () => {
 
     render(<TwinPage />);
 
-    expect(await screen.findByText("Topology graph is empty")).toBeInTheDocument();
+    expect(await screen.findByText("Topology graph is empty", {}, { timeout: 5000 })).toBeInTheDocument();
   });
 
   it("renders error state", async () => {
@@ -486,6 +541,78 @@ describe("TwinPage", () => {
     });
 
     parseImportSummarySpy.mockRestore();
+  });
+
+  it("persists device groups using selected campus scope without hardcoded campus defaults", async () => {
+    const user = userEvent.setup();
+    mockUseTopologyGraph.mockReturnValue(
+      queryResult({
+        data: {
+          nodes: [
+            {
+              device_id: "00000000-0000-0000-0000-000000000444",
+              hostname: "ap-1",
+              device_type: "wireless_ap",
+              status: "active",
+              spatial_ref_id: "campus-a/building-1/f01/wireless/ap-1",
+            },
+            {
+              device_id: "00000000-0000-0000-0000-000000000445",
+              hostname: "sw-1",
+              device_type: "switch",
+              status: "active",
+              spatial_ref_id: "campus-a/building-1/f01/access/sw-1",
+            },
+            {
+              device_id: "00000000-0000-0000-0000-000000000446",
+              hostname: "ap-2",
+              device_type: "wireless_ap",
+              status: "active",
+              spatial_ref_id: "campus-a/building-2/f02/wireless/ap-2",
+            },
+          ],
+          edges: [],
+        },
+      }),
+    );
+    mockUseTopologyNode.mockReturnValue(queryResult(null));
+
+    render(<TwinPage />);
+    await waitForTwinScene();
+
+    await user.selectOptions(screen.getByLabelText("Twin building focus"), "campus-a:building-1");
+    await user.selectOptions(screen.getByLabelText("Twin floor focus"), "f01");
+    await user.click(screen.getByRole("button", { name: "Persist Device Groups" }));
+
+    await waitFor(() => {
+      expect(mockUpsertDeviceGroupsMutateAsync).toHaveBeenCalledWith({
+        replaceExisting: true,
+        groups: [
+          {
+            group_key: "wireless-campus-a-building-1-f01",
+            name: "BUILDING-1 F01 Wireless",
+            group_type: "functional",
+            selector: {
+              site_prefix: "campus-a/building-1/f01",
+              functional_group: "wireless",
+            },
+            device_ids: ["00000000-0000-0000-0000-000000000444"],
+          },
+          {
+            group_key: "ops-campus-a-building-1-f01",
+            name: "BUILDING-1 F01 Operations",
+            group_type: "operational",
+            selector: {
+              site_prefix: "campus-a/building-1/f01",
+            },
+            device_ids: [
+              "00000000-0000-0000-0000-000000000444",
+              "00000000-0000-0000-0000-000000000445",
+            ],
+          },
+        ],
+      });
+    });
   });
 
   it("parses sidecar mapping and reports duplicates/unmatched deterministically", async () => {

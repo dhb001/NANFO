@@ -1,11 +1,15 @@
 import { apiRequest } from "@/shared/lib/api";
 import {
   CampusBuildingList,
+  CampusModelAssetList,
   Device,
+  DeviceGroupList,
   DeviceList,
   Network,
   NetworkList,
+  UpsertCampusModelAssetInput,
   UpsertCampusBuildingInput,
+  UpsertDeviceGroupInput,
 } from "@/shared/types/network";
 
 interface CreateNetworkInput {
@@ -82,6 +86,60 @@ export function upsertCampusBuildings(
     body: {
       buildings: input.buildings,
       replace_existing: input.replaceExisting ?? true,
+    },
+    token,
+  });
+}
+
+export function listCampusModelAssets(token: string, networkId: string) {
+  return apiRequest<CampusModelAssetList>(`/api/v1/networks/${networkId}/campus/model-assets`, {
+    token,
+  });
+}
+
+export function upsertCampusModelAssets(token: string, networkId: string, input: UpsertCampusModelAssetInput) {
+  return apiRequest<CampusModelAssetList>(`/api/v1/networks/${networkId}/campus/model-assets`, {
+    method: "POST",
+    body: {
+      model_file_name: input.model_file_name,
+      model_mime_type: input.model_mime_type,
+      model_data_base64: input.model_data_base64,
+      model_sha256: input.model_sha256,
+      model_size_bytes: input.model_size_bytes,
+      mapping_by_device_id: input.mapping_by_device_id,
+      source: input.source ?? null,
+      replace_existing: input.replace_existing ?? true,
+    },
+    token,
+  });
+}
+
+export function listDeviceGroups(token: string, networkId: string) {
+  return apiRequest<DeviceGroupList>(`/api/v1/networks/${networkId}/device-groups`, {
+    token,
+  });
+}
+
+export function upsertDeviceGroups(
+  token: string,
+  networkId: string,
+  input: {
+    groups: UpsertDeviceGroupInput[];
+    replaceExisting?: boolean;
+  },
+) {
+  return apiRequest<DeviceGroupList>(`/api/v1/networks/${networkId}/device-groups`, {
+    method: "POST",
+    body: {
+      replace_existing: input.replaceExisting ?? false,
+      groups: input.groups.map((group) => ({
+        group_key: group.group_key,
+        name: group.name,
+        group_type: group.group_type,
+        description: group.description ?? null,
+        selector: group.selector ?? {},
+        device_ids: group.device_ids ?? [],
+      })),
     },
     token,
   });
