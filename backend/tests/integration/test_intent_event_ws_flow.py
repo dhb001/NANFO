@@ -10,6 +10,8 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from app.events.consumers.ws_push_consumer import handle_ws_intent_event
+from app.websocket.manager import DigitalTwinWSManager
+from tests.ws_auth_support import ws_identity  # noqa: F401
 
 
 @pytest.mark.asyncio
@@ -17,6 +19,7 @@ async def test_intent_execution_started_event_is_fanned_out_to_digital_twin_ws()
     payload = {
         "intent_id": str(uuid.uuid4()),
         "network_id": str(uuid.uuid4()),
+        "workspace_id": str(uuid.uuid4()),
         "intent_kind": "reroute_path",
         "status": "execution_started",
         "confidence": {
@@ -40,6 +43,8 @@ async def test_intent_execution_started_event_is_fanned_out_to_digital_twin_ws()
         await handle_ws_intent_event(event)
 
     kwargs = mock_digital_twin_ws_manager.push_delta.await_args.kwargs
+    assert kwargs["workspace_id"] == payload["workspace_id"]
+    assert kwargs["network_id"] == payload["network_id"]
     wire_payload = {
         "event": kwargs["event_type"],
         "correlation_id": kwargs["correlation_id"],
@@ -87,6 +92,7 @@ async def test_intent_execution_failed_event_includes_rollback_changed_fields():
     payload = {
         "intent_id": str(uuid.uuid4()),
         "network_id": str(uuid.uuid4()),
+        "workspace_id": str(uuid.uuid4()),
         "intent_kind": "isolate_vlan",
         "status": "execution_failed",
         "confidence": {
@@ -119,3 +125,38 @@ async def test_intent_execution_failed_event_includes_rollback_changed_fields():
     assert changed_fields["status"] == "execution_failed"
     assert changed_fields["verification_status"] == "failed"
     assert changed_fields["rollback_status"] == "completed"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("workspace_id", [None, "invalid"])
+async def test_intent_fanout_rejects_missing_or_invalid_workspace(workspace_id):
+    with patch("app.events.consumers.ws_push_consumer.digital_twin_ws_manager") as manager:
+        manager.push_delta = AsyncMock()
+        await handle_ws_intent_event({"event_type": "intent.validated", "payload": {
+            "network_id": str(uuid.uuid4()), "workspace_id": workspace_id, "intent_id": str(uuid.uuid4()),
+        }})
+        manager.push_delta.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_intent_fanout_manager_enforces_network_and_workspace(ws_identity):  # noqa: F811
+    identity = ws_identity
+    manager = DigitalTwinWSManager()
+    socket = AsyncMock()
+    await manager.subscribe(
+        identity.network_id, socket, token=identity.token, token_exp=identity.claims["exp"],
+        token_jti=identity.claims["jti"], workspace_id=identity.workspace_id,
+    )
+    event = {"event_type": "intent.validated", "payload": {
+        "network_id": identity.network_id, "workspace_id": identity.other_workspace_id,
+        "intent_id": str(uuid.uuid4()), "status": "validated",
+    }}
+    with patch("app.events.consumers.ws_push_consumer.digital_twin_ws_manager", manager):
+        await handle_ws_intent_event(event)
+        socket.send_text.assert_not_awaited()
+        event["payload"].update(network_id=str(uuid.uuid4()), workspace_id=identity.workspace_id)
+        await handle_ws_intent_event(event)
+        socket.send_text.assert_not_awaited()
+        event["payload"]["network_id"] = identity.network_id
+        await handle_ws_intent_event(event)
+        socket.send_text.assert_awaited_once()

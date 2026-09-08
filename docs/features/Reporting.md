@@ -29,6 +29,11 @@ Provide evidence-driven decision support and audit-ready summaries.
 - Long-running report jobs impacting worker pools.
 
 ## Acceptance Criteria
+Current foundation behavior: no renderer is installed. Processing requests yields
+`failed` with `REPORT_RENDERER_UNAVAILABLE` and no artifacts. Historical fabricated
+baseline references are suppressed on reads/replays. Generation requires current
+write capability and org write membership; status reads require membership.
+
 - [ ] Reports generated with consistent structure and metadata.
 - [ ] Failed jobs provide actionable error context.
 

@@ -108,7 +108,7 @@ class IntentValidationService:
         correlation_id: str,
         requested_by_user_id: str,
     ) -> dict[str, Any]:
-        await self._workspace_svc.get_active_workspace(workspace_id)
+        await self._workspace_svc.get_active_workspace(workspace_id, user_id=requested_by_user_id, require_write=True)
 
         now = datetime.now(UTC)
         normalized_intent = _extract_unil_intent(intent_payload)
@@ -165,6 +165,7 @@ class IntentValidationService:
         else:
             network = await self._network_repo.get_by_id(network_id)
             if network is None:
+                network_id = None
                 reasons.append(
                     _build_reason(
                         "NETWORK_NOT_FOUND",
@@ -173,13 +174,7 @@ class IntentValidationService:
                     )
                 )
             elif network.workspace_id != workspace_id:
-                reasons.append(
-                    _build_reason(
-                        "NETWORK_WORKSPACE_MISMATCH",
-                        "network_id is outside the requested workspace boundary.",
-                        path="network_id",
-                    )
-                )
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions.")
 
         required_checks = ["simulation_before_deployment"]
         if action in _HIGH_IMPACT_ACTIONS:
@@ -187,10 +182,10 @@ class IntentValidationService:
 
         is_valid = len(reasons) == 0
         status_value = "validated" if is_valid else "rejected"
-        capability_match = "matched" if is_valid else "failed"
-        dependency_analysis = "complete" if is_valid else "failed"
+        capability_match = "baseline_schema_match" if is_valid else "failed"
+        dependency_analysis = "not_performed"
 
-        confidence_score = 0.84 if is_valid else 0.0
+        confidence_score = 0.0
         confidence_band = _confidence_band(confidence_score)
         approval_required = True
 
@@ -203,6 +198,8 @@ class IntentValidationService:
             "simulation_required": True,
             "policy_reference": "ADR-008",
             "validated_at": now.isoformat(),
+            "validation_kind": "baseline_schema_only",
+            "model_evidence": "unavailable",
         }
         explainability = {
             "summary": (
@@ -210,7 +207,8 @@ class IntentValidationService:
                 if is_valid
                 else "Intent rejected by baseline UNIL validation checks."
             ),
-            "evidence": [reason["code"] for reason in reasons] if reasons else ["BASELINE_CHECKS_PASSED"],
+            "evidence": ([reason["code"] for reason in reasons] if reasons else ["BASELINE_SCHEMA_CHECKS_PASSED"])
+            + ["MODEL_CONFIDENCE_UNAVAILABLE", "DEPENDENCY_EVALUATOR_UNAVAILABLE"],
             "alternatives_considered": ["manual_review"],
             "policy_reference": "ADR-008",
         }
@@ -357,7 +355,7 @@ class IntentExecutionService:
                 },
             )
 
-        await self._workspace_svc.get_active_workspace(workspace_id)
+        await self._workspace_svc.get_active_workspace(workspace_id, user_id=requested_by_user_id, require_write=True)
 
         existing_by_key = None
 
@@ -443,8 +441,7 @@ class IntentExecutionService:
             {
                 "pipeline_stage": "execution_started",
                 "status": "execution_started",
-                "executor": "hypervisor_baseline",
-                "execution_mode": "vendor_neutral_baseline",
+                "executor": "unavailable",
                 "policy_reference": "ADR-008",
                 "execution_started_at": now.isoformat(),
                 "requested_by_user_id": requested_by_user_id,
@@ -458,13 +455,13 @@ class IntentExecutionService:
         explainability_started.update(
             {
                 "execution_posture": "simulation_required_before_hypervisor",
-                "execution_summary": "Execution lifecycle started; hypervisor dispatch in progress.",
+                "execution_summary": "Execution requested; no controller is installed and no dispatch occurred.",
             }
         )
 
-        confidence_score = float(intent.confidence_score or 0.0)
-        confidence_band = str(intent.confidence_band or _confidence_band(confidence_score))
-        approval_required = bool(intent.approval_required)
+        confidence_score = 0.0
+        confidence_band = _confidence_band(confidence_score)
+        approval_required = True
 
         update_kwargs: dict[str, Any] = {
             "status": "execution_started",
@@ -534,44 +531,29 @@ class IntentExecutionService:
         )
 
         terminal_execution_provenance = dict(execution_provenance_started)
+        terminal_execution_provenance.pop("rollback", None)
+        terminal_execution_provenance.pop("execution_completed_at", None)
+        terminal_execution_provenance.pop("completion_mode", None)
         terminal_explainability = dict(explainability_started)
 
         terminal_status = hypervisor_outcome.terminal_status
         terminal_event_type = f"intent.{terminal_status}"
 
-        if terminal_status == "execution_completed":
-            terminal_execution_provenance.update(
-                {
-                    "pipeline_stage": "execution_completed",
-                    "status": "execution_completed",
-                    "execution_completed_at": terminal_time.isoformat(),
-                    "completion_mode": "verified",
-                    "verification": hypervisor_outcome.verification,
-                }
-            )
-            terminal_explainability.update(
-                {
-                    "execution_summary": hypervisor_outcome.execution_summary,
-                }
-            )
-        else:
-            terminal_execution_provenance.update(
-                {
-                    "pipeline_stage": "execution_failed",
-                    "status": "execution_failed",
-                    "execution_failed_at": terminal_time.isoformat(),
-                    "failure_reason": hypervisor_outcome.failure_reason or "execution_unavailable",
-                    "verification": hypervisor_outcome.verification,
-                }
-            )
-            if hypervisor_outcome.rollback is not None:
-                terminal_execution_provenance["rollback"] = hypervisor_outcome.rollback
-            terminal_explainability.update(
-                {
-                    "execution_summary": hypervisor_outcome.execution_summary,
-                    "failure_reason": hypervisor_outcome.failure_reason or "execution_unavailable",
-                }
-            )
+        terminal_execution_provenance.update(
+            {
+                "pipeline_stage": "execution_failed",
+                "status": "execution_failed",
+                "execution_failed_at": terminal_time.isoformat(),
+                "failure_reason": hypervisor_outcome.failure_reason,
+                "verification": hypervisor_outcome.verification,
+            }
+        )
+        terminal_explainability.update(
+            {
+                "execution_summary": hypervisor_outcome.execution_summary,
+                "failure_reason": hypervisor_outcome.failure_reason,
+            }
+        )
 
         if queue_status == "deferred" and warning:
             terminal_execution_provenance["event_publication"] = {
@@ -652,8 +634,9 @@ class IntentExecutionService:
         *,
         workspace_id: uuid.UUID,
         intent_id: uuid.UUID,
+        user_id: str,
     ) -> dict[str, Any]:
-        await self._workspace_svc.get_active_workspace(workspace_id)
+        await self._workspace_svc.get_active_workspace(workspace_id, user_id=user_id)
         intent = await self._repo.get_by_id(intent_id)
         if intent is None or intent.workspace_id != workspace_id:
             raise HTTPException(
@@ -703,7 +686,7 @@ def _serialize_intent(
             if isinstance(intent.explainability, dict)
             else {}
         ),
-        "confidence": confidence_override,
+        "confidence": {"score": 0.0, "band": "below_60", "approval_required": True},
         "idempotency_key": intent.idempotency_key,
         "queue_status": str(intent.queue_status),
         "stream_entry_id": intent.stream_entry_id,
@@ -713,6 +696,25 @@ def _serialize_intent(
         "requested_at": intent.requested_at.isoformat(),
         "updated_at": intent.updated_at.isoformat(),
     }
+    base["validation_result"].update(
+        validation_kind="baseline_schema_only", model_evidence="unavailable", dependency_analysis="not_performed",
+    )
+    if base["validation_result"].get("capability_match") == "matched":
+        base["validation_result"]["capability_match"] = "baseline_schema_match"
+    base["explainability"]["model_confidence"] = "unavailable; baseline schema checks are not model evidence"
+    provenance = base["execution_provenance"]
+    if base["status"] == "execution_completed" or provenance.get("executor") == "hypervisor_baseline":
+        outcome = HypervisorExecutionService().execute(
+            intent_id=intent.intent_id, intent_kind=str(intent.intent_kind), validation_result={},
+            correlation_id=intent.correlation_id, requested_by_user_id=str(intent.requested_by_user_id),
+        )
+        base["status"] = outcome.terminal_status
+        base["execution_provenance"] = {
+            "status": outcome.terminal_status, "pipeline_stage": outcome.terminal_status,
+            "executor": "unavailable", "failure_reason": outcome.failure_reason,
+            "verification": outcome.verification, "legacy_baseline_unverified": True,
+        }
+        base["explainability"].update(execution_summary=outcome.execution_summary, failure_reason=outcome.failure_reason)
     if detail_mode:
         base["intent_payload"] = (
             dict(intent.intent_payload)

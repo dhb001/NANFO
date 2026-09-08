@@ -31,6 +31,14 @@ The authoritative channel list lives in `docs/features/Telemetry.md` §4. The cu
 - The server validates the token on connection. An invalid or missing token must reject the upgrade with HTTP `401 Unauthorized`.
 - The server must re-validate the token's expiry before every delta push. On expiry, the server pushes a `WS_UNAUTHORIZED` error frame and closes the connection. The client must reconnect using a refreshed token.
 - Credentials must never appear in WebSocket message payloads.
+- Only access tokens with a live Redis session are accepted; refresh tokens are
+  rejected. Every delivery checks current identity, capability, and organization
+  membership, not only token expiry. Alerts subscriptions enumerate authorized
+  workspaces even when the login token has no tenant claim. Missing event scope
+  never grants global delivery.
+- Browser upgrade rejection can appear as close 1006. Clients use a bounded
+  authenticated REST probe with cooldown after inconclusive transport failures;
+  only a confirmed authentication failure triggers token rotation.
 
 ---
 

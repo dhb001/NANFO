@@ -11,7 +11,6 @@ from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from app.core.dependencies import get_db, get_redis
-from app.core.security import create_access_token
 from app.main import app
 from app.modules.telemetry.schemas import (
     TelemetryDeviceHistoryResponse,
@@ -19,6 +18,7 @@ from app.modules.telemetry.schemas import (
     TelemetryHistoryResponse,
     TelemetryRecordResponse,
 )
+from tests.auth_support import create_session_access_token as create_access_token
 
 
 def _make_token() -> str:
@@ -53,11 +53,9 @@ def _make_workspace_scoped_token(*, workspace_id: uuid.UUID) -> str:
 
 
 @pytest.fixture
-def client() -> TestClient:
-    import fakeredis
-
+def client(session_auth, tenant_auth) -> TestClient:
     db = AsyncMock()
-    fake_r = fakeredis.FakeAsyncRedis(decode_responses=True)
+    fake_r = session_auth.redis
 
     async def _db():
         yield db
@@ -72,7 +70,7 @@ def client() -> TestClient:
 
 
 @pytest.fixture
-def headers() -> dict[str, str]:
+def headers(session_auth) -> dict[str, str]:
     return {"Authorization": f"Bearer {_make_token()}"}
 
 
@@ -340,7 +338,7 @@ def test_get_telemetry_health_validates_org_claim_scope_without_workspace_claim(
     )
 
 
-def test_get_telemetry_health_invalid_org_claim_returns_403(client):
+def test_get_telemetry_health_invalid_org_claim_returns_401(client):
     token, _ = create_access_token(
         user_id=str(uuid.uuid4()),
         email="telemetry-health-invalid-org@example.com",
@@ -351,7 +349,7 @@ def test_get_telemetry_health_invalid_org_claim_returns_403(client):
     headers = {"Authorization": f"Bearer {token}"}
 
     response = client.get("/api/v1/telemetry/health", headers=headers)
-    assert response.status_code == 403
+    assert response.status_code == 401
 
 
 def test_telemetry_endpoints_require_auth(client):

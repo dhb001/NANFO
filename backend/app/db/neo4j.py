@@ -5,7 +5,7 @@ The Network module is the exclusive writer; Topology Query Service is the reader
 Both operate within the same module boundary — no cross-module Neo4j access.
 """
 
-from neo4j import AsyncGraphDatabase, AsyncDriver
+from neo4j import AsyncDriver, AsyncGraphDatabase
 
 from app.core.config import get_settings
 from app.core.logging import get_logger

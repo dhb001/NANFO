@@ -39,3 +39,18 @@ async def test_get_roles_for_user_returns_empty_list_when_no_roles(mock_db):
 
     assert roles == []
     mock_db.execute.assert_awaited_once()
+
+
+@pytest.mark.parametrize(("roles", "expected"), [
+    ([], []), (["unknown"], []),
+    (["Operator"], ["read:topology", "read:telemetry"]),
+    (["Read-Only"], ["read:topology", "read:telemetry"]),
+    (["Admin"], ["read:topology", "write:config"]),
+])
+async def test_permission_semantics(mock_db, roles, expected):
+    result = MagicMock()
+    result.scalars.return_value.all.return_value = [
+        SimpleNamespace(name="read:topology"), SimpleNamespace(name="write:config"),
+    ]
+    mock_db.execute.return_value = result
+    assert await UserRepository(mock_db).get_permissions_for_roles(roles) == expected

@@ -13,7 +13,7 @@ from app.core.dependencies import (
     RequestMeta,
     TokenClaims,
     enforce_workspace_scope,
-    get_current_user,
+    get_claim_org_scope,
     get_db,
     get_redis,
     get_request_meta,
@@ -29,6 +29,7 @@ from app.modules.intent.schemas import (
     ValidateIntentResponse,
 )
 from app.modules.intent.service import IntentExecutionService, IntentValidationService
+from app.modules.organization.service import WorkspaceService
 
 router = APIRouter(prefix="/api/v1/intents", tags=["Intent"])
 
@@ -43,6 +44,10 @@ async def validate_intent(
 ):
     started = time.monotonic()
     scoped_workspace_id = enforce_workspace_scope(claims=claims, workspace_id=req.workspace_id)
+    await WorkspaceService(db=db, redis=redis).get_active_workspace(
+        scoped_workspace_id, user_id=claims.user_id, claim_org_id=get_claim_org_scope(claims=claims),
+        require_write=True,
+    )
     idempotency_key = None
     if hasattr(meta, "request") and meta.request is not None:
         idempotency_key = meta.request.headers.get("Idempotency-Key")
@@ -68,6 +73,10 @@ async def execute_intent(
 ):
     started = time.monotonic()
     scoped_workspace_id = enforce_workspace_scope(claims=claims, workspace_id=req.workspace_id)
+    await WorkspaceService(db=db, redis=redis).get_active_workspace(
+        scoped_workspace_id, user_id=claims.user_id, claim_org_id=get_claim_org_scope(claims=claims),
+        require_write=True,
+    )
     header_idempotency_key = None
     if hasattr(meta, "request") and meta.request is not None:
         header_idempotency_key = meta.request.headers.get("Idempotency-Key")
@@ -94,10 +103,14 @@ async def get_intent(
     redis: Annotated[aioredis.Redis, Depends(get_redis)],
 ):
     scoped_workspace_id = enforce_workspace_scope(claims=claims, workspace_id=workspace_id)
+    await WorkspaceService(db=db, redis=redis).get_active_workspace(
+        scoped_workspace_id, user_id=claims.user_id, claim_org_id=get_claim_org_scope(claims=claims),
+    )
     started = time.monotonic()
     result = await IntentExecutionService(db=db, redis=redis).get_intent_detail(
         workspace_id=scoped_workspace_id,
         intent_id=intent_id,
+        user_id=claims.user_id,
     )
     payload = IntentDetailResponse.model_validate(result)
     return success_response(payload, meta.request_id, started, meta.timestamp)

@@ -20,6 +20,8 @@ from app.modules.telemetry.service import (
     compute_bounded_backoff_seconds,
 )
 
+pytestmark = pytest.mark.usefixtures("execution_mode")
+
 
 @pytest.mark.asyncio
 async def test_telemetry_normalize_payload_coerces_types_and_defaults(fake_redis):
@@ -132,6 +134,8 @@ async def test_seeded_runtime_adapter_returns_deterministic_canonical_sample(fak
     assert first_sample["tags"] == {
         "adapter_mode": "seeded",
         "sample_key": "campus-a",
+        "synthetic": True,
+        "execution_mode": "demo",
     }
     assert first_sample["observed_at"]
 

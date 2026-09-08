@@ -15,10 +15,10 @@ from app.core.dependencies import (
     TokenClaims,
     get_claim_org_scope,
     get_claim_workspace_scope,
-    get_current_user,
     get_db,
     get_redis,
     get_request_meta,
+    require_permissions,
 )
 from app.core.responses import APIResponse, success_response
 from app.db.postgres import AsyncSession
@@ -53,6 +53,8 @@ class ScenarioValidationState(BaseModel):
     status: str
     queued_at: str
     requested_by_user_id: str
+    evaluator_status: str = "unavailable"
+    failure_reason: str | None = None
 
 
 class SimulationValidationHandoffResponse(BaseModel):
@@ -124,9 +126,9 @@ class SimulationDetailResponse(BaseModel):
 
 
 class SimulationMetricsSnapshot(BaseModel):
-    latency_ms: float
-    loss_pct: float
-    throughput_mbps: float
+    latency_ms: float | None
+    loss_pct: float | None
+    throughput_mbps: float | None
 
 
 class SimulationCompareResponse(BaseModel):
@@ -143,7 +145,7 @@ class SimulationCompareResponse(BaseModel):
 @router.post("/start", response_model=APIResponse[SimulationValidationHandoffResponse], status_code=status.HTTP_202_ACCEPTED)
 async def start_simulation(
     req: StartSimulationRequest,
-    claims: Annotated[TokenClaims, Depends(get_current_user)],
+    claims: Annotated[TokenClaims, Depends(require_permissions("write:config"))],
     meta: Annotated[RequestMeta, Depends(get_request_meta)],
     db: Annotated[AsyncSession, Depends(get_db)],
     redis: Annotated[aioredis.Redis, Depends(get_redis)],
@@ -175,7 +177,7 @@ async def start_simulation(
 @router.post("/pause", response_model=APIResponse[PauseSimulationResponse], status_code=status.HTTP_200_OK)
 async def pause_simulation(
     req: PauseSimulationRequest,
-    claims: Annotated[TokenClaims, Depends(get_current_user)],
+    claims: Annotated[TokenClaims, Depends(require_permissions("write:config"))],
     meta: Annotated[RequestMeta, Depends(get_request_meta)],
     db: Annotated[AsyncSession, Depends(get_db)],
     redis: Annotated[aioredis.Redis, Depends(get_redis)],
@@ -197,7 +199,7 @@ async def pause_simulation(
 @router.post("/branch", response_model=APIResponse[BranchSimulationResponse], status_code=status.HTTP_201_CREATED)
 async def branch_simulation(
     req: BranchSimulationRequest,
-    claims: Annotated[TokenClaims, Depends(get_current_user)],
+    claims: Annotated[TokenClaims, Depends(require_permissions("write:config"))],
     meta: Annotated[RequestMeta, Depends(get_request_meta)],
     db: Annotated[AsyncSession, Depends(get_db)],
     redis: Annotated[aioredis.Redis, Depends(get_redis)],
@@ -220,7 +222,7 @@ async def branch_simulation(
 @router.get("/{simulation_id}", response_model=APIResponse[SimulationDetailResponse], status_code=status.HTTP_200_OK)
 async def get_simulation_detail(
     simulation_id: uuid.UUID,
-    claims: Annotated[TokenClaims, Depends(get_current_user)],
+    claims: Annotated[TokenClaims, Depends(require_permissions("read:topology"))],
     meta: Annotated[RequestMeta, Depends(get_request_meta)],
     db: Annotated[AsyncSession, Depends(get_db)],
     redis: Annotated[aioredis.Redis, Depends(get_redis)],
@@ -246,7 +248,7 @@ async def get_simulation_detail(
 async def compare_simulations(
     simulation_id: uuid.UUID,
     baseline_id: uuid.UUID,
-    claims: Annotated[TokenClaims, Depends(get_current_user)],
+    claims: Annotated[TokenClaims, Depends(require_permissions("read:topology"))],
     meta: Annotated[RequestMeta, Depends(get_request_meta)],
     db: Annotated[AsyncSession, Depends(get_db)],
     redis: Annotated[aioredis.Redis, Depends(get_redis)],

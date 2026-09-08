@@ -1,3 +1,5 @@
+export type SocketUpgradeRecovery = "conclusive" | "inconclusive";
+
 export interface WebSocketErrorData {
   code: "WS_UNAUTHORIZED" | "WS_UNKNOWN_CHANNEL" | "WS_BACKPRESSURE" | "WS_INVALID_FILTER" | string;
   message: string;

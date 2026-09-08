@@ -20,10 +20,11 @@ from app.core.dependencies import (
     get_redis,
     get_request_meta,
     require_permissions,
+    require_roles,
 )
 from app.core.responses import APIResponse, success_response
 from app.modules.network.service import NetworkService
-from app.modules.organization.service import WorkspaceService
+from app.modules.organization.service import OrgService, WorkspaceService
 from app.modules.telemetry.counters import TelemetryHealthCounterService
 from app.modules.telemetry.schemas import (
     TelemetryDeviceHistoryResponse,
@@ -117,6 +118,11 @@ async def _enforce_health_scope(
             page=1,
             page_size=1,
         )
+        return
+
+    orgs = await OrgService(db=db, redis=redis).list_orgs(user_id=claims.user_id, page=1, page_size=1)
+    if not orgs.items:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions.")
 
 
 @router.get("/history", response_model=APIResponse[TelemetryHistoryResponse], status_code=status.HTTP_200_OK)
@@ -180,7 +186,10 @@ async def get_device_telemetry(
     return success_response(result, meta.request_id, started, meta.timestamp)
 
 
-@router.get("/health", response_model=APIResponse[TelemetryHealthResponse], status_code=status.HTTP_200_OK)
+@router.get(
+    "/health", response_model=APIResponse[TelemetryHealthResponse], status_code=status.HTTP_200_OK,
+    dependencies=[Depends(require_roles("Admin"))],
+)
 async def get_telemetry_health(
     claims: Annotated[TokenClaims, Depends(require_permissions("read:telemetry"))],
     meta: Annotated[RequestMeta, Depends(get_request_meta)],

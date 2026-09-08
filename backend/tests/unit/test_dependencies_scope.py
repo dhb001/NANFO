@@ -23,6 +23,7 @@ def _claims(*, workspace_id: str | None, org_id: str | None = None) -> TokenClai
         "roles": ["Admin"],
         "permissions": ["read:topology"],
         "jti": str(uuid.uuid4()),
+        "sid": str(uuid.uuid4()),
         "exp": 9999999999,
     }
     if org_id is not None:

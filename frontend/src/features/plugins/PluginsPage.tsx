@@ -232,7 +232,7 @@ export function PluginsPage() {
           </label>
 
           <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
-            <Button type="submit" disabled={installMutation.isPending}>
+            <Button permission="write:config" type="submit" disabled={installMutation.isPending}>
               {installMutation.isPending ? "Installing..." : "Install Plugin"}
             </Button>
             <Badge text={`installed ${summary.installed}`} tone="info" />
@@ -332,6 +332,7 @@ export function PluginsPage() {
 
                     <div style={{ display: "flex", gap: "0.4rem", flexWrap: "wrap" }}>
                       <Button
+                        permission="write:config"
                         tone="primary"
                         type="button"
                         disabled={!canEnable || actionLoading || enableMutation.isPending}
@@ -340,6 +341,7 @@ export function PluginsPage() {
                         {actionLoading && !plugin.enabled ? "Working..." : "Enable"}
                       </Button>
                       <Button
+                        permission="write:config"
                         tone="ghost"
                         type="button"
                         disabled={!canDisable || actionLoading || disableMutation.isPending}

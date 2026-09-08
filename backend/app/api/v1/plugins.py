@@ -12,11 +12,13 @@ from fastapi import APIRouter, Depends, Query, status
 from app.core.dependencies import (
     RequestMeta,
     TokenClaims,
-    get_current_user,
+    get_claim_org_scope,
+    get_claim_workspace_scope,
     get_db,
     get_redis,
     get_request_meta,
     require_permissions,
+    require_roles,
 )
 from app.core.responses import APIResponse, success_response
 from app.db.postgres import AsyncSession
@@ -27,7 +29,9 @@ from app.modules.plugin.schemas import (
 )
 from app.modules.plugin.service import PluginService
 
-router = APIRouter(prefix="/api/v1/plugins", tags=["Plugins"])
+router = APIRouter(
+    prefix="/api/v1/plugins", tags=["Plugins"], dependencies=[Depends(require_roles("Admin"))],
+)
 
 
 @router.get("", response_model=APIResponse[PluginListResponse], status_code=status.HTTP_200_OK)
@@ -43,6 +47,9 @@ async def list_plugins(
 ):
     started = time.monotonic()
     payload = await PluginService(db=db, redis=redis).list_plugins(
+        actor_user_id=claims.user_id,
+        claim_org_id=get_claim_org_scope(claims=claims),
+        claim_workspace_id=get_claim_workspace_scope(claims=claims),
         status_filter=status_filter,
         enabled_filter=enabled,
         search_filter=search,
@@ -61,6 +68,8 @@ async def install_plugin(
 ):
     started = time.monotonic()
     payload = await PluginService(db=db, redis=redis).install_plugin(
+        claim_org_id=get_claim_org_scope(claims=claims),
+        claim_workspace_id=get_claim_workspace_scope(claims=claims),
         req=req,
         correlation_id=meta.request_id,
         requested_by_user_id=claims.user_id,
@@ -78,6 +87,8 @@ async def enable_plugin(
 ):
     started = time.monotonic()
     payload = await PluginService(db=db, redis=redis).enable_plugin(
+        claim_org_id=get_claim_org_scope(claims=claims),
+        claim_workspace_id=get_claim_workspace_scope(claims=claims),
         plugin_id=plugin_id,
         correlation_id=meta.request_id,
         requested_by_user_id=claims.user_id,
@@ -95,6 +106,8 @@ async def disable_plugin(
 ):
     started = time.monotonic()
     payload = await PluginService(db=db, redis=redis).disable_plugin(
+        claim_org_id=get_claim_org_scope(claims=claims),
+        claim_workspace_id=get_claim_workspace_scope(claims=claims),
         plugin_id=plugin_id,
         correlation_id=meta.request_id,
         requested_by_user_id=claims.user_id,

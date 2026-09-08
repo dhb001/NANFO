@@ -8,14 +8,13 @@ import uuid
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
-import fakeredis
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from app.core.dependencies import get_db, get_redis
-from app.core.security import create_access_token
 from app.main import app
+from tests.auth_support import create_session_access_token as create_access_token
 
 
 def _make_token(roles=None, org_id: str | None = None):
@@ -30,13 +29,13 @@ def _make_token(roles=None, org_id: str | None = None):
 
 
 @pytest.fixture
-def admin_token():
+def admin_token(session_auth):
     return _make_token(["Admin"])
 
 
 @pytest.fixture
-def fake_redis_instance():
-    return fakeredis.FakeAsyncRedis(decode_responses=True)
+def fake_redis_instance(session_auth):
+    return session_auth.redis
 
 
 @pytest.fixture

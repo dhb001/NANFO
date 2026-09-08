@@ -13,7 +13,6 @@ from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from app.core.dependencies import get_db, get_redis
-from app.core.security import create_access_token
 from app.main import app
 from app.modules.network.schemas import (
     CampusBuildingListResponse,
@@ -23,6 +22,7 @@ from app.modules.network.schemas import (
     TopologyGraphResponse,
     TopologyImpactResponse,
 )
+from tests.auth_support import create_session_access_token as create_access_token
 
 
 def _make_token():
@@ -58,13 +58,12 @@ def _make_token_without_permission() -> str:
 
 
 @pytest.fixture
-def client() -> TestClient:
-    import fakeredis
+def client(session_auth) -> TestClient:
     db = AsyncMock()
     db.commit = AsyncMock()
     db.flush = AsyncMock()
     db.refresh = AsyncMock()
-    fake_r = fakeredis.FakeAsyncRedis(decode_responses=True)
+    fake_r = session_auth.redis
 
     async def _db():
         yield db
@@ -79,7 +78,7 @@ def client() -> TestClient:
 
 
 @pytest.fixture
-def token():
+def token(session_auth):
     return _make_token()
 
 
@@ -90,7 +89,7 @@ def headers(token):
 
 @pytest.fixture(autouse=True)
 def _patch_topology_scope_resolution():
-    async def _resolve_network_scope(*, network_id, claims, db, redis):
+    async def _resolve_network_scope(*, network_id, claims, db, redis, require_write=False):
         return network_id, uuid.uuid4()
 
     async def _resolve_device_scope(*, device_id, claims, db, redis):

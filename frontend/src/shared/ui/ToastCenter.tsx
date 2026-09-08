@@ -1,4 +1,4 @@
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence, m } from "framer-motion";
 import { useUiStore } from "@/shared/state/ui-store";
 
 export function ToastCenter() {
@@ -9,7 +9,7 @@ export function ToastCenter() {
     <div style={{ position: "fixed", right: 16, bottom: 16, display: "grid", gap: "0.6rem", zIndex: 1100 }}>
       <AnimatePresence>
         {toasts.map((toast) => (
-          <motion.button
+          <m.button
             key={toast.id}
             initial={{ opacity: 0, y: 8, scale: 0.98 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
@@ -29,7 +29,7 @@ export function ToastCenter() {
           >
             <div style={{ fontWeight: 700 }}>{toast.title}</div>
             {toast.description ? <div style={{ color: "var(--ink-3)", fontSize: "0.82rem" }}>{toast.description}</div> : null}
-          </motion.button>
+          </m.button>
         ))}
       </AnimatePresence>
     </div>

@@ -199,6 +199,7 @@ export function OverviewPage() {
           subtitle="Density snapshot for selected tenancy"
           action={
             <Button
+              permission="write:config"
               onClick={async () => {
                 if (!workspaceId) {
                   pushToast({
@@ -269,6 +270,7 @@ export function OverviewPage() {
           subtitle="Create devices and seed digital twin topology"
           action={
             <Button
+              permission="write:config"
               onClick={async () => {
                 if (!networkId) {
                   pushToast({
@@ -345,6 +347,7 @@ export function OverviewPage() {
                         }}
                       />
                       <Button
+                        permission="write:config"
                         tone="ghost"
                         type="button"
                         style={{ padding: "0.26rem 0.46rem" }}

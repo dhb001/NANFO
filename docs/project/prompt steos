@@ -1,0 +1,272 @@
+1. Establish a Trustworthy Application Baseline
+Before adding intelligence, fix the engineering problems that can conceal failures.
+Do:
+- Correct the TypeScript command so it checks the application and tooling projects.
+- Fix the resulting TypeScript errors.
+- Resolve backend lint issues, distinguishing actual defects from lint configuration issues.
+- Clearly separate demo, emulation, and any future production execution modes.
+- Ensure synthetic telemetry and demonstration outcomes are visibly identified.
+- Stop reporting real execution, successful simulation, or generated reports when only metadata was produced.
+- Represent missing measurements as unavailable, not zero.
+Complete when: the application passes effective checks, and every displayed success corresponds to something that actually happened.
+This is the foundation for trusting every later step.
+2. Fix Authentication, Permissions, and Session Isolation
+Do this before connecting the application to anything it can control.
+Do:
+- Restrict organization/workspace/member administration to appropriate administrators.
+- Enforce tenant membership on every REST and WebSocket operation.
+- Require access tokens, not refresh tokens, for WebSocket authentication.
+- Implement revocable refresh sessions, including logout and refresh-token rotation.
+- Make the frontend Logout button call the backend.
+- Clear cached operational data and realtime state when the user logs out.
+- Scope realtime stores to the selected network/workspace.
+- Make the interface permission-aware without relying on it for backend enforcement.
+- Recheck authorization for long-lived connections when membership or permissions change.
+Complete when: automated tests using two organizations and Admin/Read-Only users prove that users cannot see or change unauthorized resources, and logout actually terminates their session.
+Do not postpone this until after real routing control.
+3. Create a Reproducible SDN Emulation Environment
+Build the environment in which NANFO will observe and control actual traffic.
+Do:
+- Create a Mininet topology using Open vSwitch.
+- Include hosts, access switches, distribution switches, and a core.
+- Include redundant paths so rerouting can actually relieve a bottleneck.
+- Configure realistic link capacities, delays, and queue limits.
+- Integrate Ryu using a supported OpenFlow version.
+- Establish stable mappings between application device IDs and switch DPIDs/ports.
+- Add scripts for starting, resetting, and stopping the environment.
+- Verify the controller environment separately from the FastAPI runtime; they do not need to share one Python environment.
+- Start small before scaling to the larger campus demonstration.
+Complete when: one reproducible startup procedure creates the network, attaches the controller, and allows hosts to exchange traffic.
+A 3D campus graph is useful, but it is not a replacement for this environment.
+4. Implement Actual Network Discovery and Telemetry
+Replace the synthetic adapters with a collector that observes the emulated network.
+Do:
+- Discover switches, ports, links, and hosts.
+- Collect port/flow counters through the controller.
+- Calculate throughput from counter differences and elapsed time.
+- Calculate link utilization using known link capacity.
+- Measure latency using a defined probe method.
+- Measure packet loss using suitable counters or end-to-end observations.
+- Collect queue occupancy through instrumentation that actually exposes backlog. Do not assume ordinary OpenFlow statistics provide instantaneous queue depth.
+- Handle counter resets, missing samples, invalid values, and stale observations.
+- Store metric units, observation timestamps, provenance, and quality indicators.
+- Support time-range queries and aggregation for historical analysis.
+Complete when: generating traffic changes the dashboard metrics, and independent network tools confirm that the displayed values are credible.
+Important: first prove that telemetry is correct. An intelligent controller using incorrect observations will make incorrect decisions.
+5. Implement Real, Safe Network Actions
+Before training DRL, prove that NANFO can execute useful actions without it.
+Do:
+- Replace the deterministic hypervisor with a real controller adapter.
+- Pass complete action plans, including targets, flow matches, paths, and rate parameters.
+- Implement path rerouting.
+- Implement supported multipath/group behavior where needed.
+- Implement traffic shaping using appropriate queue configuration.
+- Implement traffic policing using supported meters or equivalent mechanisms.
+- Implement QoS classification and bandwidth constraints.
+- Validate topology and device capabilities before dispatch.
+- Use acknowledgments/barriers and readback to verify changes.
+- Capture the previous relevant configuration.
+- Implement actual rollback and verify restoration.
+- Prevent concurrent conflicting changes.
+- Add route-change limits and hold-down intervals.
+Complete when: a manual action from the application changes actual traffic behavior, and a failed change can restore the previous forwarding configuration.
+Shaping, policing, and rerouting are different operations. Each needs its own implementation and verification.
+6. Make Execution Durable and Recoverable
+Real control requires stronger guarantees than a successful API response.
+Do:
+- Use an atomic state transition or lock to claim an execution.
+- Enforce scoped idempotency for repeated requests.
+- Persist events reliably alongside state changes, using an outbox or equivalent design.
+- Recover unacknowledged Redis messages after worker failures.
+- Make consumers safely repeatable.
+- Separate command execution from ordinary HTTP request handling where appropriate.
+- Define timeouts and cancellation behavior.
+- On restart, reconcile in-progress operations with actual controller/switch state.
+- Fix the simulation-start publication race.
+- Make WebSocket delivery work across application processes, or explicitly constrain deployment until it does.
+Complete when: restarting the backend or worker during an operation does not silently lose the operation, execute it twice, or leave the application claiming the wrong network state.
+7. Implement a Real DRL Environment and Baselines
+Now build the learning problem around the working network.
+Do:
+- Define the decision interval.
+- Define the observation vector and topology representation.
+- Include previous actions or observation history where needed.
+- Normalize features consistently without hiding absolute offered load.
+- Define legal actions and how they map to actual controller operations.
+- Define reward terms for delay, loss, throughput, utilization, and route-change penalties.
+- Implement environment reset, step, termination, and measurement-window behavior.
+- Create deterministic workload scenarios.
+- Implement an OSPF baseline using an actual routing implementation.
+- Add a simple load-aware heuristic baseline for debugging.
+Complete when: a non-learning policy can repeatedly run episodes, take actions, and receive measured next states and rewards.
+Do not train the neural network until this loop is reliable.
+8. Implement and Train the Actor-Critic Model
+This is the central intelligence currently missing.
+Do:
+- Select one actor-critic algorithm and implement it properly. PPO is a reasonable starting candidate, but the choice should fit the final action space.
+- Build the actor and critic in PyTorch.
+- Implement rollout collection, losses, updates, and checkpointing.
+- Support training and inference as separate operating modes.
+- Track rewards, losses, action frequency, and constraint violations.
+- Train across different traffic patterns, not just one favorable scenario.
+- Use separate training, validation, and held-out evaluation scenarios.
+- Save the model, normalization parameters, action mapping, and configuration together.
+- Implement policy loading and version tracking.
+Complete when: a saved policy can be loaded into a fresh process and make reproducible, meaningful decisions from measured network state.
+A changing reward curve is not sufficient. Confirm that the learned actions actually affect the network beneficially.
+9. Implement the Neuro-Adaptive Safety Mechanism
+Do not attach an unconstrained learned policy directly to network control.
+There are two distinct pieces to address:
+- Learning stability: whether the chosen adaptive update behaves as intended.
+- Action safety: whether a proposed network action is admissible before execution.
+Do:
+- Define the precise stability property you are targeting.
+- Establish the assumptions under which it applies.
+- Implement the relevant Lyapunov/drift or neuro-adaptive calculations.
+- Define constraints for capacity, permitted paths, QoS, connectivity, and action frequency.
+- Evaluate every proposed action before dispatch.
+- Reject or modify inadmissible actions.
+- Provide a deterministic safe fallback.
+- Handle stale telemetry, controller delay, and overloaded networks explicitly.
+- Test repeated rejected actions and recovery.
+- Record why the filter accepted, changed, or rejected each proposal.
+Complete when: deliberately unsafe proposals are blocked or corrected, and the chosen stability claim is justified under explicit assumptions.
+A weight clamp, a confidence threshold, or a successful simulation flag alone is not the promised neuro-adaptive filter. Documentation writing can wait; the mathematical basis cannot.
+10. Connect the Autonomous Control Loop
+Combine the pieces into the actual orchestrator.
+The operating loop should be:
+Observe network
+    -> validate measurement freshness and quality
+    -> construct model state
+    -> infer proposed action
+    -> enforce safety constraints
+    -> obtain required approval
+    -> execute action
+    -> verify switch and traffic state
+    -> observe outcome
+    -> record decision and feedback
+Do:
+- Add monitor-only, recommendation, and autonomous modes.
+- Start with inference-only deployment of a trained policy.
+- Keep online learning disabled until its safety and recovery behavior are established.
+- Correlate observations, policy versions, actions, verification, and outcomes.
+- Prevent feedback loops that repeatedly undo previous decisions.
+- Add degraded behavior for missing telemetry or unavailable controllers.
+- Add a clear emergency stop.
+Complete when: a controlled congestion scenario causes NANFO to intervene without a manual API call, with an observable and verified result.
+To call it proactive, demonstrate intervention before your defined congestion condition, rather than merely reacting after loss occurs.
+11. Replace the Simulation Placeholder with a Real Evaluator
+Keep the current simulation UI and lifecycle structure, but replace its underlying behavior.
+Do:
+- Run scenarios against an isolated emulation instance or a validated simulation backend.
+- Supply actual topology, workload, action, duration, and seed inputs.
+- Generate measured or explicitly modeled outcomes.
+- Support meaningful pause/resume/branch behavior.
+- Compare results produced under equivalent conditions.
+- Bind predeployment results to the exact proposed action and relevant network state.
+- Expire stale validation results.
+- Never equate message-queue availability with simulation safety.
+Complete when: changing a scenario or proposed action changes computed/measured outcomes, and a failed evaluation genuinely blocks the corresponding deployment.
+A full RF/mobility physics engine is not necessary to finish the original wired-network proposal. Do not let that expansion delay the real congestion-control evaluator.
+12. Finish the Operator Experience
+Once real data and actions exist, expose them clearly.
+Add:
+- Time-series charts for the five telemetry metrics.
+- Network-wide and per-link congestion views.
+- Observed active flow/path visualization.
+- Before/after action comparisons.
+- A decision history with policy version and evidence.
+- Safety-filter interventions and reasons.
+- Model status and inference latency.
+- Configuration of supported reward/policy parameters.
+- Explicit manual override with scope, duration, reason, and cancellation.
+- A visible return-to-autonomy control.
+- Clear distinction between measured, modeled, and synthetic information.
+Fix:
+- Cross-page topology links.
+- Snapshot reconciliation after reconnect and dropped events.
+- Stale alert and simulation views.
+- Network/account state isolation.
+- Destructive group-replacement defaults.
+- Persisted model loading after refresh.
+- Missing pagination and partial-result indicators.
+- Mobile layout and keyboard accessibility.
+Complete when: an operator can understand what NANFO observed, what it did, why it did it, whether it helped, and how to stop or override it.
+13. Complete Reports, Alerts, and Remaining Modules
+Finish the features already presented as part of the application.
+Reports:
+- Generate real CSV and PDF files from scoped data.
+- Calculate checksums and sizes from actual file bytes.
+- Store artifacts durably.
+- Provide authorized download and report history.
+- Include workload, policy, metrics, actions, and comparison results.
+Alerts:
+- Generate alerts from actual network conditions.
+- Add persistence thresholds and hysteresis to avoid alert storms.
+- Correlate recovery events with the original alert.
+- Scope deduplication to the correct tenant/resource.
+- Keep REST and realtime state consistent.
+Plugins:
+- Decide whether they are a registry or executable extensions.
+- If executable, implement real package integrity verification, loading, isolation, resource limits, and uninstall.
+- Do not label declared permissions as an enforced sandbox.
+Energy control:
+- If retaining the power-saving promise, implement safe redundant-link/port power management.
+- Preserve connectivity and recovery behavior.
+- Evaluate it using a defensible energy model or measurement source.
+- Do not claim measured power savings from an emulator that only toggles logical state.
+Complete when: each visible module performs its advertised operation, not just records a successful status.
+14. Run Network-Level Acceptance Testing
+Application unit tests are necessary but insufficient.
+Build an automated campaign covering:
+- Normal low-load traffic.
+- Gradually increasing demand.
+- Sudden traffic bursts.
+- Sustained overload.
+- Multiple simultaneous bottlenecks.
+- Link failure and recovery.
+- Stale/missing telemetry.
+- Controller disconnection.
+- Worker/backend restart.
+- Unsafe policy proposals.
+- Manual override.
+- Rollback failure.
+- Different traffic classes.
+- Larger topologies.
+Compare OSPF, the heuristic baseline, DRL alone, and DRL with the safety mechanism where appropriate.
+Measure:
+Area	Measurements
+Performance	Latency, goodput/throughput, PDR
+Congestion	Frequency, duration, queue occupancy
+Utilization	Link loading and capacity-normalized efficiency
+Stability	Route-change rate, oscillation, packet reordering
+Control overhead	Inference time, action time, CPU/memory, control traffic
+Safety	Violations, filter interventions, rollback outcomes
+Application	API behavior, realtime recovery, permissions, mobile usability
+Complete when: repeated held-out runs meet predefined acceptance criteria, with raw results retained.
+“Way better” should mean measurably better under specified conditions without unacceptable regressions, not an assumption that DRL must win every test.
+15. Package the Complete Application
+Finally, make the finished system reproducible and recoverable.
+Do:
+- Package the frontend, backend, workers, controller, and required services.
+- Pin compatible dependency versions.
+- Keep privileged emulation/controller components isolated from the public web application.
+- Automate fresh-database migrations.
+- Add meaningful readiness checks.
+- Require proper secret configuration.
+- Keep datastore interfaces private.
+- Add backup and restore procedures.
+- Bound telemetry/artifact retention.
+- Monitor failures, queues, controller connectivity, and model health.
+- Verify deployment from an empty environment.
+Complete when: a fresh installation can start the full system, run a real congestion-control scenario, survive a restart, and restore from backup.
+Recommended Milestones
+Milestone	Steps	What You Can Honestly Claim
+A. Trustworthy foundation	1–2	The application has meaningful quality checks and secure access boundaries
+B. Real network control	3–6	NANFO observes, changes, verifies, and recovers actual emulated network behavior
+C. Working intelligence	7–10	A trained, constrained policy autonomously controls network traffic
+D. Complete operator application	11–13	Simulation, dashboard, reports, alerts, and controls perform real operations
+E. Validated release	14–15	The system is reproducible, benchmarked, deployable, and recoverable
+Start with Steps 1–2, then prioritize Steps 3–6. The first major breakthrough should be:
+Traffic generated in Mininet appears as measured telemetry in NANFO; an action submitted through NANFO changes the actual packet path; the application verifies the result and can restore the previous configuration.
+Once that works reliably, the DRL model has a real system to learn from and control. Until then, additional AI labels or visual enhancements will not close the main application gap.

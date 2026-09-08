@@ -318,6 +318,11 @@ async def handle_ws_intent_event(event: dict) -> None:
         logger.warning("ws_intent_missing_network_id", event_type=event_type)
         return
 
+    workspace_id = _extract_uuid_text(payload, "workspace_id")
+    if workspace_id is None:
+        logger.warning("ws_intent_missing_workspace_id", event_type=event_type)
+        return
+
     intent_id = _extract_uuid_text(payload, "intent_id") or ""
     status = str(payload.get("status", "unknown")).strip() or "unknown"
     scene_object_id = f"intent-{intent_id}" if intent_id else "intent-state"
@@ -343,6 +348,7 @@ async def handle_ws_intent_event(event: dict) -> None:
 
     await digital_twin_ws_manager.push_delta(
         network_id=network_id,
+        workspace_id=workspace_id,
         event_type=event_type,
         delta_type=delta_type,
         scene_object=scene_object,

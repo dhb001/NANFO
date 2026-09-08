@@ -7,7 +7,7 @@ org_members.user_id is a logical reference to Identity module — NO SQL FK to u
 import uuid
 from datetime import datetime
 
-from sqlalchemy import ForeignKey, Text, TIMESTAMP, func
+from sqlalchemy import TIMESTAMP, ForeignKey, Text, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 

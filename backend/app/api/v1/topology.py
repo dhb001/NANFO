@@ -22,10 +22,10 @@ from app.core.dependencies import (
     TokenClaims,
     get_claim_org_scope,
     get_claim_workspace_scope,
-    require_permissions,
     get_db,
     get_redis,
     get_request_meta,
+    require_permissions,
 )
 from app.core.responses import ErrorDetail, ResponseMeta
 from app.db.neo4j import get_neo4j_driver
@@ -123,12 +123,14 @@ async def _resolve_network_scope(
     claims: TokenClaims,
     db: AsyncSession,
     redis: aioredis.Redis,
+    require_write: bool = False,
 ) -> tuple[uuid.UUID, uuid.UUID]:
     network = await NetworkService(db=db, redis=redis).assert_network_workspace_access(
         network_id=network_id,
         requested_workspace_id=get_claim_workspace_scope(claims=claims),
         actor_user_id=claims.user_id,
         claim_org_id=get_claim_org_scope(claims=claims),
+        require_write=require_write,
     )
     return network.network_id, network.workspace_id
 
@@ -338,6 +340,7 @@ async def reconcile_topology(
         claims=claims,
         db=db,
         redis=redis,
+        require_write=True,
     )
 
     driver = get_neo4j_driver()

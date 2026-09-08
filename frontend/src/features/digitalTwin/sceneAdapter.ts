@@ -74,6 +74,7 @@ const MAX_CONGESTION_METRICS_PER_DEVICE = 12;
 const MAX_CONGESTION_KEYS = 240;
 
 export interface TwinMetricSnapshot {
+  tags: Record<string, unknown>;
   metric: string;
   value: number;
   unit: string | null;
@@ -266,6 +267,7 @@ function toCongestionMetricScore(metric: TelemetryDeltaData["metric"]): TwinMetr
     value: metric.value,
     unit: metric.unit,
     observedAt: metric.observed_at,
+    tags: metric.tags,
     source: metric.source,
     normalizedScore,
     severity,

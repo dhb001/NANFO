@@ -1,0 +1,14 @@
+import { useExecutionModeStore } from "@/shared/state/execution-mode-store";
+
+export function ExecutionModeBanner() {
+  const mode = useExecutionModeStore((state) => state.mode);
+  const labels = {
+    demo: "Demo mode: synthetic data. No real network execution or measured simulation validation.",
+    emulation: "Emulation mode: not production. Real control capability is not implied.",
+    production: "Production mode: backend authorization and validation still apply. Synthetic records remain labeled.",
+  };
+  return <div role="status" style={{ padding: "0.8rem 1rem", borderBottom: "2px solid var(--warn)",
+    background: "var(--surface-card)", fontWeight: 700 }}>
+    {mode ? labels[mode] : "Execution mode: Unknown. Awaiting authoritative backend response; no live-control assurance."}
+  </div>;
+}

@@ -43,7 +43,7 @@ class TelemetryDeviceHistoryResponse(BaseModel):
 
 class TelemetryHealthResponse(BaseModel):
     status: str
-    ingest_lag_ms: int
+    ingest_lag_ms: int | None
     dropped_events: int
     latest_observed_at: datetime | None
     total_records: int

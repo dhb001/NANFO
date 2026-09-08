@@ -7,6 +7,8 @@ import {
   listPlugins,
 } from "@/features/plugins/api";
 import { InstallPluginRequest } from "@/shared/types/plugins";
+import { useAuthStore } from "@/shared/state/auth-store";
+import { canAccessRoute } from "@/features/auth/permissions";
 
 interface UsePluginsQueryOptions {
   status?: "installed" | "enabled" | "disabled" | "failed";
@@ -17,6 +19,7 @@ interface UsePluginsQueryOptions {
 }
 
 export function usePluginsQuery(token: string | null, options: UsePluginsQueryOptions = {}) {
+  const allowed = useAuthStore((state) => canAccessRoute(state.profile, "/ops/plugins"));
   const pollInterval = options.pollMs ?? 4000;
   return useQuery({
     queryKey: ["plugins", token, options],
@@ -29,7 +32,7 @@ export function usePluginsQuery(token: string | null, options: UsePluginsQueryOp
       });
       return response.data;
     },
-    enabled: Boolean(token),
+    enabled: Boolean(token && allowed),
     refetchInterval: pollInterval,
   });
 }

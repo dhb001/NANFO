@@ -18,13 +18,13 @@ import asyncio
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, status
-from fastapi.exceptions import HTTPException as StarletteHTTPException
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from jose import JWTError
 from neo4j.exceptions import Neo4jError
 from sqlalchemy.exc import SQLAlchemyError
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.api.v1.alerts import router as alerts_router
 from app.api.v1.audit import router as audit_router
@@ -262,7 +262,7 @@ async def jwt_error_handler(request: Request, exc: JWTError):
         content={
             "success": False,
             "data": None,
-            "meta": {"request_id": request.headers.get("X-Request-ID", ""), "timestamp": ""},
+            "meta": {"request_id": request.headers.get("X-Request-ID", ""), "timestamp": "", "execution_mode": get_settings().EXECUTION_MODE},
             "errors": {"code": "AUTH_TOKEN_INVALID", "message": "Invalid or expired token."},
         },
     )
@@ -321,7 +321,7 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
         content={
             "success": False,
             "data": None,
-            "meta": {"request_id": request.headers.get("X-Request-ID", ""), "timestamp": ""},
+            "meta": {"request_id": request.headers.get("X-Request-ID", ""), "timestamp": "", "execution_mode": get_settings().EXECUTION_MODE},
             "errors": {"code": code, "message": message},
         },
     )
@@ -338,7 +338,7 @@ async def request_validation_exception_handler(request: Request, exc: RequestVal
         content={
             "success": False,
             "data": None,
-            "meta": {"request_id": request.headers.get("X-Request-ID", ""), "timestamp": ""},
+            "meta": {"request_id": request.headers.get("X-Request-ID", ""), "timestamp": "", "execution_mode": get_settings().EXECUTION_MODE},
             "errors": {
                 "code": "VALIDATION_ERROR",
                 "message": str(message or "Request validation failed."),
@@ -357,7 +357,7 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
         content={
             "success": False,
             "data": None,
-            "meta": {"request_id": request.headers.get("X-Request-ID", ""), "timestamp": ""},
+            "meta": {"request_id": request.headers.get("X-Request-ID", ""), "timestamp": "", "execution_mode": get_settings().EXECUTION_MODE},
             "errors": {"code": "INTERNAL_ERROR", "message": "An unexpected error occurred."},
         },
     )

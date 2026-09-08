@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { useTelemetryHealth } from "@/features/telemetry/hooks";
+import { canReadTelemetryHealth } from "@/features/auth/permissions";
 import {
   useAcknowledgeAlert,
   useAlertsQuery,
@@ -67,6 +68,7 @@ function extractAlertId(payload: Record<string, unknown>): string | null {
 }
 
 export function ReliabilityPage() {
+  const canReadHealth = useAuthStore((state) => canReadTelemetryHealth(state.profile));
   const token = useAuthStore((state) => state.accessToken);
   const pushToast = useUiStore((state) => state.pushToast);
   const healthQuery = useTelemetryHealth(token);
@@ -204,7 +206,7 @@ export function ReliabilityPage() {
   return (
     <div style={{ display: "grid", gap: "1rem" }}>
       <Panel title="Runtime Reliability" subtitle="VS11 alerts lifecycle monitoring and operator actions">
-        <QueryState query={healthQuery}>
+        {!canReadHealth ? <AsyncState title="Telemetry health restricted" description="Global diagnostics require Admin and read:telemetry permission. Tenant alerts remain available below." /> : <QueryState query={healthQuery}>
           {(health) => (
             <div
               style={{
@@ -214,11 +216,11 @@ export function ReliabilityPage() {
               }}
             >
               <StatTile label="Collector Status" value={health.status.toUpperCase()} tone={health.status === "ok" ? "ok" : "warn"} />
-              <StatTile label="Ingest Lag ms" value={String(health.ingest_lag_ms)} tone={health.ingest_lag_ms > 1200 ? "warn" : "normal"} />
+              <StatTile label="Ingest Lag ms" value={health.ingest_lag_ms === null ? "Unavailable (no observations)" : String(health.ingest_lag_ms)} tone={health.ingest_lag_ms !== null && health.ingest_lag_ms > 1200 ? "warn" : "normal"} />
               <StatTile label="Dropped Events" value={String(health.dropped_events)} tone={health.dropped_events > 0 ? "danger" : "ok"} />
               <StatTile label="Alerts WS" value={alertsStatus.toUpperCase()} tone={alertsStatus === "open" ? "ok" : "warn"} />
               <StatTile label="Active Alerts" value={String(unresolvedAlerts)} tone={unresolvedAlerts > 0 ? "danger" : "ok"} />
-              <StatTile label="Acknowledged" value={String(acknowledgedAlerts)} tone={acknowledgedAlerts > 0 ? "info" : "ok"} />
+              <StatTile label="Acknowledged" value={String(acknowledgedAlerts)} tone={acknowledgedAlerts > 0 ? "normal" : "ok"} />
               <StatTile
                 label="Highest Severity"
                 value={highestSeverity > 0 ? String(highestSeverity) : "0"}
@@ -226,7 +228,7 @@ export function ReliabilityPage() {
               />
             </div>
           )}
-        </QueryState>
+        </QueryState>}
       </Panel>
 
       <Panel title="Source Breakdown" subtitle="Current alert volume grouped by producer source">
@@ -333,6 +335,7 @@ export function ReliabilityPage() {
                     </div>
                     <div style={{ display: "flex", gap: "0.4rem", flexWrap: "wrap" }}>
                       <Button
+                        permission="write:config"
                         tone="ghost"
                         type="button"
                         disabled={disableAcknowledge}
@@ -341,6 +344,7 @@ export function ReliabilityPage() {
                         {actionLoading && !isResolved ? "Working..." : "Acknowledge"}
                       </Button>
                       <Button
+                        permission="write:config"
                         tone={isResolved ? "ghost" : "primary"}
                         type="button"
                         disabled={disableResolve}

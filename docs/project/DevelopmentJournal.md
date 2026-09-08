@@ -1,5 +1,28 @@
 # Development Journal
 
+## [2026-09-08] - Completion Plan Steps 1-2
+
+- Replaced the empty-root TypeScript gate with explicit app/tooling checks and
+  fixed resulting errors without disabling strictness. Updated compatible test
+  tooling, reduced animation bundle cost, and retained existing bundle thresholds.
+- Removed fictional controller verification/rollback and report artifacts;
+  unavailable simulation evaluation is cancelled/blocked with null outputs and
+  committed before publication. Historical baseline successes are not promoted to
+  measured evidence. Added execution-mode metadata and synthetic telemetry labels.
+- Implemented Redis session families, atomic refresh rotation/replay revocation,
+  full-family logout, strict token types, current identity/capability checks,
+  tenant and org-role enforcement, and per-delivery websocket revalidation.
+- Fixed cross-tenant intent references before persistence/publication, scoped
+  intent websocket fanout, tab-local credentials, logout/cache/context cleanup,
+  permission-aware UI, expired-access logout and websocket outage recovery.
+- Validation: backend Ruff passed; backend regression 1,112 passed; frontend lint
+  and effective typecheck passed; 188 frontend tests and 24 Chromium browser tests
+  passed; production/bundle gate passed (401.67 KiB total gzip).
+- Limitations: fake Redis/repository fixtures and mocked browser contracts do not
+  certify live infrastructure. Full durable outbox remains Step 6. Existing sessions
+  require login again; real controller/evaluator/report renderer remain unavailable.
+- Details: `docs/project/FoundationSecurity-Step1-Step2.md`.
+
 ## [2026-09-02] - Digital Twin Residual Closure (Campus Model Assets + Native Device Groups)
 
 - **Completed:** Closed the remaining Digital Twin backend residuals by implementing and validating network-native campus model asset and device-group lifecycle flows end-to-end (backend + frontend) under existing Network-module ownership and tenancy guardrails.

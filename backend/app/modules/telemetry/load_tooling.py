@@ -229,6 +229,8 @@ def build_vs17_deterministic_sample(*, profile: VS17LoadProfile, index: int) -> 
         "observed_at": observed_at.isoformat(),
         "source": "vs17_external_load",
         "tags": {
+            "synthetic": True,
+            "execution_mode": "demo",
             "campaign": "vs17_external_load",
             "profile": profile.name,
             "sample_index": str(index),

@@ -1,6 +1,9 @@
 import { API_BASE_URL } from "@/shared/lib/env";
-import { ApiEnvelope } from "@/shared/types/api";
+import { ApiEnvelope, ApiSuccess } from "@/shared/types/api";
 import { ApiClientError } from "@/shared/lib/errors";
+import { useExecutionModeStore } from "@/shared/state/execution-mode-store";
+import { useAuthStore } from "@/shared/state/auth-store";
+import { useWorkspaceStore } from "@/shared/state/workspace-store";
 
 type Method = "GET" | "POST" | "PATCH" | "DELETE";
 
@@ -31,7 +34,10 @@ function createHeaders(options: RequestOptions): HeadersInit {
 export async function apiRequest<T>(
   path: string,
   { method = "GET", body, token, headers, signal }: RequestOptions = {},
-): Promise<ApiEnvelope<T>> {
+  retryAuth = true,
+): Promise<ApiSuccess<NonNullable<T>>> {
+  const session = useAuthStore.getState();
+  const context = useWorkspaceStore.getState();
   const response = await fetch(`${API_BASE_URL}${path}`, {
     method,
     headers: createHeaders({ token, headers, body }),
@@ -44,7 +50,29 @@ export async function apiRequest<T>(
     payload = (await response.json()) as ApiEnvelope<T>;
   }
 
+  if (token && token === session.accessToken &&
+      (session.generation !== useAuthStore.getState().generation ||
+        (!path.startsWith("/api/v1/auth/") && context !== useWorkspaceStore.getState()))) {
+    throw new ApiClientError("Session context changed", "API_STALE_CONTEXT", response.status);
+  }
+  if (session.generation === useAuthStore.getState().generation) {
+    useExecutionModeStore.getState().observe(payload?.meta?.execution_mode);
+  }
+
+  if (response.status === 401 && retryAuth && token && token === session.accessToken && !path.startsWith("/api/v1/auth/")) {
+    const { refreshSession } = await import("@/features/auth/session");
+    const current = useAuthStore.getState();
+    const refreshed = current.accessToken !== token || await refreshSession();
+    if (refreshed && session.generation === useAuthStore.getState().generation &&
+        context === useWorkspaceStore.getState() && !useAuthStore.getState().endingSession) {
+      return apiRequest<T>(path, { method, body, headers, signal, token: useAuthStore.getState().accessToken }, false);
+    }
+  }
+
   if (!response.ok || payload?.success === false) {
+    if (response.status === 401 && !retryAuth && token === useAuthStore.getState().accessToken) {
+      useAuthStore.getState().clearSession();
+    }
     const code = payload?.errors?.code ?? `HTTP_${response.status}`;
     const message = payload?.errors?.message ?? `Request failed (${response.status})`;
     throw new ApiClientError(message, code, response.status);
@@ -54,17 +82,20 @@ export async function apiRequest<T>(
     throw new ApiClientError("API returned no content for envelope-based request", "API_EMPTY_RESPONSE", response.status);
   }
 
-  if (payload.data === null) {
+  if (payload.success !== true || payload.data == null) {
     throw new ApiClientError("API returned empty data payload", "API_EMPTY_DATA", response.status);
   }
 
-  return payload;
+  return { ...payload, data: payload.data };
 }
 
 export async function apiRequestNoContent(
   path: string,
   { method = "DELETE", body, token, headers, signal }: RequestOptions = {},
+  retryAuth = true,
 ): Promise<void> {
+  const session = useAuthStore.getState();
+  const context = useWorkspaceStore.getState();
   const response = await fetch(`${API_BASE_URL}${path}`, {
     method,
     headers: createHeaders({ token, headers, body }),
@@ -72,7 +103,23 @@ export async function apiRequestNoContent(
     signal,
   });
 
+  if (token === session.accessToken && (session.generation !== useAuthStore.getState().generation ||
+      context !== useWorkspaceStore.getState())) {
+    throw new ApiClientError("Session context changed", "API_STALE_CONTEXT", response.status);
+  }
+  if (response.status === 401 && retryAuth && token && token === session.accessToken) {
+    const { refreshSession } = await import("@/features/auth/session");
+    const refreshed = useAuthStore.getState().accessToken !== token || await refreshSession();
+    if (refreshed && session.generation === useAuthStore.getState().generation &&
+        context === useWorkspaceStore.getState() && !useAuthStore.getState().endingSession) {
+      return apiRequestNoContent(path, { method, body, headers, signal, token: useAuthStore.getState().accessToken }, false);
+    }
+  }
+
   if (!response.ok) {
+    if (response.status === 401 && !retryAuth && token === useAuthStore.getState().accessToken) {
+      useAuthStore.getState().clearSession();
+    }
     let code = `HTTP_${response.status}`;
     let message = `Request failed (${response.status})`;
     try {

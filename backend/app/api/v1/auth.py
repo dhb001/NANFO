@@ -19,7 +19,12 @@ from app.core.dependencies import (
     get_request_meta,
 )
 from app.core.responses import APIResponse, success_response
-from app.modules.identity.schemas import AccessToken, LoginRequest, RefreshRequest, TokenPair, UserProfile
+from app.modules.identity.schemas import (
+    LoginRequest,
+    RefreshRequest,
+    TokenPair,
+    UserProfile,
+)
 from app.modules.identity.service import AuthService
 
 router = APIRouter(prefix="/api/v1/auth", tags=["Authentication"])
@@ -31,7 +36,7 @@ async def login(
     request: Request,
     meta: Annotated[RequestMeta, Depends(get_request_meta)],
     db: Annotated[AsyncSession, Depends(get_db)],
-    redis=Depends(get_redis),
+    redis: Annotated[object, Depends(get_redis)],
 ):
     started = time.monotonic()
     ip = request.client.host if request.client else "unknown"
@@ -50,20 +55,20 @@ async def logout(
     claims: Annotated[TokenClaims, Depends(get_current_user)],
     meta: Annotated[RequestMeta, Depends(get_request_meta)],
     db: Annotated[AsyncSession, Depends(get_db)],
-    redis=Depends(get_redis),
+    redis: Annotated[object, Depends(get_redis)],
 ):
     started = time.monotonic()
     svc = AuthService(db=db, redis=redis)
-    await svc.logout(jti=claims.jti, exp=claims.exp, user_id=claims.user_id, correlation_id=meta.request_id)
+    await svc.logout(jti=claims.jti, exp=claims.exp, user_id=claims.user_id, correlation_id=meta.request_id, sid=claims.sid)
     return success_response({"logged_out": True}, meta.request_id, started, meta.timestamp)
 
 
-@router.post("/refresh", response_model=APIResponse[AccessToken], status_code=status.HTTP_200_OK)
+@router.post("/refresh", response_model=APIResponse[TokenPair], status_code=status.HTTP_200_OK)
 async def refresh(
     req: RefreshRequest,
     meta: Annotated[RequestMeta, Depends(get_request_meta)],
     db: Annotated[AsyncSession, Depends(get_db)],
-    redis=Depends(get_redis),
+    redis: Annotated[object, Depends(get_redis)],
 ):
     started = time.monotonic()
     svc = AuthService(db=db, redis=redis)
@@ -76,7 +81,7 @@ async def me(
     claims: Annotated[TokenClaims, Depends(get_current_user)],
     meta: Annotated[RequestMeta, Depends(get_request_meta)],
     db: Annotated[AsyncSession, Depends(get_db)],
-    redis=Depends(get_redis),
+    redis: Annotated[object, Depends(get_redis)],
 ):
     started = time.monotonic()
     svc = AuthService(db=db, redis=redis)

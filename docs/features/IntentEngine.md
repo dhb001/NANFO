@@ -1,5 +1,14 @@
 # Feature PRD: Intent Engine
 
+## Foundation Capability Boundary
+
+No controller/model is installed in the current foundation. Basic validation is
+not learned confidence; score zero explicitly denotes unavailable model confidence.
+Execution returns `execution_failed`, verification `not_performed`, and
+`executor_unavailable`, with no rollback. Historical deterministic baseline
+success metadata is not evidence of execution. Cross-workspace network references
+are rejected before persistence/publication. Mode selection never enables a driver.
+
 ## Purpose
 Translate administrator or AI intent into validated, executable workflows.
 

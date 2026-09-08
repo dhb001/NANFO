@@ -109,7 +109,7 @@ export function IntentPage() {
     });
     setIntentId(response.intent_id);
     pushToast({
-      title: "Intent validated",
+      title: response.status === "validated" ? "Intent validated" : "Intent validation response",
       description: `Status: ${response.status} | confidence ${response.confidence.band}`,
       tone: response.status === "validated" ? "ok" : "warn",
     });
@@ -134,9 +134,9 @@ export function IntentPage() {
         idempotencyKey,
       });
       pushToast({
-        title: response.idempotent_replay ? "Execution replayed" : "Execution accepted",
-        description: `Queue status: ${response.queue_status}`,
-        tone: response.queue_status === "queued" ? "ok" : "warn",
+        title: response.status === "execution_failed" ? "Execution failed" : response.idempotent_replay ? "Execution replayed" : "Execution request received",
+        description: `Status: ${response.status} | Queue status: ${response.queue_status}${response.warning ? ` | ${response.warning}` : ""}`,
+        tone: response.status === "execution_failed" ? "danger" : "warn",
       });
       await detailQuery.refetch();
     } catch (error) {
@@ -281,10 +281,11 @@ export function IntentPage() {
           </label>
 
           <div style={{ display: "flex", gap: "0.5rem" }}>
-            <Button type="submit" disabled={validateMutation.isPending}>
+            <Button permission="write:config" type="submit" disabled={validateMutation.isPending}>
               {validateMutation.isPending ? "Validating..." : "Validate"}
             </Button>
             <Button
+              permission="write:config"
               tone="ghost"
               type="button"
               disabled={!intentId || executeMutation.isPending || terminalState || !canExecute}

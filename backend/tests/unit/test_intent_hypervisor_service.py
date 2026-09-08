@@ -4,10 +4,14 @@ from __future__ import annotations
 
 import uuid
 
+import pytest
+
 from app.modules.intent.hypervisor import HypervisorExecutionService
 
 
-def test_hypervisor_execute_returns_completed_when_verification_passes():
+@pytest.mark.parametrize("mode", ["demo", "emulation", "production"])
+def test_hypervisor_execute_fails_without_executor_in_all_modes(monkeypatch, mode):
+    monkeypatch.setenv("EXECUTION_MODE", mode)
     outcome = HypervisorExecutionService().execute(
         intent_id=uuid.uuid4(),
         intent_kind="reroute_path",
@@ -19,13 +23,13 @@ def test_hypervisor_execute_returns_completed_when_verification_passes():
         requested_by_user_id=str(uuid.uuid4()),
     )
 
-    assert outcome.terminal_status == "execution_completed"
-    assert outcome.verification["status"] == "passed"
+    assert outcome.terminal_status == "execution_failed"
+    assert outcome.verification["status"] == "not_performed"
     assert outcome.rollback is None
-    assert outcome.failure_reason is None
+    assert outcome.failure_reason == "executor_unavailable"
 
 
-def test_hypervisor_execute_returns_failed_with_rollback_on_verification_failure():
+def test_hypervisor_execute_never_fabricates_rollback():
     outcome = HypervisorExecutionService().execute(
         intent_id=uuid.uuid4(),
         intent_kind="isolate_vlan",
@@ -38,11 +42,10 @@ def test_hypervisor_execute_returns_failed_with_rollback_on_verification_failure
     )
 
     assert outcome.terminal_status == "execution_failed"
-    assert outcome.verification["status"] == "failed"
-    assert outcome.rollback is not None
-    assert outcome.rollback["attempted"] is True
-    assert outcome.rollback["status"] == "completed"
-    assert outcome.failure_reason == "post_change_verification_failed"
+    assert outcome.verification["status"] == "not_performed"
+    assert outcome.verification["checked_at"] is None
+    assert outcome.rollback is None
+    assert outcome.failure_reason == "executor_unavailable"
 
 
 def test_hypervisor_execute_fails_when_simulation_gate_missing():
@@ -58,6 +61,6 @@ def test_hypervisor_execute_fails_when_simulation_gate_missing():
     )
 
     assert outcome.terminal_status == "execution_failed"
-    assert outcome.verification["status"] == "failed"
-    assert outcome.failure_reason == "simulation_policy_gate_missing"
+    assert outcome.verification["status"] == "not_performed"
+    assert outcome.failure_reason == "executor_unavailable"
     assert outcome.rollback is None

@@ -1,5 +1,23 @@
 # Current Sprint State
 
+## Completion Plan Steps 1-2: Foundation and Security
+
+- Implementation and automated regression gate completed on 2026-09-08 for the
+  user-requested foundation/security scope. This supersedes earlier baseline
+  success claims for controller execution, simulation evaluation, and reports.
+- Delivered: effective strict TypeScript checks; clean backend/frontend lint;
+  execution-mode metadata/banner; synthetic provenance; unavailable measurements;
+  fail-closed executor/evaluator/renderer behavior; rotated Redis session families;
+  current role/membership checks across REST/WS; org-role write intersection;
+  tenant-safe intent publication; real logout and tab-local frontend state isolation.
+- Validation: backend 1,112 tests; frontend 188 tests; Chromium 24 tests; lint,
+  strict typecheck, production build and unchanged bundle bounds all passed.
+- Evidence, changed contracts and residual limits:
+  `docs/project/FoundationSecurity-Step1-Step2.md`.
+- Next planned implementation: Step 3 reproducible SDN emulation. Live infrastructure
+  fault certification remains pending; these automated tests are not production
+  security certification or proof of real network control.
+
 ## Active Goals
 - Vertical Slice 1 Implementation: **COMPLETE** — all modules implemented, tested, and migrated.
 - Vertical Slice 2 Implementation: **COMPLETE** — telemetry ingestion/persistence/read APIs and telemetry health counters + `/ws/telemetry` fanout delivered through Step 8.

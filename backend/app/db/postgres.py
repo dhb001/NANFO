@@ -16,7 +16,6 @@ from app.core.config import get_settings
 
 class Base(DeclarativeBase):
     """Shared declarative base for all SQLAlchemy ORM models."""
-    pass
 
 
 _engine = None

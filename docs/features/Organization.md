@@ -68,6 +68,15 @@ All events must follow the mandatory envelope defined in `docs/api/EventAPI.md` 
 
 ## 6. Risks
 
+### Authorization Baseline
+
+Organization/workspace/member administration requires global `write:config` and
+current organization `Admin` membership. Tenant-resource writes additionally
+require current org `Admin` or `Operator` membership; global privileges do not
+override an org Read-Only role. Reads require active membership and active parent
+organization/workspace. Optional token claims restrict, never expand, that scope.
+
+
 - **Orphaned workspaces after soft-delete:** If a workspace is soft-deleted, networks referencing it must transition to a `suspended` state. The Network module must consume `org.workspace.deleted` to enforce this.
 - **Cross-org data leakage:** API routes must enforce that the authenticated user's `org_id` (from JWT) matches the `org_id` in the path parameter for all org-scoped endpoints. Missing this check exposes multi-tenant data.
 - **`user_id` reference integrity:** Since `org_members.user_id` is a logical reference without a SQL FK to Identity's `users` table, it is possible to add a non-existent user. The Organization Service must validate via Identity API before inserting a membership row.

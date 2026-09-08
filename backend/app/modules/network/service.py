@@ -81,6 +81,7 @@ class NetworkService:
         workspace = await self._workspace_svc.assert_workspace_membership(
             workspace_id=req.workspace_id,
             user_id=actor_id,
+            require_write=True,
         )
         if claim_org_id is not None and workspace.org_id != claim_org_id:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions.")
@@ -156,6 +157,7 @@ class NetworkService:
         requested_workspace_id: uuid.UUID | None,
         actor_user_id: str,
         claim_org_id: uuid.UUID | None = None,
+        require_write: bool = False,
     ):
         network = await self._repo.get_by_id(network_id)
         if network is None:
@@ -167,6 +169,7 @@ class NetworkService:
         workspace = await self._workspace_svc.assert_workspace_membership(
             workspace_id=network.workspace_id,
             user_id=actor_user_id,
+            require_write=require_write,
         )
         if claim_org_id is not None and workspace.org_id != claim_org_id:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions.")
@@ -217,6 +220,7 @@ class DeviceService:
             requested_workspace_id=requested_workspace_id,
             actor_user_id=actor_id,
             claim_org_id=claim_org_id,
+            require_write=True,
         )
 
         device = await self._repo.create(
@@ -302,6 +306,7 @@ class DeviceService:
             requested_workspace_id=requested_workspace_id,
             actor_user_id=actor_id,
             claim_org_id=claim_org_id,
+            require_write=True,
         )
 
         current = await self._repo.get_by_id(device_id)
@@ -354,6 +359,7 @@ class DeviceService:
         requested_workspace_id: uuid.UUID | None,
         actor_user_id: str,
         claim_org_id: uuid.UUID | None,
+        require_write: bool = False,
     ):
         network = await self._network_repo.get_by_id(network_id)
         if network is None:
@@ -365,6 +371,7 @@ class DeviceService:
         workspace = await self._workspace_svc.assert_workspace_membership(
             workspace_id=network.workspace_id,
             user_id=actor_user_id,
+            require_write=require_write,
         )
         if claim_org_id is not None and workspace.org_id != claim_org_id:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions.")
@@ -417,6 +424,7 @@ class CampusBuildingService:
             requested_workspace_id=requested_workspace_id,
             actor_user_id=actor_id,
             claim_org_id=claim_org_id,
+            require_write=True,
         )
 
         upserted: list[CampusBuildingResponse] = []
@@ -486,6 +494,7 @@ class CampusBuildingService:
         requested_workspace_id: uuid.UUID | None,
         actor_user_id: str,
         claim_org_id: uuid.UUID | None,
+        require_write: bool = False,
     ):
         network = await self._network_repo.get_by_id(network_id)
         if network is None:
@@ -497,6 +506,7 @@ class CampusBuildingService:
         workspace = await self._workspace_svc.assert_workspace_membership(
             workspace_id=network.workspace_id,
             user_id=actor_user_id,
+            require_write=require_write,
         )
         if claim_org_id is not None and workspace.org_id != claim_org_id:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions.")
@@ -579,6 +589,7 @@ class CampusModelAssetService:
             requested_workspace_id=requested_workspace_id,
             actor_user_id=actor_id,
             claim_org_id=claim_org_id,
+            require_write=True,
         )
 
         mapping = dict(req.mapping_by_device_id)
@@ -676,6 +687,7 @@ class CampusModelAssetService:
         requested_workspace_id: uuid.UUID | None,
         actor_user_id: str,
         claim_org_id: uuid.UUID | None,
+        require_write: bool = False,
     ):
         network = await self._network_repo.get_by_id(network_id)
         if network is None:
@@ -687,6 +699,7 @@ class CampusModelAssetService:
         workspace = await self._workspace_svc.assert_workspace_membership(
             workspace_id=network.workspace_id,
             user_id=actor_user_id,
+            require_write=require_write,
         )
         if claim_org_id is not None and workspace.org_id != claim_org_id:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions.")
@@ -746,6 +759,7 @@ class DeviceGroupService:
             requested_workspace_id=requested_workspace_id,
             actor_user_id=actor_id,
             claim_org_id=claim_org_id,
+            require_write=True,
         )
 
         devices = await self._device_repo.list_active_for_network(network_id)
@@ -895,6 +909,7 @@ class DeviceGroupService:
         requested_workspace_id: uuid.UUID | None,
         actor_user_id: str,
         claim_org_id: uuid.UUID | None,
+        require_write: bool = False,
     ):
         network = await self._network_repo.get_by_id(network_id)
         if network is None:
@@ -906,6 +921,7 @@ class DeviceGroupService:
         workspace = await self._workspace_svc.assert_workspace_membership(
             workspace_id=network.workspace_id,
             user_id=actor_user_id,
+            require_write=require_write,
         )
         if claim_org_id is not None and workspace.org_id != claim_org_id:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions.")

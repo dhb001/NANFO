@@ -5,11 +5,6 @@ export interface TokenPair {
   expires_in: number;
 }
 
-export interface AccessToken {
-  access_token: string;
-  expires_in: number;
-}
-
 export interface UserProfile {
   user_id: string;
   email: string;

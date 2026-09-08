@@ -134,7 +134,7 @@ async def test_generate_report_replays_when_same_idempotency_request(mock_db, fa
 
     assert result["idempotent_replay"] is True
     assert result["report_id"] == str(existing.report_id)
-    assert result["status"] == "generated"
+    assert result["status"] == "failed"
 
 
 @pytest.mark.asyncio
@@ -283,7 +283,7 @@ async def test_get_report_returns_404_when_not_found(mock_db, fake_redis):
     service._repo.get_by_id = AsyncMock(return_value=None)
 
     with pytest.raises(HTTPException) as exc_info:
-        await service.get_report(report_id=uuid.uuid4(), workspace_id=workspace_id)
+        await service.get_report(report_id=uuid.uuid4(), workspace_id=workspace_id, user_id=str(uuid.uuid4()))
 
     assert exc_info.value.status_code == 404
     assert exc_info.value.detail["code"] == "REPORT_NOT_FOUND"
@@ -308,14 +308,15 @@ async def test_get_report_returns_record_when_workspace_matches(mock_db, fake_re
     service._workspace_svc.get_active_workspace = AsyncMock()
     service._repo.get_by_id = AsyncMock(return_value=record)
 
-    result = await service.get_report(report_id=record.report_id, workspace_id=workspace_id)
+    result = await service.get_report(report_id=record.report_id, workspace_id=workspace_id, user_id=str(uuid.uuid4()))
     assert result["report_id"] == str(record.report_id)
-    assert result["status"] == "generated"
-    assert result["artifacts"][0]["artifact_id"] == "artifact-1"
+    assert result["status"] == "failed"
+    assert result["artifacts"] == []
+    assert result["error"]["code"] == "REPORT_RENDERER_UNAVAILABLE"
 
 
 @pytest.mark.asyncio
-async def test_process_requested_event_marks_generated_and_adds_artifact(mock_db, fake_redis):
+async def test_process_requested_event_fails_without_renderer(mock_db, fake_redis):
     record = _make_report_row(status="requested", output_format="pdf")
     service = ReportService(db=mock_db, redis=fake_redis)
     service._repo.get_by_id = AsyncMock(return_value=record)
@@ -336,10 +337,10 @@ async def test_process_requested_event_marks_generated_and_adds_artifact(mock_db
 
     assert service._repo.update_lifecycle.await_count == 1
     update_kwargs = service._repo.update_lifecycle.await_args.kwargs
-    assert update_kwargs["status"] == "generated"
+    assert update_kwargs["status"] == "failed"
     assert update_kwargs["queue_status"] == "queued"
-    assert len(update_kwargs["artifact_refs"]) == 1
-    assert mock_publish.await_args.kwargs["event_type"] == "report.generated"
+    assert update_kwargs["artifact_refs"] == []
+    assert mock_publish.await_args.kwargs["event_type"] == "report.failed"
     mock_db.commit.assert_awaited_once()
 
 
@@ -366,7 +367,7 @@ async def test_process_requested_event_marks_failed_with_error_context(mock_db, 
     update_kwargs = service._repo.update_lifecycle.await_args.kwargs
     assert update_kwargs["status"] == "failed"
     assert update_kwargs["artifact_refs"] == []
-    assert update_kwargs["error_context"]["code"] == "REPORT_GENERATION_FAILED"
+    assert update_kwargs["error_context"]["code"] == "REPORT_RENDERER_UNAVAILABLE"
     assert mock_publish.await_args.kwargs["event_type"] == "report.failed"
     mock_db.commit.assert_awaited_once()
 

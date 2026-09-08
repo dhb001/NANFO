@@ -9,6 +9,7 @@ import os
 
 os.environ.update({
     "APP_ENV": "test",
+    "EXECUTION_MODE": "demo",
     "LOG_LEVEL": "WARNING",
     "POSTGRES_HOST": "localhost",
     "POSTGRES_PORT": "5432",
@@ -31,19 +32,16 @@ os.environ.update({
 })
 
 # ── Standard imports (after env vars are set) ─────────────────────────────────
-import asyncio
 import uuid
-from datetime import UTC, datetime, timedelta
-from typing import AsyncGenerator
-from unittest.mock import AsyncMock, MagicMock, patch
+from datetime import UTC, datetime
+from unittest.mock import AsyncMock, MagicMock
 
 import fakeredis
 import pytest
-import pytest_asyncio
 
 from app.core.config import get_settings
 from app.core.logging import configure_logging
-from app.core.security import create_access_token, hash_password
+from tests.auth_support import SessionIdentities, _current_identities
 
 # Configure structlog at WARNING level for all unit tests.
 # Must run before any logger is first used to avoid the 'PrintLogger has no .name'
@@ -54,9 +52,22 @@ configure_logging("WARNING")
 @pytest.fixture(scope="session")
 def settings():
     """Return a cached Settings instance using test environment variables."""
-    from app.core.config import get_settings
     get_settings.cache_clear()
     return get_settings()
+
+
+@pytest.fixture
+def execution_mode(monkeypatch):
+    """Isolate mode changes and clear cached settings both before and after use."""
+    def set_mode(mode):
+        monkeypatch.setenv("EXECUTION_MODE", mode)
+        get_settings.cache_clear()
+
+    set_mode("demo")
+    try:
+        yield set_mode
+    finally:
+        get_settings.cache_clear()
 
 
 @pytest.fixture
@@ -102,9 +113,56 @@ def test_network_id() -> str:
 
 
 @pytest.fixture
-def valid_access_token(test_user_id) -> tuple[str, str]:
+def session_auth(monkeypatch):
+    """Opt-in persistence fixtures, never an authentication dependency override."""
+    from app.modules.identity.repository import UserRepository
+
+    identities = SessionIdentities()
+    context = _current_identities.set(identities)
+    monkeypatch.setattr(UserRepository, "get_by_id", AsyncMock(side_effect=identities.users.get))
+    monkeypatch.setattr(UserRepository, "get_roles_for_user", AsyncMock(
+        side_effect=lambda user: list(identities.roles[user.user_id]),
+    ))
+    monkeypatch.setattr(UserRepository, "get_permissions_for_roles", AsyncMock(
+        side_effect=lambda roles: list(identities.permissions.get(tuple(roles), [])),
+    ))
+    yield identities
+    _current_identities.reset(context)
+
+
+@pytest.fixture
+def tenant_auth(session_auth, monkeypatch):
+    """Explicit organization persistence for contracts that exercise membership."""
+    from types import SimpleNamespace
+
+    from app.modules.organization.repository import (
+        OrganizationRepository,
+        OrgMemberRepository,
+        WorkspaceRepository,
+    )
+
+    org = SimpleNamespace(org_id=session_auth.org_id, name="Test Org", slug="test-org", created_at=datetime.now(UTC))
+
+    def list_orgs(user_id, *, page, page_size, org_id=None):
+        rows = [org] if (org.org_id, user_id) in session_auth.memberships and org_id in (None, org.org_id) else []
+        return rows[(page - 1) * page_size:page * page_size], len(rows)
+
+    monkeypatch.setattr(OrganizationRepository, "get_by_id", AsyncMock(
+        side_effect=lambda org_id: org if org_id == org.org_id else None,
+    ))
+    monkeypatch.setattr(OrganizationRepository, "list_for_user", AsyncMock(side_effect=list_orgs))
+    monkeypatch.setattr(OrgMemberRepository, "get_member", AsyncMock(
+        side_effect=lambda org_id, user_id: SimpleNamespace(org_role="Admin")
+        if (org_id, user_id) in session_auth.memberships else None,
+    ))
+    monkeypatch.setattr(WorkspaceRepository, "get_by_id", AsyncMock(side_effect=session_auth.workspaces.get))
+    return session_auth
+
+
+@pytest.fixture
+def valid_access_token(test_user_id, session_auth) -> tuple[str, str]:
     """Return (access_token, jti) for a test user with Admin role."""
-    token, jti = create_access_token(
+    token, jti = session_auth.issue(
         user_id=test_user_id,
         email="test@example.com",
         roles=["Admin"],
@@ -121,9 +179,9 @@ def auth_headers(valid_access_token) -> dict:
 
 
 @pytest.fixture
-def readonly_access_token(test_user_id) -> tuple[str, str]:
+def readonly_access_token(test_user_id, session_auth) -> tuple[str, str]:
     """Return (access_token, jti) for a read-only test user."""
-    token, jti = create_access_token(
+    token, jti = session_auth.issue(
         user_id=test_user_id,
         email="readonly@example.com",
         roles=["Read-Only"],

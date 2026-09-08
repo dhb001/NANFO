@@ -7,9 +7,11 @@ Error:   { success: false, data: null,  meta: {...}, errors: {code, message} }
 """
 
 import time
-from typing import Any, Generic, TypeVar
+from typing import Any, Generic, Literal, TypeVar
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+
+from app.core.config import get_settings
 
 T = TypeVar("T")
 
@@ -18,6 +20,9 @@ class ResponseMeta(BaseModel):
     request_id: str
     timestamp: str
     execution_time_ms: int | None = None
+    execution_mode: Literal["demo", "emulation", "production"] = Field(
+        default_factory=lambda: get_settings().EXECUTION_MODE,
+    )
 
 
 class ErrorDetail(BaseModel):

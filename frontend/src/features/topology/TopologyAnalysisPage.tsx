@@ -189,6 +189,7 @@ export function TopologyAnalysisPage() {
                 </label>
 
                 <Button
+                  permission="write:config"
                   type="button"
                   tone="ghost"
                   disabled={!networkId || reconcileMutation.isPending}

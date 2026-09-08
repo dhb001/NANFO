@@ -37,10 +37,14 @@ class OrganizationRepository:
         )
         return result.scalar_one_or_none()
 
-    async def list_for_user(self, user_id: uuid.UUID, page: int = 1, page_size: int = 20) -> tuple[list[Organization], int]:
+    async def list_for_user(
+        self, user_id: uuid.UUID, page: int = 1, page_size: int = 20, org_id: uuid.UUID | None = None,
+    ) -> tuple[list[Organization], int]:
         """Return organizations the user is a member of."""
         member_org_ids = select(OrgMember.org_id).where(OrgMember.user_id == user_id, OrgMember.deleted_at.is_(None))
         q = select(Organization).where(Organization.org_id.in_(member_org_ids), Organization.deleted_at.is_(None))
+        if org_id is not None:
+            q = q.where(Organization.org_id == org_id)
         total = (await self._db.execute(select(func.count()).select_from(q.subquery()))).scalar_one()
         rows = (await self._db.execute(q.offset((page - 1) * page_size).limit(page_size))).scalars().all()
         return list(rows), total
@@ -61,6 +65,27 @@ class WorkspaceRepository:
 
     def __init__(self, db: AsyncSession):
         self._db = db
+
+    async def list_accessible_ids(
+        self, *, user_id: uuid.UUID, org_id: uuid.UUID | None, workspace_id: uuid.UUID | None,
+    ) -> list[uuid.UUID]:
+        query = (
+            select(Workspace.workspace_id)
+            .join(Organization, Organization.org_id == Workspace.org_id)
+            .join(OrgMember, OrgMember.org_id == Organization.org_id)
+            .where(
+                Workspace.deleted_at.is_(None),
+                Organization.deleted_at.is_(None),
+                OrgMember.deleted_at.is_(None),
+                OrgMember.user_id == user_id,
+            )
+            .order_by(Workspace.workspace_id)
+        )
+        if org_id is not None:
+            query = query.where(Organization.org_id == org_id)
+        if workspace_id is not None:
+            query = query.where(Workspace.workspace_id == workspace_id)
+        return list((await self._db.execute(query)).scalars().all())
 
     async def create(self, org_id: uuid.UUID, name: str, description: str | None) -> Workspace:
         ws = Workspace(org_id=org_id, name=name, description=description)
@@ -83,8 +108,12 @@ class WorkspaceRepository:
         )
         return result.scalar_one_or_none()
 
-    async def list_for_org(self, org_id: uuid.UUID, page: int = 1, page_size: int = 20) -> tuple[list[Workspace], int]:
+    async def list_for_org(
+        self, org_id: uuid.UUID, page: int = 1, page_size: int = 20, workspace_id: uuid.UUID | None = None,
+    ) -> tuple[list[Workspace], int]:
         q = select(Workspace).where(Workspace.org_id == org_id, Workspace.deleted_at.is_(None))
+        if workspace_id is not None:
+            q = q.where(Workspace.workspace_id == workspace_id)
         total = (await self._db.execute(select(func.count()).select_from(q.subquery()))).scalar_one()
         rows = (await self._db.execute(q.offset((page - 1) * page_size).limit(page_size))).scalars().all()
         return list(rows), total

@@ -441,7 +441,7 @@ function parseGeoJsonTextDeterministic(value: string): CampusImportParseResult {
       const localFootprint = convertFootprintToLocalXZ(building.footprint, centerLon, centerLat, bounds);
       const span = spanFromLocalFootprint(localFootprint);
 
-      const nextFootprint =
+      const nextFootprint: Array<[number, number]> =
         localFootprint.length >= 3
           ? localFootprint
           : [

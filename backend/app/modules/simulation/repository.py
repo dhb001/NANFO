@@ -93,11 +93,17 @@ class SimulationRepository:
         state: str,
         status: str,
         risk_gate: str | None = None,
+        validation: dict | None = None,
+        run_output: dict | None = None,
     ) -> Simulation:
         simulation.state = state
         simulation.status = status
         if risk_gate is not None:
             simulation.risk_gate = risk_gate
+        if validation is not None:
+            simulation.validation = validation
+        if run_output is not None:
+            simulation.run_output = run_output
         await self._db.flush()
         return simulation
 

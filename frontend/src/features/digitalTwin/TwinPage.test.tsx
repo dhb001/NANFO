@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { TwinPage } from "@/features/digitalTwin/TwinPage";
 import { parseImportSummary } from "@/features/digitalTwin/twinImport";
 import { useAuthStore } from "@/shared/state/auth-store";
+import { operatorProfile } from "@/test/profile";
 import { useWorkspaceStore } from "@/shared/state/workspace-store";
 import { useLiveStore } from "@/features/realtime/store";
 import { useUiStore } from "@/shared/state/ui-store";
@@ -120,6 +121,7 @@ describe("TwinPage", () => {
     mockUpsertDeviceGroupsMutateAsync.mockReset();
 
     useAuthStore.setState({
+      profile: operatorProfile,
       accessToken: "token-1",
       refreshToken: "refresh-1",
       userId: "00000000-0000-0000-0000-000000000123",

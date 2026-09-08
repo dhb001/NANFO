@@ -3,7 +3,7 @@
 Provides reusable dependencies:
   - get_db()          : async SQLAlchemy session
   - get_redis()       : async Redis client
-  - get_current_user(): JWT validation + deny-list check → TokenClaims
+  - get_current_user(): strict JWT + session + current identity check -> TokenClaims
   - require_roles()   : RBAC decorator factory
   - get_request_meta(): request_id + timestamp for envelope construction
 """
@@ -17,17 +17,16 @@ from typing import Annotated
 import redis.asyncio as aioredis
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from jose import JWTError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
-from app.core.security import decode_token
 from app.db.postgres import AsyncSessionLocal
 from app.db.redis import get_redis_client
+from app.modules.identity.service import AuthService
 
 logger = get_logger(__name__)
 
-_bearer = HTTPBearer(auto_error=True)
+_bearer = HTTPBearer(auto_error=False)
 
 
 # ── Database ──────────────────────────────────────────────────────────────────
@@ -80,35 +79,22 @@ class TokenClaims:
         self.workspace_id: str | None = payload.get("workspace_id")
         self.jti: str = payload["jti"]
         self.exp: int = payload["exp"]
+        self.sid: str = payload["sid"]
 
 
 async def get_current_user(
-    credentials: Annotated[HTTPAuthorizationCredentials, Depends(_bearer)],
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer)],
     redis: Annotated[aioredis.Redis, Depends(get_redis)],
+    db: Annotated[AsyncSession, Depends(get_db)],
 ) -> TokenClaims:
-    """Validate JWT, check jti deny-list, return TokenClaims.
+    """Validate JWT/session and reload current identity authorization.
 
     Raises HTTP 401 on any failure (missing, expired, revoked, malformed token).
     Per Authentication.md §6 AC: must not specify whether token was revoked vs expired.
     """
-    token = credentials.credentials
-    try:
-        payload = decode_token(token)
-    except JWTError:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or expired token.",
-        )
-
-    jti = payload.get("jti")
-    if not jti:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token.")
-
-    # Deny-list check (jti-based revocation, Authentication.md §8.3)
-    deny_key = f"jti:deny:{jti}"
-    if await redis.exists(deny_key):
+    if credentials is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token.")
-
+    payload = await AuthService(db, redis).authenticate_access(credentials.credentials)
     return TokenClaims(payload)
 
 

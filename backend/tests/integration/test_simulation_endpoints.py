@@ -6,14 +6,13 @@ import uuid
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
-import fakeredis
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from app.core.dependencies import get_db, get_redis
-from app.core.security import create_access_token
 from app.main import app
+from tests.auth_support import create_session_access_token as create_access_token
 
 
 def _make_token() -> str:
@@ -39,8 +38,8 @@ def _make_token_with_workspace(*, workspace_id: uuid.UUID, org_id: uuid.UUID | N
 
 
 @pytest.fixture
-def client() -> TestClient:
-    fake_r = fakeredis.FakeAsyncRedis(decode_responses=True)
+def client(session_auth) -> TestClient:
+    fake_r = session_auth.redis
     db = AsyncMock()
     db.commit = AsyncMock()
     db.flush = AsyncMock()
@@ -257,7 +256,7 @@ def test_start_simulation_scope_resolution_includes_claim_workspace_and_org(clie
     assert call_kwargs["claim_org_id"] == token_org_id
 
 
-def test_start_simulation_invalid_workspace_claim_returns_403(client):
+def test_start_simulation_invalid_workspace_claim_returns_401(client):
     token, _ = create_access_token(
         user_id=str(uuid.uuid4()),
         email="simulation-invalid-claim@example.com",
@@ -277,7 +276,7 @@ def test_start_simulation_invalid_workspace_claim_returns_403(client):
         headers=headers,
     )
 
-    assert response.status_code == 403
+    assert response.status_code == 401
 
 
 def test_pause_simulation_returns_envelope(client):

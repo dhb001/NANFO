@@ -32,6 +32,7 @@ class UserRepository:
         result = await self._db.execute(
             select(User)
             .where(User.user_id == user_id, User.deleted_at.is_(None))
+            .execution_options(populate_existing=True)
             .options(selectinload(User.user_roles).selectinload(UserRole.role))
         )
         return result.scalar_one_or_none()
@@ -51,6 +52,8 @@ class UserRepository:
         return list(result.scalars().all())
 
     async def get_permissions_for_roles(self, role_names: list[str]) -> list[str]:
+        if not role_names:
+            return []
         # For this slice permissions are static seed data; fetch all for matching roles.
         # Full permission mapping is deferred to a dedicated RBAC service in M3 full pass.
         from app.modules.identity.models import Permission
@@ -59,7 +62,9 @@ class UserRepository:
         # Admin role gets all permissions; others get read-only subset
         if "Admin" in role_names:
             return [p.name for p in all_perms]
-        return ["read:topology", "read:telemetry"]
+        if any(role in role_names for role in ("Operator", "Read-Only")):
+            return ["read:topology", "read:telemetry"]
+        return []
 
     async def assign_role(self, user_id: uuid.UUID, role_name: str) -> None:
         role_result = await self._db.execute(select(Role).where(Role.name == role_name))

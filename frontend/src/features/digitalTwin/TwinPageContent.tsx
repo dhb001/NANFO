@@ -853,6 +853,7 @@ export function TwinPageContent() {
                     type="button"
                     tone="ghost"
                     disabled={!currentModelFile || !importSummary || isPersistingModelAsset || !networkId || !token}
+                    permission="write:config"
                     onClick={persistImportedModelAsset}
                   >
                     {isPersistingModelAsset ? "Persisting model asset..." : "Persist Model Asset"}
@@ -911,6 +912,7 @@ export function TwinPageContent() {
                     type="button"
                     tone="ghost"
                     disabled={importedCampusBuildings.length === 0 || isPersistingCampus || !networkId || !token}
+                    permission="write:config"
                     onClick={persistImportedCampusBuildings}
                   >
                     {isPersistingCampus ? "Persisting buildings..." : "Persist Buildings to Network"}
@@ -937,6 +939,7 @@ export function TwinPageContent() {
                     type="button"
                     tone="ghost"
                     disabled={sceneModel.nodes.length === 0 || isPersistingDeviceGroups || !networkId || !token}
+                    permission="write:config"
                     onClick={persistDerivedDeviceGroups}
                   >
                     {isPersistingDeviceGroups ? "Persisting groups..." : "Persist Device Groups"}
@@ -1023,13 +1026,14 @@ export function TwinPageContent() {
                   type="button"
                   tone="ghost"
                   disabled={!canPersistSelectedNodeSpatialRef || pendingPersistDeviceId === selectedNode.id}
+                  permission="write:config"
                   onClick={persistSelectedNodeSpatialRef}
                 >
                   {pendingPersistDeviceId === selectedNode.id ? "Persisting mapping..." : "Persist Mapping to Device"}
                 </Button>
               ) : null}
 
-              <Button type="button" tone="ghost" onClick={handleConfigureIntentWorkflow}>Configure in Intent Workflow</Button>
+              <Button permission="write:config" type="button" tone="ghost" onClick={handleConfigureIntentWorkflow}>Configure in Intent Workflow</Button>
             </div>
           ) : null}
 

@@ -3,7 +3,8 @@ import { useAuthStore } from "@/shared/state/auth-store";
 import { useWorkspaceStore } from "@/shared/state/workspace-store";
 import { useManagedWebSocket } from "@/shared/realtime/useManagedWebSocket";
 import { useLiveStore } from "@/features/realtime/store";
-import { refresh } from "@/features/auth/api";
+import { recoverSocketUpgrade, refreshSession } from "@/features/auth/session";
+import { hasPermission } from "@/features/auth/permissions";
 import { useUiStore } from "@/shared/state/ui-store";
 import {
   AlertDeltaData,
@@ -38,14 +39,23 @@ function isDigitalTwinFrame(frame: WebSocketEnvelope<unknown>): frame is WebSock
 
 export function RealtimeBridge() {
   const token = useAuthStore((state) => state.accessToken);
-  const refreshToken = useAuthStore((state) => state.refreshToken);
   const userId = useAuthStore((state) => state.userId);
-  const setSession = useAuthStore((state) => state.setSession);
+  const generation = useAuthStore((state) => state.generation);
+  const endingSession = useAuthStore((state) => state.endingSession);
+  const profile = useAuthStore((state) => state.profile);
+  const organizationId = useWorkspaceStore((state) => state.organizationId);
+  const workspaceId = useWorkspaceStore((state) => state.workspaceId);
   const networkId = useWorkspaceStore((state) => state.networkId);
-  const clearSession = useAuthStore((state) => state.clearSession);
   const pushToast = useUiStore((state) => state.pushToast);
 
-  const refreshInFlightRef = useRef<Promise<boolean> | null>(null);
+  const contextKey = JSON.stringify([generation, userId, organizationId, workspaceId, networkId, profile?.permissions]);
+  const isCurrent = useCallback(() => {
+    const auth = useAuthStore.getState();
+    const scope = useWorkspaceStore.getState();
+    return !auth.endingSession && auth.accessToken === token &&
+      JSON.stringify([auth.generation, auth.userId, scope.organizationId, scope.workspaceId, scope.networkId, auth.profile?.permissions]) === contextKey;
+  }, [token, contextKey]);
+  const scoped = { contextKey, isCurrent, onUpgradeFailure: recoverSocketUpgrade };
   const lastToastByCodeRef = useRef<Record<string, number>>({});
 
   const applyTopologyDelta = useLiveStore((state) => state.applyTopologyDelta);
@@ -83,40 +93,9 @@ export function RealtimeBridge() {
     [pushToast],
   );
 
-  const refreshSession = useCallback(async () => {
-    if (!refreshToken || !userId) {
-      clearSession();
-      return false;
-    }
-
-    if (refreshInFlightRef.current) {
-      return refreshInFlightRef.current;
-    }
-
-    const task = (async () => {
-      try {
-        const nextToken = await refresh(refreshToken);
-        setSession({
-          accessToken: nextToken.access_token,
-          refreshToken,
-          userId,
-        });
-        return true;
-      } catch {
-        clearSession();
-        return false;
-      } finally {
-        refreshInFlightRef.current = null;
-      }
-    })();
-
-    refreshInFlightRef.current = task;
-    return task;
-  }, [clearSession, refreshToken, setSession, userId]);
-
   const onUnauthorized = useCallback(() => {
     void refreshSession();
-  }, [refreshSession]);
+  }, []);
 
   const onSocketError = useCallback(
     (error: WebSocketErrorData) => {
@@ -126,11 +105,12 @@ export function RealtimeBridge() {
   );
 
   useManagedWebSocket<WebSocketEnvelope<unknown>>({
+    ...scoped,
     path: "/ws/topology",
     token,
     channel: "topology",
     filters: networkId ? { network_id: networkId } : {},
-    enabled: Boolean(token && networkId),
+    enabled: Boolean(token && workspaceId && networkId && !endingSession && hasPermission(profile, "read:topology")),
     onUnauthorized,
     onError: onSocketError,
     onStatusChange: (status) => setConnectionStatus("topology", status),
@@ -142,32 +122,38 @@ export function RealtimeBridge() {
   });
 
   useManagedWebSocket<WebSocketEnvelope<unknown>>({
+    ...scoped,
     path: "/ws/telemetry",
     token,
     channel: "telemetry",
     filters: networkId ? { network_id: networkId } : {},
-    enabled: Boolean(token && networkId),
+    enabled: Boolean(token && workspaceId && networkId && !endingSession && hasPermission(profile, "read:telemetry")),
     onUnauthorized,
     onError: onSocketError,
     onStatusChange: (status) => setConnectionStatus("telemetry", status),
     onFrame: (frame) => {
-      if (isTelemetryFrame(frame) && frame.data?.metric) {
+      if (isTelemetryFrame(frame) && frame.data?.metric &&
+          frame.data.metric.workspace_id === workspaceId && frame.data.metric.network_id === networkId) {
         applyTelemetryDelta(frame.data);
       }
     },
   });
 
   useManagedWebSocket<WebSocketEnvelope<unknown>>({
+    ...scoped,
     path: "/ws/alerts",
     token,
     channel: "alerts",
     filters: {},
-    enabled: Boolean(token),
+    enabled: Boolean(token && workspaceId && !endingSession && hasPermission(profile, "read:telemetry")),
     onUnauthorized,
     onError: onSocketError,
     onStatusChange: (status) => setConnectionStatus("alerts", status),
     onFrame: (frame) => {
       if (isAlertFrame(frame) && frame.data?.alert) {
+        // Alerts has no documented subscription filter. Fail closed on unscoped payloads.
+        const payload = frame.data.alert.payload;
+        if (payload.workspace_id !== workspaceId || (networkId && payload.network_id !== networkId)) return;
         applyAlertDelta(frame.data, {
           correlation_id: frame.correlation_id,
           timestamp: frame.timestamp,
@@ -177,11 +163,12 @@ export function RealtimeBridge() {
   });
 
   useManagedWebSocket<WebSocketEnvelope<unknown>>({
+    ...scoped,
     path: "/ws/digital-twin",
     token,
     channel: "digital-twin",
     filters: networkId ? { network_id: networkId } : {},
-    enabled: Boolean(token && networkId),
+    enabled: Boolean(token && workspaceId && networkId && !endingSession && hasPermission(profile, "read:topology")),
     onUnauthorized,
     onError: onSocketError,
     onStatusChange: (status) => setConnectionStatus("digitalTwin", status),

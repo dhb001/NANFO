@@ -64,13 +64,19 @@ async def test_validate_intent_valid_payload_persists_validated_state(mock_db, f
         "blast_radius_assessment",
     ]
     assert result["explainability"]["summary"] == "Intent passed baseline UNIL validation checks."
-    assert result["explainability"]["evidence"] == ["BASELINE_CHECKS_PASSED"]
+    assert result["explainability"]["evidence"] == [
+        "BASELINE_SCHEMA_CHECKS_PASSED", "MODEL_CONFIDENCE_UNAVAILABLE", "DEPENDENCY_EVALUATOR_UNAVAILABLE",
+    ]
     assert result["explainability"]["alternatives_considered"] == ["manual_review"]
     assert result["explainability"]["policy_reference"] == "ADR-008"
     assert result["confidence"]["approval_required"] is True
     assert result["queue_status"] == "validated"
     assert result["warning"] is None
-    mock_ws.assert_awaited_once_with(workspace_id)
+    mock_ws.assert_awaited_once_with(
+        workspace_id, user_id=mock_create.await_args.kwargs["requested_by_user_id"], require_write=True,
+    )
+    assert result["confidence"]["score"] == 0.0
+    assert result["confidence"]["band"] == "below_60"
     mock_get_network.assert_awaited_once_with(network_id)
     mock_create.assert_awaited_once()
     mock_db.commit.assert_awaited_once()

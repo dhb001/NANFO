@@ -11,7 +11,7 @@ receives a working in-memory Redis, not None.
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import fakeredis
 import pytest

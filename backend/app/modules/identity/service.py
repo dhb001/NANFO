@@ -4,7 +4,7 @@ AuthService: login, logout, refresh, me endpoints.
 Implements:
   - Rate limiting per IP and per email (Authentication.md §5)
   - JWT issuance with full claim baseline (Authentication.md §8)
-  - jti deny-list on logout (Authentication.md §8.3)
+  - Redis session families with atomic refresh rotation and logout revocation
   - Audit log writes for all auth events (Authentication.md §2, §6)
   - Event publication for auth domain events (EventAPI.md)
 """
@@ -15,6 +15,7 @@ import uuid
 
 import redis.asyncio as aioredis
 from fastapi import HTTPException, status
+from redis.exceptions import RedisError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
@@ -23,12 +24,12 @@ from app.core.security import (
     create_access_token,
     create_refresh_token,
     decode_token,
-    remaining_ttl_seconds,
     verify_password,
 )
 from app.events.publisher import publish_event
 from app.modules.identity.repository import AuditLogRepository, UserRepository
-from app.modules.identity.schemas import AccessToken, TokenPair, UserProfile
+from app.modules.identity.schemas import TokenPair, UserProfile
+from app.modules.identity.sessions import SessionRepository, invalid_session
 
 logger = get_logger(__name__)
 
@@ -40,6 +41,26 @@ class AuthService:
         self._redis = redis
         self._user_repo = UserRepository(db)
         self._audit_repo = AuditLogRepository(db)
+        self._sessions = SessionRepository(redis)
+
+    async def authenticate_access(self, token: str) -> dict:
+        """Shared REST/WS identity check; signed role snapshots are not authoritative."""
+        from jose import JWTError
+
+        try:
+            claims = decode_token(token)
+        except JWTError:
+            raise invalid_session() from None
+        await self._sessions.validate(claims)
+        user = await self._user_repo.get_by_id(uuid.UUID(claims["sub"]))
+        if user is None or not user.is_active:
+            raise invalid_session()
+        roles = await self._user_repo.get_roles_for_user(user)
+        claims.update(
+            email=user.email, roles=roles,
+            permissions=await self._user_repo.get_permissions_for_roles(roles),
+        )
+        return claims
 
     async def login(
         self,
@@ -58,12 +79,15 @@ class AuthService:
         # ── Rate limiting (Authentication.md §5) ──────────────────────────────
         ip_key = f"ratelimit:login:{ip_address}"
         email_key = f"ratelimit:login:email:{email}"
-        ip_count = await self._redis.incr(ip_key)
-        if ip_count == 1:
-            await self._redis.expire(ip_key, settings.RATE_LIMIT_LOGIN_WINDOW_SECONDS)
-        email_count = await self._redis.incr(email_key)
-        if email_count == 1:
-            await self._redis.expire(email_key, settings.RATE_LIMIT_LOGIN_WINDOW_SECONDS)
+        try:
+            ip_count = await self._redis.incr(ip_key)
+            if ip_count == 1:
+                await self._redis.expire(ip_key, settings.RATE_LIMIT_LOGIN_WINDOW_SECONDS)
+            email_count = await self._redis.incr(email_key)
+            if email_count == 1:
+                await self._redis.expire(email_key, settings.RATE_LIMIT_LOGIN_WINDOW_SECONDS)
+        except (RedisError, RuntimeError):
+            raise invalid_session() from None
 
         if ip_count > settings.RATE_LIMIT_LOGIN_MAX_ATTEMPTS or email_count > settings.RATE_LIMIT_LOGIN_MAX_ATTEMPTS:
             logger.warning("login_rate_limited", ip=ip_address, email=email)
@@ -117,13 +141,16 @@ class AuthService:
         roles = await self._user_repo.get_roles_for_user(user)
         permissions = await self._user_repo.get_permissions_for_roles(roles)
 
+        sid = str(uuid.uuid4())
         access_token, _access_jti = create_access_token(
+            sid=sid,
             user_id=str(user.user_id),
             email=user.email,
             roles=roles,
             permissions=permissions,
         )
-        refresh_token, _ = create_refresh_token(user_id=str(user.user_id))
+        refresh_token, _ = create_refresh_token(user_id=str(user.user_id), sid=sid)
+        await self._sessions.create(decode_token(refresh_token, token_type="refresh"), refresh_token)
 
         # ── Audit log + event publication ─────────────────────────────────────
         await self._audit_repo.append(
@@ -159,12 +186,9 @@ class AuthService:
             expires_in=settings2.JWT_ACCESS_TOKEN_EXPIRE_MINUTES * 60,
         )
 
-    async def logout(self, jti: str, exp: int, user_id: str, correlation_id: str) -> None:
-        """Revoke the current access token by adding its jti to the Redis deny-list."""
-        ttl = remaining_ttl_seconds(exp)
-        if ttl > 0:
-            deny_key = f"jti:deny:{jti}"
-            await self._redis.set(deny_key, "revoked", ex=ttl)
+    async def logout(self, jti: str, exp: int, user_id: str, correlation_id: str, sid: str) -> None:
+        """Revoke every access/refresh token associated with the login session."""
+        await self._sessions.revoke(sid)
 
         # Audit log
         await self._audit_repo.append(
@@ -191,16 +215,15 @@ class AuthService:
                 error=str(exc),
             )
 
-    async def refresh(self, refresh_token: str, correlation_id: str) -> AccessToken:
-        """Issue a new access token from a valid refresh token."""
+    async def refresh(self, refresh_token: str, correlation_id: str) -> TokenPair:
+        """Consume a refresh token once; reuse revokes its entire session family."""
         from jose import JWTError
         try:
-            payload = decode_token(refresh_token)
+            payload = decode_token(refresh_token, token_type="refresh")
         except JWTError:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token.")
 
-        if payload.get("token_type") != "refresh":
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token type.")
+        entry = await self._sessions.validate(payload)
 
         user_id = payload.get("sub")
         user = await self._user_repo.get_by_id(uuid.UUID(user_id))
@@ -210,10 +233,21 @@ class AuthService:
         roles = await self._user_repo.get_roles_for_user(user)
         permissions = await self._user_repo.get_permissions_for_roles(roles)
         access_token, _ = create_access_token(
+            sid=payload["sid"],
+            org_id=payload.get("org_id"),
+            workspace_id=payload.get("workspace_id"),
             user_id=str(user.user_id),
             email=user.email,
             roles=roles,
             permissions=permissions,
+        )
+        new_refresh_token, _ = create_refresh_token(
+            user_id=str(user.user_id), sid=payload["sid"], exp=entry["exp"],
+            org_id=payload.get("org_id"), workspace_id=payload.get("workspace_id"),
+        )
+        await self._sessions.rotate(
+            payload, refresh_token,
+            decode_token(new_refresh_token, token_type="refresh"), new_refresh_token,
         )
 
         await self._audit_repo.append(
@@ -239,15 +273,16 @@ class AuthService:
             )
 
         settings = get_settings()
-        return AccessToken(
+        return TokenPair(
             access_token=access_token,
+            refresh_token=new_refresh_token,
             expires_in=settings.JWT_ACCESS_TOKEN_EXPIRE_MINUTES * 60,
         )
 
     async def get_profile(self, user_id: str) -> UserProfile:
         """Return the authenticated user's profile and permissions."""
         user = await self._user_repo.get_by_id(uuid.UUID(user_id))
-        if user is None:
+        if user is None or not user.is_active:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
         roles = await self._user_repo.get_roles_for_user(user)
         permissions = await self._user_repo.get_permissions_for_roles(roles)

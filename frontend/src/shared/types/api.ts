@@ -3,6 +3,7 @@ export interface ApiMeta {
   timestamp: string;
   execution_time_ms?: number;
   next_cursor?: string | null;
+  execution_mode?: "demo" | "emulation" | "production";
 }
 
 export interface ApiError {
@@ -10,9 +11,16 @@ export interface ApiError {
   message: string;
 }
 
-export interface ApiEnvelope<T> {
-  success: boolean;
-  data: T | null;
+export interface ApiSuccess<T> {
+  success: true;
+  data: T;
   meta: ApiMeta;
-  errors: ApiError | null;
+  errors: null;
 }
+
+export type ApiEnvelope<T> = ApiSuccess<T> | {
+  success: false;
+  data: null;
+  meta: ApiMeta;
+  errors: ApiError;
+};

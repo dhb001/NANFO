@@ -90,19 +90,12 @@ def _coerce_iso_datetime(value: Any) -> datetime:
         return datetime.now(UTC)
 
 
-def _coerce_metric_value(raw: Any) -> float:
-    try:
-        return float(raw)
-    except (TypeError, ValueError):
-        return 0.0
-
-
-def _extract_metrics(run_output: Any) -> dict[str, float]:
-    payload = run_output if isinstance(run_output, dict) else {}
+def _unavailable_metrics() -> dict[str, None]:
+    """No evaluator exists, including for historical baseline output records."""
     return {
-        "latency_ms": _coerce_metric_value(payload.get("latency_ms")),
-        "loss_pct": _coerce_metric_value(payload.get("loss_pct")),
-        "throughput_mbps": _coerce_metric_value(payload.get("throughput_mbps")),
+        "latency_ms": None,
+        "loss_pct": None,
+        "throughput_mbps": None,
     }
 
 
@@ -111,13 +104,7 @@ def _derive_terminal_transition(
     queue_status: Any,
     warning: Any,
 ) -> tuple[str, str, str]:
-    normalized_queue_status = str(queue_status).strip().lower()
-    normalized_warning = str(warning).strip()
-
-    if normalized_queue_status == "deferred" or normalized_warning == "event_queue_unavailable":
-        return "cancelled", "blocked", "simulation.cancelled"
-
-    return "completed", "passed", "simulation.completed"
+    return "cancelled", "blocked", "simulation.cancelled"
 
 
 class ScenarioValidationHandoffService:
@@ -164,6 +151,7 @@ class ScenarioValidationHandoffService:
                 "status": "pending",
                 "queued_at": now_iso,
                 "requested_by_user_id": normalized_requested_by,
+                "evaluator_status": "unavailable",
             },
             "requested_at": now_iso,
             "correlation_id": normalized_correlation_id,
@@ -268,17 +256,20 @@ class SimulationTerminalEventService:
             )
             return
 
+        normalized_validation = dict(simulation.validation) if isinstance(simulation.validation, dict) else {}
+        normalized_validation["pipeline_stage"] = "terminal"
+        normalized_validation["status"] = terminal_state
+        normalized_validation["terminal_event_type"] = terminal_event_type
+        normalized_validation["failure_reason"] = "evaluator_unavailable"
+        normalized_validation["evaluator_status"] = "unavailable"
         await self._repo.update_state(
             simulation,
             state=terminal_state,
             status=terminal_state,
             risk_gate=terminal_risk_gate,
+            validation=normalized_validation,
+            run_output=_unavailable_metrics(),
         )
-
-        normalized_validation = dict(simulation.validation) if isinstance(simulation.validation, dict) else {}
-        normalized_validation["pipeline_stage"] = "terminal"
-        normalized_validation["status"] = terminal_state
-        normalized_validation["terminal_event_type"] = terminal_event_type
 
         terminal_payload = {
             "simulation_id": str(simulation.simulation_id),
@@ -290,6 +281,8 @@ class SimulationTerminalEventService:
             "status": terminal_state,
             "risk_gate": terminal_risk_gate,
             "validation": normalized_validation,
+            "run_output": _unavailable_metrics(),
+            "failure_reason": "evaluator_unavailable",
         }
         correlation_id = _coerce_correlation_id(event.get("correlation_id"))
         event_id = _derive_terminal_event_id(
@@ -333,6 +326,7 @@ class SimulationStartService:
         requested_workspace_id: uuid.UUID | None,
         actor_user_id: str,
         claim_org_id: uuid.UUID | None,
+        require_write: bool = False,
     ) -> None:
         if requested_workspace_id is not None and simulation.workspace_id != requested_workspace_id:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions.")
@@ -341,6 +335,7 @@ class SimulationStartService:
             simulation.workspace_id,
             user_id=actor_user_id,
             claim_org_id=claim_org_id,
+            require_write=require_write,
         )
 
     async def start_simulation(
@@ -369,20 +364,22 @@ class SimulationStartService:
             requested_workspace_id=requested_workspace_id,
             actor_user_id=requested_by_user_id,
             claim_org_id=claim_org_id,
+            require_write=True,
         )
 
-        result = await queue_scenario_validation_handoff(
-            redis=self._redis,
+        handoff = ScenarioValidationHandoffService().build_handoff_payload(
             network_id=network_id,
             scenario_name=scenario_name,
             validation_checks=validation_checks,
             correlation_id=correlation_id,
             requested_by_user_id=requested_by_user_id,
         )
-        handoff = result["handoff"]
         validation = handoff.get("validation") if isinstance(handoff.get("validation"), dict) else {}
+        handoff.update(state="cancelled", status="cancelled", risk_gate="blocked", workspace_id=str(network.workspace_id))
+        validation.update(pipeline_stage="terminal", status="cancelled", failure_reason="evaluator_unavailable",
+                          terminal_event_type="simulation.cancelled")
 
-        await self._repo.create(
+        record = await self._repo.create(
             simulation_id=uuid.UUID(str(handoff["simulation_id"])),
             parent_simulation_id=None,
             network_id=network.network_id,
@@ -393,25 +390,41 @@ class SimulationStartService:
             status=str(handoff.get("status", "queued")),
             risk_gate=str(handoff.get("risk_gate", "required")),
             validation=validation,
-            run_output={
-                "latency_ms": 0.0,
-                "loss_pct": 0.0,
-                "throughput_mbps": 0.0,
-            },
+            run_output=_unavailable_metrics(),
             model_versions={},
             audit_provenance={
                 "correlation_id": handoff.get("correlation_id"),
                 "requested_by_user_id": validation.get("requested_by_user_id"),
                 "policy_reference": validation.get("policy_reference"),
             },
-            queue_status=str(result.get("queue_status", "queued")),
-            stream_entry_id=result.get("stream_entry_id"),
-            warning=result.get("warning"),
+            queue_status="pending",
+            stream_entry_id=None,
+            warning=None,
             requested_by_user_id=str(validation.get("requested_by_user_id", requested_by_user_id)),
             requested_at=_coerce_iso_datetime(handoff.get("requested_at")),
         )
         await self._db.commit()
-        return result
+        return await self._publish_cancelled(record=record, handoff=handoff)
+
+    async def _publish_cancelled(self, *, record, handoff: dict[str, Any]) -> dict[str, Any]:
+        """Publish only after the unavailable outcome is durably stored."""
+        try:
+            stream_entry_id = await SimulationEventService(redis=self._redis).publish_lifecycle_event(
+                event_type="simulation.cancelled", payload={**handoff, "run_output": _unavailable_metrics()},
+                correlation_id=str(handoff["correlation_id"]),
+                event_id=_derive_terminal_event_id(
+                    simulation_id=uuid.UUID(handoff["simulation_id"]), event_type="simulation.cancelled",
+                ),
+            )
+            queue_status, warning = "queued", None
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("simulation_cancelled_publish_failed", simulation_id=handoff["simulation_id"], error=str(exc))
+            stream_entry_id, queue_status, warning = None, "deferred", "event_queue_unavailable"
+        await self._repo.update_queue_outcome(
+            record, queue_status=queue_status, stream_entry_id=stream_entry_id, warning=warning,
+        )
+        await self._db.commit()
+        return {"handoff": handoff, "queue_status": queue_status, "stream_entry_id": stream_entry_id, "warning": warning}
 
     async def _resume_simulation(
         self,
@@ -431,6 +444,7 @@ class SimulationStartService:
             requested_workspace_id=requested_workspace_id,
             actor_user_id=requested_by_user_id,
             claim_org_id=claim_org_id,
+            require_write=True,
         )
 
         if simulation.state not in {"paused", "queued"}:
@@ -452,48 +466,21 @@ class SimulationStartService:
         )
         handoff["simulation_id"] = str(simulation.simulation_id)
         handoff["scenario_id"] = str(simulation.scenario_id)
-
-        try:
-            stream_entry_id = await SimulationEventService(redis=self._redis).publish_simulation_started_handoff(
-                handoff_payload=handoff,
-                correlation_id=str(handoff["correlation_id"]),
-            )
-            queue_status = "queued"
-            warning = None
-        except Exception as exc:  # noqa: BLE001
-            logger.warning(
-                "simulation_resume_queue_failed",
-                simulation_id=str(simulation.simulation_id),
-                correlation_id=str(handoff["correlation_id"]),
-                error=str(exc),
-            )
-            stream_entry_id = None
-            queue_status = "deferred"
-            warning = "event_queue_unavailable"
+        handoff.update(state="cancelled", status="cancelled", risk_gate="blocked",
+                       workspace_id=str(simulation.workspace_id), resumed_from_simulation_id=str(simulation.simulation_id))
+        handoff["validation"].update(pipeline_stage="terminal", status="cancelled", failure_reason="evaluator_unavailable",
+                                     terminal_event_type="simulation.cancelled")
 
         await self._repo.update_state(
             simulation,
-            state="queued",
-            status="queued",
-            risk_gate="required",
-        )
-        await self._repo.update_queue_outcome(
-            simulation,
-            queue_status=queue_status,
-            stream_entry_id=stream_entry_id,
-            warning=warning,
+            state="cancelled",
+            status="cancelled",
+            risk_gate="blocked",
+            validation=handoff["validation"],
+            run_output=_unavailable_metrics(),
         )
         await self._db.commit()
-
-        return {
-            "handoff": {
-                **handoff,
-                "resumed_from_simulation_id": str(simulation.simulation_id),
-            },
-            "queue_status": queue_status,
-            "stream_entry_id": stream_entry_id,
-            "warning": warning,
-        }
+        return await self._publish_cancelled(record=simulation, handoff=handoff)
 
     async def pause_simulation(
         self,
@@ -513,6 +500,7 @@ class SimulationStartService:
             requested_workspace_id=requested_workspace_id,
             actor_user_id=requested_by_user_id,
             claim_org_id=claim_org_id,
+            require_write=True,
         )
 
         if simulation.state == "paused":
@@ -597,6 +585,7 @@ class SimulationStartService:
             requested_workspace_id=requested_workspace_id,
             actor_user_id=requested_by_user_id,
             claim_org_id=claim_org_id,
+            require_write=True,
         )
 
         normalized_scenario_name = _coerce_non_empty_text(
@@ -626,18 +615,9 @@ class SimulationStartService:
             "requested_by_user_id": normalized_requested_by,
         }
 
-        run_output: dict[str, Any]
-        if isinstance(parent.run_output, dict):
-            run_output = dict(parent.run_output)
-        else:
-            run_output = {
-                "latency_ms": 0.0,
-                "loss_pct": 0.0,
-                "throughput_mbps": 0.0,
-            }
-
-        model_versions = dict(parent.model_versions) if isinstance(parent.model_versions, dict) else {}
-        audit_provenance = dict(parent.audit_provenance) if isinstance(parent.audit_provenance, dict) else {}
+        run_output = _unavailable_metrics()
+        model_versions = {}
+        audit_provenance = {"evaluator_status": "unavailable"}
         audit_provenance["branch_from_simulation_id"] = str(parent.simulation_id)
         audit_provenance["branch_correlation_id"] = correlation_id
 
@@ -733,6 +713,11 @@ class SimulationStartService:
             claim_org_id=claim_org_id,
         )
 
+        validation = dict(simulation.validation) if isinstance(simulation.validation, dict) else {}
+        validation.update(evaluator_status="unavailable", failure_reason="evaluator_unavailable")
+        legacy_completed = simulation.state == "completed" or simulation.status == "completed"
+        if legacy_completed:
+            validation.update(status="cancelled", pipeline_stage="terminal", legacy_baseline_unverified=True)
         return {
             "simulation_id": str(simulation.simulation_id),
             "parent_simulation_id": (
@@ -744,12 +729,12 @@ class SimulationStartService:
             "network_id": str(simulation.network_id),
             "workspace_id": str(simulation.workspace_id),
             "scene_object_id": _DEFAULT_SIMULATION_OBJECT_ID,
-            "state": str(simulation.state),
-            "status": str(simulation.status),
-            "risk_gate": str(simulation.risk_gate),
+            "state": "cancelled" if legacy_completed else str(simulation.state),
+            "status": "cancelled" if legacy_completed else str(simulation.status),
+            "risk_gate": "blocked" if legacy_completed else str(simulation.risk_gate),
             "scenario_name": str(simulation.scenario_name),
-            "validation": dict(simulation.validation) if isinstance(simulation.validation, dict) else {},
-            "run_output": dict(simulation.run_output) if isinstance(simulation.run_output, dict) else {},
+            "validation": validation,
+            "run_output": _unavailable_metrics(),
             "model_versions": (
                 dict(simulation.model_versions)
                 if isinstance(simulation.model_versions, dict)
@@ -805,13 +790,9 @@ class SimulationStartService:
                 detail="Simulations belong to different networks.",
             )
 
-        simulation_metrics = _extract_metrics(simulation.run_output)
-        baseline_metrics = _extract_metrics(baseline.run_output)
-        deltas = {
-            "latency_ms": simulation_metrics["latency_ms"] - baseline_metrics["latency_ms"],
-            "loss_pct": simulation_metrics["loss_pct"] - baseline_metrics["loss_pct"],
-            "throughput_mbps": simulation_metrics["throughput_mbps"] - baseline_metrics["throughput_mbps"],
-        }
+        simulation_metrics = _unavailable_metrics()
+        baseline_metrics = _unavailable_metrics()
+        deltas = _unavailable_metrics()
 
         return {
             "simulation_id": str(simulation.simulation_id),

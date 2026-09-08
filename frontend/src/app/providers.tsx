@@ -1,4 +1,5 @@
 import { PropsWithChildren, useMemo } from "react";
+import { LazyMotion, domAnimation } from "framer-motion";
 import { ToastCenter } from "@/shared/ui/ToastCenter";
 import { HotkeyLayer } from "@/shared/ui/HotkeyLayer";
 import { CommandPalette } from "@/shared/ui/CommandPalette";
@@ -16,9 +17,9 @@ export function AppProviders({ children }: PropsWithChildren) {
   );
 
   return (
-    <>
+    <LazyMotion features={domAnimation} strict>
       {children}
       {overlays}
-    </>
+    </LazyMotion>
   );
 }

@@ -546,6 +546,7 @@ def _intent_event(
         else {
             "intent_id": str(uuid.uuid4()),
             "network_id": str(uuid.uuid4()),
+            "workspace_id": str(uuid.uuid4()),
             "intent_kind": "reroute_path",
             "status": "execution_started",
             "confidence": {
@@ -610,6 +611,7 @@ async def test_ws_intent_consumer_maps_verification_and_rollback_statuses():
         payload={
             "intent_id": str(uuid.uuid4()),
             "network_id": str(uuid.uuid4()),
+            "workspace_id": str(uuid.uuid4()),
             "intent_kind": "isolate_vlan",
             "status": "execution_failed",
             "confidence": {

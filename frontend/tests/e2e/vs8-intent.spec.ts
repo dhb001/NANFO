@@ -168,7 +168,7 @@ test.describe("VS8 intent parity", () => {
 
     await page.getByLabel("Idempotency Key").fill("intent-test-2");
     await page.getByRole("button", { name: "Execute" }).click();
-    await expect(page.getByText("Execution accepted")).toBeVisible();
+    await expect(page.getByText("Execution request received")).toBeVisible();
 
     await expect(page.getByText("execution_failed").first()).toBeVisible();
     await expect(page.getByText("rollback_ref: rbk-1")).toBeVisible();

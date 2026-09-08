@@ -2,6 +2,20 @@
 
 Lightweight chronological notes for decisions that do not require a full ADR.
 
+## 2026-09-08
+### User-Requested Foundation and Security Baseline
+
+Keep existing routes, channels and ownership. Redis remains the session store;
+refresh returns a rotated TokenPair and legacy sessionless tokens require login.
+Browser credentials are tab-local to avoid shared refresh-token replay races.
+Global capabilities intersect current organization roles for tenant writes.
+Global diagnostics/registry require Admin and active membership; audit reads are
+organization-scoped. No mode enables an uninstalled controller, evaluator, or
+renderer. Unsupported operations fail explicitly and unmeasured values remain
+null. No relational migration or new event name is introduced. Full design,
+verification, breaking session behavior, and live-testing limits are recorded in
+`FoundationSecurity-Step1-Step2.md`.
+
 ## 2026-09-02
 ### Digital Twin Residual Closure: Approve Network-Native Device Groups and Campus Model Asset Persistence Under Existing Network Contracts
 Decision: Close the remaining backend Digital Twin residuals for native device-group support and persisted campus model asset lifecycle by extending the existing Network PRD surface with `GET|POST /api/v1/networks/{network_id}/device-groups` and `GET|POST /api/v1/networks/{network_id}/campus/model-assets`, while preserving canonical API envelopes and avoiding websocket/event contract expansion.

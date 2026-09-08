@@ -8,7 +8,6 @@ Scope:
 
 from __future__ import annotations
 
-import hashlib
 import uuid
 from datetime import UTC, datetime
 from typing import Any
@@ -17,7 +16,6 @@ import redis.asyncio as aioredis
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.events.publisher import publish_event
 from app.modules.network.repository import NetworkRepository
@@ -68,12 +66,6 @@ def _as_dict(value: Any) -> dict:
     return {}
 
 
-def _as_list(value: Any) -> list:
-    if isinstance(value, list):
-        return list(value)
-    return []
-
-
 class ReportService:
     """Generate and read report lifecycle records with queue-backed transitions."""
 
@@ -99,7 +91,7 @@ class ReportService:
         correlation_id: str,
         requested_by_user_id: str,
     ) -> dict[str, Any]:
-        await self._workspace_svc.get_active_workspace(workspace_id)
+        await self._workspace_svc.get_active_workspace(workspace_id, user_id=requested_by_user_id, require_write=True)
 
         if network_id is not None:
             network = await self._network_repo.get_by_id(network_id)
@@ -225,8 +217,9 @@ class ReportService:
         *,
         report_id: uuid.UUID,
         workspace_id: uuid.UUID,
+        user_id: str,
     ) -> dict[str, Any]:
-        await self._workspace_svc.get_active_workspace(workspace_id)
+        await self._workspace_svc.get_active_workspace(workspace_id, user_id=user_id)
         record = await self._repo.get_by_id(report_id)
         if record is None or record.workspace_id != workspace_id:
             raise HTTPException(
@@ -264,20 +257,14 @@ class ReportService:
         if _normalize_text(record.status) in _TERMINAL_STATUSES:
             return
 
-        fail_generation = bool(payload.get("fail_generation"))
         completed_at = datetime.now(UTC)
-        if fail_generation:
-            terminal_status = _REPORT_STATUS_FAILED
-            artifacts: list[dict[str, Any]] = []
-            error_context = {
-                "code": "REPORT_GENERATION_FAILED",
-                "message": "Report generation failed during queue processing.",
-                "failed_at": completed_at.isoformat(),
-            }
-        else:
-            terminal_status = _REPORT_STATUS_GENERATED
-            artifacts = self._build_artifacts(record=record, generated_at=completed_at)
-            error_context = {}
+        terminal_status = _REPORT_STATUS_FAILED
+        artifacts: list[dict[str, Any]] = []
+        error_context = {
+            "code": "REPORT_RENDERER_UNAVAILABLE",
+            "message": "No report renderer is installed. No artifact was generated.",
+            "failed_at": completed_at.isoformat(),
+        }
 
         terminal_event_type = f"report.{terminal_status}"
         queue_status, stream_entry_id, warning = await self._publish_lifecycle_event(
@@ -323,29 +310,6 @@ class ReportService:
             and _as_dict(record.scope) == scope
             and _as_dict(record.filters) == filters
         )
-
-    @staticmethod
-    def _build_artifacts(*, record, generated_at: datetime) -> list[dict[str, Any]]:
-        settings = get_settings()
-        extension = _normalize_report_format(record.output_format)
-        media_type = "application/pdf" if extension == "pdf" else "text/csv"
-        content_fingerprint = (
-            f"{record.report_id}:{record.workspace_id}:{record.report_type}:{record.output_format}:{generated_at.isoformat()}"
-        )
-        checksum = hashlib.sha256(content_fingerprint.encode("utf-8")).hexdigest()
-        size_bytes = 16384 if extension == "pdf" else 8192
-        artifact_id = f"artifact-{record.report_id}-{extension}"
-        uri = f"s3://{settings.REPORTS_ARTIFACT_BUCKET}/{record.workspace_id}/{record.report_id}.{extension}"
-        return [
-            {
-                "artifact_id": artifact_id,
-                "uri": uri,
-                "media_type": media_type,
-                "checksum_sha256": checksum,
-                "size_bytes": size_bytes,
-                "generated_at": generated_at.isoformat(),
-            }
-        ]
 
     def _build_requested_event_payload(
         self,
@@ -422,17 +386,24 @@ class ReportService:
     @staticmethod
     def _serialize_report(record, *, idempotent_replay: bool) -> dict[str, Any]:
         error_context = _as_dict(record.error_context)
+        report_status = _normalize_text(record.status)
+        if report_status == _REPORT_STATUS_GENERATED:
+            report_status = _REPORT_STATUS_FAILED
+            error_context = {
+                "code": "REPORT_RENDERER_UNAVAILABLE",
+                "message": "Legacy baseline artifacts were not rendered and are unavailable.",
+            }
         return {
             "report_id": str(record.report_id),
             "workspace_id": str(record.workspace_id),
             "network_id": str(record.network_id) if record.network_id is not None else None,
             "report_type": _normalize_text(record.report_type),
             "format": _normalize_report_format(record.output_format),
-            "status": _normalize_text(record.status),
+            "status": report_status,
             "date_range": _as_dict(record.date_range),
             "scope": _as_dict(record.scope),
             "filters": _as_dict(record.filters),
-            "artifacts": _as_list(record.artifact_refs),
+            "artifacts": [],
             "error": error_context or None,
             "queue_status": _normalize_text(record.queue_status),
             "stream_entry_id": record.stream_entry_id,

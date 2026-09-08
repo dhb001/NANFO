@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { useUiStore } from "@/shared/state/ui-store";
+import { useAuthStore } from "@/shared/state/auth-store";
+import { canAccessRoute } from "@/features/auth/permissions";
 import {
   resolveChordNavigation,
   shouldIgnoreHotkeyTarget,
@@ -64,7 +66,7 @@ export function HotkeyLayer() {
       if (result.path) {
         event.preventDefault();
         resetPrefix();
-        navigate(result.path);
+        if (canAccessRoute(useAuthStore.getState().profile, result.path)) navigate(result.path);
       }
     };
 

@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 
 import { ReportsPage } from "@/features/reporting/ReportsPage";
 import { useAuthStore } from "@/shared/state/auth-store";
+import { operatorProfile } from "@/test/profile";
 import { useUiStore } from "@/shared/state/ui-store";
 import { useWorkspaceStore } from "@/shared/state/workspace-store";
 
@@ -32,6 +33,7 @@ describe("ReportsPage", () => {
     vi.clearAllMocks();
 
     useAuthStore.setState({
+      profile: operatorProfile,
       accessToken: "token-1",
       refreshToken: "refresh-1",
       userId: "00000000-0000-0000-0000-000000000123",
@@ -99,6 +101,15 @@ describe("ReportsPage", () => {
 
     expect(mutateAsync).toHaveBeenCalledTimes(1);
     expect(useUiStore.getState().toasts.some((toast) => toast.title === "Report request accepted")).toBe(true);
+  });
+
+  it("does not call a failed demo report accepted or generated", async () => {
+    mutateAsync.mockResolvedValueOnce({ report_id: "demo-report", status: "failed", queue_status: "blocked", idempotent_replay: false });
+    render(<ReportsPage />);
+    await userEvent.click(screen.getByRole("button", { name: "Generate Report" }));
+    expect(useUiStore.getState().toasts.at(-1)).toMatchObject({
+      title: "Report failed: no artifacts generated", tone: "danger",
+    });
   });
 
   it("shows failed report diagnostics and retry action", async () => {

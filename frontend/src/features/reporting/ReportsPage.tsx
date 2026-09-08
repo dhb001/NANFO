@@ -119,9 +119,9 @@ export function ReportsPage() {
 
       setReportId(result.report_id);
       pushToast({
-        title: result.idempotent_replay ? "Report replayed" : "Report request accepted",
+        title: result.status === "failed" ? "Report failed: no artifacts generated" : result.idempotent_replay ? "Report replayed" : "Report request accepted",
         description: `Status ${result.status} | queue ${result.queue_status}`,
-        tone: mapQueueTone(result.queue_status) === "warn" ? "warn" : "ok",
+        tone: result.status === "failed" ? "danger" : mapQueueTone(result.queue_status) === "warn" ? "warn" : "ok",
       });
     } catch (error) {
       if (error instanceof ApiClientError && error.code === "REPORT_IDEMPOTENCY_CONFLICT") {
@@ -249,7 +249,7 @@ export function ReportsPage() {
           </label>
 
           <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
-            <Button type="submit" disabled={generateMutation.isPending}>
+            <Button permission="read:telemetry" type="submit" disabled={generateMutation.isPending}>
               {generateMutation.isPending ? "Requesting..." : "Generate Report"}
             </Button>
             {reportId ? <Badge text={`report ${reportId.slice(0, 8)}`} tone="info" /> : null}

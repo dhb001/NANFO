@@ -7,6 +7,7 @@ interface WorkspaceSelection {
   setOrganizationId: (organizationId: string | null) => void;
   setWorkspaceId: (workspaceId: string | null) => void;
   setNetworkId: (networkId: string | null) => void;
+  reset: () => void;
 }
 
 const ORGANIZATION_STORAGE_KEY = "nanfo.workspace.organizationId";
@@ -23,9 +24,9 @@ function readWorkspaceSelection() {
   }
 
   return {
-    organizationId: window.localStorage.getItem(ORGANIZATION_STORAGE_KEY),
-    workspaceId: window.localStorage.getItem(WORKSPACE_STORAGE_KEY),
-    networkId: window.localStorage.getItem(NETWORK_STORAGE_KEY),
+    organizationId: window.sessionStorage.getItem(ORGANIZATION_STORAGE_KEY),
+    workspaceId: window.sessionStorage.getItem(WORKSPACE_STORAGE_KEY),
+    networkId: window.sessionStorage.getItem(NETWORK_STORAGE_KEY),
   };
 }
 
@@ -39,27 +40,40 @@ function persistWorkspaceSelection(selection: {
   }
 
   if (selection.organizationId) {
-    window.localStorage.setItem(ORGANIZATION_STORAGE_KEY, selection.organizationId);
+    window.sessionStorage.setItem(ORGANIZATION_STORAGE_KEY, selection.organizationId);
   } else {
-    window.localStorage.removeItem(ORGANIZATION_STORAGE_KEY);
+    window.sessionStorage.removeItem(ORGANIZATION_STORAGE_KEY);
   }
 
   if (selection.workspaceId) {
-    window.localStorage.setItem(WORKSPACE_STORAGE_KEY, selection.workspaceId);
+    window.sessionStorage.setItem(WORKSPACE_STORAGE_KEY, selection.workspaceId);
   } else {
-    window.localStorage.removeItem(WORKSPACE_STORAGE_KEY);
+    window.sessionStorage.removeItem(WORKSPACE_STORAGE_KEY);
   }
 
   if (selection.networkId) {
-    window.localStorage.setItem(NETWORK_STORAGE_KEY, selection.networkId);
+    window.sessionStorage.setItem(NETWORK_STORAGE_KEY, selection.networkId);
   } else {
-    window.localStorage.removeItem(NETWORK_STORAGE_KEY);
+    window.sessionStorage.removeItem(NETWORK_STORAGE_KEY);
   }
 }
 
+// Discard legacy cross-tab selections along with shared authentication persistence.
+try {
+  for (const key of [ORGANIZATION_STORAGE_KEY, WORKSPACE_STORAGE_KEY, NETWORK_STORAGE_KEY]) {
+    window.localStorage.removeItem(key);
+  }
+} catch {
+  // Selection is tab-local even when shared storage is unavailable.
+}
 const initialSelection = readWorkspaceSelection();
 
 export const useWorkspaceStore = create<WorkspaceSelection>((set) => ({
+  reset: () => {
+    const next = { organizationId: null, workspaceId: null, networkId: null };
+    persistWorkspaceSelection(next);
+    set(next);
+  },
   organizationId: initialSelection.organizationId,
   workspaceId: initialSelection.workspaceId,
   networkId: initialSelection.networkId,

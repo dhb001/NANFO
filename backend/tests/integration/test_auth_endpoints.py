@@ -54,7 +54,8 @@ def client() -> TestClient:
 
 
 @pytest.fixture
-def auth_client(auth_headers) -> TestClient:
+def auth_client(auth_headers, session_auth) -> TestClient:
+    app.dependency_overrides[get_redis] = lambda: session_auth.redis
     return TestClient(app, headers=auth_headers, raise_server_exceptions=False)
 
 
@@ -88,10 +89,10 @@ class TestAPIEnvelope:
         # FastAPI HTTPBearer returns 403 when header is missing
         assert response.status_code in (401, 403)
 
-    def test_meta_has_request_id(self, auth_headers, fake_redis):
+    def test_meta_has_request_id(self, auth_headers, session_auth):
         """meta.request_id must be present in every successful response."""
         with TestClient(app, headers=auth_headers, raise_server_exceptions=False) as c:
-            c.app.dependency_overrides[get_redis] = lambda: _fake_redis
+            c.app.dependency_overrides[get_redis] = lambda: session_auth.redis
             c.app.dependency_overrides[get_db] = lambda: _fake_db
             # hit /health as a non-envelope check route
             response = c.get("/health")
@@ -171,3 +172,14 @@ class TestStatusCodes:
     def test_openapi_schema_available(self, client):
         response = client.get("/api/openapi.json")
         assert response.status_code == 200
+
+
+def test_refresh_response_preserves_rotated_pair(client):
+    from app.modules.identity.schemas import TokenPair
+    from app.modules.identity.service import AuthService
+
+    pair = TokenPair(access_token="access", refresh_token="rotated-refresh", expires_in=900)
+    with patch.object(AuthService, "refresh", return_value=pair):
+        response = client.post("/api/v1/auth/refresh", json={"refresh_token": "previous-refresh"})
+    assert response.status_code == 200
+    assert response.json()["data"] == pair.model_dump()

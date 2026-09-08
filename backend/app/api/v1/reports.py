@@ -13,7 +13,7 @@ from app.core.dependencies import (
     RequestMeta,
     TokenClaims,
     enforce_workspace_scope,
-    get_current_user,
+    get_claim_org_scope,
     get_db,
     get_redis,
     get_request_meta,
@@ -21,6 +21,7 @@ from app.core.dependencies import (
 )
 from app.core.responses import APIResponse, success_response
 from app.db.postgres import AsyncSession
+from app.modules.organization.service import WorkspaceService
 from app.modules.report.schemas import (
     GenerateReportRequest,
     ReportGenerateResponse,
@@ -35,6 +36,7 @@ router = APIRouter(prefix="/api/v1/reports", tags=["Reports"])
     "/generate",
     response_model=APIResponse[ReportGenerateResponse],
     status_code=status.HTTP_202_ACCEPTED,
+    dependencies=[Depends(require_permissions("write:config"))],
 )
 async def generate_report(
     req: GenerateReportRequest,
@@ -45,6 +47,10 @@ async def generate_report(
 ):
     started = time.monotonic()
     scoped_workspace_id = enforce_workspace_scope(claims=claims, workspace_id=req.workspace_id)
+    await WorkspaceService(db=db, redis=redis).get_active_workspace(
+        scoped_workspace_id, user_id=claims.user_id, claim_org_id=get_claim_org_scope(claims=claims),
+        require_write=True,
+    )
     header_idempotency_key = None
     if hasattr(meta, "request") and meta.request is not None:
         header_idempotency_key = meta.request.headers.get("Idempotency-Key")
@@ -80,10 +86,14 @@ async def get_report(
     redis: Annotated[aioredis.Redis, Depends(get_redis)],
 ):
     scoped_workspace_id = enforce_workspace_scope(claims=claims, workspace_id=workspace_id)
+    await WorkspaceService(db=db, redis=redis).get_active_workspace(
+        scoped_workspace_id, user_id=claims.user_id, claim_org_id=get_claim_org_scope(claims=claims),
+    )
     started = time.monotonic()
     result = await ReportService(db=db, redis=redis).get_report(
         report_id=report_id,
         workspace_id=scoped_workspace_id,
+        user_id=claims.user_id,
     )
     payload = ReportRecordResponse.model_validate(result)
     return success_response(payload, meta.request_id, started, meta.timestamp)

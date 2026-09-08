@@ -104,6 +104,7 @@ class AlertService:
         actor_user_id: str,
         requested_workspace_id: uuid.UUID | None,
         claim_org_id: uuid.UUID | None,
+        require_write: bool = False,
     ) -> None:
         payload = alert.payload if isinstance(alert.payload, dict) else {}
         payload_network_id = self._extract_alert_scope_uuid(payload, "network_id")
@@ -111,29 +112,45 @@ class AlertService:
         payload_org_id = self._extract_alert_scope_uuid(payload, "org_id")
 
         if payload_network_id is not None:
-            await self._network_svc.assert_network_workspace_access(
+            network = await self._network_svc.assert_network_workspace_access(
                 network_id=payload_network_id,
                 requested_workspace_id=requested_workspace_id,
                 actor_user_id=actor_user_id,
                 claim_org_id=claim_org_id,
+                require_write=require_write,
             )
+            if payload_workspace_id is not None and network.workspace_id != payload_workspace_id:
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions.")
+            if payload_org_id is not None:
+                await self._workspace_svc.get_active_workspace(
+                    network.workspace_id, user_id=actor_user_id, claim_org_id=payload_org_id,
+                )
             return
 
         if payload_workspace_id is not None:
             if requested_workspace_id is not None and payload_workspace_id != requested_workspace_id:
                 raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions.")
-            await self._workspace_svc.get_active_workspace(
+            workspace = await self._workspace_svc.get_active_workspace(
                 payload_workspace_id,
                 user_id=actor_user_id,
                 claim_org_id=claim_org_id,
+                require_write=require_write,
             )
+            if payload_org_id is not None and workspace.org_id != payload_org_id:
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions.")
             return
 
         if claim_org_id is not None and payload_org_id is not None and payload_org_id != claim_org_id:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions.")
 
-        if requested_workspace_id is not None or claim_org_id is not None:
+        if requested_workspace_id is not None or payload_org_id is None:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions.")
+        if require_write:
+            await self._workspace_svc.assert_org_write_access(org_id=payload_org_id, user_id=actor_user_id)
+        else:
+            await self._workspace_svc.list_workspaces(
+                org_id=payload_org_id, user_id=actor_user_id, page=1, page_size=1,
+            )
 
     async def list_alerts(
         self,
@@ -159,6 +176,8 @@ class AlertService:
             )
 
         normalized_severity = _normalize_status(severity_filter)
+        if actor_user_id is None:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions.")
         normalized_source = _normalize_status(source_filter)
         normalized_search = _coerce_text(search_filter) or None
         bounded_limit = max(1, min(limit, 500))
@@ -184,7 +203,7 @@ class AlertService:
                         claim_org_id=claim_org_id,
                     )
                 except HTTPException as exc:
-                    if exc.status_code == status.HTTP_403_FORBIDDEN:
+                    if exc.status_code in (status.HTTP_403_FORBIDDEN, status.HTTP_404_NOT_FOUND):
                         continue
                     raise
                 scoped_rows.append(row)
@@ -228,6 +247,7 @@ class AlertService:
             actor_user_id=requested_by_user_id,
             requested_workspace_id=requested_workspace_id,
             claim_org_id=claim_org_id,
+            require_write=True,
         )
 
         current_status = _normalize_status(alert.status) or _ALERT_STATUS_ACTIVE
@@ -305,6 +325,7 @@ class AlertService:
             actor_user_id=requested_by_user_id,
             requested_workspace_id=requested_workspace_id,
             claim_org_id=claim_org_id,
+            require_write=True,
         )
 
         current_status = _normalize_status(alert.status) or _ALERT_STATUS_ACTIVE

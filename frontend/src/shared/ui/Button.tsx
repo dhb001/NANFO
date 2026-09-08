@@ -1,12 +1,17 @@
 import { ButtonHTMLAttributes, CSSProperties } from "react";
+import { useAuthStore } from "@/shared/state/auth-store";
+import { hasPermission } from "@/features/auth/permissions";
 
 type Tone = "primary" | "ghost" | "danger";
 
 interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   tone?: Tone;
+  permission?: string;
 }
 
-export function Button({ tone = "primary", children, style, ...props }: ButtonProps) {
+export function Button({ tone = "primary", permission, children, style, ...props }: ButtonProps) {
+  const profile = useAuthStore((state) => state.profile);
+  const denied = permission !== undefined && !hasPermission(profile, permission);
   const toneStyles: Record<Tone, CSSProperties> = {
     primary: {
       background: "linear-gradient(135deg, var(--brand), var(--brand-2))",
@@ -28,6 +33,8 @@ export function Button({ tone = "primary", children, style, ...props }: ButtonPr
   return (
     <button
       {...props}
+      disabled={props.disabled || denied}
+      title={denied ? `Requires ${permission} permission` : props.title}
       style={{
         borderRadius: "10px",
         padding: "0.5rem 0.8rem",

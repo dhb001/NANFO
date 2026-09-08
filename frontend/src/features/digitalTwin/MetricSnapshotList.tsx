@@ -1,5 +1,6 @@
 import type { TwinMetricSnapshot } from "@/features/digitalTwin/sceneAdapter";
 import { formatNumber, formatTimestamp } from "@/shared/lib/format";
+import { TelemetryProvenance } from "@/features/telemetry/TelemetryProvenance";
 
 interface MetricSnapshotListProps {
   metrics: TwinMetricSnapshot[];
@@ -32,6 +33,7 @@ export function MetricSnapshotList({ metrics }: MetricSnapshotListProps) {
           <div className="mono" style={{ color: "var(--ink-3)", fontSize: "0.72rem" }}>
             score {formatNumber(metric.normalizedScore * 100, 0)}% | {metric.policyId} {metric.severity} | {metric.source}
           </div>
+          <TelemetryProvenance tags={metric.tags} />
           <div style={{ color: "var(--ink-3)", fontSize: "0.74rem" }}>{formatTimestamp(metric.observedAt)}</div>
         </div>
       ))}

@@ -44,25 +44,8 @@ def _intent_record(
     return row
 
 
-class _Outcome:
-    def __init__(
-        self,
-        *,
-        terminal_status: str,
-        verification: dict,
-        rollback: dict | None,
-        execution_summary: str,
-        failure_reason: str | None,
-    ):
-        self.terminal_status = terminal_status
-        self.verification = verification
-        self.rollback = rollback
-        self.execution_summary = execution_summary
-        self.failure_reason = failure_reason
-
-
 @pytest.mark.asyncio
-async def test_execute_intent_completes_lifecycle_and_publishes_started_and_completed_events(
+async def test_execute_intent_fails_lifecycle_and_publishes_started_and_failed_events(
     mock_db,
     fake_redis,
 ):
@@ -75,19 +58,11 @@ async def test_execute_intent_completes_lifecycle_and_publishes_started_and_comp
         patch("app.modules.intent.service.IntentRepository.get_by_idempotency_key", new_callable=AsyncMock) as mock_by_key,
         patch("app.modules.intent.service.IntentRepository.get_by_id", new_callable=AsyncMock) as mock_by_id,
         patch("app.modules.intent.service.IntentRepository.update_status", new_callable=AsyncMock) as mock_update,
-        patch("app.modules.intent.service.HypervisorExecutionService.execute") as mock_hypervisor_execute,
         patch("app.modules.intent.service.publish_event", new_callable=AsyncMock) as mock_publish,
     ):
         mock_by_key.return_value = None
         mock_by_id.return_value = intent
         mock_publish.side_effect = ["3001-0", "3002-0"]
-        mock_hypervisor_execute.return_value = _Outcome(
-            terminal_status="execution_completed",
-            verification={"status": "passed"},
-            rollback=None,
-            execution_summary="Execution verified by hypervisor baseline checks.",
-            failure_reason=None,
-        )
 
         async def _update_status_side_effect(target, **kwargs):
             if "status" in kwargs:
@@ -118,7 +93,9 @@ async def test_execute_intent_completes_lifecycle_and_publishes_started_and_comp
             requested_permissions=["write:config", "execute:rollback"],
         )
 
-    assert result["status"] == "execution_completed"
+    assert result["status"] == "execution_failed"
+    assert result["execution_provenance"]["verification"]["status"] == "not_performed"
+    assert "rollback" not in result["execution_provenance"]
     assert result["queue_status"] == "queued"
     assert result["idempotent_replay"] is False
     assert result["stream_entry_id"] == "3002-0"
@@ -127,9 +104,8 @@ async def test_execute_intent_completes_lifecycle_and_publishes_started_and_comp
     assert mock_publish.await_count == 2
     assert mock_publish.await_args_list[0].kwargs["event_type"] == "intent.execution_started"
     assert mock_publish.await_args_list[0].kwargs["source"] == "intent"
-    assert mock_publish.await_args_list[1].kwargs["event_type"] == "intent.execution_completed"
+    assert mock_publish.await_args_list[1].kwargs["event_type"] == "intent.execution_failed"
     assert mock_publish.await_args_list[1].kwargs["source"] == "intent"
-    assert mock_hypervisor_execute.called
     mock_db.refresh.assert_awaited_once_with(intent)
     mock_db.commit.assert_awaited_once()
 
@@ -148,19 +124,11 @@ async def test_execute_intent_publish_failure_marks_execution_failed_fail_open(
         patch("app.modules.intent.service.IntentRepository.get_by_idempotency_key", new_callable=AsyncMock) as mock_by_key,
         patch("app.modules.intent.service.IntentRepository.get_by_id", new_callable=AsyncMock) as mock_by_id,
         patch("app.modules.intent.service.IntentRepository.update_status", new_callable=AsyncMock) as mock_update,
-        patch("app.modules.intent.service.HypervisorExecutionService.execute") as mock_hypervisor_execute,
         patch("app.modules.intent.service.publish_event", new_callable=AsyncMock) as mock_publish,
     ):
         mock_by_key.return_value = None
         mock_by_id.return_value = intent
         mock_publish.side_effect = ["3001-0", "3002-0"]
-        mock_hypervisor_execute.return_value = _Outcome(
-            terminal_status="execution_failed",
-            verification={"status": "failed", "checks": ["post_change_health"]},
-            rollback={"attempted": True, "status": "completed"},
-            execution_summary="Execution failed verification; rollback baseline completed.",
-            failure_reason="post_change_verification_failed",
-        )
 
         async def _update_status_side_effect(target, **kwargs):
             if "status" in kwargs:
@@ -198,7 +166,7 @@ async def test_execute_intent_publish_failure_marks_execution_failed_fail_open(
     assert mock_publish.await_count == 2
     assert mock_publish.await_args_list[0].kwargs["event_type"] == "intent.execution_started"
     assert mock_publish.await_args_list[1].kwargs["event_type"] == "intent.execution_failed"
-    assert mock_hypervisor_execute.called
+    assert "rollback" not in result["execution_provenance"]
     mock_db.commit.assert_awaited_once()
 
 
@@ -267,10 +235,10 @@ async def test_execute_intent_idempotent_replay_falls_back_confidence_band(mock_
             requested_permissions=["write:config", "execute:rollback"],
         )
 
-    assert result["status"] == "execution_completed"
+    assert result["status"] == "execution_failed"
     assert result["idempotent_replay"] is True
-    assert result["confidence"]["score"] == 0.91
-    assert result["confidence"]["band"] == "80-94"
+    assert result["confidence"]["score"] == 0.0
+    assert result["confidence"]["band"] == "below_60"
     assert result["confidence"]["approval_required"] is True
     mock_publish.assert_not_awaited()
     mock_db.commit.assert_not_awaited()
@@ -295,19 +263,11 @@ async def test_execute_intent_existing_validated_idempotency_key_proceeds_to_ter
         patch("app.modules.intent.service.IntentRepository.get_by_idempotency_key", new_callable=AsyncMock) as mock_by_key,
         patch("app.modules.intent.service.IntentRepository.get_by_id", new_callable=AsyncMock) as mock_by_id,
         patch("app.modules.intent.service.IntentRepository.update_status", new_callable=AsyncMock) as mock_update,
-        patch("app.modules.intent.service.HypervisorExecutionService.execute") as mock_hypervisor_execute,
         patch("app.modules.intent.service.publish_event", new_callable=AsyncMock) as mock_publish,
     ):
         mock_by_key.return_value = intent
         mock_by_id.return_value = None
         mock_publish.side_effect = ["3002-0", "3003-0"]
-        mock_hypervisor_execute.return_value = _Outcome(
-            terminal_status="execution_completed",
-            verification={"status": "passed"},
-            rollback=None,
-            execution_summary="Execution verified by hypervisor baseline checks.",
-            failure_reason=None,
-        )
 
         async def _update_status_side_effect(target, **kwargs):
             if "status" in kwargs:
@@ -330,11 +290,10 @@ async def test_execute_intent_existing_validated_idempotency_key_proceeds_to_ter
             requested_permissions=["write:config", "execute:rollback"],
         )
 
-    assert result["status"] == "execution_completed"
+    assert result["status"] == "execution_failed"
     assert result["idempotent_replay"] is False
     assert result["stream_entry_id"] == "3003-0"
     assert mock_publish.await_count == 2
-    assert mock_hypervisor_execute.called
 
 
 @pytest.mark.asyncio
@@ -348,19 +307,11 @@ async def test_execute_intent_started_event_publish_failure_remains_fail_open(mo
         patch("app.modules.intent.service.IntentRepository.get_by_idempotency_key", new_callable=AsyncMock) as mock_by_key,
         patch("app.modules.intent.service.IntentRepository.get_by_id", new_callable=AsyncMock) as mock_by_id,
         patch("app.modules.intent.service.IntentRepository.update_status", new_callable=AsyncMock) as mock_update,
-        patch("app.modules.intent.service.HypervisorExecutionService.execute") as mock_hypervisor_execute,
         patch("app.modules.intent.service.publish_event", new_callable=AsyncMock) as mock_publish,
     ):
         mock_by_key.return_value = None
         mock_by_id.return_value = intent
         mock_publish.side_effect = [RuntimeError("stream unavailable"), "3002-0"]
-        mock_hypervisor_execute.return_value = _Outcome(
-            terminal_status="execution_completed",
-            verification={"status": "passed"},
-            rollback=None,
-            execution_summary="Execution verified by hypervisor baseline checks.",
-            failure_reason=None,
-        )
 
         async def _update_status_side_effect(target, **kwargs):
             if "status" in kwargs:
@@ -389,13 +340,13 @@ async def test_execute_intent_started_event_publish_failure_remains_fail_open(mo
             requested_permissions=["write:config", "execute:rollback"],
         )
 
-    assert result["status"] == "execution_completed"
+    assert result["status"] == "execution_failed"
     assert result["queue_status"] == "deferred"
     assert result["warning"] == "event_queue_unavailable"
     assert result["stream_entry_id"] == "3002-0"
     assert mock_publish.await_count == 2
     assert mock_publish.await_args_list[0].kwargs["event_type"] == "intent.execution_started"
-    assert mock_publish.await_args_list[1].kwargs["event_type"] == "intent.execution_completed"
+    assert mock_publish.await_args_list[1].kwargs["event_type"] == "intent.execution_failed"
 
 
 @pytest.mark.asyncio
@@ -533,6 +484,7 @@ async def test_get_intent_detail_returns_record_for_workspace(mock_db, fake_redi
 
         svc = IntentExecutionService(db=mock_db, redis=fake_redis)
         result = await svc.get_intent_detail(
+            user_id=str(uuid.uuid4()),
             workspace_id=workspace_id,
             intent_id=intent_id,
         )
@@ -564,16 +516,17 @@ async def test_get_intent_detail_falls_back_for_missing_metadata(mock_db, fake_r
 
         svc = IntentExecutionService(db=mock_db, redis=fake_redis)
         result = await svc.get_intent_detail(
+            user_id=str(uuid.uuid4()),
             workspace_id=workspace_id,
             intent_id=intent_id,
         )
 
-    assert result["validation_result"] == {}
+    assert result["validation_result"]["model_evidence"] == "unavailable"
     assert result["execution_provenance"] == {}
-    assert result["explainability"] == {}
+    assert "unavailable" in result["explainability"]["model_confidence"]
     assert result["confidence"]["score"] == 0.0
     assert result["confidence"]["band"] == "below_60"
-    assert result["confidence"]["approval_required"] is False
+    assert result["confidence"]["approval_required"] is True
 
 
 @pytest.mark.asyncio
@@ -592,6 +545,7 @@ async def test_get_intent_detail_raises_404_for_workspace_mismatch(mock_db, fake
         svc = IntentExecutionService(db=mock_db, redis=fake_redis)
         with pytest.raises(HTTPException) as exc_info:
             await svc.get_intent_detail(
+                user_id=str(uuid.uuid4()),
                 workspace_id=workspace_id,
                 intent_id=intent_id,
             )

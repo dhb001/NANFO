@@ -170,38 +170,42 @@ class TestLogin:
 class TestLogout:
     @pytest.mark.asyncio
     async def test_logout_adds_jti_to_deny_list(self, auth_svc, fake_redis):
-        """Logout must add jti to Redis deny-list so token is revoked (Authentication.md §8.3)."""
+        """Logout removes the entire session family, not just one access jti."""
         jti = str(uuid.uuid4())
+        sid = str(uuid.uuid4())
+        await fake_redis.set(f"auth:session:{sid}", "session")
         from datetime import timedelta
         exp = int((datetime.now(UTC) + timedelta(minutes=14)).timestamp())
 
         with patch("app.modules.identity.service.publish_event", new_callable=AsyncMock):
-            await auth_svc.logout(jti=jti, exp=exp, user_id=str(uuid.uuid4()), correlation_id=str(uuid.uuid4()))
+            await auth_svc.logout(jti=jti, exp=exp, user_id=str(uuid.uuid4()), correlation_id=str(uuid.uuid4()), sid=sid)
 
-        deny_key = f"jti:deny:{jti}"
-        assert await fake_redis.exists(deny_key) == 1
+        assert await fake_redis.exists(f"auth:session:{sid}") == 0
 
     @pytest.mark.asyncio
     async def test_logout_event_publish_failure_is_fail_open(self, auth_svc, fake_redis):
         from datetime import timedelta
 
         jti = str(uuid.uuid4())
+        sid = str(uuid.uuid4())
+        await fake_redis.set(f"auth:session:{sid}", "session")
         exp = int((datetime.now(UTC) + timedelta(minutes=14)).timestamp())
         with patch(
             "app.modules.identity.service.publish_event",
             new_callable=AsyncMock,
             side_effect=RuntimeError("stream unavailable"),
         ):
-            await auth_svc.logout(jti=jti, exp=exp, user_id=str(uuid.uuid4()), correlation_id=str(uuid.uuid4()))
+            await auth_svc.logout(jti=jti, exp=exp, user_id=str(uuid.uuid4()), correlation_id=str(uuid.uuid4()), sid=sid)
 
-        assert await fake_redis.exists(f"jti:deny:{jti}") == 1
+        assert await fake_redis.exists(f"auth:session:{sid}") == 0
 
 
 class TestRefresh:
     @pytest.mark.asyncio
     async def test_valid_refresh_token_returns_new_access_token(self, auth_svc, user):
-        from app.core.security import create_refresh_token
+        from app.core.security import create_refresh_token, decode_token
         refresh_token, _ = create_refresh_token(user_id=str(user.user_id))
+        await auth_svc._sessions.create(decode_token(refresh_token, token_type="refresh"), refresh_token)
         with (
             patch.object(auth_svc._user_repo, "get_by_id", return_value=user),
             patch.object(auth_svc._user_repo, "get_roles_for_user", return_value=["Admin"]),
@@ -214,9 +218,10 @@ class TestRefresh:
 
     @pytest.mark.asyncio
     async def test_refresh_event_publish_failure_is_fail_open(self, auth_svc, user):
-        from app.core.security import create_refresh_token
+        from app.core.security import create_refresh_token, decode_token
 
         refresh_token, _ = create_refresh_token(user_id=str(user.user_id))
+        await auth_svc._sessions.create(decode_token(refresh_token, token_type="refresh"), refresh_token)
         with (
             patch.object(auth_svc._user_repo, "get_by_id", return_value=user),
             patch.object(auth_svc._user_repo, "get_roles_for_user", return_value=["Admin"]),

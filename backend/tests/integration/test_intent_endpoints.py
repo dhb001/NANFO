@@ -6,13 +6,13 @@ import uuid
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
-import fakeredis
 import pytest
 from fastapi.testclient import TestClient
 
 from app.core.dependencies import get_db, get_redis
-from app.core.security import create_access_token
 from app.main import app
+from tests.auth_support import create_authorized_workspace
+from tests.auth_support import create_session_access_token as create_access_token
 
 
 def _make_token() -> str:
@@ -67,8 +67,8 @@ def _make_workspace_scoped_token(*, workspace_id: uuid.UUID) -> str:
 
 
 @pytest.fixture
-def client() -> TestClient:
-    fake_r = fakeredis.FakeAsyncRedis(decode_responses=True)
+def client(session_auth, tenant_auth) -> TestClient:
+    fake_r = session_auth.redis
     db = AsyncMock()
     db.commit = AsyncMock()
     db.flush = AsyncMock()
@@ -91,7 +91,7 @@ def test_validate_intent_returns_envelope_and_validation_payload(client):
     now = datetime.now(UTC)
     result_payload = {
         "intent_id": uuid.uuid4(),
-        "workspace_id": uuid.uuid4(),
+        "workspace_id": create_authorized_workspace(),
         "network_id": uuid.uuid4(),
         "status": "validated",
         "intent_kind": "reroute_path",
@@ -159,7 +159,7 @@ def test_validate_intent_forwards_idempotency_key_header(client):
         new=AsyncMock(
             return_value={
                 "intent_id": uuid.uuid4(),
-                "workspace_id": uuid.uuid4(),
+                "workspace_id": create_authorized_workspace(),
                 "network_id": uuid.uuid4(),
                 "status": "validated",
                 "intent_kind": "reroute_path",
@@ -189,7 +189,7 @@ def test_validate_intent_forwards_idempotency_key_header(client):
         response = client.post(
             "/api/v1/intents/validate",
             json={
-                "workspace_id": str(uuid.uuid4()),
+                "workspace_id": str(create_authorized_workspace()),
                 "network_id": str(uuid.uuid4()),
                 "intent": {"action": "reroute_path", "scope": {"building": "A"}},
             },
@@ -203,7 +203,7 @@ def test_validate_intent_forwards_idempotency_key_header(client):
 def test_validate_intent_invalid_returns_explicit_reasons(client):
     headers = {"Authorization": f"Bearer {_make_token()}"}
     now = datetime.now(UTC)
-    workspace_id = uuid.uuid4()
+    workspace_id = create_authorized_workspace()
     result_payload = {
         "intent_id": uuid.uuid4(),
         "workspace_id": workspace_id,
@@ -315,7 +315,7 @@ def test_validate_intent_workspace_scope_mismatch_returns_403(client):
 def test_execute_intent_returns_envelope_and_execution_payload(client):
     headers = {"Authorization": f"Bearer {_make_token()}"}
     now = datetime.now(UTC)
-    workspace_id = uuid.uuid4()
+    workspace_id = create_authorized_workspace()
     intent_id = uuid.uuid4()
     result_payload = {
         "intent_id": intent_id,
@@ -366,7 +366,7 @@ def test_execute_intent_requires_execute_rollback_permission(client):
     response = client.post(
         "/api/v1/intents/execute",
         json={
-            "workspace_id": str(uuid.uuid4()),
+            "workspace_id": str(create_authorized_workspace()),
             "intent_id": str(uuid.uuid4()),
             "idempotency_key": "idem-1",
         },
@@ -384,7 +384,7 @@ def test_execute_intent_prefers_body_idempotency_key_over_header(client):
         "Authorization": f"Bearer {_make_token()}",
         "Idempotency-Key": "idem-header-1",
     }
-    workspace_id = uuid.uuid4()
+    workspace_id = create_authorized_workspace()
     intent_id = uuid.uuid4()
 
     with patch(
@@ -429,7 +429,7 @@ def test_execute_intent_prefers_body_idempotency_key_over_header(client):
 def test_get_intent_returns_envelope_and_detail_payload(client):
     headers = {"Authorization": f"Bearer {_make_token()}"}
     now = datetime.now(UTC)
-    workspace_id = uuid.uuid4()
+    workspace_id = create_authorized_workspace()
     intent_id = uuid.uuid4()
     result_payload = {
         "intent_id": intent_id,

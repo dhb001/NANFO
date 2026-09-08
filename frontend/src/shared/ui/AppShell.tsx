@@ -1,9 +1,14 @@
-import { NavLink, Outlet, useNavigate } from "react-router-dom";
+import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useAuthStore } from "@/shared/state/auth-store";
 import { Button } from "@/shared/ui/Button";
 import { useUiStore } from "@/shared/state/ui-store";
 import { RealtimeBridge } from "@/features/realtime/RealtimesBridge";
 import { useIsNarrowViewport } from "@/shared/lib/viewport";
+import { logoutSession } from "@/features/auth/session";
+import { canAccessRoute } from "@/features/auth/permissions";
+import { useWorkspaceStore } from "@/shared/state/workspace-store";
+import { AsyncState } from "@/shared/ui/AsyncState";
+import { ExecutionModeBanner } from "@/shared/ui/ExecutionModeBanner";
 
 const navItems = [
   { to: "/ops/overview", label: "Overview", keyHint: "G O" },
@@ -21,7 +26,14 @@ const navItems = [
 
 export function AppShell() {
   const navigate = useNavigate();
-  const clearSession = useAuthStore((state) => state.clearSession);
+  const location = useLocation();
+  const profile = useAuthStore((state) => state.profile);
+  const endingSession = useAuthStore((state) => state.endingSession);
+  const generation = useAuthStore((state) => state.generation);
+  const organizationId = useWorkspaceStore((state) => state.organizationId);
+  const workspaceId = useWorkspaceStore((state) => state.workspaceId);
+  const networkId = useWorkspaceStore((state) => state.networkId);
+  const contextKey = JSON.stringify([generation, organizationId, workspaceId, networkId]);
   const activeUser = useAuthStore((state) => state.userId);
   const commandPaletteOpen = useUiStore((state) => state.commandPaletteOpen);
   const setCommandPaletteOpen = useUiStore((state) => state.setCommandPaletteOpen);
@@ -62,7 +74,7 @@ export function AppShell() {
             gridTemplateColumns: isNarrowViewport ? "repeat(2, minmax(0, 1fr))" : undefined,
           }}
         >
-          {navItems.map((item) => (
+          {navItems.filter((item) => canAccessRoute(profile, item.to)).map((item) => (
             <NavLink
               key={item.to}
               to={item.to}
@@ -126,18 +138,26 @@ export function AppShell() {
               </div>
             <Button
               tone="ghost"
-              onClick={() => {
-                clearSession();
-                navigate("/login");
+              disabled={endingSession}
+              onClick={async () => {
+                try {
+                  await logoutSession();
+                } catch {
+                  useUiStore.getState().pushToast({ title: "Signed out locally", tone: "warn",
+                    description: "Backend revocation could not be confirmed. Sign in again to continue." });
+                }
+                navigate("/login", { replace: true });
               }}
             >
-              Logout
+              {endingSession ? "Signing Out..." : "Logout"}
             </Button>
           </div>
         </header>
 
-        <div style={{ padding: "1rem", display: "grid", gap: "1rem" }}>
-          <Outlet />
+        <ExecutionModeBanner />
+        <div key={contextKey} style={{ padding: "1rem", display: "grid", gap: "1rem" }}>
+          {canAccessRoute(profile, location.pathname) ? <Outlet /> :
+            <AsyncState title="Permission denied" description="Your current backend profile does not permit this route." />}
         </div>
       </main>
     </div>

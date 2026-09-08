@@ -11,8 +11,12 @@ import { useLiveStore } from "@/features/realtime/store";
 import { useDevices } from "@/features/networks/hooks";
 import { useIsNarrowViewport } from "@/shared/lib/viewport";
 import { useVirtualizer } from "@tanstack/react-virtual";
+import { TelemetryProvenance } from "@/features/telemetry/TelemetryProvenance";
+import { canReadTelemetryHealth } from "@/features/auth/permissions";
+import { AsyncState } from "@/shared/ui/AsyncState";
 
 export function TelemetryPage() {
+  const canReadHealth = useAuthStore((state) => canReadTelemetryHealth(state.profile));
   const token = useAuthStore((state) => state.accessToken);
   const workspaceId = useWorkspaceStore((state) => state.workspaceId);
   const networkId = useWorkspaceStore((state) => state.networkId);
@@ -55,7 +59,7 @@ export function TelemetryPage() {
   return (
     <div style={{ display: "grid", gap: "1rem" }}>
       <Panel title="Telemetry Health" subtitle="VS2 /telemetry/health and realtime status snapshot">
-        <QueryState query={healthQuery}>
+        {!canReadHealth ? <AsyncState title="Telemetry health restricted" description="Global diagnostics require Admin and read:telemetry permission. Tenant telemetry history remains available below." /> : <QueryState query={healthQuery}>
           {(health) => (
             <div
               style={{
@@ -65,12 +69,12 @@ export function TelemetryPage() {
               }}
             >
               <StatTile label="Status" value={health.status.toUpperCase()} tone={health.status === "ok" ? "ok" : "warn"} />
-              <StatTile label="Ingest Lag" value={`${formatNumber(health.ingest_lag_ms, 0)} ms`} />
+              <StatTile label="Ingest Lag" value={health.ingest_lag_ms === null ? "Unavailable (no observations)" : `${formatNumber(health.ingest_lag_ms, 0)} ms`} />
               <StatTile label="Dropped Events" value={String(health.dropped_events)} tone={health.dropped_events > 0 ? "warn" : "ok"} />
               <StatTile label="Total Records" value={String(health.total_records)} />
             </div>
           )}
-        </QueryState>
+        </QueryState>}
       </Panel>
 
       <div style={{ display: "grid", gridTemplateColumns: isNarrowViewport ? "1fr" : "1.2fr 1fr", gap: "1rem", alignItems: "start" }}>
@@ -141,6 +145,7 @@ export function TelemetryPage() {
                       >
                         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "0.4rem" }}>
                           <strong>{row.metric}</strong>
+                          <TelemetryProvenance tags={row.tags} />
                           <Badge text={`${formatNumber(row.value)} ${row.unit ?? ""}`.trim()} tone="info" />
                         </div>
                         <div className="mono" style={{ color: "var(--ink-3)", fontSize: "0.74rem" }}>
@@ -193,6 +198,7 @@ export function TelemetryPage() {
                         >
                           <div style={{ display: "flex", justifyContent: "space-between" }}>
                             <strong>{row.metric}</strong>
+                            <TelemetryProvenance tags={row.tags} />
                             <span className="mono" style={{ fontSize: "0.8rem" }}>
                               {formatNumber(row.value)}
                             </span>
@@ -230,6 +236,7 @@ export function TelemetryPage() {
                 }}
               >
                 <div style={{ fontWeight: 600 }}>{metric.metric}</div>
+                <TelemetryProvenance tags={metric.tags} />
                 <div className="mono" style={{ fontSize: "1.1rem", color: "var(--ink-2)" }}>
                   {formatNumber(metric.value)} {metric.unit ?? ""}
                 </div>

@@ -9,6 +9,7 @@ VS2 Step 5 scope:
 from __future__ import annotations
 
 import asyncio
+import math
 import uuid
 from abc import ABC, abstractmethod
 from collections import deque
@@ -19,6 +20,7 @@ from typing import Any
 import redis.asyncio as aioredis
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.events.publisher import publish_event
 from app.modules.telemetry.counters import TelemetryHealthCounterService
@@ -127,9 +129,13 @@ def _build_deterministic_runtime_sample(
     adapter_mode: str,
     extra_tags: dict[str, str] | None = None,
 ) -> dict[str, Any]:
+    if get_settings().EXECUTION_MODE != "demo":
+        raise ValueError("Synthetic runtime telemetry is only available in demo mode")
     tags = {
         "adapter_mode": adapter_mode,
         "sample_key": sample_key,
+        "synthetic": True,
+        "execution_mode": "demo",
     }
     if extra_tags:
         tags.update(extra_tags)
@@ -297,6 +303,8 @@ def build_production_runtime_adapter(
     grpc_source: str = "runtime_grpc",
 ) -> RuntimeTelemetryAdapter:
     normalized_mode = str(mode).strip().lower()
+    if get_settings().EXECUTION_MODE != "demo" and normalized_mode != "stub":
+        raise ValueError("No measured runtime telemetry adapter is installed for this execution mode")
     if normalized_mode == "seeded":
         return SeededRuntimeTelemetryAdapter(
             sample_key=seeded_sample_key,
@@ -491,11 +499,7 @@ class TelemetryIngestionService:
         if not observed_at:
             observed_at = datetime.now(UTC).isoformat()
 
-        value_raw = raw.get("value", 0)
-        try:
-            value = float(value_raw)
-        except (TypeError, ValueError):
-            value = 0.0
+        value = TelemetryPersistenceService._parse_value(raw.get("value"))
 
         tags_raw = raw.get("tags")
         tags = tags_raw if isinstance(tags_raw, dict) else {}
@@ -967,9 +971,12 @@ class TelemetryPersistenceService:
     @staticmethod
     def _parse_value(value: Any) -> float:
         try:
-            return float(value)
+            parsed = float(value)
         except (TypeError, ValueError) as exc:
             raise ValueError("payload.value must be numeric") from exc
+        if isinstance(value, bool) or not math.isfinite(parsed):
+            raise ValueError("payload.value must be a finite measurement")
+        return parsed
 
     @staticmethod
     def _parse_optional_text(value: Any) -> str | None:
@@ -1168,8 +1175,8 @@ class TelemetryQueryService:
 
         if latest_observed_at is None:
             return TelemetryHealthResponse(
-                status=status,
-                ingest_lag_ms=0,
+                status="degraded" if runtime_sustained_failure_active else "unavailable",
+                ingest_lag_ms=None,
                 dropped_events=dropped_events,
                 latest_observed_at=None,
                 total_records=0,

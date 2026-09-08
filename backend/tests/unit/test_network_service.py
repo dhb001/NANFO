@@ -191,7 +191,7 @@ class TestNetworkService:
                 correlation_id=str(uuid.uuid4()),
             )
         # Verify C5: the service-layer method was called
-        mock_ws.assert_awaited_once_with(workspace_id=ws.workspace_id, user_id=actor_id)
+        mock_ws.assert_awaited_once_with(workspace_id=ws.workspace_id, user_id=actor_id, require_write=True)
         mock_publish.assert_awaited_once()
         assert result.network_id == network.network_id
 

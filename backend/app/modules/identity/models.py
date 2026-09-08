@@ -8,8 +8,8 @@ audit_logs is immutable — no UPDATE or DELETE ever executed (Authentication.md
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, ForeignKey, Text, TIMESTAMP, func
-from sqlalchemy.dialects.postgresql import UUID, JSONB
+from sqlalchemy import TIMESTAMP, Boolean, ForeignKey, Text, func
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.postgres import Base

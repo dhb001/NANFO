@@ -31,7 +31,7 @@ export interface TelemetryDeviceHistory {
 
 export interface TelemetryHealth {
   status: string;
-  ingest_lag_ms: number;
+  ingest_lag_ms: number | null;
   dropped_events: number;
   latest_observed_at: string | null;
   total_records: number;

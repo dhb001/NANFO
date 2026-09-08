@@ -3,6 +3,7 @@ import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { IntentPage } from "@/features/intent/IntentPage";
 import { useAuthStore } from "@/shared/state/auth-store";
+import { operatorProfile } from "@/test/profile";
 import { useWorkspaceStore } from "@/shared/state/workspace-store";
 import { useLiveStore } from "@/features/realtime/store";
 import { useUiStore } from "@/shared/state/ui-store";
@@ -44,6 +45,7 @@ describe("IntentPage", () => {
     mockUseIntentDetail.mockReturnValue(detailQuery(null));
 
     useAuthStore.setState({
+      profile: operatorProfile,
       accessToken: "token-1",
       refreshToken: "refresh-1",
       userId: "00000000-0000-0000-0000-000000000123",
@@ -75,6 +77,20 @@ describe("IntentPage", () => {
     render(<IntentPage />);
     expect(screen.getByText("Intent Validate and Execute")).toBeInTheDocument();
     expect(screen.getByText("No intent selected")).toBeInTheDocument();
+  });
+
+  it("reports failed execution responses without an accepted or completed claim", async () => {
+    mockUseIntentDetail.mockReturnValue(detailQuery({
+      status: "validated", validation_result: {}, execution_provenance: {}, explainability: {},
+      confidence: { score: 0.9, band: "high", approval_required: false },
+    }));
+    mockExecuteAsync.mockResolvedValueOnce({ status: "execution_failed", queue_status: "blocked",
+      warning: "Demo control is not executed", idempotent_replay: false });
+    render(<IntentPage />);
+    await userEvent.type(screen.getByPlaceholderText("Intent ID"), "demo-intent");
+    await userEvent.click(screen.getByRole("button", { name: "Execute" }));
+    expect(useUiStore.getState().toasts.at(-1)).toMatchObject({ title: "Execution failed", tone: "danger" });
+    expect(useUiStore.getState().toasts.at(-1)?.description).toContain("Demo control is not executed");
   });
 
   it("prefills intent form from digital twin handoff query params", () => {

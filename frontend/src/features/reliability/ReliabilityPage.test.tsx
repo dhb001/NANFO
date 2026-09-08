@@ -3,6 +3,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ReliabilityPage } from "@/features/reliability/ReliabilityPage";
 import { useAuthStore } from "@/shared/state/auth-store";
+import { operatorProfile } from "@/test/profile";
 import { useLiveStore } from "@/features/realtime/store";
 import { useUiStore } from "@/shared/state/ui-store";
 
@@ -39,6 +40,7 @@ describe("ReliabilityPage", () => {
     vi.clearAllMocks();
 
     useAuthStore.setState({
+      profile: { ...operatorProfile, roles: ["Admin"] },
       accessToken: "token-1",
       refreshToken: "refresh-1",
       userId: "00000000-0000-0000-0000-000000000123",
@@ -186,5 +188,21 @@ describe("ReliabilityPage", () => {
 
     await user.click(screen.getAllByRole("button", { name: "Resolve" })[0]);
     expect(mockResolveMutateAsync).toHaveBeenCalledWith("00000000-0000-0000-0000-000000000101");
+  });
+
+  it("renders unavailable ingest lag without coercing null to zero", () => {
+    mockUseTelemetryHealth.mockReturnValue(queryResult({ status: "unavailable", ingest_lag_ms: null, dropped_events: 0 }));
+    render(<ReliabilityPage />);
+    expect(screen.getByText("UNAVAILABLE")).toBeInTheDocument();
+    expect(screen.getByText("Unavailable (no observations)")).toBeInTheDocument();
+    expect(screen.queryByText("null")).not.toBeInTheDocument();
+  });
+
+  it("explains restricted diagnostics without hiding tenant alerts", () => {
+    useAuthStore.getState().setProfile(operatorProfile);
+    render(<ReliabilityPage />);
+    expect(screen.getByText("Telemetry health restricted")).toBeInTheDocument();
+    expect(screen.getByText("Alerts Lifecycle")).toBeInTheDocument();
+    expect(screen.queryByText("Collector Status")).not.toBeInTheDocument();
   });
 });

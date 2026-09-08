@@ -1,6 +1,10 @@
-import { act, render } from "@testing-library/react";
+import { act, render, renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useManagedWebSocket } from "@/shared/realtime/useManagedWebSocket";
+import type { SocketUpgradeRecovery } from "@/shared/types/ws";
+import { recoverSocketUpgrade } from "@/features/auth/session";
+import { useAuthStore } from "@/shared/state/auth-store";
+import { operatorProfile } from "@/test/profile";
 
 interface TestFrame {
   event: string;
@@ -133,5 +137,187 @@ describe("useManagedWebSocket", () => {
 
     expect(onUnauthorized).toHaveBeenCalledTimes(1);
     expect(onError).not.toHaveBeenCalled();
+  });
+
+  it("ignores all late callbacks from an old socket after context switching", () => {
+    const onFrame = vi.fn();
+    const onUnauthorized = vi.fn();
+    const onStatusChange = vi.fn();
+    const { rerender } = renderHook(({ context }) => useManagedWebSocket<TestFrame>({
+      path: "/ws/telemetry", token: "token", channel: "telemetry", enabled: true,
+      filters: { network_id: context }, contextKey: context, onFrame, onUnauthorized, onStatusChange,
+    }), { initialProps: { context: "old" } });
+    const old = MockWebSocket.instances[0];
+    rerender({ context: "new" });
+    onStatusChange.mockClear();
+    act(() => {
+      old.onopen?.(new Event("open"));
+      old.onmessage?.(new MessageEvent("message", { data: JSON.stringify({ event: "telemetry.received" }) }));
+      old.onclose?.(new CloseEvent("close", { code: 1008 }));
+    });
+    expect(old.send).not.toHaveBeenCalled();
+    expect(onFrame).not.toHaveBeenCalled();
+    expect(onUnauthorized).not.toHaveBeenCalled();
+    expect(onStatusChange).not.toHaveBeenCalled();
+    act(() => MockWebSocket.instances[1].onmessage?.(new MessageEvent("message", { data: JSON.stringify({ event: "telemetry.received" }) })));
+    expect(onFrame).toHaveBeenCalledTimes(1);
+  });
+
+  it("stops denied subscriptions without refreshing or reconnecting", () => {
+    vi.useFakeTimers();
+    const onUnauthorized = vi.fn();
+    const onError = vi.fn();
+    const { unmount } = render(<Harness onFrame={vi.fn()} onUnauthorized={onUnauthorized} onError={onError} />);
+    act(() => {
+      MockWebSocket.instances[0].onmessage?.(new MessageEvent("message", { data: JSON.stringify({ event: "error", data: { code: "WS_INVALID_FILTER", message: "Denied" } }) }));
+      vi.advanceTimersByTime(60_000);
+    });
+    expect(onError).toHaveBeenCalledWith({ code: "WS_INVALID_FILTER", message: "Denied" });
+    expect(onUnauthorized).not.toHaveBeenCalled();
+    expect(MockWebSocket.instances).toHaveLength(1);
+    unmount();
+    vi.useRealTimers();
+  });
+
+  it("isolates malformed messages and reconnects after a transport disconnect", () => {
+    vi.useFakeTimers();
+    const onFrame = vi.fn();
+    const { unmount } = render(<Harness onFrame={onFrame} onUnauthorized={vi.fn()} onError={vi.fn()} />);
+    act(() => {
+      const socket = MockWebSocket.instances[0];
+      socket.onmessage?.(new MessageEvent("message", { data: "invalid-json" }));
+      socket.onmessage?.(new MessageEvent("message", { data: JSON.stringify({ event: "telemetry.received" }) }));
+      socket.onclose?.(new CloseEvent("close", { code: 1006 }));
+      vi.advanceTimersByTime(60_000);
+    });
+    expect(onFrame).toHaveBeenCalledTimes(1);
+    expect(MockWebSocket.instances).toHaveLength(2);
+    unmount();
+    vi.useRealTimers();
+  });
+
+  it("bounds pre-upgrade 1006 auth recovery across reconnects and token rotation", async () => {
+    vi.useFakeTimers();
+    const onUpgradeFailure = vi.fn().mockResolvedValue("conclusive");
+    const { rerender, unmount } = renderHook(({ token }) => useManagedWebSocket<TestFrame>({
+      path: "/ws/telemetry", token, channel: "telemetry", enabled: true, onFrame: vi.fn(), onUpgradeFailure,
+    }), { initialProps: { token: "old" } });
+    await act(async () => {
+      MockWebSocket.instances[0].onclose?.(new CloseEvent("close", { code: 1006 }));
+    });
+    expect(onUpgradeFailure).toHaveBeenCalledWith("old");
+    rerender({ token: "fresh" });
+    await act(async () => {
+      MockWebSocket.instances.at(-1)?.onclose?.(new CloseEvent("close", { code: 1006 }));
+      await vi.advanceTimersByTimeAsync(60_000);
+      MockWebSocket.instances.at(-1)?.onclose?.(new CloseEvent("close", { code: 1006 }));
+      await vi.advanceTimersByTimeAsync(60_000);
+    });
+    expect(onUpgradeFailure).toHaveBeenCalledTimes(1);
+    act(() => MockWebSocket.instances.at(-1)?.onopen?.(new Event("open")));
+    await act(async () => {
+      MockWebSocket.instances.at(-1)?.onclose?.(new CloseEvent("close", { code: 1006 }));
+      await vi.advanceTimersByTimeAsync(60_000);
+      MockWebSocket.instances.at(-1)?.onclose?.(new CloseEvent("close", { code: 1006 }));
+    });
+    expect(onUpgradeFailure).toHaveBeenCalledTimes(2);
+    unmount();
+    vi.useRealTimers();
+  });
+
+  it("ignores a late upgrade probe completion after unmount", async () => {
+    vi.useFakeTimers();
+    let resolve!: (result: SocketUpgradeRecovery) => void;
+    const onUpgradeFailure = vi.fn(() => new Promise<SocketUpgradeRecovery>((done) => { resolve = done; }));
+    const { unmount } = renderHook(() => useManagedWebSocket<TestFrame>({
+      path: "/ws/telemetry", token: "old", channel: "telemetry", enabled: true, onFrame: vi.fn(), onUpgradeFailure,
+    }));
+    act(() => { void MockWebSocket.instances[0].onclose?.(new CloseEvent("close", { code: 1006 })); });
+    unmount();
+    await act(async () => { resolve("inconclusive"); await vi.advanceTimersByTimeAsync(60_000); });
+    expect(MockWebSocket.instances).toHaveLength(1);
+    vi.useRealTimers();
+  });
+
+  it("recovers after an outage probe fails and the access token expires offline", async () => {
+    vi.useFakeTimers();
+    useAuthStore.getState().setSession({ accessToken: "expired", refreshToken: "refresh-old",
+      userId: operatorProfile.user_id, profile: operatorProfile });
+    const envelope = (data: unknown) => Response.json({ success: true, data, meta: {}, errors: null });
+    const fetchMock = vi.fn<typeof fetch>()
+      .mockRejectedValueOnce(new TypeError("Backend offline"))
+      .mockResolvedValueOnce(Response.json({ success: false, data: null, meta: {}, errors: { code: "UNAUTHORIZED", message: "Expired while offline" } }, { status: 401 }))
+      .mockResolvedValueOnce(envelope({ access_token: "fresh", refresh_token: "refresh-new", token_type: "bearer", expires_in: 900 }))
+      .mockResolvedValueOnce(envelope(operatorProfile));
+    vi.stubGlobal("fetch", fetchMock);
+    const onFrame = vi.fn();
+    const { unmount } = renderHook(() => {
+      const token = useAuthStore((state) => state.accessToken);
+      useManagedWebSocket<TestFrame>({ path: "/ws/telemetry", token, channel: "telemetry", enabled: true,
+        onFrame, onUpgradeFailure: recoverSocketUpgrade });
+    });
+
+    await act(async () => {
+      MockWebSocket.instances[0].onclose?.(new CloseEvent("close", { code: 1006 }));
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(useAuthStore.getState().accessToken).toBe("expired");
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(400);
+      MockWebSocket.instances.at(-1)?.onclose?.(new CloseEvent("close", { code: 1006 }));
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    // No unrelated REST activity: the next eligible socket failure probes the restored backend.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_000);
+      await MockWebSocket.instances.at(-1)?.onclose?.(new CloseEvent("close", { code: 1006 }));
+    });
+    expect(useAuthStore.getState().accessToken).toBe("fresh");
+    expect(useAuthStore.getState().refreshToken).toBe("refresh-new");
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).endsWith("/auth/refresh"))).toHaveLength(1);
+    expect(MockWebSocket.instances.at(-1)?.url).toContain("token=fresh");
+
+    // A rejected upgrade even with the fresh token must not create a rotation loop.
+    await act(async () => {
+      MockWebSocket.instances.at(-1)?.onclose?.(new CloseEvent("close", { code: 1006 }));
+      await vi.advanceTimersByTimeAsync(60_000);
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    act(() => {
+      MockWebSocket.instances.at(-1)?.onopen?.(new Event("open"));
+      MockWebSocket.instances.at(-1)?.onmessage?.(new MessageEvent("message", { data: JSON.stringify({ event: "telemetry.received" }) }));
+    });
+    expect(onFrame).toHaveBeenCalledWith({ event: "telemetry.received" });
+    unmount();
+    useAuthStore.getState().clearSession();
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  it("backs off repeated inconclusive probes without probing every reconnect", async () => {
+    vi.useFakeTimers();
+    const onUpgradeFailure = vi.fn().mockResolvedValue("inconclusive");
+    const { unmount } = renderHook(() => useManagedWebSocket<TestFrame>({
+      path: "/ws/telemetry", token: "old", channel: "telemetry", enabled: true, onFrame: vi.fn(), onUpgradeFailure,
+    }));
+    await act(async () => {
+      MockWebSocket.instances[0].onclose?.(new CloseEvent("close", { code: 1006 }));
+    });
+    for (const expectedCalls of [2, 3, 4, 5, 6]) {
+      const cooldown = Math.min(5_000 * 2 ** (expectedCalls - 2), 60_000);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(cooldown);
+        await MockWebSocket.instances.at(-1)?.onclose?.(new CloseEvent("close", { code: 1006 }));
+      });
+      expect(onUpgradeFailure).toHaveBeenCalledTimes(expectedCalls);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5_000);
+        await MockWebSocket.instances.at(-1)?.onclose?.(new CloseEvent("close", { code: 1006 }));
+      });
+      expect(onUpgradeFailure).toHaveBeenCalledTimes(expectedCalls);
+    }
+    unmount();
+    vi.useRealTimers();
   });
 });

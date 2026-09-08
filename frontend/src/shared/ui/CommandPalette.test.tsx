@@ -1,11 +1,14 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { CommandPalette } from "@/shared/ui/CommandPalette";
 import { useUiStore } from "@/shared/state/ui-store";
+import { useAuthStore } from "@/shared/state/auth-store";
+import { operatorProfile } from "@/test/profile";
 
 describe("CommandPalette", () => {
+  beforeEach(() => useAuthStore.setState({ profile: operatorProfile }));
   it("filters commands and closes on escape", async () => {
     const user = userEvent.setup();
 
@@ -51,6 +54,7 @@ describe("CommandPalette", () => {
   });
 
   it("includes plugins navigation command", async () => {
+    useAuthStore.getState().setProfile({ ...operatorProfile, roles: ["Admin"] });
     const user = userEvent.setup();
 
     useUiStore.setState({

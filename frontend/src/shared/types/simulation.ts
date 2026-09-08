@@ -76,9 +76,9 @@ export interface SimulationDetail {
 }
 
 export interface SimulationMetricsSnapshot {
-  latency_ms: number;
-  loss_pct: number;
-  throughput_mbps: number;
+  latency_ms: number | null;
+  loss_pct: number | null;
+  throughput_mbps: number | null;
 }
 
 export interface SimulationCompare {

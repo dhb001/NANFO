@@ -206,7 +206,7 @@ export function TenancyPage() {
             </label>
 
             <div style={{ display: "flex", justifyContent: "flex-end" }}>
-              <Button type="submit" disabled={createOrgMutation.isPending || !token}>
+              <Button permission="write:config" type="submit" disabled={createOrgMutation.isPending || !token}>
                 {createOrgMutation.isPending ? "Creating..." : "Create Organization"}
               </Button>
             </div>
@@ -279,7 +279,7 @@ export function TenancyPage() {
             </label>
 
             <div style={{ display: "flex", justifyContent: "flex-end" }}>
-              <Button type="submit" disabled={!orgId || createWorkspaceMutation.isPending}>
+              <Button permission="write:config" type="submit" disabled={!orgId || createWorkspaceMutation.isPending}>
                 {createWorkspaceMutation.isPending ? "Creating..." : "Create Workspace"}
               </Button>
             </div>
@@ -360,7 +360,7 @@ export function TenancyPage() {
             </label>
 
             <div style={{ display: "flex", justifyContent: "flex-end" }}>
-              <Button type="submit" disabled={!orgId || addMemberMutation.isPending}>
+              <Button permission="write:config" type="submit" disabled={!orgId || addMemberMutation.isPending}>
                 {addMemberMutation.isPending ? "Adding..." : "Add Member"}
               </Button>
             </div>
@@ -390,6 +390,7 @@ export function TenancyPage() {
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                         <Badge text={member.org_role} tone="info" />
                         <Button
+                          permission="write:config"
                           tone="ghost"
                           type="button"
                           disabled={removeMemberMutation.isPending || isCurrentUser}

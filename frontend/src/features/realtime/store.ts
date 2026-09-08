@@ -15,6 +15,7 @@ export interface LiveAlertItem {
 }
 
 interface LiveState {
+  reset: () => void;
   topologyByDeviceId: Record<string, TopologyDeltaData["node"]>;
   telemetryByDeviceMetric: Record<string, TelemetryDeltaData["metric"]>;
   telemetryKeysNewestFirst: string[];
@@ -56,6 +57,11 @@ function pushNewestKey(keys: string[], key: string, maxItems: number) {
 }
 
 export const useLiveStore = create<LiveState>((set) => ({
+  reset: () => set({
+    topologyByDeviceId: {}, telemetryByDeviceMetric: {}, telemetryKeysNewestFirst: [],
+    sceneObjects: {}, sceneObjectIdsNewestFirst: [], alerts: [],
+    topologyStatus: "closed", telemetryStatus: "closed", alertsStatus: "closed", digitalTwinStatus: "closed",
+  }),
   topologyByDeviceId: {},
   telemetryByDeviceMetric: {},
   telemetryKeysNewestFirst: [],

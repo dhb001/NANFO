@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { renderHook } from "@testing-library/react";
 import { useTwinLinks, useTwinNodes, useTwinSceneModel } from "@/features/digitalTwin/hooks";
 import { useLiveStore } from "@/features/realtime/store";
+import type { TwinNode } from "@/features/digitalTwin/sceneAdapter";
 
 describe("digital twin hooks", () => {
   it("merges base topology and live deltas into node list", () => {
@@ -45,7 +46,7 @@ describe("digital twin hooks", () => {
   });
 
   it("builds links only when source and target nodes exist", () => {
-    const nodes = [
+    const nodes: TwinNode[] = [
       {
         id: "a",
         hostname: "A",

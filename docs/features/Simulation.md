@@ -44,6 +44,13 @@ Baseline payload fields for digital twin synchronization:
 - Cost spikes from unbounded scenario complexity.
 
 ## 6. Acceptance Criteria
+Current foundation behavior: no evaluator is installed. Start/resume persist
+`cancelled` / `blocked` with `evaluator_unavailable` before publishing the existing
+terminal event. Output metrics and comparison deltas are null, including historical
+unmeasured baseline outputs. Queue availability is not a successful risk check.
+The criteria below remain evaluator implementation work, not achieved by the
+foundation lifecycle APIs.
+
 - [ ] Same seed + same inputs produce identical metric outputs.
 - [ ] Pause/resume preserves simulation state integrity.
 - [ ] Baseline compare returns latency, loss, and throughput deltas.

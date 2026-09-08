@@ -184,7 +184,7 @@ async def test_get_device_history_returns_device_scoped_records(mock_db):
 
 
 @pytest.mark.asyncio
-async def test_get_health_returns_zero_when_no_records(mock_db):
+async def test_get_health_returns_unavailable_and_null_lag_when_no_records(mock_db):
     counter_service = AsyncMock()
     counter_service.get_snapshot = AsyncMock(
         return_value={
@@ -204,8 +204,8 @@ async def test_get_health_returns_zero_when_no_records(mock_db):
 
     result = await svc.get_health()
 
-    assert result.status == "ok"
-    assert result.ingest_lag_ms == 0
+    assert result.status == "unavailable"
+    assert result.ingest_lag_ms is None
     assert result.dropped_events == 2
     assert result.latest_observed_at is None
     assert result.total_records == 0
@@ -242,7 +242,7 @@ async def test_get_health_logs_runtime_adapter_slo_snapshot(mock_db):
     ):
         result = await svc.get_health()
 
-    assert result.status == "ok"
+    assert result.status == "unavailable"
     snapshot_logs = _event_calls(mock_info, "telemetry_health_runtime_adapter_slo_snapshot")
     assert len(snapshot_logs) == 1
     info_kwargs = snapshot_logs[0].kwargs
@@ -438,7 +438,7 @@ async def test_get_health_rollup_logs_ok_severity_for_healthy_runtime_adapter(mo
     with patch("app.modules.telemetry.service.logger.info") as mock_info:
         result = await svc.get_health()
 
-    assert result.status == "ok"
+    assert result.status == "unavailable"
     rollup_logs = _event_calls(mock_info, "telemetry_health_runtime_adapter_slo_rollup")
     assert len(rollup_logs) == 1
     rollup_log = rollup_logs[0]
@@ -529,7 +529,7 @@ async def test_get_health_rollup_logs_critical_severity_when_anomaly_streak_reac
     with patch("app.modules.telemetry.service.logger.error") as mock_error:
         result = await svc.get_health()
 
-    assert result.status == "ok"
+    assert result.status == "unavailable"
     rollup_logs = _event_calls(mock_error, "telemetry_health_runtime_adapter_slo_rollup")
     assert len(rollup_logs) == 1
     rollup_log = rollup_logs[0]
@@ -898,7 +898,7 @@ async def test_get_health_trend_window_state_write_failure_is_fail_open(mock_db)
     ):
         result = await svc.get_health()
 
-    assert result.status == "ok"
+    assert result.status == "unavailable"
     trend_state_write_failed = _event_calls(
         mock_warning, "telemetry_health_runtime_adapter_slo_trend_window_state_write_failed"
     )
@@ -943,7 +943,7 @@ async def test_get_health_trend_window_state_read_failure_is_fail_open(mock_db):
     ):
         result = await svc.get_health()
 
-    assert result.status == "ok"
+    assert result.status == "unavailable"
     trend_state_read_failed = _event_calls(
         mock_warning, "telemetry_health_runtime_adapter_slo_trend_window_state_read_failed"
     )
@@ -987,7 +987,7 @@ async def test_get_health_trend_threshold_evaluation_failure_is_fail_open(mock_d
     ):
         result = await svc.get_health()
 
-    assert result.status == "ok"
+    assert result.status == "unavailable"
     evaluation_failed_logs = _event_calls(
         mock_warning, "telemetry_health_runtime_adapter_slo_trend_threshold_evaluation_failed"
     )
@@ -1770,7 +1770,7 @@ async def test_get_health_runtime_adapter_slo_snapshot_invalid_values_are_fail_o
     ):
         result = await svc.get_health()
 
-    assert result.status == "ok"
+    assert result.status == "unavailable"
     snapshot_logs = _event_calls(mock_info, "telemetry_health_runtime_adapter_slo_snapshot")
     assert len(snapshot_logs) == 1
     info_kwargs = snapshot_logs[0].kwargs
@@ -1836,7 +1836,7 @@ async def test_get_health_runtime_adapter_slo_snapshot_log_failure_is_fail_open(
     ):
         result = await svc.get_health()
 
-    assert result.status == "ok"
+    assert result.status == "unavailable"
     assert any(
         call.args and call.args[0] == "telemetry_health_runtime_adapter_slo_snapshot_log_failed"
         for call in mock_warning.call_args_list
@@ -1871,7 +1871,7 @@ async def test_get_health_warns_when_invalid_sample_ratio_exceeds_threshold(mock
     with patch("app.modules.telemetry.service.logger.warning") as mock_warning:
         result = await svc.get_health()
 
-    assert result.status == "ok"
+    assert result.status == "unavailable"
     ratio_warnings = [
         call
         for call in mock_warning.call_args_list
@@ -1925,7 +1925,7 @@ async def test_get_health_does_not_warn_when_invalid_sample_ratio_within_thresho
     with patch("app.modules.telemetry.service.logger.warning") as mock_warning:
         result = await svc.get_health()
 
-    assert result.status == "ok"
+    assert result.status == "unavailable"
     assert not any(
         call.args and call.args[0] == "telemetry_health_runtime_adapter_invalid_sample_ratio_exceeded"
         for call in mock_warning.call_args_list
@@ -1960,7 +1960,7 @@ async def test_get_health_warns_ingest_failures_with_zero_attempt_guard(mock_db)
     with patch("app.modules.telemetry.service.logger.warning") as mock_warning:
         result = await svc.get_health()
 
-    assert result.status == "ok"
+    assert result.status == "unavailable"
     ingest_failure_warnings = [
         call
         for call in mock_warning.call_args_list
@@ -2014,7 +2014,7 @@ async def test_get_health_warns_when_runtime_adapter_dropped_samples_detected(mo
     with patch("app.modules.telemetry.service.logger.warning") as mock_warning:
         result = await svc.get_health()
 
-    assert result.status == "ok"
+    assert result.status == "unavailable"
     dropped_sample_warnings = [
         call
         for call in mock_warning.call_args_list
@@ -2065,7 +2065,7 @@ async def test_get_health_transition_metadata_includes_combined_anomaly_reason_f
     with patch("app.modules.telemetry.service.logger.warning") as mock_warning:
         result = await svc.get_health()
 
-    assert result.status == "ok"
+    assert result.status == "unavailable"
     counter_service.set_runtime_adapter_anomaly_streak.assert_awaited_once_with(3)
     transition_logs = _event_calls(
         mock_warning, "telemetry_health_runtime_adapter_anomaly_streak_transition"
@@ -2336,7 +2336,7 @@ async def test_get_health_anomaly_streak_counter_write_failure_is_fail_open(mock
     with patch("app.modules.telemetry.service.logger.warning") as mock_warning:
         result = await svc.get_health()
 
-    assert result.status == "ok"
+    assert result.status == "unavailable"
     assert any(
         call.args and call.args[0] == "telemetry_health_runtime_adapter_anomaly_streak_incremented"
         for call in mock_warning.call_args_list
@@ -2370,7 +2370,7 @@ async def test_get_health_anomaly_streak_counter_read_failure_falls_back_to_zero
     ):
         result = await svc.get_health()
 
-    assert result.status == "ok"
+    assert result.status == "unavailable"
     assert any(
         call.args and call.args[0] == "telemetry_health_counter_snapshot_failed"
         for call in mock_warning.call_args_list
@@ -2423,7 +2423,7 @@ async def test_get_health_uses_counter_snapshot_streak_for_cross_instance_contin
     with patch("app.modules.telemetry.service.logger.warning") as mock_warning:
         result = await svc.get_health()
 
-    assert result.status == "ok"
+    assert result.status == "unavailable"
     counter_service.set_runtime_adapter_anomaly_streak.assert_awaited_once_with(8)
     counter_service.set_runtime_adapter_slo_alert_active.assert_awaited_once_with(True)
     streak_logs = [
@@ -2481,7 +2481,7 @@ async def test_get_health_runtime_adapter_slo_alert_activation_publishes_alert_g
         mock_publish.return_value = "41-0"
         result = await svc.get_health()
 
-    assert result.status == "ok"
+    assert result.status == "unavailable"
     counter_service.set_runtime_adapter_slo_alert_active.assert_awaited_once_with(True)
     mock_publish.assert_awaited_once()
     publish_kwargs = mock_publish.await_args.kwargs
@@ -2540,7 +2540,7 @@ async def test_get_health_runtime_adapter_slo_alert_recovery_publishes_alert_res
         mock_publish.return_value = "42-0"
         result = await svc.get_health()
 
-    assert result.status == "ok"
+    assert result.status == "unavailable"
     counter_service.set_runtime_adapter_slo_alert_active.assert_awaited_once_with(False)
     mock_publish.assert_awaited_once()
     publish_kwargs = mock_publish.await_args.kwargs
@@ -2598,7 +2598,7 @@ async def test_get_health_runtime_adapter_slo_alert_persist_failure_is_fail_open
         mock_publish.return_value = "43-0"
         result = await svc.get_health()
 
-    assert result.status == "ok"
+    assert result.status == "unavailable"
     mock_publish.assert_awaited_once()
     persist_failed_logs = _event_calls(
         mock_warning, "telemetry_health_runtime_adapter_slo_alert_state_persist_failed"
@@ -2642,7 +2642,7 @@ async def test_get_health_runtime_adapter_slo_alert_publish_skipped_without_even
     ):
         result = await svc.get_health()
 
-    assert result.status == "ok"
+    assert result.status == "unavailable"
     mock_publish.assert_not_awaited()
     skipped_logs = _event_calls(
         mock_warning, "telemetry_health_runtime_adapter_slo_alert_publish_skipped"
@@ -2693,7 +2693,7 @@ async def test_get_health_runtime_adapter_slo_alert_publish_failure_is_fail_open
     ):
         result = await svc.get_health()
 
-    assert result.status == "ok"
+    assert result.status == "unavailable"
     mock_publish.assert_awaited_once()
     publish_failed_logs = _event_calls(
         mock_warning, "telemetry_health_runtime_adapter_slo_alert_publish_failed"
@@ -2741,7 +2741,7 @@ async def test_get_health_runtime_adapter_alert_scope_resolution_failure_is_fail
         mock_publish.return_value = "45-0"
         result = await svc.get_health()
 
-    assert result.status == "ok"
+    assert result.status == "unavailable"
     mock_publish.assert_awaited_once()
     payload = mock_publish.await_args.kwargs["payload"]
     assert "workspace_id" not in payload

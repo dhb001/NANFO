@@ -505,7 +505,7 @@ export async function installSessionMocks(page: Page, state: SessionMockState): 
           email: state.email,
           display_name: "Operator",
           roles: ["Admin"],
-          permissions: ["execute:intent", "write:config"],
+          permissions: ["read:topology", "read:telemetry", "execute:intent", "write:config"],
         },
         meta: { request_id: "req-profile", timestamp: "2026-08-13T10:00:01Z" },
         errors: null,
@@ -1339,7 +1339,7 @@ export async function installSessionMocks(page: Page, state: SessionMockState): 
             data: {
               ...existing,
               idempotent_replay: true,
-              queue_status: existing.queue_status === "requested" ? "queued" : existing.queue_status,
+              queue_status: existing.queue_status,
             },
             meta: { request_id: "req-report-generate-replayed", timestamp: "2026-08-14T12:00:00Z" },
             errors: null,
@@ -1499,6 +1499,8 @@ export async function installSessionMocks(page: Page, state: SessionMockState): 
 
 export async function loginFromUi(page: Page): Promise<void> {
   await page.goto("/login");
+  await page.getByLabel("Email").fill("test@example.com");
+  await page.getByLabel("Password").fill("change-me");
   await page.getByRole("button", { name: "Sign In" }).click();
   await expect(page).toHaveURL(/\/ops\/overview$/);
 }

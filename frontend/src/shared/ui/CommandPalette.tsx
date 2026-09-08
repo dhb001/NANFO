@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
-import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
+import { AnimatePresence, m, useReducedMotion } from "framer-motion";
 import { useNavigate } from "react-router-dom";
 import { useUiStore } from "@/shared/state/ui-store";
+import { useAuthStore } from "@/shared/state/auth-store";
+import { canAccessRoute } from "@/features/auth/permissions";
 
 interface CommandEntry {
   id: string;
@@ -27,6 +29,7 @@ const commands: CommandEntry[] = [
 ];
 
 export function CommandPalette() {
+  const profile = useAuthStore((state) => state.profile);
   const navigate = useNavigate();
   const open = useUiStore((state) => state.commandPaletteOpen);
   const setOpen = useUiStore((state) => state.setCommandPaletteOpen);
@@ -36,17 +39,18 @@ export function CommandPalette() {
 
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase();
+    const allowed = commands.filter((entry) => canAccessRoute(profile, entry.path));
     if (!needle) {
-      return commands;
+      return allowed;
     }
-    return commands.filter((entry) => {
+    return allowed.filter((entry) => {
       return (
         entry.label.toLowerCase().includes(needle) ||
         entry.group.toLowerCase().includes(needle) ||
         entry.hint.toLowerCase().replace(/\s+/g, "").includes(needle.replace(/\s+/g, ""))
       );
     });
-  }, [query]);
+  }, [query, profile]);
 
   useEffect(() => {
     if (!open) {
@@ -91,7 +95,7 @@ export function CommandPalette() {
   return (
     <AnimatePresence>
       {open ? (
-        <motion.div
+        <m.div
           initial={prefersReducedMotion ? { opacity: 0 } : { opacity: 0, backdropFilter: "blur(0px)" }}
           animate={prefersReducedMotion ? { opacity: 1 } : { opacity: 1, backdropFilter: "blur(4px)" }}
           exit={prefersReducedMotion ? { opacity: 0 } : { opacity: 0, backdropFilter: "blur(0px)" }}
@@ -114,7 +118,7 @@ export function CommandPalette() {
             paddingTop: "14vh",
           }}
         >
-          <motion.div
+          <m.div
             initial={prefersReducedMotion ? { opacity: 0 } : { opacity: 0, y: 18, scale: 0.985 }}
             animate={prefersReducedMotion ? { opacity: 1 } : { opacity: 1, y: 0, scale: 1 }}
             exit={prefersReducedMotion ? { opacity: 0 } : { opacity: 0, y: 10, scale: 0.99 }}
@@ -184,8 +188,8 @@ export function CommandPalette() {
                 })
               )}
             </div>
-          </motion.div>
-        </motion.div>
+          </m.div>
+        </m.div>
       ) : null}
     </AnimatePresence>
   );

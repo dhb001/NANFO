@@ -6,14 +6,13 @@ import uuid
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
-import fakeredis
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from app.core.dependencies import get_db, get_redis
-from app.core.security import create_access_token
 from app.main import app
+from tests.auth_support import create_session_access_token as create_access_token
 
 
 def _make_token() -> str:
@@ -47,8 +46,8 @@ def _make_write_only_token() -> str:
 
 
 @pytest.fixture
-def client() -> TestClient:
-    fake_r = fakeredis.FakeAsyncRedis(decode_responses=True)
+def client(session_auth) -> TestClient:
+    fake_r = session_auth.redis
     db = AsyncMock()
     db.commit = AsyncMock()
     db.flush = AsyncMock()
@@ -408,9 +407,9 @@ def test_alert_endpoints_reject_invalid_workspace_claim(client):
     ack_response = client.post(f"/api/v1/alerts/{uuid.uuid4()}/ack", headers=headers)
     resolve_response = client.post(f"/api/v1/alerts/{uuid.uuid4()}/resolve", headers=headers)
 
-    assert list_response.status_code == 403
-    assert ack_response.status_code == 403
-    assert resolve_response.status_code == 403
+    assert list_response.status_code == 401
+    assert ack_response.status_code == 401
+    assert resolve_response.status_code == 401
 
 
 def test_alert_endpoints_reject_invalid_org_claim(client):
@@ -427,6 +426,6 @@ def test_alert_endpoints_reject_invalid_org_claim(client):
     ack_response = client.post(f"/api/v1/alerts/{uuid.uuid4()}/ack", headers=headers)
     resolve_response = client.post(f"/api/v1/alerts/{uuid.uuid4()}/resolve", headers=headers)
 
-    assert list_response.status_code == 403
-    assert ack_response.status_code == 403
-    assert resolve_response.status_code == 403
+    assert list_response.status_code == 401
+    assert ack_response.status_code == 401
+    assert resolve_response.status_code == 401

@@ -1,5 +1,16 @@
 # Feature PRD: Telemetry Ingestion & Streaming
 
+## Foundation Truth Boundary
+
+Configured runtime adapters are demo-only synthetic samples or an empty stub;
+no measured SNMP/gRPC collector is implied by an adapter name. Synthetic samples
+carry `tags.synthetic=true` and `tags.execution_mode=demo`. Non-demo modes reject
+synthetic runtime polling. Missing, malformed, nonfinite and boolean values are
+rejected rather than coerced into zero measurements. Empty telemetry health has
+`ingest_lag_ms=null` and `status=unavailable` (or degraded on known failures).
+The global collector-health endpoint requires Admin capability plus active org
+membership; tenant-scoped history remains available to authorized read-only users.
+
 ## 1. Purpose
 Collect, validate, normalize, store, and stream high-frequency telemetry to drive AI reasoning, alerting, and digital twin updates.
 

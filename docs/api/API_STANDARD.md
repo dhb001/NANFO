@@ -42,6 +42,11 @@ Every REST endpoint must return a predictable, standardized JSON payload structu
 ```
 
 ## 3. HTTP Methods & Status Codes
+Response `meta` also includes `execution_mode`: `demo`, `emulation`, or
+`production`, sourced from backend configuration. This describes the configured
+environment, not installed controller/model capabilities. An HTTP-success envelope
+can contain a failed domain operation; clients must inspect its lifecycle status.
+
 * **GET:** Retrieve resources (200 OK).
 * **POST:** Create new resources (201 Created).
 * **PATCH:** Partially update resources (200 OK).

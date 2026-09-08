@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { TopologyAnalysisPage } from "@/features/topology/TopologyAnalysisPage";
 import { useAuthStore } from "@/shared/state/auth-store";
+import { operatorProfile } from "@/test/profile";
 import { useWorkspaceStore } from "@/shared/state/workspace-store";
 import { useLiveStore } from "@/features/realtime/store";
 
@@ -32,6 +33,7 @@ describe("TopologyAnalysisPage", () => {
     vi.clearAllMocks();
 
     useAuthStore.setState({
+      profile: operatorProfile,
       accessToken: "token-1",
       refreshToken: "refresh-1",
       userId: "00000000-0000-0000-0000-000000000123",

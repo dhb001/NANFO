@@ -5,6 +5,7 @@ No secrets or operational values are hardcoded (security.md guardrail).
 """
 
 from functools import lru_cache
+from typing import Literal
 
 from pydantic import computed_field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -19,6 +20,7 @@ class Settings(BaseSettings):
 
     # Application
     APP_ENV: str = "development"
+    EXECUTION_MODE: Literal["demo", "emulation", "production"] = "demo"
     LOG_LEVEL: str = "INFO"
     CORS_ALLOW_ORIGINS: str = "http://localhost:5173,http://127.0.0.1:5173"
 

@@ -17,6 +17,7 @@ from fastapi import WebSocket
 
 from app.core.logging import get_logger
 from app.db.redis import get_redis_client
+from app.websocket.auth import authorized_workspaces
 
 logger = get_logger(__name__)
 
@@ -31,12 +32,15 @@ _WS_UNAUTHORIZED_FRAME = json.dumps({
 })
 
 
-@dataclass(frozen=True)
+@dataclass
 class _ConnectionAuth:
     token_exp: int | None
     token_jti: str | None
     workspace_id: str | None = None
     allowed_workspace_ids: frozenset[str] | None = None
+    token: str | None = None
+    channel: str = ""
+    network_id: str | None = None
 
 
 def _coerce_token_exp(value: object) -> int | None:
@@ -78,33 +82,24 @@ def _coerce_allowed_workspace_ids(value: object) -> frozenset[str] | None:
 
 def _is_token_expired(auth: _ConnectionAuth | None) -> bool:
     if auth is None or auth.token_exp is None:
-        return False
+        return True
     return int(datetime.now(UTC).timestamp()) >= auth.token_exp
 
 
 async def _is_token_revoked(auth: _ConnectionAuth | None) -> bool:
-    if auth is None or auth.token_jti is None:
-        return False
-
+    if auth is None or not auth.token:
+        return True
     try:
-        redis = get_redis_client()
-    except RuntimeError as exc:
-        logger.warning(
-            "ws_digital_twin_denylist_client_unavailable",
-            jti=auth.token_jti,
-            error=str(exc),
+        allowed = await authorized_workspaces(
+            token=auth.token, channel=auth.channel, network_id=auth.network_id,
         )
+        if not allowed or (auth.workspace_id is not None and auth.workspace_id not in allowed):
+            return True
+        auth.allowed_workspace_ids = frozenset(allowed)
         return False
-
-    try:
-        return bool(await redis.exists(f"jti:deny:{auth.token_jti}"))
-    except Exception as exc:  # noqa: BLE001
-        logger.warning(
-            "ws_digital_twin_denylist_check_failed",
-            jti=auth.token_jti,
-            error=str(exc),
-        )
-        return False
+    except Exception:  # noqa: BLE001
+        logger.warning("ws_authorization_revalidation_failed", channel=auth.channel)
+        return True
 
 
 async def _record_security_close_reason(*, reason: str, network_id: str) -> None:
@@ -158,6 +153,7 @@ class TopologyWSManager:
         token_exp: int | None = None,
         token_jti: str | None = None,
         workspace_id: str | None = None,
+        token: str | None = None,
     ) -> None:
         async with self._lock:
             self._subscriptions[network_id].add(websocket)
@@ -165,6 +161,7 @@ class TopologyWSManager:
                 token_exp=_coerce_token_exp(token_exp),
                 token_jti=_coerce_token_jti(token_jti),
                 workspace_id=_coerce_workspace_id(workspace_id),
+                token=token, channel="topology", network_id=network_id,
             )
         logger.info("ws_subscribed", network_id=network_id)
 
@@ -193,8 +190,7 @@ class TopologyWSManager:
         """Push a topology delta to all subscribers of a network_id.
 
         Per WebSocket.md §4.1: delta_type in {add, update, remove}.
-        Per WebSocket.md §2: JWT expiry check is done by the WS endpoint before accepting
-        the connection; continuous re-validation is the caller's responsibility.
+        Identity, session, capability and membership are rechecked before delivery.
         """
         message = json.dumps({
             "event": event_type,
@@ -215,14 +211,6 @@ class TopologyWSManager:
             }
 
         for ws, auth in targets.items():
-            if (
-                event_workspace_id is not None
-                and auth is not None
-                and auth.workspace_id is not None
-                and auth.workspace_id != event_workspace_id
-            ):
-                continue
-
             if _is_token_expired(auth) or await _is_token_revoked(auth):
                 try:
                     await ws.send_text(_WS_UNAUTHORIZED_FRAME)
@@ -241,6 +229,9 @@ class TopologyWSManager:
                         error=str(exc),
                     )
                 dead_connections.append((network_id, ws))
+                continue
+
+            if event_workspace_id is not None and auth.workspace_id != event_workspace_id:
                 continue
 
             try:
@@ -269,6 +260,7 @@ class TelemetryWSManager:
         token_exp: int | None = None,
         token_jti: str | None = None,
         workspace_id: str | None = None,
+        token: str | None = None,
     ) -> None:
         async with self._lock:
             self._subscriptions[network_id].add(websocket)
@@ -276,6 +268,7 @@ class TelemetryWSManager:
                 token_exp=_coerce_token_exp(token_exp),
                 token_jti=_coerce_token_jti(token_jti),
                 workspace_id=_coerce_workspace_id(workspace_id),
+                token=token, channel="telemetry", network_id=network_id,
             )
         logger.info("ws_telemetry_subscribed", network_id=network_id)
 
@@ -320,14 +313,6 @@ class TelemetryWSManager:
             }
 
         for ws, auth in targets.items():
-            if (
-                event_workspace_id is not None
-                and auth is not None
-                and auth.workspace_id is not None
-                and auth.workspace_id != event_workspace_id
-            ):
-                continue
-
             if _is_token_expired(auth) or await _is_token_revoked(auth):
                 try:
                     await ws.send_text(_WS_UNAUTHORIZED_FRAME)
@@ -346,6 +331,9 @@ class TelemetryWSManager:
                         error=str(exc),
                     )
                 dead_connections.append((network_id, ws))
+                continue
+
+            if event_workspace_id is not None and auth.workspace_id != event_workspace_id:
                 continue
 
             try:
@@ -373,6 +361,7 @@ class DigitalTwinWSManager:
         token_exp: int | None = None,
         token_jti: str | None = None,
         workspace_id: str | None = None,
+        token: str | None = None,
     ) -> None:
         async with self._lock:
             self._subscriptions[network_id].add(websocket)
@@ -380,6 +369,7 @@ class DigitalTwinWSManager:
                 token_exp=_coerce_token_exp(token_exp),
                 token_jti=_coerce_token_jti(token_jti),
                 workspace_id=_coerce_workspace_id(workspace_id),
+                token=token, channel="digital-twin", network_id=network_id,
             )
         logger.info("ws_digital_twin_subscribed", network_id=network_id)
 
@@ -426,14 +416,6 @@ class DigitalTwinWSManager:
             }
 
         for ws, auth in targets.items():
-            if (
-                event_workspace_id is not None
-                and auth is not None
-                and auth.workspace_id is not None
-                and auth.workspace_id != event_workspace_id
-            ):
-                continue
-
             if _is_token_expired(auth):
                 await _record_security_close_reason(
                     reason="expired",
@@ -482,6 +464,9 @@ class DigitalTwinWSManager:
                 dead_connections.append((network_id, ws))
                 continue
 
+            if event_workspace_id is not None and auth.workspace_id != event_workspace_id:
+                continue
+
             try:
                 await ws.send_text(message)
             except Exception:  # noqa: BLE001
@@ -506,6 +491,7 @@ class AlertsWSManager:
         token_exp: int | None = None,
         token_jti: str | None = None,
         allowed_workspace_ids: set[str] | None = None,
+        token: str | None = None,
     ) -> None:
         async with self._lock:
             self._subscribers.add(websocket)
@@ -513,6 +499,7 @@ class AlertsWSManager:
                 token_exp=_coerce_token_exp(token_exp),
                 token_jti=_coerce_token_jti(token_jti),
                 allowed_workspace_ids=_coerce_allowed_workspace_ids(allowed_workspace_ids),
+                token=token, channel="alerts",
             )
         logger.info("ws_alerts_subscribed")
 
@@ -554,14 +541,6 @@ class AlertsWSManager:
         event_workspace_id = _coerce_workspace_id(workspace_id)
 
         for ws, auth in targets.items():
-            if (
-                event_workspace_id is not None
-                and auth is not None
-                and auth.allowed_workspace_ids is not None
-                and event_workspace_id not in auth.allowed_workspace_ids
-            ):
-                continue
-
             if _is_token_expired(auth) or await _is_token_revoked(auth):
                 try:
                     await ws.send_text(_WS_UNAUTHORIZED_FRAME)
@@ -572,6 +551,10 @@ class AlertsWSManager:
                 except Exception as exc:  # noqa: BLE001
                     logger.debug("ws_alerts_unauthorized_connection_close_failed", error=str(exc))
                 dead_connections.append(ws)
+                continue
+
+            # Missing tenant context is never a global broadcast authorization.
+            if event_workspace_id is None or event_workspace_id not in (auth.allowed_workspace_ids or ()):
                 continue
 
             try:

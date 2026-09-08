@@ -103,42 +103,16 @@ async def test_start_simulation_persists_handoff_with_workspace_validation(mock_
     network.network_id = network_id
     network.workspace_id = workspace_id
 
-    handoff = {
-        "simulation_id": str(uuid.uuid4()),
-        "scenario_id": str(uuid.uuid4()),
-        "network_id": str(network_id),
-        "scene_object_id": "simulation-state",
-        "state": "queued",
-        "status": "queued",
-        "risk_gate": "required",
-        "scenario_name": "Campus baseline",
-        "validation": {
-            "pipeline_stage": "handoff_queued",
-            "required_checks": ["simulation_before_deployment"],
-            "policy_reference": "ADR-008",
-            "status": "pending",
-            "queued_at": "2026-08-12T00:00:00+00:00",
-            "requested_by_user_id": str(uuid.uuid4()),
-        },
-        "requested_at": "2026-08-12T00:00:00+00:00",
-        "correlation_id": str(uuid.uuid4()),
-    }
-
     with (
         patch(
             "app.modules.simulation.service.NetworkService.assert_network_workspace_access",
             new_callable=AsyncMock,
         ) as mock_assert_network_access,
-        patch("app.modules.simulation.service.queue_scenario_validation_handoff", new_callable=AsyncMock) as mock_queue,
+        patch("app.modules.simulation.service.publish_event", new_callable=AsyncMock) as mock_queue,
         patch("app.modules.simulation.service.SimulationRepository.create", new_callable=AsyncMock) as mock_create,
     ):
         mock_assert_network_access.return_value = network
-        mock_queue.return_value = {
-            "handoff": handoff,
-            "queue_status": "queued",
-            "stream_entry_id": "1001-0",
-            "warning": None,
-        }
+        mock_queue.return_value = "1001-0"
 
         svc = SimulationStartService(db=mock_db, redis=fake_redis)
         result = await svc.start_simulation(
@@ -158,15 +132,18 @@ async def test_start_simulation_persists_handoff_with_workspace_validation(mock_
         requested_workspace_id=None,
         actor_user_id=actor_user_id,
         claim_org_id=None,
+        require_write=True,
     )
     mock_queue.assert_awaited_once()
     create_kwargs = mock_create.await_args.kwargs
     assert create_kwargs["network_id"] == network_id
     assert create_kwargs["workspace_id"] == workspace_id
     assert create_kwargs["scenario_name"] == "Campus baseline"
-    assert create_kwargs["queue_status"] == "queued"
-    assert create_kwargs["stream_entry_id"] == "1001-0"
-    mock_db.commit.assert_awaited_once()
+    assert create_kwargs["queue_status"] == "pending"
+    assert create_kwargs["stream_entry_id"] is None
+    assert create_kwargs["state"] == "cancelled"
+    assert mock_queue.await_args.kwargs["event_type"] == "simulation.cancelled"
+    assert mock_db.commit.await_count == 2
 
 
 @pytest.mark.asyncio
@@ -178,42 +155,16 @@ async def test_start_simulation_persists_deferred_queue_outcome_fail_open(mock_d
     network.network_id = network_id
     network.workspace_id = workspace_id
 
-    handoff = {
-        "simulation_id": str(uuid.uuid4()),
-        "scenario_id": str(uuid.uuid4()),
-        "network_id": str(network_id),
-        "scene_object_id": "simulation-state",
-        "state": "queued",
-        "status": "queued",
-        "risk_gate": "required",
-        "scenario_name": "Campus baseline",
-        "validation": {
-            "pipeline_stage": "handoff_queued",
-            "required_checks": ["simulation_before_deployment"],
-            "policy_reference": "ADR-008",
-            "status": "pending",
-            "queued_at": "2026-08-12T00:00:00+00:00",
-            "requested_by_user_id": str(uuid.uuid4()),
-        },
-        "requested_at": "2026-08-12T00:00:00+00:00",
-        "correlation_id": str(uuid.uuid4()),
-    }
-
     with (
         patch(
             "app.modules.simulation.service.NetworkService.assert_network_workspace_access",
             new_callable=AsyncMock,
         ) as mock_assert_network_access,
-        patch("app.modules.simulation.service.queue_scenario_validation_handoff", new_callable=AsyncMock) as mock_queue,
+        patch("app.modules.simulation.service.publish_event", new_callable=AsyncMock) as mock_queue,
         patch("app.modules.simulation.service.SimulationRepository.create", new_callable=AsyncMock) as mock_create,
     ):
         mock_assert_network_access.return_value = network
-        mock_queue.return_value = {
-            "handoff": handoff,
-            "queue_status": "deferred",
-            "stream_entry_id": None,
-            "warning": "event_queue_unavailable",
-        }
+        mock_queue.side_effect = RuntimeError("stream unavailable")
 
         svc = SimulationStartService(db=mock_db, redis=fake_redis)
         result = await svc.start_simulation(
@@ -229,9 +180,12 @@ async def test_start_simulation_persists_deferred_queue_outcome_fail_open(mock_d
 
     assert result["queue_status"] == "deferred"
     create_kwargs = mock_create.await_args.kwargs
-    assert create_kwargs["queue_status"] == "deferred"
+    assert create_kwargs["state"] == "cancelled"
+    assert create_kwargs["risk_gate"] == "blocked"
+    assert create_kwargs["queue_status"] == "pending"
     assert create_kwargs["stream_entry_id"] is None
-    assert create_kwargs["warning"] == "event_queue_unavailable"
+    assert result["warning"] == "event_queue_unavailable"
+    assert result["handoff"]["state"] == "cancelled"
 
 
 @pytest.mark.asyncio
@@ -328,10 +282,10 @@ async def test_start_simulation_resume_uses_existing_simulation_record(mock_db, 
     assert result["handoff"]["simulation_id"] == str(simulation_id)
     assert result["handoff"]["resumed_from_simulation_id"] == str(simulation_id)
     assert result["queue_status"] == "queued"
-    mock_ws.assert_awaited_once_with(existing.workspace_id, user_id=actor_user_id, claim_org_id=None)
+    mock_ws.assert_awaited_once_with(existing.workspace_id, user_id=actor_user_id, claim_org_id=None, require_write=True)
     mock_update_state.assert_awaited_once()
     mock_update_queue.assert_awaited_once()
-    mock_db.commit.assert_awaited_once()
+    assert mock_db.commit.await_count == 2
 
 
 @pytest.mark.asyncio
@@ -367,7 +321,7 @@ async def test_pause_simulation_updates_state_and_publishes_event(mock_db, fake_
 
     assert result["simulation_id"] == str(simulation_id)
     assert result["state"] == "paused"
-    mock_ws.assert_awaited_once_with(existing.workspace_id, user_id=actor_user_id, claim_org_id=None)
+    mock_ws.assert_awaited_once_with(existing.workspace_id, user_id=actor_user_id, claim_org_id=None, require_write=True)
     mock_update.assert_awaited_once()
     mock_publish.assert_awaited_once()
     assert mock_publish.await_args.kwargs["event_type"] == "simulation.paused"
@@ -407,7 +361,7 @@ async def test_pause_simulation_event_publish_failure_is_fail_open(mock_db, fake
         )
 
     assert result["state"] == "paused"
-    mock_ws.assert_awaited_once_with(existing.workspace_id, user_id=actor_user_id, claim_org_id=None)
+    mock_ws.assert_awaited_once_with(existing.workspace_id, user_id=actor_user_id, claim_org_id=None, require_write=True)
     mock_db.commit.assert_awaited_once()
 
 
@@ -498,7 +452,7 @@ async def test_branch_simulation_creates_draft_lineage_record(mock_db, fake_redi
     assert result["status"] == "draft"
     assert result["validation"]["pipeline_stage"] == "branch_draft"
     assert result["validation"]["required_checks"] == ["simulation_before_deployment", "blast_radius_assessment"]
-    mock_ws.assert_awaited_once_with(parent.workspace_id, user_id=actor_user_id, claim_org_id=None)
+    mock_ws.assert_awaited_once_with(parent.workspace_id, user_id=actor_user_id, claim_org_id=None, require_write=True)
     create_kwargs = mock_create.await_args.kwargs
     assert create_kwargs["parent_simulation_id"] == parent.simulation_id
     assert create_kwargs["network_id"] == parent.network_id
@@ -578,7 +532,7 @@ async def test_get_simulation_detail_returns_persisted_record(mock_db, fake_redi
     assert result["scenario_name"] == "Campus baseline"
     assert result["queue_status"] == "queued"
     assert result["validation"]["pipeline_stage"] == "handoff_queued"
-    mock_ws.assert_awaited_once_with(existing.workspace_id, user_id=actor_user_id, claim_org_id=None)
+    mock_ws.assert_awaited_once_with(existing.workspace_id, user_id=actor_user_id, claim_org_id=None, require_write=False)
 
 
 @pytest.mark.asyncio
@@ -624,7 +578,7 @@ async def test_get_simulation_detail_raises_404_when_missing(mock_db, fake_redis
 
 
 @pytest.mark.asyncio
-async def test_compare_simulations_returns_deterministic_metric_deltas(mock_db, fake_redis):
+async def test_compare_simulations_does_not_advertise_unmeasured_baseline_deltas(mock_db, fake_redis):
     simulation = AsyncMock()
     simulation.simulation_id = uuid.uuid4()
     simulation.scenario_id = uuid.uuid4()
@@ -665,11 +619,9 @@ async def test_compare_simulations_returns_deterministic_metric_deltas(mock_db, 
 
     assert result["simulation_id"] == str(simulation.simulation_id)
     assert result["baseline_simulation_id"] == str(baseline.simulation_id)
-    assert result["simulation_metrics"]["latency_ms"] == 12.5
-    assert result["baseline_metrics"]["latency_ms"] == 10.0
-    assert result["deltas"]["latency_ms"] == 2.5
-    assert result["deltas"]["loss_pct"] == 0.30000000000000004
-    assert result["deltas"]["throughput_mbps"] == -2.0
+    assert result["simulation_metrics"]["latency_ms"] is None
+    assert result["baseline_metrics"]["latency_ms"] is None
+    assert result["deltas"] == {"latency_ms": None, "loss_pct": None, "throughput_mbps": None}
     assert mock_ws.await_count == 2
 
 
@@ -815,7 +767,7 @@ async def test_branch_simulation_event_publish_failure_is_fail_open(mock_db, fak
 
 
 @pytest.mark.asyncio
-async def test_terminal_consumer_transitions_started_record_to_completed(mock_db, fake_redis):
+async def test_terminal_consumer_cancels_without_evaluator(mock_db, fake_redis):
     simulation_id = uuid.uuid4()
     simulation = AsyncMock()
     simulation.simulation_id = simulation_id
@@ -845,24 +797,21 @@ async def test_terminal_consumer_transitions_started_record_to_completed(mock_db
             }
         )
 
-    mock_update_state.assert_awaited_once_with(
-        simulation,
-        state="completed",
-        status="completed",
-        risk_gate="passed",
-    )
+    mock_update_state.assert_awaited_once()
+    assert mock_update_state.await_args.kwargs["state"] == "cancelled"
+    assert mock_update_state.await_args.kwargs["validation"]["failure_reason"] == "evaluator_unavailable"
     mock_publish.assert_awaited_once()
-    assert mock_publish.await_args.kwargs["event_type"] == "simulation.completed"
-    assert mock_publish.await_args.kwargs["payload"]["state"] == "completed"
-    assert mock_publish.await_args.kwargs["payload"]["status"] == "completed"
-    assert mock_publish.await_args.kwargs["payload"]["risk_gate"] == "passed"
+    assert mock_publish.await_args.kwargs["event_type"] == "simulation.cancelled"
+    assert mock_publish.await_args.kwargs["payload"]["state"] == "cancelled"
+    assert mock_publish.await_args.kwargs["payload"]["status"] == "cancelled"
+    assert mock_publish.await_args.kwargs["payload"]["risk_gate"] == "blocked"
     assert mock_publish.await_args.kwargs["payload"]["workspace_id"] == str(simulation.workspace_id)
     assert mock_publish.await_args.kwargs["payload"]["validation"]["pipeline_stage"] == "terminal"
-    assert mock_publish.await_args.kwargs["payload"]["validation"]["status"] == "completed"
-    assert mock_publish.await_args.kwargs["payload"]["validation"]["terminal_event_type"] == "simulation.completed"
+    assert mock_publish.await_args.kwargs["payload"]["validation"]["status"] == "cancelled"
+    assert mock_publish.await_args.kwargs["payload"]["validation"]["terminal_event_type"] == "simulation.cancelled"
     assert (
         mock_publish.await_args.kwargs["event_id"]
-        == _derive_terminal_event_id(simulation_id=simulation_id, event_type="simulation.completed")
+        == _derive_terminal_event_id(simulation_id=simulation_id, event_type="simulation.cancelled")
     )
     mock_db.commit.assert_awaited_once()
 
@@ -903,6 +852,9 @@ async def test_terminal_consumer_transitions_deferred_record_to_cancelled(mock_d
         state="cancelled",
         status="cancelled",
         risk_gate="blocked",
+        validation={"pipeline_stage": "terminal", "status": "cancelled", "terminal_event_type": "simulation.cancelled",
+                    "failure_reason": "evaluator_unavailable", "evaluator_status": "unavailable"},
+        run_output={"latency_ms": None, "loss_pct": None, "throughput_mbps": None},
     )
     mock_publish.assert_awaited_once()
     assert mock_publish.await_args.kwargs["event_type"] == "simulation.cancelled"

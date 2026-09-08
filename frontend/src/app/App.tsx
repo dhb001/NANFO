@@ -1,7 +1,7 @@
 import { Suspense } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { AppProviders } from "./providers";
-import { useAuthStore } from "@/shared/state/auth-store";
+import { SessionGate } from "@/features/auth/SessionGate";
 import { AppShell } from "@/shared/ui/AppShell";
 import {
   AuditPage,
@@ -18,14 +18,6 @@ import {
   TwinPage,
 } from "./routes";
 import { AsyncState } from "@/shared/ui/AsyncState";
-
-function RequireAuth({ children }: { children: JSX.Element }) {
-  const token = useAuthStore((state) => state.accessToken);
-  if (!token) {
-    return <Navigate to="/login" replace />;
-  }
-  return children;
-}
 
 function AppLoadingFallback() {
   return (
@@ -44,9 +36,9 @@ export function App() {
           <Route
             path="/ops"
             element={
-              <RequireAuth>
+              <SessionGate>
                 <AppShell />
-              </RequireAuth>
+              </SessionGate>
             }
           >
             <Route index element={<Navigate to="overview" replace />} />

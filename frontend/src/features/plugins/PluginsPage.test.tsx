@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 
 import { PluginsPage } from "@/features/plugins/PluginsPage";
 import { useAuthStore } from "@/shared/state/auth-store";
+import { operatorProfile } from "@/test/profile";
 import { useUiStore } from "@/shared/state/ui-store";
 
 const mockUsePluginsQuery = vi.fn();
@@ -37,6 +38,7 @@ describe("PluginsPage", () => {
     vi.clearAllMocks();
 
     useAuthStore.setState({
+      profile: { ...operatorProfile, roles: ["Admin"] },
       accessToken: "token-1",
       refreshToken: "refresh-1",
       userId: "00000000-0000-0000-0000-000000000123",

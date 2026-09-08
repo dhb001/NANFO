@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.events.publisher import publish_event
+from app.modules.organization.service import OrgService, WorkspaceService
 from app.modules.plugin.repository import PluginRepository
 from app.modules.plugin.schemas import (
     PluginActionResponse,
@@ -79,6 +80,21 @@ class PluginService:
         self._redis = redis
         self._repo = PluginRepository(db)
 
+    async def _assert_membership(
+        self, *, user_id: str, claim_org_id: uuid.UUID | None, claim_workspace_id: uuid.UUID | None,
+    ) -> None:
+        # The plugin registry is platform-wide, not a tenant-owned resource.
+        if claim_workspace_id is not None:
+            await WorkspaceService(db=self._db, redis=self._redis).get_active_workspace(
+                claim_workspace_id, user_id=user_id, claim_org_id=claim_org_id,
+            )
+        elif claim_org_id is not None:
+            await OrgService(db=self._db, redis=self._redis).get_org(org_id=claim_org_id, user_id=user_id)
+        else:
+            orgs = await OrgService(db=self._db, redis=self._redis).list_orgs(user_id=user_id, page=1, page_size=1)
+            if not orgs.items:
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions.")
+
     async def list_plugins(
         self,
         *,
@@ -86,7 +102,13 @@ class PluginService:
         enabled_filter: str | None,
         search_filter: str | None,
         limit: int,
+        actor_user_id: str,
+        claim_org_id: uuid.UUID | None = None,
+        claim_workspace_id: uuid.UUID | None = None,
     ) -> PluginListResponse:
+        await self._assert_membership(
+            user_id=actor_user_id, claim_org_id=claim_org_id, claim_workspace_id=claim_workspace_id,
+        )
         normalized_status = _normalize_status(status_filter)
         if normalized_status is not None and normalized_status not in _PLUGIN_STATUSES:
             raise HTTPException(
@@ -138,7 +160,12 @@ class PluginService:
         req: PluginInstallRequest,
         correlation_id: str,
         requested_by_user_id: str,
+        claim_org_id: uuid.UUID | None = None,
+        claim_workspace_id: uuid.UUID | None = None,
     ) -> PluginActionResponse:
+        await self._assert_membership(
+            user_id=requested_by_user_id, claim_org_id=claim_org_id, claim_workspace_id=claim_workspace_id,
+        )
         plugin_key = _normalize_text(req.plugin_key).lower()
         existing = await self._repo.get_by_plugin_key(plugin_key)
         if existing is not None:
@@ -280,7 +307,12 @@ class PluginService:
         plugin_id: uuid.UUID,
         correlation_id: str,
         requested_by_user_id: str,
+        claim_org_id: uuid.UUID | None = None,
+        claim_workspace_id: uuid.UUID | None = None,
     ) -> PluginActionResponse:
+        await self._assert_membership(
+            user_id=requested_by_user_id, claim_org_id=claim_org_id, claim_workspace_id=claim_workspace_id,
+        )
         plugin = await self._repo.get_by_id(plugin_id)
         if plugin is None:
             raise HTTPException(
@@ -393,7 +425,12 @@ class PluginService:
         plugin_id: uuid.UUID,
         correlation_id: str,
         requested_by_user_id: str,
+        claim_org_id: uuid.UUID | None = None,
+        claim_workspace_id: uuid.UUID | None = None,
     ) -> PluginActionResponse:
+        await self._assert_membership(
+            user_id=requested_by_user_id, claim_org_id=claim_org_id, claim_workspace_id=claim_workspace_id,
+        )
         plugin = await self._repo.get_by_id(plugin_id)
         if plugin is None:
             raise HTTPException(

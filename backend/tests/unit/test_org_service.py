@@ -50,12 +50,16 @@ def org_svc(mock_db, fake_redis) -> OrgService:
 
 @pytest.fixture
 def ws_svc(mock_db, fake_redis) -> WorkspaceService:
-    return WorkspaceService(db=mock_db, redis=fake_redis)
+    svc = WorkspaceService(db=mock_db, redis=fake_redis)
+    svc._org_repo.get_by_id = AsyncMock(return_value=_make_org())
+    return svc
 
 
 @pytest.fixture
 def member_svc(mock_db, fake_redis) -> MemberService:
-    return MemberService(db=mock_db, redis=fake_redis)
+    svc = MemberService(db=mock_db, redis=fake_redis)
+    svc._org_repo.get_by_id = AsyncMock(return_value=_make_org())
+    return svc
 
 
 class TestOrgService:
@@ -273,7 +277,7 @@ class TestWorkspaceService:
         ):
             result = await ws_svc.get_active_workspace(ws.workspace_id, user_id=user_id)
 
-        mock_assert.assert_awaited_once_with(org_id=ws.org_id, user_id=user_id)
+        mock_assert.assert_awaited_once_with(org_id=ws.org_id, user_id=user_id, require_write=False)
         assert result is ws
 
     @pytest.mark.asyncio
@@ -296,7 +300,7 @@ class TestWorkspaceService:
         ):
             result = await ws_svc.assert_workspace_membership(workspace_id=ws.workspace_id, user_id=user_id)
 
-        mock_get.assert_awaited_once_with(ws.workspace_id, user_id=user_id)
+        mock_get.assert_awaited_once_with(ws.workspace_id, user_id=user_id, require_write=False)
         assert result is ws
 
     @pytest.mark.asyncio

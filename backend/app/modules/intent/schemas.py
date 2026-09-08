@@ -27,6 +27,8 @@ class IntentValidationState(BaseModel):
     simulation_required: bool
     policy_reference: str
     validated_at: datetime
+    validation_kind: str = "baseline_schema_only"
+    model_evidence: str = "unavailable"
 
 
 class IntentExplainability(BaseModel):

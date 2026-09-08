@@ -5,19 +5,18 @@ from __future__ import annotations
 import uuid
 from unittest.mock import AsyncMock, patch
 
-import fakeredis
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from app.core.dependencies import get_db, get_redis
-from app.core.security import create_access_token
 from app.main import app
+from tests.auth_support import create_session_access_token as create_access_token
 
 
 @pytest.fixture
-def client() -> TestClient:
-    fake_r = fakeredis.FakeAsyncRedis(decode_responses=True)
+def client(session_auth) -> TestClient:
+    fake_r = session_auth.redis
     db = AsyncMock()
     db.commit = AsyncMock()
     db.flush = AsyncMock()
@@ -40,7 +39,7 @@ def _make_token() -> str:
         user_id=str(uuid.uuid4()),
         email="errors@example.com",
         roles=["Admin"],
-        permissions=["read:telemetry"],
+        permissions=["read:telemetry", "read:topology", "write:config"],
     )
     return token
 

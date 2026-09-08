@@ -99,7 +99,7 @@ export function SimulationPage() {
               style={{ border: "1px solid var(--line-soft)", borderRadius: "10px", padding: "0.52rem 0.56rem" }}
             />
           </label>
-          <Button type="submit" disabled={!networkId || startMutation.isPending}>
+          <Button permission="write:config" type="submit" disabled={!networkId || startMutation.isPending}>
             {startMutation.isPending ? "Starting..." : "Start Simulation"}
           </Button>
         </form>
@@ -138,13 +138,14 @@ export function SimulationPage() {
 
         <div style={{ display: "flex", gap: "0.5rem", marginTop: "0.7rem", flexWrap: "wrap" }}>
           <Button
+            permission="write:config"
             tone="ghost"
             onClick={() => trackedSimulationId && pauseMutation.mutate(trackedSimulationId)}
             disabled={!trackedSimulationId || pauseMutation.isPending}
           >
             Pause
           </Button>
-          <Button tone="ghost" onClick={branch} disabled={!trackedSimulationId || branchMutation.isPending}>
+          <Button permission="write:config" tone="ghost" onClick={branch} disabled={!trackedSimulationId || branchMutation.isPending}>
             Branch
           </Button>
           <input
@@ -226,7 +227,7 @@ export function SimulationPage() {
               <div style={{ display: "grid", gap: "0.5rem" }}>
                 <MetricRow label="Latency delta" value={compare.deltas.latency_ms} unit="ms" />
                 <MetricRow label="Loss delta" value={compare.deltas.loss_pct} unit="%" />
-                <MetricRow label="Throughput delta" value={compare.deltas.throughput_mbps} unit="mbps" />
+                <MetricRow label="Throughput delta" value={compare.deltas.throughput_mbps} unit="mbps" higherIsBetter />
               </div>
             )}
           </QueryState>
@@ -265,8 +266,11 @@ export function SimulationPage() {
   );
 }
 
-function MetricRow({ label, value, unit }: { label: string; value: number; unit: string }) {
-  const tone = value > 0 ? "warn" : value < 0 ? "ok" : "neutral";
+function MetricRow({ label, value, unit, higherIsBetter = false }: {
+  label: string; value: number | null; unit: string; higherIsBetter?: boolean;
+}) {
+  const available = value !== null && Number.isFinite(value);
+  const tone = !available || value === 0 ? "neutral" : (value > 0) === higherIsBetter ? "ok" : "warn";
   return (
     <div
       style={{
@@ -279,7 +283,7 @@ function MetricRow({ label, value, unit }: { label: string; value: number; unit:
       }}
     >
       <span>{label}</span>
-      <Badge text={`${formatNumber(value)} ${unit}`} tone={tone as "neutral" | "ok" | "warn"} />
+      <Badge text={available ? `${formatNumber(value)} ${unit}` : "Unavailable (not measured)"} tone={tone} />
     </div>
   );
 }

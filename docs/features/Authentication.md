@@ -4,7 +4,8 @@
 To provide secure, stateless identity verification and strict Role-Based Access Control (RBAC) across the NANFO platform[cite: 1]. This ensures that only authorized administrators and specialized engineers can execute high-impact network configurations.
 
 ## 2. Requirements
-* Implement stateless authentication utilizing JSON Web Tokens (JWT)[cite: 1].
+* Use signed JWTs with Redis-backed revocable session families. JWT verification
+  alone does not authorize a request.
 * Support token lifecycle management (issue, refresh, revoke/logout).
 * Enforce fine-grained RBAC for different user personas (e.g., Enterprise NOC Engineers, SDN & Wireless Engineers, Tertiary Users)[cite: 1].
 * All authentication events must append records to the immutable Audit Log[cite: 1].
@@ -70,7 +71,20 @@ All JWTs issued by `POST /api/v1/auth/login` and `POST /api/v1/auth/refresh` mus
 - **Single-org per token:** A token may carry at most one `org_id`. A user who is a member of multiple organizations must obtain a new token (via `/api/v1/auth/login` with an explicit `org_id` parameter, or via a future `/api/v1/auth/switch-org` endpoint) to switch organization context. Multi-org membership is supported at the data layer; the token scope is always single-org.
 - **Workspace scoping:** `workspace_id` is optional in the token. If absent, the client must provide `workspace_id` as a query parameter where required (e.g., `GET /api/v1/networks?workspace_id=<uuid>`). If present, downstream services may use it to pre-filter results without requiring an explicit query parameter.
 - **RBAC evaluation order:** The RBAC middleware evaluates `roles` first (coarse-grained route access), then `permissions` (fine-grained capability access). Both arrays must be present in the token; an empty `permissions` array is valid for read-only roles.
-- **Token revocation:** The `jti` claim is used to implement token revocation. On logout, the `jti` of the access token is added to a Redis deny-list with a TTL equal to the remaining token lifetime.
+- **Token revocation:** Access and refresh tokens require `sid` (session UUID) and
+  `token_type` (`access` or `refresh`). Logout deletes the Redis session family;
+  all its tokens become invalid. Existing access-token deny-list entries are
+  still honored. Sessionless legacy tokens require a fresh login.
+- **Refresh rotation:** Refresh returns a full TokenPair (`access_token`,
+  `refresh_token`, `token_type`, `expires_in`). Refresh tokens are single-use;
+  replay revokes the family. Absolute session expiry is not extended by rotation.
+- **Current authorization:** Every authenticated request reloads active identity,
+  roles, and permissions; JWT role snapshots cannot preserve removed privileges.
+- **Browser ownership:** Sessions are tab-local (`sessionStorage`); legacy shared
+  local-storage credentials are discarded. Logout clears query/realtime/context
+  state, and attempts refresh before revocation if the access token has expired.
+- **Availability:** Redis/session failures deny access. Clients must not silently
+  substitute local logout for confirmed backend revocation.
 
 ### 8.4 Claims That Must Never Appear in a JWT
 

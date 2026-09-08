@@ -6,14 +6,14 @@ import uuid
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
-import fakeredis
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from app.core.dependencies import get_db, get_redis
-from app.core.security import create_access_token
 from app.main import app
+from tests.auth_support import create_authorized_workspace
+from tests.auth_support import create_session_access_token as create_access_token
 
 
 def _make_token() -> str:
@@ -48,8 +48,8 @@ def _make_workspace_scoped_token(*, workspace_id: uuid.UUID) -> str:
 
 
 @pytest.fixture
-def client() -> TestClient:
-    fake_r = fakeredis.FakeAsyncRedis(decode_responses=True)
+def client(session_auth, tenant_auth) -> TestClient:
+    fake_r = session_auth.redis
     db = AsyncMock()
     db.commit = AsyncMock()
     db.flush = AsyncMock()
@@ -71,7 +71,7 @@ def _report_response_payload(*, status: str, queue_status: str, idempotent_repla
     now = datetime.now(UTC)
     payload = {
         "report_id": uuid.uuid4(),
-        "workspace_id": uuid.uuid4(),
+        "workspace_id": create_authorized_workspace(),
         "network_id": uuid.uuid4(),
         "report_type": "executive_summary",
         "format": "pdf",
@@ -222,7 +222,7 @@ def test_generate_report_idempotency_conflict_returns_409(client):
         response = client.post(
             "/api/v1/reports/generate",
             json={
-                "workspace_id": str(uuid.uuid4()),
+                "workspace_id": str(create_authorized_workspace()),
                 "network_id": str(uuid.uuid4()),
                 "report_type": "executive_summary",
                 "format": "pdf",
@@ -260,7 +260,7 @@ def test_generate_report_invalid_date_range_returns_400(client):
         response = client.post(
             "/api/v1/reports/generate",
             json={
-                "workspace_id": str(uuid.uuid4()),
+                "workspace_id": str(create_authorized_workspace()),
                 "network_id": str(uuid.uuid4()),
                 "report_type": "executive_summary",
                 "format": "pdf",
@@ -345,7 +345,7 @@ def test_get_report_not_found_returns_404(client):
     ):
         response = client.get(
             f"/api/v1/reports/{uuid.uuid4()}",
-            params={"workspace_id": str(uuid.uuid4())},
+            params={"workspace_id": str(create_authorized_workspace())},
             headers=headers,
         )
 

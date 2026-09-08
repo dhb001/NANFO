@@ -9,17 +9,21 @@ import uuid
 from typing import Annotated
 
 import redis.asyncio as aioredis
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.dependencies import (
     RequestMeta,
     TokenClaims,
     enforce_org_scope,
+    enforce_workspace_scope,
+    get_claim_org_scope,
+    get_claim_workspace_scope,
     get_current_user,
     get_db,
     get_redis,
     get_request_meta,
+    require_permissions,
 )
 from app.core.responses import APIResponse, success_response
 from app.modules.organization.schemas import (
@@ -37,7 +41,29 @@ from app.modules.organization.schemas import (
 )
 from app.modules.organization.service import MemberService, OrgService, WorkspaceService
 
-router = APIRouter(prefix="/api/v1/organizations", tags=["Organizations"])
+
+async def _enforce_workspace_context(
+    request: Request,
+    claims: Annotated[TokenClaims, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    redis: Annotated[aioredis.Redis, Depends(get_redis)],
+):
+    workspace_id = get_claim_workspace_scope(claims=claims)
+    raw_org_id = request.path_params.get("org_id")
+    if workspace_id is not None and raw_org_id is not None:
+        try:
+            org_id = uuid.UUID(str(raw_org_id))
+        except ValueError:
+            return  # Path validation reports malformed resource identifiers.
+        enforce_org_scope(claims=claims, org_id=org_id)
+        await WorkspaceService(db=db, redis=redis).get_active_workspace(
+            workspace_id, user_id=claims.user_id, claim_org_id=org_id,
+        )
+
+
+router = APIRouter(
+    prefix="/api/v1/organizations", tags=["Organizations"], dependencies=[Depends(_enforce_workspace_context)],
+)
 
 
 # ── Organizations ─────────────────────────────────────────────────────────────
@@ -45,7 +71,7 @@ router = APIRouter(prefix="/api/v1/organizations", tags=["Organizations"])
 @router.post("", response_model=APIResponse[OrgResponse], status_code=status.HTTP_201_CREATED)
 async def create_org(
     req: CreateOrgRequest,
-    claims: Annotated[TokenClaims, Depends(get_current_user)],
+    claims: Annotated[TokenClaims, Depends(require_permissions("write:config"))],
     meta: Annotated[RequestMeta, Depends(get_request_meta)],
     db: Annotated[AsyncSession, Depends(get_db)],
     redis: Annotated[aioredis.Redis, Depends(get_redis)],
@@ -67,7 +93,14 @@ async def list_orgs(
 ):
     started = time.monotonic()
     svc = OrgService(db=db, redis=redis)
-    result = await svc.list_orgs(user_id=claims.user_id, page=page, page_size=page_size)
+    claim_org_id = get_claim_org_scope(claims=claims)
+    claim_workspace_id = get_claim_workspace_scope(claims=claims)
+    if claim_workspace_id is not None:
+        workspace = await WorkspaceService(db=db, redis=redis).get_active_workspace(
+            claim_workspace_id, user_id=claims.user_id, claim_org_id=claim_org_id,
+        )
+        claim_org_id = workspace.org_id
+    result = await svc.list_orgs(user_id=claims.user_id, page=page, page_size=page_size, org_id=claim_org_id)
     return success_response(result, meta.request_id, started, meta.timestamp)
 
 
@@ -90,7 +123,7 @@ async def get_org(
 async def update_org(
     org_id: uuid.UUID,
     req: UpdateOrgRequest,
-    claims: Annotated[TokenClaims, Depends(get_current_user)],
+    claims: Annotated[TokenClaims, Depends(require_permissions("write:config"))],
     meta: Annotated[RequestMeta, Depends(get_request_meta)],
     db: Annotated[AsyncSession, Depends(get_db)],
     redis: Annotated[aioredis.Redis, Depends(get_redis)],
@@ -111,7 +144,7 @@ async def update_org(
 @router.delete("/{org_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_org(
     org_id: uuid.UUID,
-    claims: Annotated[TokenClaims, Depends(get_current_user)],
+    claims: Annotated[TokenClaims, Depends(require_permissions("write:config"))],
     meta: Annotated[RequestMeta, Depends(get_request_meta)],
     db: Annotated[AsyncSession, Depends(get_db)],
     redis: Annotated[aioredis.Redis, Depends(get_redis)],
@@ -132,7 +165,7 @@ async def delete_org(
 async def create_workspace(
     org_id: uuid.UUID,
     req: CreateWorkspaceRequest,
-    claims: Annotated[TokenClaims, Depends(get_current_user)],
+    claims: Annotated[TokenClaims, Depends(require_permissions("write:config"))],
     meta: Annotated[RequestMeta, Depends(get_request_meta)],
     db: Annotated[AsyncSession, Depends(get_db)],
     redis: Annotated[aioredis.Redis, Depends(get_redis)],
@@ -168,6 +201,7 @@ async def list_workspaces(
         user_id=claims.user_id,
         page=page,
         page_size=page_size,
+        workspace_id=get_claim_workspace_scope(claims=claims),
     )
     return success_response(result, meta.request_id, started, meta.timestamp)
 
@@ -183,6 +217,7 @@ async def get_workspace(
 ):
     started = time.monotonic()
     scoped_org_id = enforce_org_scope(claims=claims, org_id=org_id)
+    enforce_workspace_scope(claims=claims, workspace_id=workspace_id)
     svc = WorkspaceService(db=db, redis=redis)
     result = await svc.get_workspace_for_org(
         org_id=scoped_org_id,
@@ -197,13 +232,14 @@ async def update_workspace(
     org_id: uuid.UUID,
     workspace_id: uuid.UUID,
     req: UpdateWorkspaceRequest,
-    claims: Annotated[TokenClaims, Depends(get_current_user)],
+    claims: Annotated[TokenClaims, Depends(require_permissions("write:config"))],
     meta: Annotated[RequestMeta, Depends(get_request_meta)],
     db: Annotated[AsyncSession, Depends(get_db)],
     redis: Annotated[aioredis.Redis, Depends(get_redis)],
 ):
     started = time.monotonic()
     scoped_org_id = enforce_org_scope(claims=claims, org_id=org_id)
+    enforce_workspace_scope(claims=claims, workspace_id=workspace_id)
     svc = WorkspaceService(db=db, redis=redis)
     result = await svc.update_workspace(
         org_id=scoped_org_id,
@@ -221,12 +257,13 @@ async def update_workspace(
 async def delete_workspace(
     org_id: uuid.UUID,
     workspace_id: uuid.UUID,
-    claims: Annotated[TokenClaims, Depends(get_current_user)],
+    claims: Annotated[TokenClaims, Depends(require_permissions("write:config"))],
     meta: Annotated[RequestMeta, Depends(get_request_meta)],
     db: Annotated[AsyncSession, Depends(get_db)],
     redis: Annotated[aioredis.Redis, Depends(get_redis)],
 ):
     scoped_org_id = enforce_org_scope(claims=claims, org_id=org_id)
+    enforce_workspace_scope(claims=claims, workspace_id=workspace_id)
     svc = WorkspaceService(db=db, redis=redis)
     await svc.delete_workspace(
         org_id=scoped_org_id,
@@ -243,7 +280,7 @@ async def delete_workspace(
 async def add_member(
     org_id: uuid.UUID,
     req: AddMemberRequest,
-    claims: Annotated[TokenClaims, Depends(get_current_user)],
+    claims: Annotated[TokenClaims, Depends(require_permissions("write:config"))],
     meta: Annotated[RequestMeta, Depends(get_request_meta)],
     db: Annotated[AsyncSession, Depends(get_db)],
     redis: Annotated[aioredis.Redis, Depends(get_redis)],
@@ -288,7 +325,7 @@ async def list_members(
 async def remove_member(
     org_id: uuid.UUID,
     user_id: uuid.UUID,
-    claims: Annotated[TokenClaims, Depends(get_current_user)],
+    claims: Annotated[TokenClaims, Depends(require_permissions("write:config"))],
     meta: Annotated[RequestMeta, Depends(get_request_meta)],
     db: Annotated[AsyncSession, Depends(get_db)],
     redis: Annotated[aioredis.Redis, Depends(get_redis)],

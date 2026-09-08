@@ -14,6 +14,13 @@ from app.modules.plugin.schemas import PluginInstallRequest
 from app.modules.plugin.service import PluginService
 
 
+@pytest.fixture(autouse=True)
+def active_membership():
+    org = SimpleNamespace(org_id=uuid.UUID(int=1), name="Test", slug="test", created_at=datetime.now(UTC))
+    with patch("app.modules.organization.repository.OrganizationRepository.list_for_user", return_value=([org], 1)):
+        yield
+
+
 def _make_plugin_row(
     *,
     plugin_id: uuid.UUID | None = None,
@@ -98,6 +105,7 @@ async def test_list_plugins_normalizes_filters_and_counts_statuses(mock_db, fake
     )
 
     result = await service.list_plugins(
+        actor_user_id=str(uuid.UUID(int=10)),
         status_filter="ENABLED",
         enabled_filter="true",
         search_filter="  telemetry  ",
@@ -120,6 +128,7 @@ async def test_list_plugins_rejects_invalid_status_filter(mock_db, fake_redis):
 
     with pytest.raises(HTTPException) as exc_info:
         await service.list_plugins(
+            actor_user_id=str(uuid.UUID(int=10)),
             status_filter="queued",
             enabled_filter=None,
             search_filter=None,
@@ -136,6 +145,7 @@ async def test_list_plugins_rejects_invalid_enabled_filter(mock_db, fake_redis):
 
     with pytest.raises(HTTPException) as exc_info:
         await service.list_plugins(
+            actor_user_id=str(uuid.UUID(int=10)),
             status_filter=None,
             enabled_filter="not-bool",
             search_filter=None,
