@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
@@ -102,6 +103,47 @@ async def _run_topology_workspace_backfill(correlation_id: str) -> int:
         return await service.backfill_missing_workspace_ids(db=db, correlation_id=correlation_id)
 
 
+async def _build_emulation_adapter(settings, redis):
+    """ADR-009 composition: Network validates discovery before Telemetry ingestion."""
+    from app.modules.identity.service import AuthService
+    from app.modules.network.emulation import EmulationDiscoveryService, load_binding
+    from app.modules.network.repository import DeviceRepository
+    from app.modules.network.service import NetworkService
+    from app.modules.telemetry.emulation import (
+        EmulationTelemetryAdapter,
+        SnapshotReader,
+    )
+
+    if settings.EXECUTION_MODE != "emulation":
+        raise ValueError("Snapshot telemetry is restricted to emulation mode")
+    if not settings.EMULATION_SNAPSHOT_PATH or not settings.EMULATION_BINDING_PATH:
+        raise ValueError("Emulation snapshot and binding paths are required")
+    try:
+        from emulation.topology import manifest
+    except ImportError as exc:
+        raise ValueError("Trusted emulation topology must be installed on the backend Python path") from exc
+    expected_topology = manifest()
+    snapshot_path = Path(settings.EMULATION_SNAPSHOT_PATH)
+    binding = await load_binding(Path(settings.EMULATION_BINDING_PATH), snapshot_path=snapshot_path)
+
+    async def prepare(snapshot):
+        # A fresh session prevents cached membership/capabilities surviving revocation.
+        async with AsyncSessionLocal() as db:
+            service = EmulationDiscoveryService(
+                identity=AuthService(db, redis), network=NetworkService(db, redis),
+                devices=DeviceRepository(db), topology=TopologyQueryService(get_neo4j_driver()),
+                expected_topology=expected_topology,
+            )
+            return await service.apply_snapshot(binding, snapshot)
+
+    return EmulationTelemetryAdapter(
+        reader=SnapshotReader(snapshot_path, max_bytes=settings.EMULATION_SNAPSHOT_MAX_BYTES,
+                              max_age_seconds=settings.EMULATION_SNAPSHOT_MAX_AGE_SECONDS,
+                              future_skew_seconds=settings.EMULATION_SNAPSHOT_FUTURE_SKEW_SECONDS),
+        prepare_snapshot=prepare,
+    )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = get_settings()
@@ -126,6 +168,9 @@ async def lifespan(app: FastAPI):
             max_backoff_seconds=_TELEMETRY_COLLECTOR_BACKOFF_MAX_SECONDS,
         )
         if started:
+            adapter_options = {}
+            if settings.TELEMETRY_RUNTIME_ADAPTER_MODE.strip().lower() == "emulation":
+                adapter_options["emulation_adapter"] = await _build_emulation_adapter(settings, redis)
             runtime_adapter = build_production_runtime_adapter(
                 mode=settings.TELEMETRY_RUNTIME_ADAPTER_MODE,
                 seeded_sample_key=settings.TELEMETRY_RUNTIME_ADAPTER_SEEDED_SAMPLE_KEY,
@@ -147,6 +192,7 @@ async def lifespan(app: FastAPI):
                 grpc_value=settings.TELEMETRY_RUNTIME_ADAPTER_GRPC_VALUE,
                 grpc_unit=settings.TELEMETRY_RUNTIME_ADAPTER_GRPC_UNIT,
                 grpc_source=settings.TELEMETRY_RUNTIME_ADAPTER_GRPC_SOURCE,
+                **adapter_options,
             )
             runtime_poll_action = build_runtime_poll_action(
                 collector_runner=telemetry_collector,

@@ -251,7 +251,7 @@ class DeviceService:
                     "network_id": str(network_id),
                     "workspace_id": str(network.workspace_id),
                     "hostname": device.hostname,
-                    "ip_address": device.ip_address,
+                    "ip_address": str(device.ip_address) if device.ip_address is not None else None,
                     "device_type": device.device_type,
                     "spatial_ref_id": device.spatial_ref_id,
                     "actor_id": actor_id,

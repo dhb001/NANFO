@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { useLiveStore } from "@/features/realtime/store";
 import { TopologyEdge, TopologyNode } from "@/shared/types/network";
+import { topologyEdgeIdentity } from "@/features/topology/edgeIdentity";
 import {
   buildTwinSceneModel,
   type TwinCongestion,
@@ -76,6 +77,7 @@ export function useTwinSceneModel(
 
 export function useTwinLinks(nodes: TwinNode[], edges: TopologyEdge[] = []): TwinLink[] {
   return useMemo(() => {
+    const seenLinkIds = new Set<string>();
     const nodeById = nodes.reduce<Record<string, TwinNode>>((acc, node) => {
       acc[node.id] = node;
       return acc;
@@ -85,17 +87,20 @@ export function useTwinLinks(nodes: TwinNode[], edges: TopologyEdge[] = []): Twi
       .map((edge) => {
         const sourceNode = nodeById[edge.source_id];
         const targetNode = nodeById[edge.target_id];
-        if (!sourceNode || !targetNode) {
+        const id = topologyEdgeIdentity(edge);
+        if (!sourceNode || !targetNode || seenLinkIds.has(id)) {
           return null;
         }
+        seenLinkIds.add(id);
 
         return {
-          id: `${edge.source_id}:${edge.target_id}:${edge.edge_type}`,
+          id,
           source: [sourceNode.x, sourceNode.y, sourceNode.z],
           target: [targetNode.x, targetNode.y, targetNode.z],
           sourceId: sourceNode.id,
           targetId: targetNode.id,
           edgeType: edge.edge_type,
+          metadata: edge.metadata,
         } satisfies TwinLink;
       })
       .filter((link): link is TwinLink => link !== null);

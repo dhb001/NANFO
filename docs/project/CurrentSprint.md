@@ -1,5 +1,46 @@
 # Current Sprint State
 
+## Completion Plan Steps 3-4: Measured Emulation
+
+- Implemented and live-verified on 2026-09-08 under ADR-009: isolated Mininet/OVS/
+  Ryu OpenFlow 1.3 campus (5 switches, 4 hosts), repeatable lifecycle/workload tools,
+  actual LLDP/host discovery, trusted API-returned inventory bindings, observed
+  graph ownership, measured counter/queue/probe ingestion and historical queries.
+- Final live verification: 9 nodes, 11 observed edges, 2,672 unique persisted
+  observations and matching actual WebSocket frames; zero duplicate rows; partial
+  publication replay after producer advancement, actor revocation, independent
+  measurements and all four aggregation modes passed.
+- Automated gates: 1,230 backend tests passed, 1 opt-in SQL fixture skipped;
+  SQL aggregation separately exercised against real PostgreSQL by the verifier.
+  Frontend lint/typecheck, 209 tests, 25 browser tests without retries, production
+  build and unchanged bundle bounds passed (403.60 KiB total JS gzip).
+- Evidence and operating instructions: `emulation/README.md`,
+  `docs/project/Emulation-Backend-Live-Validation.md` and ADR-009.
+- Next: Step 5 real safe manual actions. Existing intent executor and simulation
+  evaluator remain unavailable; observation does not enable autonomous control.
+- Boundaries: one trusted lab/collector; topology link changes use REST refresh;
+  no durable exactly-once guarantee or normal shared consumer-group recovery
+  certification. Legacy Ryu dependencies are isolated, not production-safe.
+
+## ADR-009 Backend Live Observation Gate
+
+- Measurement-review correction: earlier connectivity counts do not certify
+  measurement identity/timing. Corrected live run
+  `/tmp/opencode/emulation-audit-0dupngy6/result.json`: 2,876 unique observations/
+  WebSocket frames, 13 snapshots, 9 nodes/11 edges. Observation-level IDs, pending
+  full-publication acknowledgement, OpenFlow-duration rates and independent
+  synthetic/observed Neo4j ownership verified. 1,230 backend tests passed, one skipped.
+
+- 2026-09-08: Real isolated-lab -> snapshot adapter -> Redis handler -> PostgreSQL/
+  Neo4j -> authenticated HTTP/WebSocket validation passed in a dedicated audit scope.
+- Final run: 9 nodes, 11 observed edges, 2,896 unique measurements and matching
+  WebSocket frames; source calculations, retry deduplication, current actor denial,
+  four aggregation modes, UTC bounds and device scope verified. Owned lab stopped.
+- Fixed host-add event serialization of PostgreSQL INET values; no endpoint/event
+  expansion, migrations, credential changes or unrelated row deletion.
+- Exact command, sanitized artifacts and consumer-lifecycle limitations:
+  `docs/project/Emulation-Backend-Live-Validation.md`.
+
 ## Completion Plan Steps 1-2: Foundation and Security
 
 - Implementation and automated regression gate completed on 2026-09-08 for the

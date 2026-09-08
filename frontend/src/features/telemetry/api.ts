@@ -1,15 +1,7 @@
 import { apiRequest } from "@/shared/lib/api";
-import { TelemetryDeviceHistory, TelemetryHealth, TelemetryHistory } from "@/shared/types/telemetry";
+import { TelemetryAggregationHistory, TelemetryDeviceHistory, TelemetryHealth, TelemetryHistory, TelemetryHistoryQuery, TelemetryTimeRange } from "@/shared/types/telemetry";
 
-interface HistoryQuery {
-  networkId?: string;
-  workspaceId?: string;
-  metric?: string;
-  page?: number;
-  pageSize?: number;
-}
-
-export function getTelemetryHistory(token: string, query: HistoryQuery) {
+export function getTelemetryHistory(token: string, query: TelemetryHistoryQuery) {
   const params = new URLSearchParams();
   if (query.networkId) {
     params.set("network_id", query.networkId);
@@ -22,14 +14,20 @@ export function getTelemetryHistory(token: string, query: HistoryQuery) {
   }
   params.set("page", String(query.page ?? 1));
   params.set("page_size", String(query.pageSize ?? 50));
-  return apiRequest<TelemetryHistory>(`/api/v1/telemetry/history?${params.toString()}`, { token });
+  if (query.startTime) params.set("start_time", query.startTime);
+  if (query.endTime) params.set("end_time", query.endTime);
+  if (query.aggregation) params.set("aggregation", query.aggregation);
+  if (query.bucketSeconds !== undefined) params.set("bucket_seconds", String(query.bucketSeconds));
+  return apiRequest<TelemetryHistory | TelemetryAggregationHistory>(`/api/v1/telemetry/history?${params.toString()}`, { token });
 }
 
-export function getDeviceTelemetry(token: string, deviceId: string, page = 1, pageSize = 50, metric?: string) {
+export function getDeviceTelemetry(token: string, deviceId: string, page = 1, pageSize = 50, metric?: string, range: TelemetryTimeRange = {}) {
   const params = new URLSearchParams({ page: String(page), page_size: String(pageSize) });
   if (metric) {
     params.set("metric", metric);
   }
+  if (range.startTime) params.set("start_time", range.startTime);
+  if (range.endTime) params.set("end_time", range.endTime);
   return apiRequest<TelemetryDeviceHistory>(`/api/v1/telemetry/device/${deviceId}?${params.toString()}`, { token });
 }
 

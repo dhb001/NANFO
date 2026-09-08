@@ -26,6 +26,8 @@ from app.events.publisher import publish_event
 from app.modules.telemetry.counters import TelemetryHealthCounterService
 from app.modules.telemetry.repository import TelemetryRecordRepository
 from app.modules.telemetry.schemas import (
+    TelemetryAggregation,
+    TelemetryAggregationResponse,
     TelemetryDeviceHistoryResponse,
     TelemetryHealthResponse,
     TelemetryHistoryResponse,
@@ -117,6 +119,9 @@ class RuntimeTelemetryAdapter(ABC):
     @abstractmethod
     async def poll(self) -> list[dict[str, Any]]:
         """Collect a batch of raw telemetry samples from the runtime adapter."""
+
+    async def acknowledge_batch(self, samples: list[dict[str, Any]]) -> None:
+        """Optional adapter checkpoint after every sample has been published."""
 
 
 def _build_deterministic_runtime_sample(
@@ -301,8 +306,17 @@ def build_production_runtime_adapter(
     grpc_value: float = 1.0,
     grpc_unit: str = "ms",
     grpc_source: str = "runtime_grpc",
+    emulation_adapter: RuntimeTelemetryAdapter | None = None,
 ) -> RuntimeTelemetryAdapter:
     normalized_mode = str(mode).strip().lower()
+    if normalized_mode == "emulation":
+        from app.modules.telemetry.emulation import EmulationTelemetryAdapter
+
+        if get_settings().EXECUTION_MODE != "emulation" or not isinstance(
+            emulation_adapter, EmulationTelemetryAdapter
+        ):
+            raise ValueError("Emulation telemetry requires emulation mode and a trusted snapshot adapter")
+        return emulation_adapter
     if get_settings().EXECUTION_MODE != "demo" and normalized_mode != "stub":
         raise ValueError("No measured runtime telemetry adapter is installed for this execution mode")
     if normalized_mode == "seeded":
@@ -406,8 +420,10 @@ def build_runtime_poll_action(
             counter_name="runtime_adapter_last_batch_size",
         )
 
+        batch_valid = True
         for sample in samples:
             if not isinstance(sample, dict):
+                batch_valid = False
                 await _safe_runtime_adapter_counter_update(
                     collector_runner.counter_service.increment_runtime_adapter_invalid_sample,
                     adapter_name=adapter_name,
@@ -427,6 +443,7 @@ def build_runtime_poll_action(
                 continue
 
             if not _is_runtime_sample_minimally_valid(sample):
+                batch_valid = False
                 await _safe_runtime_adapter_counter_update(
                     collector_runner.counter_service.increment_runtime_adapter_invalid_sample,
                     adapter_name=adapter_name,
@@ -451,7 +468,8 @@ def build_runtime_poll_action(
                 counter_name="runtime_adapter_ingest_attempts",
             )
             try:
-                await collector_runner.ingest_once(raw=sample, correlation_id=correlation_id)
+                event_options = {"event_id": sample["event_id"]} if sample.get("event_id") else {}
+                await collector_runner.ingest_once(raw=sample, correlation_id=correlation_id, **event_options)
             except Exception as exc:
                 await _safe_runtime_adapter_counter_update(
                     collector_runner.counter_service.increment_runtime_adapter_ingest_failure,
@@ -470,6 +488,9 @@ def build_runtime_poll_action(
                     error=str(exc),
                 )
                 raise
+
+        if batch_valid:
+            await adapter.acknowledge_batch(samples)
 
     return _poll_action
 
@@ -516,14 +537,16 @@ class TelemetryIngestionService:
             "tags": tags,
         }
 
-    async def ingest(self, raw: dict[str, Any], correlation_id: str) -> str:
+    async def ingest(self, raw: dict[str, Any], correlation_id: str, *, event_id: str | None = None) -> str:
         payload = self.normalize_payload(raw)
+        event_options = {"event_id": str(uuid.UUID(event_id))} if event_id is not None else {}
         entry_id = await publish_event(
             redis=self._redis,
             event_type="telemetry.metric.ingested",
             source="telemetry",
             payload=payload,
             correlation_id=correlation_id,
+            **event_options,
         )
         await self._increment_ingested_counter(correlation_id=correlation_id)
         logger.info(
@@ -898,8 +921,9 @@ class TelemetryCollectorRunner(TelemetryCollector):
 
         return False
 
-    async def ingest_once(self, raw: dict[str, Any], correlation_id: str) -> str:
-        return await self._ingestion_service.ingest(raw=raw, correlation_id=correlation_id)
+    async def ingest_once(self, raw: dict[str, Any], correlation_id: str, *, event_id: str | None = None) -> str:
+        event_options = {"event_id": event_id} if event_id is not None else {}
+        return await self._ingestion_service.ingest(raw=raw, correlation_id=correlation_id, **event_options)
 
 
 class TelemetryPersistenceService:
@@ -1110,14 +1134,24 @@ class TelemetryQueryService:
         metric: str | None,
         page: int,
         page_size: int,
-    ) -> TelemetryHistoryResponse:
+        start_time: datetime | None = None,
+        end_time: datetime | None = None,
+        aggregation: TelemetryAggregation | None = None,
+        bucket_seconds: int | None = None,
+    ) -> TelemetryHistoryResponse | TelemetryAggregationResponse:
         rows, total = await self._repo.list_history(
             network_id=network_id,
             workspace_id=workspace_id,
             metric=metric,
             page=page,
             page_size=page_size,
+            start_time=start_time,
+            end_time=end_time,
+            aggregation=aggregation,
+            bucket_seconds=bucket_seconds,
         )
+        if aggregation is not None:
+            return TelemetryAggregationResponse(items=rows, total=total, page=page, page_size=page_size)
         return TelemetryHistoryResponse(
             items=[TelemetryRecordResponse.model_validate(row) for row in rows],
             total=total,
@@ -1134,6 +1168,8 @@ class TelemetryQueryService:
         metric: str | None,
         page: int,
         page_size: int,
+        start_time: datetime | None = None,
+        end_time: datetime | None = None,
     ) -> TelemetryDeviceHistoryResponse:
         rows, total = await self._repo.list_for_device(
             device_id=device_id,
@@ -1142,6 +1178,8 @@ class TelemetryQueryService:
             metric=metric,
             page=page,
             page_size=page_size,
+            start_time=start_time,
+            end_time=end_time,
         )
         return TelemetryDeviceHistoryResponse(
             device_id=device_id,

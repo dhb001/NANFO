@@ -2,10 +2,12 @@ import { useQuery } from "@tanstack/react-query";
 import { getDeviceTelemetry, getTelemetryHealth, getTelemetryHistory } from "@/features/telemetry/api";
 import { useAuthStore } from "@/shared/state/auth-store";
 import { canReadTelemetryHealth } from "@/features/auth/permissions";
+import { TelemetryHistoryQuery, TelemetryTimeRange } from "@/shared/types/telemetry";
 
 export function useTelemetryHistory(
   token: string | null,
-  query: { networkId?: string; workspaceId?: string; metric?: string; page?: number; pageSize?: number },
+  query: TelemetryHistoryQuery,
+  enabled = true,
 ) {
   return useQuery({
     queryKey: ["telemetry", "history", token, query],
@@ -13,18 +15,18 @@ export function useTelemetryHistory(
       const response = await getTelemetryHistory(token as string, query);
       return response.data;
     },
-    enabled: Boolean(token),
+    enabled: Boolean(token && (query.networkId || query.workspaceId)) && enabled,
   });
 }
 
-export function useDeviceTelemetry(token: string | null, deviceId: string | null) {
+export function useDeviceTelemetry(token: string | null, deviceId: string | null, range: TelemetryTimeRange = {}, metric?: string, enabled = true) {
   return useQuery({
-    queryKey: ["telemetry", "device", token, deviceId],
+    queryKey: ["telemetry", "device", token, deviceId, range, metric],
     queryFn: async () => {
-      const response = await getDeviceTelemetry(token as string, deviceId as string, 1, 100);
+      const response = await getDeviceTelemetry(token as string, deviceId as string, 1, 100, metric, range);
       return response.data;
     },
-    enabled: Boolean(token && deviceId),
+    enabled: Boolean(token && deviceId) && enabled,
   });
 }
 

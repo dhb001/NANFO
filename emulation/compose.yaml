@@ -1,0 +1,34 @@
+name: nanfo-emulation
+services:
+  lab:
+    image: nanfo-emulation:campus-small-v1
+    build:
+      context: .
+    privileged: true
+    # Privilege is only for this disposable namespace/OVS lab. Never add host PID,
+    # host networking, a Docker socket, a physical interface, or credential mounts.
+    network_mode: none
+    volumes:
+      - type: bind
+        source: ./output
+        target: /output
+        bind:
+          create_host_path: false
+    tmpfs:
+      - /run:exec,size=64m
+      - /tmp:exec,size=64m
+    pids_limit: 256
+    mem_limit: 768m
+    cpus: 2
+    stop_grace_period: 20s
+    healthcheck:
+      test: ["CMD", "python", "-m", "emulation.runner", "--request", "status"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    logging:
+      driver: json-file
+      options:
+        max-size: 2m
+        max-file: "2"

@@ -1,4 +1,5 @@
 import { apiRequest } from "@/shared/lib/api";
+import { topologyEdgeIdentity } from "@/features/topology/edgeIdentity";
 import {
   TopologyEdge,
   TopologyDeviceNeighbours,
@@ -65,7 +66,7 @@ function mergeTopologyEdges(pages: readonly TopologyGraphPage[]): TopologyEdge[]
 
   for (const page of pages) {
     for (const edge of page.data.edges) {
-      const key = `${edge.source_id}:${edge.target_id}:${edge.edge_type}`;
+      const key = topologyEdgeIdentity(edge);
       const existing = edgesByKey.get(key);
 
       if (!existing) {
@@ -85,8 +86,8 @@ function mergeTopologyEdges(pages: readonly TopologyGraphPage[]): TopologyEdge[]
   }
 
   return [...edgesByKey.values()].sort((left, right) => {
-    const leftKey = `${left.source_id}:${left.target_id}:${left.edge_type}`;
-    const rightKey = `${right.source_id}:${right.target_id}:${right.edge_type}`;
+    const leftKey = topologyEdgeIdentity(left);
+    const rightKey = topologyEdgeIdentity(right);
     return leftKey.localeCompare(rightKey);
   });
 }

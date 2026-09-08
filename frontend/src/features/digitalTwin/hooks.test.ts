@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import { renderHook } from "@testing-library/react";
 import { useTwinLinks, useTwinNodes, useTwinSceneModel } from "@/features/digitalTwin/hooks";
 import { useLiveStore } from "@/features/realtime/store";
-import type { TwinNode } from "@/features/digitalTwin/sceneAdapter";
+import { buildTwinSceneModel, type TwinNode } from "@/features/digitalTwin/sceneAdapter";
+import { topologyEdgeIdentity } from "@/features/topology/edgeIdentity";
 
 describe("digital twin hooks", () => {
   it("merges base topology and live deltas into node list", () => {
@@ -92,6 +93,33 @@ describe("digital twin hooks", () => {
 
     expect(result.current).toHaveLength(1);
     expect(result.current[0].edgeType).toBe("connected_to");
+  });
+
+  it("preserves parallel observed link IDs and metadata in both Twin builders", () => {
+    const base = { source_id: "a", target_id: "b", edge_type: "connected_to" };
+    const metadata = { observation_owner: "lab-a", edge_key: "link", source_port: 1, target_port: 2 };
+    const distinct = [
+      { ...base, metadata },
+      { ...base, metadata: { ...metadata, source_port: 3 } },
+      { ...base, metadata: { ...metadata, target_port: 4 } },
+      { ...base, metadata: { ...metadata, observation_owner: "lab-b" } },
+      { ...base, metadata: { ...metadata, edge_key: "parallel" } },
+      { ...base, metadata: { synthetic: true } },
+      { ...base, metadata: { synthetic: false } },
+    ];
+    const edges = [...distinct, distinct[5]];
+    const scene = buildTwinSceneModel({
+      baseNodes: ["a", "b"].map((id) => ({ device_id: id, hostname: id, device_type: "switch", status: "active", spatial_ref_id: null })),
+      baseEdges: edges, liveNodesByDeviceId: {}, telemetryByDeviceMetric: {}, telemetryKeysNewestFirst: [], sceneObjects: {}, sceneObjectIdsNewestFirst: [],
+    });
+    const { result } = renderHook(() => useTwinLinks(scene.nodes, edges));
+    for (const links of [scene.links, result.current]) {
+      expect(links).toHaveLength(7);
+      expect(new Set(links.map((link) => link.id)).size).toBe(7);
+      for (const edge of distinct) {
+        expect(links.find((link) => link.id === topologyEdgeIdentity(edge))?.metadata).toEqual(edge.metadata);
+      }
+    }
   });
 
   it("builds overlays from live simulation and intent scene objects", () => {

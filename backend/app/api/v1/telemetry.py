@@ -8,6 +8,8 @@ from typing import Annotated
 
 import redis.asyncio as aioredis
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.exceptions import RequestValidationError
+from pydantic import AwareDatetime, ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.dependencies import (
@@ -27,9 +29,13 @@ from app.modules.network.service import NetworkService
 from app.modules.organization.service import OrgService, WorkspaceService
 from app.modules.telemetry.counters import TelemetryHealthCounterService
 from app.modules.telemetry.schemas import (
+    TelemetryAggregation,
+    TelemetryAggregationResponse,
     TelemetryDeviceHistoryResponse,
     TelemetryHealthResponse,
+    TelemetryHistoryQuery,
     TelemetryHistoryResponse,
+    TelemetryTimeRange,
 )
 from app.modules.telemetry.service import TelemetryQueryService
 
@@ -125,7 +131,7 @@ async def _enforce_health_scope(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions.")
 
 
-@router.get("/history", response_model=APIResponse[TelemetryHistoryResponse], status_code=status.HTTP_200_OK)
+@router.get("/history", response_model=APIResponse[TelemetryHistoryResponse | TelemetryAggregationResponse], status_code=status.HTTP_200_OK)
 async def get_telemetry_history(
     claims: Annotated[TokenClaims, Depends(require_permissions("read:telemetry"))],
     meta: Annotated[RequestMeta, Depends(get_request_meta)],
@@ -136,8 +142,19 @@ async def get_telemetry_history(
     metric: str | None = None,
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=200),
+    start_time: AwareDatetime | None = None,
+    end_time: AwareDatetime | None = None,
+    aggregation: TelemetryAggregation | None = None,
+    bucket_seconds: int | None = Query(default=None, ge=1, le=86400),
 ):
     started = time.monotonic()
+    try:
+        query = TelemetryHistoryQuery(
+            metric=metric, start_time=start_time, end_time=end_time,
+            aggregation=aggregation, bucket_seconds=bucket_seconds,
+        )
+    except ValidationError as exc:
+        raise RequestValidationError(exc.errors()) from exc
     scoped_network_id, scoped_workspace_id = await _resolve_history_scope(
         claims=claims,
         db=db,
@@ -149,7 +166,7 @@ async def get_telemetry_history(
     result = await svc.get_history(
         network_id=scoped_network_id,
         workspace_id=scoped_workspace_id,
-        metric=metric,
+        **query.model_dump(),
         page=page,
         page_size=page_size,
     )
@@ -166,8 +183,14 @@ async def get_device_telemetry(
     metric: str | None = None,
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=200),
+    start_time: AwareDatetime | None = None,
+    end_time: AwareDatetime | None = None,
 ):
     started = time.monotonic()
+    try:
+        bounds = TelemetryTimeRange(start_time=start_time, end_time=end_time)
+    except ValidationError as exc:
+        raise RequestValidationError(exc.errors()) from exc
     network_id, workspace_id = await _resolve_device_scope(
         claims=claims,
         db=db,
@@ -179,6 +202,7 @@ async def get_device_telemetry(
         device_id=device_id,
         network_id=network_id,
         workspace_id=workspace_id,
+        **bounds.model_dump(),
         metric=metric,
         page=page,
         page_size=page_size,

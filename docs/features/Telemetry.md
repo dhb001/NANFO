@@ -2,7 +2,7 @@
 
 ## Foundation Truth Boundary
 
-Configured runtime adapters are demo-only synthetic samples or an empty stub;
+Configured demo runtime adapters are synthetic samples or an empty stub;
 no measured SNMP/gRPC collector is implied by an adapter name. Synthetic samples
 carry `tags.synthetic=true` and `tags.execution_mode=demo`. Non-demo modes reject
 synthetic runtime polling. Missing, malformed, nonfinite and boolean values are
@@ -10,6 +10,25 @@ rejected rather than coerced into zero measurements. Empty telemetry health has
 `ingest_lag_ms=null` and `status=unavailable` (or degraded on known failures).
 The global collector-health endpoint requires Admin capability plus active org
 membership; tenant-scoped history remains available to authorized read-only users.
+
+## Measured Emulation (Steps 3-4)
+
+ADR-009 adds an `emulation` runtime adapter, only in `EXECUTION_MODE=emulation`.
+It reads the isolated lab snapshot against an operator-owned inventory binding,
+rechecks actor capabilities/membership, and ingests actual OpenFlow counters,
+duration-derived port rates, capacity-normalized utilization, Linux queue backlog,
+ping RTT and probe loss. Tags distinguish measured emulation from synthetic or
+physical data. Cached observations keep stable event IDs across export sequences;
+pending batches are acknowledged only after full publication. Stale pending data
+blocks explicitly. No durable outbox is claimed.
+
+History/device queries support aware `start_time` inclusive and `end_time`
+exclusive, normalized to UTC. History supports `aggregation=avg|min|max|sum` with
+required metric, both time bounds (at most seven days), and `bucket_seconds`
+1..86400. Grouping includes device, metric, unit, source, port, probe peer and run.
+Raw flow counters remain queryable, but `flow_*` aggregation is rejected because
+snapshot v1 does not expose durable per-flow match identity. Empty buckets are not
+zero-filled. Existing endpoints and tenant checks remain authoritative.
 
 ## 1. Purpose
 Collect, validate, normalize, store, and stream high-frequency telemetry to drive AI reasoning, alerting, and digital twin updates.

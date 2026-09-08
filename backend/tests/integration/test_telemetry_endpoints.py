@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 from app.core.dependencies import get_db, get_redis
 from app.main import app
 from app.modules.telemetry.schemas import (
+    TelemetryAggregationResponse,
     TelemetryDeviceHistoryResponse,
     TelemetryHealthResponse,
     TelemetryHistoryResponse,
@@ -116,6 +117,86 @@ def test_get_telemetry_history_returns_envelope_and_payload(client, headers):
     assert "meta" in body
     assert "errors" in body
     assert body["data"]["total"] == 1
+
+
+@pytest.mark.parametrize("params", [
+    {"start_time": "2026-09-08T00:00:00"},
+    {"end_time": "invalid"},
+    {"start_time": "2026-09-08T00:00:00Z", "end_time": "2026-09-08T00:00:00Z"},
+    {"aggregation": "avg"}, {"aggregation": "median"}, {"bucket_seconds": 60},
+    {"metric": "cpu", "aggregation": "avg", "bucket_seconds": 0},
+    {"metric": "cpu", "aggregation": "avg", "bucket_seconds": 86401},
+    {"metric": "cpu", "aggregation": "avg", "bucket_seconds": 60,
+     "start_time": "2026-09-01T00:00:00Z", "end_time": "2026-09-08T00:00:01Z"},
+])
+def test_invalid_history_bounds_return_canonical_errors(client, headers, params):
+    with patch("app.modules.telemetry.service.TelemetryQueryService.get_history", new_callable=AsyncMock) as query:
+        response = client.get("/api/v1/telemetry/history", headers=headers, params=params)
+    assert response.status_code == 422
+    assert response.json()["success"] is False
+    assert response.json()["errors"]["code"] == "VALIDATION_ERROR"
+    query.assert_not_awaited()
+
+
+def test_aggregation_response_and_scoped_forwarding(client, headers):
+    workspace_id, network_id, device_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    payload = TelemetryAggregationResponse(items=[{
+        "device_id": device_id, "metric": "queue_backlog_bytes", "unit": "bytes",
+        "source": "emulation", "port_no": "2", "peer_host": None, "run_id": None, "bucket_start": "2026-09-08T00:00:00Z",
+        "value": 40, "sample_count": 3,
+    }], total=8, page=2, page_size=1)
+    with (
+        patch("app.api.v1.telemetry._resolve_history_scope", new=AsyncMock(return_value=(network_id, workspace_id))),
+        patch("app.modules.telemetry.service.TelemetryQueryService.get_history", new=AsyncMock(return_value=payload)) as query,
+    ):
+        response = client.get("/api/v1/telemetry/history", headers=headers, params={
+            "metric": "queue_backlog_bytes", "aggregation": "avg", "bucket_seconds": 60,
+            "start_time": "2026-09-08T03:00:00+03:00", "end_time": "2026-09-08T01:00:00Z", "page": 2, "page_size": 1,
+        })
+    assert response.status_code == 200
+    assert response.json()["data"] == payload.model_dump(mode="json")
+    query.assert_awaited_once_with(
+        network_id=network_id, workspace_id=workspace_id, metric="queue_backlog_bytes",
+        aggregation="avg", bucket_seconds=60, start_time=datetime(2026, 9, 8, tzinfo=UTC),
+        end_time=datetime(2026, 9, 8, 1, tzinfo=UTC), page=2, page_size=1,
+    )
+
+
+def test_device_bounds_validation_and_forwarding(client, headers):
+    device_id, network_id, workspace_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    with (
+        patch("app.api.v1.telemetry._resolve_device_scope", new=AsyncMock(return_value=(network_id, workspace_id))),
+        patch("app.modules.telemetry.service.TelemetryQueryService.get_device_history", new=AsyncMock(return_value=TelemetryDeviceHistoryResponse(device_id=device_id, items=[], total=0, page=1, page_size=50))) as query,
+    ):
+        invalid = client.get(f"/api/v1/telemetry/device/{device_id}", headers=headers, params={"start_time": "2026-09-08"})
+        assert invalid.status_code == 422
+        query.assert_not_awaited()
+        response = client.get(f"/api/v1/telemetry/device/{device_id}", headers=headers, params={"end_time": "2026-09-08T00:00:00Z"})
+    assert response.status_code == 200
+    assert query.call_args.kwargs["end_time"] == datetime(2026, 9, 8, tzinfo=UTC)
+    assert query.call_args.kwargs["workspace_id"] == workspace_id
+
+
+def test_aggregation_does_not_bypass_tenant_scope(client, headers):
+    with patch("app.modules.telemetry.service.TelemetryQueryService.get_history", new_callable=AsyncMock) as query:
+        response = client.get("/api/v1/telemetry/history", headers=headers, params={
+            "metric": "cpu", "aggregation": "avg", "bucket_seconds": 60,
+            "start_time": "2026-09-08T00:00:00Z", "end_time": "2026-09-08T01:00:00Z",
+        })
+    assert response.status_code == 403
+    query.assert_not_awaited()
+
+
+def test_flow_aggregation_rejected_before_query(client, headers):
+    with patch("app.modules.telemetry.service.TelemetryQueryService.get_history", new_callable=AsyncMock) as query:
+        response = client.get("/api/v1/telemetry/history", headers=headers, params={
+            "metric": "flow_byte_count", "aggregation": "sum", "bucket_seconds": 60,
+            "start_time": "2026-09-08T00:00:00Z", "end_time": "2026-09-08T01:00:00Z",
+        })
+    assert response.status_code == 422
+    assert "no durable flow match identity" in response.json()["errors"]["message"]
+    assert "raw history" in response.json()["errors"]["message"]
+    query.assert_not_awaited()
 
 
 def test_get_telemetry_device_returns_envelope_and_payload(client, headers):

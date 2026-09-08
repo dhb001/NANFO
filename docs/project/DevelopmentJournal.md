@@ -1,5 +1,57 @@
 # Development Journal
 
+## [2026-09-08] - Completion Plan Steps 3-4
+
+- Added isolated, version-pinned lab with loop-free baseline forwarding, explicit
+  capacities/ports, real LLDP/host discovery, correlated multipart OpenFlow stats,
+  leaf-only queue parsing and real ping/iperf3 verification. No host interface,
+  host networking or database credentials are mounted into the lab.
+- Added validated bounded snapshot ingestion, trusted inventory binding via
+  existing authenticated APIs, current actor revalidation, Network-owned observed
+  topology replacement and port-aware graph pagination/visual identity.
+- Corrected cached-observation identity, retained partial batches until ack,
+  counter duration timing, synthetic/observed writer isolation, and host INET event
+  serialization found during review/live verification.
+- Added UTC history bounds and grouped SQL aggregation with port/peer/run identity,
+  raw-only flow counter history, frontend controls, labels and pagination.
+- Final live command `PYTHONPATH=..:. poetry run python scripts/verify_emulation.py
+  --live` passed; artifact `/tmp/opencode/emulation-audit-2fpnq4g1/result.json`.
+  Real HTTP/WebSocket/DB path yielded 2,672 unique rows/frames, no duplicates,
+  9 nodes/11 observed edges, and independent traffic/counter checks passed.
+- Tests: backend 1,230 passed, 1 optional SQL fixture skipped; frontend 209 tests,
+  25 browser tests without retry, lint/type/build/perf passed. Live verifier also
+  executed SQL aggregates. Lab and temporary backend stopped, audit actor disabled;
+  dedicated evidence rows retained and ordinary databases left running.
+- Details/limits: ADR-009 and `Emulation-Backend-Live-Validation.md`.
+
+## [2026-09-08] - ADR-009 Measurement Review Corrections
+
+- Fixed cached observation duplication by removing snapshot sequence from stable
+  IDs; bounded fingerprints reject conflicting reused identities. Pending batches
+  advance only after full-publication acknowledgement; expiry blocks without
+  silently dropping a suffix. Rates use OpenFlow port duration, not flow-reply lag.
+- Scoped synthetic relationship MERGE by generator owner and stable edge key;
+  real Neo4j verified observed/synthetic/parallel writes, replacements and pruning
+  in both orders, restoring the original observed graph after the audit.
+- Corrected live evidence: 2,876 unique rows/matching WebSocket frames, 13 snapshots,
+  9 nodes/11 edges, no duplicate cached observations. Producer advanced after a
+  partial 102/204-sample publish; full retry retained all IDs/suffix. Actor disabled,
+  owned lab stopped. 1,230 backend tests passed, one SQL fixture skipped.
+- Superseding evidence and explicit memory-only pending-batch limitations:
+  `docs/project/Emulation-Backend-Live-Validation.md`.
+
+## [2026-09-08] - ADR-009 Backend Live Integration
+
+- Added opt-in `backend/scripts/verify_emulation.py`: randomized audit actor,
+  existing authenticated bootstrap APIs, temporary scoped real stream consumers,
+  isolated loopback backend, real telemetry WebSocket and owned lab lifecycle.
+- Fixed DeviceService's host-add event INET JSON serialization with null/string
+  regression tests. Final live run verified 9 nodes/11 observed edges, 2,896 unique
+  rows/frames, source formulas, retries, aggregation/time bounds and disabled-actor
+  denial. Audit rows retained; actor disabled and owned lab stopped.
+- Evidence and explicit shared-consumer/outbox/control limitations:
+  `docs/project/Emulation-Backend-Live-Validation.md`.
+
 ## [2026-09-08] - Completion Plan Steps 1-2
 
 - Replaced the empty-root TypeScript gate with explicit app/tooling checks and

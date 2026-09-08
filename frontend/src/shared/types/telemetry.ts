@@ -21,6 +21,40 @@ export interface TelemetryHistory {
   page_size: number;
 }
 
+export type TelemetryAggregation = "avg" | "min" | "max" | "sum";
+
+export interface TelemetryAggregate {
+  device_id: string;
+  metric: string;
+  unit: string | null;
+  source: string;
+  port_no: string | null;
+  peer_host: string | null;
+  run_id: string | null;
+  bucket_start: string;
+  value: number;
+  sample_count: number;
+}
+
+export interface TelemetryAggregationHistory extends Omit<TelemetryHistory, "items"> {
+  items: TelemetryAggregate[];
+}
+
+export interface TelemetryTimeRange {
+  startTime?: string;
+  endTime?: string;
+}
+
+export interface TelemetryHistoryQuery extends TelemetryTimeRange {
+  networkId?: string;
+  workspaceId?: string;
+  metric?: string;
+  page?: number;
+  pageSize?: number;
+  aggregation?: TelemetryAggregation;
+  bucketSeconds?: number;
+}
+
 export interface TelemetryDeviceHistory {
   device_id: string;
   items: TelemetryRecord[];

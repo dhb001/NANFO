@@ -2,6 +2,18 @@
 
 Lightweight chronological notes for decisions that do not require a full ADR.
 
+## 2026-09-08: Isolated Measured Emulation
+
+User-authorized Steps 3-4 are governed by ADR-009. Keep legacy Ryu inside a
+disposable no-network container, with a bounded snapshot handoff and separate
+operator binding. Reuse existing authenticated inventory APIs, telemetry event and
+Network service ownership; add no endpoint/channel. Counter rate timing uses port
+duration, observation identity is independent of export sequence, and publication
+acknowledgement precedes baseline advancement. Flow-counter aggregation is rejected
+until durable flow identity exists. Live observation is not Step 5 execution or a
+Step 11 evaluator. Verification evidence records real transport/database tests and
+the remaining shared-consumer/outbox limitations explicitly.
+
 ## 2026-09-08
 ### User-Requested Foundation and Security Baseline
 

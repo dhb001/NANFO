@@ -90,7 +90,7 @@ class TopologyQueryService:
 
         edge_query = """
         MATCH (s:Device {network_id: $network_id, workspace_id: $workspace_id})-[e:CONNECTED_TO]->(t:Device {network_id: $network_id, workspace_id: $workspace_id})
-        WHERE s.device_id IN $device_ids AND t.device_id IN $device_ids
+        WHERE s.device_id IN $device_ids
         RETURN DISTINCT
             s.device_id AS source_id,
             t.device_id AS target_id,
@@ -135,18 +135,18 @@ class TopologyQueryService:
             )
             for n in page_rows
         ]
-        # Deduplicate defensively: MERGE keeps one CONNECTED_TO per ordered pair, but a
-        # legacy/imported graph could hold more than one. Ordering stays deterministic.
+        # Assign each edge to its source's page so cross-page links are not lost.
         edges: list[TopologyEdge] = []
-        seen_edge_keys: set[tuple[str, str]] = set()
+        seen_edge_keys: set[tuple] = set()
         for e in raw_edges:
-            edge_key = (e["source_id"], e["target_id"])
+            raw_properties = e.get("edge_properties")
+            metadata = dict(raw_properties) if isinstance(raw_properties, dict) else {}
+            edge_key = (e["source_id"], e["target_id"], metadata.get("observation_owner"), metadata.get("synthetic_owner"),
+                        metadata.get("edge_key"), metadata.get("source_port"), metadata.get("target_port"))
             if edge_key in seen_edge_keys:
                 continue
             seen_edge_keys.add(edge_key)
 
-            raw_properties = e.get("edge_properties")
-            metadata = dict(raw_properties) if isinstance(raw_properties, dict) else {}
             edges.append(
                 TopologyEdge(
                     source_id=e["source_id"],
@@ -662,7 +662,7 @@ class TopologyQueryService:
         workspace_id: str,
         edges: Sequence[PlannedEdge],
     ) -> int:
-        """Create or merge ``CONNECTED_TO`` relationships between existing Device nodes.
+        """Create or merge synthetic ``CONNECTED_TO`` relationships between Device nodes.
 
         Counterpart to :meth:`create_device_node`, which only ever wrote nodes. Without
         this, ``get_graph`` can never return edges.
@@ -674,6 +674,7 @@ class TopologyQueryService:
           ``workspace_id``; unmatched pairs are silently skipped rather than
           fabricating nodes.
         - Self-links are rejected.
+        - Synthetic generator and edge identity never match observed relationships.
         - Relationship properties are flat primitives only (Neo4j constraint).
 
         Returns the number of relationships written.
@@ -689,6 +690,16 @@ class TopologyQueryService:
                 for key, value in (edge.metadata or {}).items()
                 if isinstance(value, (str, int, float, bool))
             }
+            if properties.get("synthetic") is not True or not properties.get("generator"):
+                raise ValueError("planned edges require synthetic provenance and a stable generator")
+            properties.pop("observation_owner", None)
+            properties["synthetic_owner"] = str(properties["generator"])
+            properties["edge_key"] = str(properties.get("edge_key") or uuid.uuid5(
+                uuid.NAMESPACE_URL,
+                f"{network_id}:{workspace_id}:{edge.source_id}:{edge.target_id}:"
+                f"{properties.get('source_port', '')}:{properties.get('target_port', '')}",
+            ))
+            properties["execution_mode"] = "demo"
             payload.append(
                 {
                     "source_id": edge.source_id,
@@ -710,7 +721,7 @@ class TopologyQueryService:
         MATCH (s:Device {device_id: edge.source_id, network_id: $network_id, workspace_id: $workspace_id})
         MATCH (t:Device {device_id: edge.target_id, network_id: $network_id, workspace_id: $workspace_id})
         WHERE s.device_id <> t.device_id
-        MERGE (s)-[r:CONNECTED_TO]->(t)
+        MERGE (s)-[r:CONNECTED_TO {synthetic_owner: edge.properties.synthetic_owner, edge_key: edge.properties.edge_key}]->(t)
         SET r += edge.properties
         RETURN count(r) AS written
         """
@@ -732,6 +743,62 @@ class TopologyQueryService:
             written_edges=written,
         )
         return written
+
+    async def replace_observed_device_edges(
+        self, *, network_id: str, workspace_id: str, owner_id: str,
+        edges: Sequence[PlannedEdge],
+    ) -> int:
+        """Atomically replace only this binding's observed links, preserving parallels.
+
+        Missing graph projections abort the transaction, retaining the previous set
+        for a later retry. No undocumented link event is published (ADR-009).
+        """
+        payload = []
+        for edge in edges:
+            properties = dict(edge.metadata or {})
+            key = properties.get("edge_key")
+            if not key or edge.source_id == edge.target_id or properties.get("synthetic") is not False:
+                raise ValueError("invalid observed edge")
+            if any(not isinstance(value, (str, int, float, bool)) for value in properties.values()):
+                raise ValueError("observed edge properties must be flat primitives")
+            properties["observation_owner"] = owner_id
+            properties["execution_mode"] = "emulation"
+            payload.append({"source_id": edge.source_id, "target_id": edge.target_id,
+                            "key": key, "properties": properties})
+        if not owner_id or len({edge["key"] for edge in payload}) != len(payload):
+            raise ValueError("invalid observed edge ownership or duplicate key")
+
+        async def replace(tx):
+            params = {"network_id": network_id, "workspace_id": workspace_id,
+                      "owner_id": owner_id, "edges": payload}
+            result = await tx.run("""
+                UNWIND $edges AS edge
+                MATCH (s:Device {device_id: edge.source_id, network_id: $network_id, workspace_id: $workspace_id})
+                MATCH (t:Device {device_id: edge.target_id, network_id: $network_id, workspace_id: $workspace_id})
+                RETURN count(*) AS matched
+            """, **params)
+            if _record_int(await result.single(), "matched") != len(payload):
+                raise ValueError("observed topology inventory projection incomplete")
+            result = await tx.run("""
+                MATCH (:Device {network_id: $network_id, workspace_id: $workspace_id})
+                    -[r:CONNECTED_TO]->(:Device {network_id: $network_id, workspace_id: $workspace_id})
+                WHERE r.observation_owner = $owner_id AND r.synthetic = false
+                    AND r.execution_mode = 'emulation'
+                DELETE r
+            """, **params)
+            await result.consume()
+            result = await tx.run("""
+                UNWIND $edges AS edge
+                MATCH (s:Device {device_id: edge.source_id, network_id: $network_id, workspace_id: $workspace_id})
+                MATCH (t:Device {device_id: edge.target_id, network_id: $network_id, workspace_id: $workspace_id})
+                MERGE (s)-[r:CONNECTED_TO {observation_owner: $owner_id, edge_key: edge.key}]->(t)
+                SET r += edge.properties
+                RETURN count(r) AS written
+            """, **params)
+            return _record_int(await result.single(), "written")
+
+        async with self._driver.session() as session:
+            return await session.execute_write(replace)
 
     async def prune_synthetic_device_edges(
         self,
@@ -789,6 +856,9 @@ class TopologyQueryService:
         Returns ``(deleted, written)``. Safe to re-run: the result depends only on the
         supplied plan, not on how many times seeding has happened before.
         """
+        if any((edge.metadata or {}).get("synthetic") is not True
+               or (edge.metadata or {}).get("generator") != generator for edge in edges):
+            raise ValueError("replacement edges must belong to the synthetic generator")
         deleted = await self.prune_synthetic_device_edges(
             network_id=network_id,
             workspace_id=workspace_id,

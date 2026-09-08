@@ -13,6 +13,12 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.telemetry.models import TelemetryRecord
+from app.modules.telemetry.schemas import (
+    TelemetryAggregateResponse,
+    TelemetryAggregation,
+    TelemetryHistoryQuery,
+    TelemetryTimeRange,
+)
 
 
 class TelemetryRecordRepository:
@@ -65,7 +71,15 @@ class TelemetryRecordRepository:
         metric: str | None = None,
         page: int = 1,
         page_size: int = 50,
-    ) -> tuple[list[TelemetryRecord], int]:
+        start_time: datetime | None = None,
+        end_time: datetime | None = None,
+        aggregation: TelemetryAggregation | None = None,
+        bucket_seconds: int | None = None,
+    ) -> tuple[list[TelemetryRecord] | list[TelemetryAggregateResponse], int]:
+        bounds = TelemetryHistoryQuery(
+            metric=metric, start_time=start_time, end_time=end_time,
+            aggregation=aggregation, bucket_seconds=bucket_seconds,
+        )
         query = select(TelemetryRecord)
         if network_id is not None:
             query = query.where(TelemetryRecord.network_id == network_id)
@@ -74,8 +88,42 @@ class TelemetryRecordRepository:
         if metric:
             query = query.where(TelemetryRecord.metric == metric)
 
+        if bounds.start_time is not None:
+            query = query.where(TelemetryRecord.observed_at >= bounds.start_time)
+        if bounds.end_time is not None:
+            query = query.where(TelemetryRecord.observed_at < bounds.end_time)
+
+        if aggregation is not None:
+            # Epoch-aligned UTC buckets need no Timescale extension. Count groups,
+            # not samples, before pagination; absent buckets are never zero-filled.
+            port = TelemetryRecord.tags["port_no"].astext.label("port_no")
+            peer = TelemetryRecord.tags["peer_host"].astext.label("peer_host")
+            run = TelemetryRecord.tags["run_id"].astext.label("run_id")
+            bucket = func.to_timestamp(
+                func.floor(func.extract("epoch", TelemetryRecord.observed_at) / bucket_seconds)
+                * bucket_seconds
+            ).label("bucket_start")
+            dimensions = (
+                TelemetryRecord.device_id, TelemetryRecord.metric,
+                TelemetryRecord.unit, TelemetryRecord.source, port, peer, run, bucket,
+            )
+            aggregate = {"avg": func.avg, "min": func.min, "max": func.max, "sum": func.sum}[aggregation]
+            grouped = query.with_only_columns(
+                *dimensions, aggregate(TelemetryRecord.value).label("value"),
+                func.count().label("sample_count"),
+            ).group_by(*dimensions)
+            total = (await self._db.execute(select(func.count()).select_from(grouped.subquery()))).scalar_one()
+            result = await self._db.execute(
+                grouped.order_by(
+                    bucket.desc(), TelemetryRecord.device_id, TelemetryRecord.metric,
+                    TelemetryRecord.unit.asc().nullsfirst(), TelemetryRecord.source, port.asc().nullsfirst(),
+                    peer.asc().nullsfirst(), run.asc().nullsfirst(),
+                ).offset((page - 1) * page_size).limit(page_size)
+            )
+            return [TelemetryAggregateResponse.model_validate(row) for row in result.mappings().all()], total
+
         query = query.order_by(TelemetryRecord.observed_at.desc(), TelemetryRecord.record_id.desc())
-        count_query = select(func.count()).select_from(query.subquery())
+        count_query = select(func.count()).select_from(query.order_by(None).subquery())
         total = (await self._db.execute(count_query)).scalar_one()
         rows = (
             await self._db.execute(
@@ -93,7 +141,10 @@ class TelemetryRecordRepository:
         metric: str | None = None,
         page: int = 1,
         page_size: int = 50,
+        start_time: datetime | None = None,
+        end_time: datetime | None = None,
     ) -> tuple[list[TelemetryRecord], int]:
+        bounds = TelemetryTimeRange(start_time=start_time, end_time=end_time)
         query = select(TelemetryRecord).where(
             TelemetryRecord.device_id == device_id,
             TelemetryRecord.network_id == network_id,
@@ -101,9 +152,13 @@ class TelemetryRecordRepository:
         )
         if metric:
             query = query.where(TelemetryRecord.metric == metric)
+        if bounds.start_time is not None:
+            query = query.where(TelemetryRecord.observed_at >= bounds.start_time)
+        if bounds.end_time is not None:
+            query = query.where(TelemetryRecord.observed_at < bounds.end_time)
 
         query = query.order_by(TelemetryRecord.observed_at.desc(), TelemetryRecord.record_id.desc())
-        count_query = select(func.count()).select_from(query.subquery())
+        count_query = select(func.count()).select_from(query.order_by(None).subquery())
         total = (await self._db.execute(count_query)).scalar_one()
         rows = (
             await self._db.execute(

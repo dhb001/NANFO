@@ -127,7 +127,7 @@ describe("RealtimeBridge", () => {
       telemetry.onFrame({ event: "telemetry.received", data: { metric } });
       alerts.onFrame({ event: "alert.created", data: { alert: { event_id: "scoped", payload: { workspace_id: workspaceId, network_id: networkId } } } });
     });
-    expect(useLiveStore.getState().telemetryKeysNewestFirst).toEqual(["device:cpu"]);
+    expect(Object.values(useLiveStore.getState().telemetryByDeviceMetric)).toEqual([metric]);
     expect(useLiveStore.getState().alerts).toHaveLength(1);
     act(() => useWorkspaceStore.getState().setNetworkId("other"));
     expect(telemetry.isCurrent()).toBe(false);

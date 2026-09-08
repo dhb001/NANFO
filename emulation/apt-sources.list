@@ -1,0 +1,3 @@
+# Frozen Bullseye main includes the pinned OVS build. The retired security index
+# references removed archives; this EOL lab must remain runtime network-isolated.
+deb https://deb.debian.org/debian bullseye main

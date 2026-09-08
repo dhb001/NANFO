@@ -866,15 +866,15 @@ async def test_merge_device_edges_writes_scoped_idempotent_relationships():
         network_id=network_id,
         workspace_id=workspace_id,
         edges=[
-            PlannedEdge("a", "b", EDGE_TYPE_CONNECTED_TO, {"synthetic": True, "relation": "core_backbone"}),
-            PlannedEdge("b", "c", EDGE_TYPE_CONNECTED_TO, {"synthetic": True, "relation": "access_uplink"}),
+            PlannedEdge("a", "b", EDGE_TYPE_CONNECTED_TO, {"synthetic": True, "generator": "test", "relation": "core_backbone"}),
+            PlannedEdge("b", "c", EDGE_TYPE_CONNECTED_TO, {"synthetic": True, "generator": "test", "relation": "access_uplink"}),
         ],
     )
 
     assert written == 2
     query = session.run.await_args.args[0]
     # Idempotency + scoping + self-link rejection must all be enforced in Cypher.
-    assert "MERGE (s)-[r:CONNECTED_TO]->(t)" in query
+    assert "MERGE (s)-[r:CONNECTED_TO {synthetic_owner: edge.properties.synthetic_owner, edge_key: edge.properties.edge_key}]->(t)" in query
     assert "network_id: $network_id" in query
     assert "workspace_id: $workspace_id" in query
     assert "s.device_id <> t.device_id" in query
@@ -899,7 +899,7 @@ async def test_merge_device_edges_drops_self_links_and_blank_endpoints():
             PlannedEdge("a", "a", EDGE_TYPE_CONNECTED_TO, {}),
             PlannedEdge("", "b", EDGE_TYPE_CONNECTED_TO, {}),
             PlannedEdge("c", "", EDGE_TYPE_CONNECTED_TO, {}),
-            PlannedEdge("c", "d", EDGE_TYPE_CONNECTED_TO, {}),
+            PlannedEdge("c", "d", EDGE_TYPE_CONNECTED_TO, {"synthetic": True, "generator": "test"}),
         ],
     )
 
@@ -924,6 +924,7 @@ async def test_merge_device_edges_strips_non_primitive_properties_for_neo4j():
                 {
                     "synthetic": True,
                     "relation": "leaf_uplink",
+                    "generator": "test",
                     "hops": 2,
                     "weight": 1.5,
                     "nested": {"not": "allowed"},
@@ -937,6 +938,10 @@ async def test_merge_device_edges_strips_non_primitive_properties_for_neo4j():
     assert properties == {
         "synthetic": True,
         "relation": "leaf_uplink",
+        "generator": "test",
+        "synthetic_owner": "test",
+        "execution_mode": "demo",
+        "edge_key": properties["edge_key"],
         "hops": 2,
         "weight": 1.5,
     }
@@ -1135,7 +1140,7 @@ async def test_merge_device_edges_returns_real_count_from_neo4j_record():
     written = await svc.merge_device_edges(
         network_id=str(uuid.uuid4()),
         workspace_id=str(uuid.uuid4()),
-        edges=[PlannedEdge("a", "b", EDGE_TYPE_CONNECTED_TO, {"synthetic": True})],
+        edges=[PlannedEdge("a", "b", EDGE_TYPE_CONNECTED_TO, {"synthetic": True, "generator": "test"})],
     )
 
     assert written == 323
@@ -1248,7 +1253,7 @@ async def test_replace_synthetic_device_edges_prunes_before_writing():
         deleted, written = await svc.replace_synthetic_device_edges(
             network_id="net-1",
             workspace_id="ws-1",
-            edges=[PlannedEdge("a", "b", EDGE_TYPE_CONNECTED_TO, {"synthetic": True})],
+            edges=[PlannedEdge("a", "b", EDGE_TYPE_CONNECTED_TO, {"synthetic": True, "generator": "nanfo.synthetic_topology.v1"})],
             generator="nanfo.synthetic_topology.v1",
         )
 
@@ -1262,8 +1267,8 @@ async def test_replace_synthetic_device_edges_is_convergent_across_reruns():
     svc = TopologyQueryService(driver=MagicMock())
     graph_edges: set[tuple[str, str]] = set()
     plan = [
-        PlannedEdge("a", "b", EDGE_TYPE_CONNECTED_TO, {"synthetic": True}),
-        PlannedEdge("b", "c", EDGE_TYPE_CONNECTED_TO, {"synthetic": True}),
+        PlannedEdge("a", "b", EDGE_TYPE_CONNECTED_TO, {"synthetic": True, "generator": "g"}),
+        PlannedEdge("b", "c", EDGE_TYPE_CONNECTED_TO, {"synthetic": True, "generator": "g"}),
     ]
 
     async def fake_prune(_self, **kwargs):
@@ -1307,8 +1312,8 @@ async def test_replace_converges_when_a_rerun_plan_picks_different_parents():
             graph_edges.add((edge.source_id, edge.target_id))
         return len(kwargs["edges"])
 
-    partial_plan = [PlannedEdge("core-1", "ap-1", EDGE_TYPE_CONNECTED_TO, {"synthetic": True})]
-    full_plan = [PlannedEdge("core-2", "ap-1", EDGE_TYPE_CONNECTED_TO, {"synthetic": True})]
+    partial_plan = [PlannedEdge("core-1", "ap-1", EDGE_TYPE_CONNECTED_TO, {"synthetic": True, "generator": "g"})]
+    full_plan = [PlannedEdge("core-2", "ap-1", EDGE_TYPE_CONNECTED_TO, {"synthetic": True, "generator": "g"})]
 
     with (
         patch.object(TopologyQueryService, "prune_synthetic_device_edges", new=fake_prune),

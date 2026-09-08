@@ -184,8 +184,22 @@ describe("realtime store", () => {
     const keys = Object.keys(state.telemetryByDeviceMetric);
     expect(keys).toHaveLength(300);
     expect(state.telemetryKeysNewestFirst).toHaveLength(300);
-    expect(state.telemetryKeysNewestFirst[0]).toBe("device-359:cpu_usage");
-    expect(state.telemetryKeysNewestFirst[299]).toBe("device-60:cpu_usage");
+    expect(state.telemetryByDeviceMetric[state.telemetryKeysNewestFirst[0]].device_id).toBe("device-359");
+    expect(state.telemetryByDeviceMetric[state.telemetryKeysNewestFirst[299]].device_id).toBe("device-60");
+  });
+
+  it("retains separate ports for the same device and metric", () => {
+    useLiveStore.getState().reset();
+    for (const port of [1, 2, 1]) {
+      useLiveStore.getState().applyTelemetryDelta({ delta_type: "metric", metric: {
+        event_id: `port-${port}`, device_id: "switch", network_id: "network", workspace_id: "workspace",
+        metric: "queue_backlog_bytes", value: port * 100, unit: "bytes", source: "emulation",
+        observed_at: "2026-09-08T00:00:00Z", tags: { port_no: port, synthetic: false, execution_mode: "emulation" },
+      } });
+    }
+    expect(useLiveStore.getState().telemetryKeysNewestFirst).toHaveLength(2);
+    expect(Object.values(useLiveStore.getState().telemetryByDeviceMetric).map((metric) => metric.tags.port_no).sort()).toEqual([1, 2]);
+    useLiveStore.getState().reset();
   });
 
   it("caps retained scene objects at 300 with newest-first object ordering", () => {

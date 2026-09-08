@@ -7,7 +7,7 @@ No secrets or operational values are hardcoded (security.md guardrail).
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import computed_field
+from pydantic import Field, computed_field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -54,6 +54,11 @@ class Settings(BaseSettings):
 
     # Runtime telemetry adapter
     TELEMETRY_RUNTIME_ADAPTER_MODE: str = "stub"
+    EMULATION_SNAPSHOT_PATH: str = ""
+    EMULATION_BINDING_PATH: str = ""
+    EMULATION_SNAPSHOT_MAX_BYTES: int = Field(default=4194304, ge=1, le=16777216)
+    EMULATION_SNAPSHOT_MAX_AGE_SECONDS: float = Field(default=30, gt=0, le=3600, allow_inf_nan=False)
+    EMULATION_SNAPSHOT_FUTURE_SKEW_SECONDS: float = Field(default=2, ge=0, le=30, allow_inf_nan=False)
     TELEMETRY_RUNTIME_ADAPTER_SEEDED_SAMPLE_KEY: str = "nanfo-runtime"
     TELEMETRY_RUNTIME_ADAPTER_SEEDED_METRIC: str = "runtime_adapter_heartbeat"
     TELEMETRY_RUNTIME_ADAPTER_SEEDED_VALUE: float = 1.0

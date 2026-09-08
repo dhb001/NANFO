@@ -1,4 +1,5 @@
 import { TopologyEdge, TopologyNode } from "@/shared/types/network";
+import { topologyEdgeIdentity } from "@/features/topology/edgeIdentity";
 import { DigitalTwinDeltaData, TelemetryDeltaData, TopologyDeltaData } from "@/shared/types/ws";
 import {
   deriveDeterministicPlacement as derivePlacementWithProvider,
@@ -115,6 +116,7 @@ export interface TwinLink {
   sourceId: string;
   targetId: string;
   edgeType: string;
+  metadata: TopologyEdge["metadata"];
 }
 
 export interface TwinOverlayObject {
@@ -416,27 +418,31 @@ export function buildTwinSceneModel(input: SceneAdapterInput): TwinSceneModel {
   });
 
   const nodeByIdMap = new Map(nodes.map((node) => [node.id, node]));
+  const seenLinkIds = new Set<string>();
 
   const links = [...input.baseEdges]
     .sort((left, right) => {
-      const leftKey = `${left.source_id}:${left.target_id}:${left.edge_type}`;
-      const rightKey = `${right.source_id}:${right.target_id}:${right.edge_type}`;
+      const leftKey = topologyEdgeIdentity(left);
+      const rightKey = topologyEdgeIdentity(right);
       return leftKey.localeCompare(rightKey);
     })
     .reduce<TwinLink[]>((acc, edge) => {
       const sourceNode = nodeByIdMap.get(edge.source_id);
       const targetNode = nodeByIdMap.get(edge.target_id);
-      if (!sourceNode || !targetNode) {
+      const id = topologyEdgeIdentity(edge);
+      if (!sourceNode || !targetNode || seenLinkIds.has(id)) {
         return acc;
       }
+      seenLinkIds.add(id);
 
       acc.push({
-        id: `${edge.source_id}:${edge.target_id}:${edge.edge_type}`,
+        id,
         source: [sourceNode.x, sourceNode.y, sourceNode.z],
         target: [targetNode.x, targetNode.y, targetNode.z],
         sourceId: sourceNode.id,
         targetId: targetNode.id,
         edgeType: edge.edge_type,
+        metadata: edge.metadata,
       });
       return acc;
     }, []);

@@ -37,7 +37,7 @@ interface LiveState {
 }
 
 function metricKey(metric: TelemetryDeltaData["metric"]) {
-  return `${metric.device_id}:${metric.metric}`;
+  return JSON.stringify([metric.device_id, metric.metric, metric.unit, metric.source, metric.tags?.port_no ?? null, metric.tags?.peer_host ?? null, metric.tags?.flow_index ?? null]);
 }
 
 function pushNewestKey(keys: string[], key: string, maxItems: number) {

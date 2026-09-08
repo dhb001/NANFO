@@ -144,9 +144,31 @@ describe("topology api", () => {
     expect(response.data.nodes[0].hostname).toBe("edge-1-updated");
     expect(response.data.nodes[0].status).toBe("offline");
 
-    expect(response.data.edges).toHaveLength(2);
-    const mergedEdge = response.data.edges.find((edge) => edge.source_id === "device-1" && edge.target_id === "device-2");
-    expect(mergedEdge?.metadata).toEqual({ one: 1, two: 2 });
+    expect(response.data.edges).toHaveLength(3);
+    const legacyEdges = response.data.edges.filter((edge) => edge.source_id === "device-1" && edge.target_id === "device-2");
+    expect(legacyEdges.map((edge) => edge.metadata)).toEqual([{ one: 1 }, { two: 2 }]);
+  });
+
+  it("preserves parallel ports and owners across pages while deduplicating identical legacy edges", async () => {
+    const base = { source_id: "a", target_id: "b", edge_type: "connected_to" };
+    const metadata = { observation_owner: "lab-a", edge_key: "link", source_port: 1, target_port: 2 };
+    const edges = [
+      { ...base, metadata },
+      { ...base, metadata: { ...metadata, source_port: 3 } },
+      { ...base, metadata: { ...metadata, target_port: 4 } },
+      { ...base, metadata: { ...metadata, observation_owner: "lab-b" } },
+      { ...base, metadata: { ...metadata, edge_key: "other-link" } },
+      { ...base, metadata: { synthetic: true } },
+      { ...base, metadata: { synthetic: false } },
+    ];
+    fetchMock.mockResolvedValueOnce({ ok: true, status: 200, json: async () => okEnvelope({ nodes: [], edges }, "next") });
+    fetchMock.mockResolvedValueOnce({ ok: true, status: 200, json: async () => okEnvelope({ nodes: [], edges: [
+      edges[5], edges[6], { ...edges[0], metadata: { ...metadata, observed_at: "later" } },
+    ] }) });
+    const result = await getTopologyGraphAll("token", "network");
+    expect(result.data.edges).toHaveLength(7);
+    expect(result.data.edges).toContainEqual({ ...edges[0], metadata: { ...metadata, observed_at: "later" } });
+    for (const edge of edges.slice(1)) expect(result.data.edges).toContainEqual(edge);
   });
 
   it("stops pagination at maxPages and returns trailing cursor", async () => {
