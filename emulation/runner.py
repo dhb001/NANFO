@@ -58,6 +58,7 @@ class Lab:
         self.lastProbe = 0
         self.outputLock = None
         self.lastQueueRaw = {}
+        self.mailbox = None
 
     def start(self):
         from mininet.link import TCLink
@@ -181,6 +182,18 @@ class Lab:
                 raise RuntimeError("Four real host PacketIn attachments not discovered")
             time.sleep(0.2)
         self.snapshot()
+        if os.environ.get("EMULATION_CONTROL_ENABLED", "false").lower() == "true":
+            from emulation.actions import Actions
+            from emulation.mailbox import Mailbox
+
+            self.mailbox = Mailbox(
+                Actions(self), self.runId, os.environ.get("EMULATION_BINDING_DIGEST", "")
+            )
+            fcntl.flock(self.mailbox.lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            try:
+                self.mailbox.recover(self.mailbox.load())
+            finally:
+                fcntl.flock(self.mailbox.lock, fcntl.LOCK_UN)
 
     def checkController(self):
         if self.controller is not None and self.controller.poll() is not None:
@@ -454,6 +467,8 @@ class Lab:
             self.processes.remove(capture)
 
     def close(self):
+        if self.mailbox is not None:
+            self.mailbox.close()
         for process in self.processes:
             stopProcess(process)
         if self.net is not None:
@@ -490,9 +505,22 @@ def main():
         "--verify", action="store_true", help="One-shot live gate; exits and cleans its lab"
     )
     parser.add_argument("--request", choices=("status", "smoke", "traffic"))
+    parser.add_argument("--experiment", action="store_true", help="Exclusive opt-in ADR-011 server")
+    parser.add_argument("--mode", choices=("sdn", "ospf"), default="sdn")
+    parser.add_argument(
+        "--verify-actions", action="store_true", help="One-shot local real control/fault gate"
+    )
     args = parser.parse_args()
     if args.request:
         return request(args.request)
+    if args.experiment and (args.verify or args.verify_actions or
+                           os.environ.get("EMULATION_CONTROL_ENABLED", "false").lower() != "false"):
+        parser.error("Experiment mode cannot coexist with verification or manual mailbox control")
+    if args.experiment and (Path("/results/.journal.json").exists() or
+                           Path("/results/.journal.json").is_symlink()):
+        parser.error("Manual journal exists; never remove a live journal to enable experiments")
+    if not args.experiment and args.mode != "sdn":
+        parser.error("OSPF requires explicit --experiment")
     requireContainer()
     if args.output.resolve() != Path("/output"):
         parser.error("Container output must be the dedicated /output mount")
@@ -505,6 +533,19 @@ def main():
     signal.signal(signal.SIGINT, stop)
     try:
         lab.start()
+        if args.experiment:
+            from emulation.experiment import Experiment
+
+            if args.mode != "sdn":
+                raise RuntimeError("OSPF adapter not yet available")
+            Experiment(lab, args.mode).serve()
+            return 0
+        if args.verify_actions:
+            from emulation.verify_actions import verifyActions
+
+            result = verifyActions(lab)
+            print(json.dumps(result))
+            return 0 if result["passed"] else 1
         if args.verify:
             result = lab.verify()
             print(json.dumps(result))
@@ -515,6 +556,8 @@ def main():
             server.listen(2)
             server.settimeout(1)
             while not lab.stopping:
+                if lab.mailbox is not None:
+                    lab.mailbox.poll()
                 if time.monotonic() - lab.lastProbe >= 5:
                     lab.probe()
                 lab.snapshot()

@@ -9,7 +9,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, StrictBool
 
 
 class ValidationReason(BaseModel):
@@ -68,9 +68,13 @@ class ValidateIntentResponse(BaseModel):
 
 
 class ExecuteIntentRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     workspace_id: uuid.UUID
     intent_id: uuid.UUID
     idempotency_key: str | None = Field(default=None, min_length=1, max_length=120)
+    manual_approval: StrictBool = False
+    cancel: StrictBool = False
 
 
 class ExecuteIntentResponse(BaseModel):

@@ -16,11 +16,12 @@ import redis.asyncio as aioredis
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.events.publisher import publish_event
 from app.modules.intent.hypervisor import HypervisorExecutionService
 from app.modules.intent.repository import IntentRepository
-from app.modules.network.repository import NetworkRepository
+from app.modules.network.service import NetworkService
 from app.modules.organization.service import WorkspaceService as OrgWorkspaceService
 
 logger = get_logger(__name__)
@@ -95,7 +96,7 @@ class IntentValidationService:
         self._db = db
         self._redis = redis
         self._repo = IntentRepository(db)
-        self._network_repo = NetworkRepository(db)
+        self._network_svc = NetworkService(db, redis)
         self._workspace_svc = OrgWorkspaceService(db=db, redis=redis)
 
     async def validate_intent(
@@ -108,7 +109,7 @@ class IntentValidationService:
         correlation_id: str,
         requested_by_user_id: str,
     ) -> dict[str, Any]:
-        await self._workspace_svc.get_active_workspace(workspace_id, user_id=requested_by_user_id, require_write=True)
+        workspace = await self._workspace_svc.get_active_workspace(workspace_id, user_id=requested_by_user_id, require_write=True)
 
         now = datetime.now(UTC)
         normalized_intent = _extract_unil_intent(intent_payload)
@@ -163,7 +164,15 @@ class IntentValidationService:
                 )
             )
         else:
-            network = await self._network_repo.get_by_id(network_id)
+            try:
+                network = await self._network_svc.assert_network_workspace_access(
+                    network_id=network_id, requested_workspace_id=workspace_id,
+                    actor_user_id=requested_by_user_id, require_write=True,
+                )
+            except HTTPException as exc:
+                if exc.status_code != 404:
+                    raise
+                network = None
             if network is None:
                 network_id = None
                 reasons.append(
@@ -179,6 +188,18 @@ class IntentValidationService:
         required_checks = ["simulation_before_deployment"]
         if action in _HIGH_IMPACT_ACTIONS:
             required_checks.append("blast_radius_assessment")
+
+        lab_validation = get_settings().EXECUTION_MODE == "emulation" and get_settings().EMULATION_CONTROL_ENABLED
+        if lab_validation and not reasons:
+            from app.modules.intent.lab import prepare_plan
+
+            try:
+                await prepare_plan(settings=get_settings(), db=self._db, redis=self._redis,
+                    workspace_id=workspace_id, network_id=network_id, actor_id=requested_by_user_id,
+                    payload=normalized_intent)
+            except (ValueError, OSError, ImportError):
+                reasons.append(_build_reason("LAB_PLAN_INVALID", "Lab plan, capabilities, binding or fresh observation invalid."))
+            required_checks = ["explicit_manual_lab_approval", "current_authority_before_dispatch", "actual_lab_readback"]
 
         is_valid = len(reasons) == 0
         status_value = "validated" if is_valid else "rejected"
@@ -219,6 +240,9 @@ class IntentValidationService:
             "requested_by_user_id": requested_by_user_id,
             "validated_at": now.isoformat(),
         }
+        if lab_validation:
+            validation_result.update(validation_kind="manual_lab_plan", policy_reference="ADR-010",
+                                     capability_match="trusted_lab_plan" if is_valid else "failed")
 
         intent = await self._repo.create(
             intent_id=uuid.uuid4(),
@@ -246,6 +270,7 @@ class IntentValidationService:
         stream_entry_id = None
         warning = None
         event_payload = {
+            "org_id": str(workspace.org_id),
             "intent_id": str(intent.intent_id),
             "workspace_id": str(intent.workspace_id),
             "network_id": str(intent.network_id) if intent.network_id is not None else None,
@@ -341,7 +366,19 @@ class IntentExecutionService:
         correlation_id: str,
         requested_by_user_id: str,
         requested_permissions: list[str],
+        manual_approval: bool = False,
+        cancel: bool = False,
     ) -> dict[str, Any]:
+        settings = get_settings()
+        if cancel or (settings.EXECUTION_MODE == "emulation" and settings.EMULATION_CONTROL_ENABLED):
+            from app.modules.intent.execution import accept_execution
+
+            intent, replay = await accept_execution(db=self._db, redis=self._redis, workspace_id=workspace_id,
+                intent_id=intent_id, idempotency_key=_coerce_non_empty_text(idempotency_key) or None,
+                correlation_id=_coerce_correlation_uuid(correlation_id), actor_id=requested_by_user_id,
+                permissions=requested_permissions, manual_approval=manual_approval, cancel=cancel)
+            return await self._serialize_with_fresh_timestamps(intent, idempotent_replay=replay,
+                confidence_override={"score": 0.0, "band": "below_60", "approval_required": True})
         normalized_idempotency_key = _coerce_non_empty_text(idempotency_key) or None
         normalized_correlation_id = _coerce_correlation_uuid(correlation_id)
         now = datetime.now(UTC)
@@ -355,7 +392,7 @@ class IntentExecutionService:
                 },
             )
 
-        await self._workspace_svc.get_active_workspace(workspace_id, user_id=requested_by_user_id, require_write=True)
+        workspace = await self._workspace_svc.get_active_workspace(workspace_id, user_id=requested_by_user_id, require_write=True)
 
         existing_by_key = None
 
@@ -482,6 +519,7 @@ class IntentExecutionService:
         queue_status = "queued"
         warning = None
         event_payload = {
+            "org_id": str(workspace.org_id),
             "intent_id": str(intent.intent_id),
             "workspace_id": str(intent.workspace_id),
             "network_id": str(intent.network_id) if intent.network_id is not None else None,
@@ -571,6 +609,7 @@ class IntentExecutionService:
         )
 
         terminal_payload = {
+            "org_id": str(workspace.org_id),
             "intent_id": str(intent.intent_id),
             "workspace_id": str(intent.workspace_id),
             "network_id": str(intent.network_id) if intent.network_id is not None else None,
@@ -696,14 +735,20 @@ def _serialize_intent(
         "requested_at": intent.requested_at.isoformat(),
         "updated_at": intent.updated_at.isoformat(),
     }
-    base["validation_result"].update(
-        validation_kind="baseline_schema_only", model_evidence="unavailable", dependency_analysis="not_performed",
-    )
+    if base["validation_result"].get("validation_kind") != "manual_lab_plan":
+        base["validation_result"].update(
+            validation_kind="baseline_schema_only", model_evidence="unavailable", dependency_analysis="not_performed",
+        )
     if base["validation_result"].get("capability_match") == "matched":
         base["validation_result"]["capability_match"] = "baseline_schema_match"
     base["explainability"]["model_confidence"] = "unavailable; baseline schema checks are not model evidence"
     provenance = base["execution_provenance"]
-    if base["status"] == "execution_completed" or provenance.get("executor") == "hypervisor_baseline":
+    from app.modules.intent.lab import verified_completion
+
+    measured_lab = (provenance.get("executor") == "manual_lab_v1" and provenance.get("phase") == "completed"
+                    and verified_completion(provenance.get("verification", {}))
+                    and bool(provenance.get("plan_hash")) and bool(provenance.get("execution_id")))
+    if (base["status"] == "execution_completed" and not measured_lab) or provenance.get("executor") == "hypervisor_baseline":
         outcome = HypervisorExecutionService().execute(
             intent_id=intent.intent_id, intent_kind=str(intent.intent_kind), validation_result={},
             correlation_id=intent.correlation_id, requested_by_user_id=str(intent.requested_by_user_id),

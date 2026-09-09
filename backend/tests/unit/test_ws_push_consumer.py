@@ -149,7 +149,7 @@ async def test_ws_alert_consumer_propagates_workspace_scope_to_manager():
 
 
 @pytest.mark.asyncio
-async def test_ws_alert_consumer_push_failure_is_fail_open():
+async def test_ws_alert_consumer_push_failure_propagates_for_retry():
     event = _alert_event("alert.generated")
 
     with (
@@ -160,7 +160,8 @@ async def test_ws_alert_consumer_push_failure_is_fail_open():
         fake_redis.incr = AsyncMock(return_value=1)
         mock_get_redis.return_value = fake_redis
         mock_alerts_ws_manager.push_delta = AsyncMock(side_effect=RuntimeError("ws down"))
-        await handle_ws_alert_event(event)
+        with pytest.raises(RuntimeError, match="ws down"):
+            await handle_ws_alert_event(event)
 
     mock_alerts_ws_manager.push_delta.assert_awaited_once()
     fake_redis.incr.assert_awaited_once_with("alerts:ws:fanout:generated:failure")

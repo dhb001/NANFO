@@ -21,14 +21,22 @@ from app.modules.identity.models import (  # noqa: F401
     User,
     UserRole,
 )
-from app.modules.intent.models import Intent  # noqa: F401
-from app.modules.network.models import CampusBuildingRecord, Device, Network  # noqa: F401
-from app.modules.plugin.models import PluginRecord  # noqa: F401
+from app.modules.intent.models import (  # noqa: F401
+    Intent,
+    IntentExecution,
+    IntentOutbox,
+)
+from app.modules.network.models import (  # noqa: F401
+    CampusBuildingRecord,
+    Device,
+    Network,
+)
 from app.modules.organization.models import (  # noqa: F401
     Organization,
     OrgMember,
     Workspace,
 )
+from app.modules.plugin.models import PluginRecord  # noqa: F401
 from app.modules.report.models import ReportRecord  # noqa: F401
 from app.modules.telemetry.models import TelemetryRecord  # noqa: F401
 

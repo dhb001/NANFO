@@ -21,7 +21,7 @@ async def test_validate_intent_valid_payload_persists_validated_state(mock_db, f
 
     with (
         patch("app.modules.intent.service.OrgWorkspaceService.get_active_workspace", new_callable=AsyncMock) as mock_ws,
-        patch("app.modules.intent.service.NetworkRepository.get_by_id", new_callable=AsyncMock) as mock_get_network,
+        patch("app.modules.intent.service.NetworkService.assert_network_workspace_access", new_callable=AsyncMock) as mock_get_network,
         patch("app.modules.intent.service.IntentRepository.create", new_callable=AsyncMock) as mock_create,
     ):
         mock_ws.return_value = AsyncMock()
@@ -77,7 +77,8 @@ async def test_validate_intent_valid_payload_persists_validated_state(mock_db, f
     )
     assert result["confidence"]["score"] == 0.0
     assert result["confidence"]["band"] == "below_60"
-    mock_get_network.assert_awaited_once_with(network_id)
+    mock_get_network.assert_awaited_once_with(network_id=network_id, requested_workspace_id=workspace_id,
+        actor_user_id=mock_create.await_args.kwargs["requested_by_user_id"], require_write=True)
     mock_create.assert_awaited_once()
     mock_db.commit.assert_awaited_once()
 
@@ -92,7 +93,7 @@ async def test_validate_intent_publishes_validated_event_and_sets_stream_metadat
 
     with (
         patch("app.modules.intent.service.OrgWorkspaceService.get_active_workspace", new_callable=AsyncMock),
-        patch("app.modules.intent.service.NetworkRepository.get_by_id", new_callable=AsyncMock) as mock_get_network,
+        patch("app.modules.intent.service.NetworkService.assert_network_workspace_access", new_callable=AsyncMock) as mock_get_network,
         patch("app.modules.intent.service.IntentRepository.create", new_callable=AsyncMock) as mock_create,
         patch("app.modules.intent.service.IntentRepository.update_status", new_callable=AsyncMock) as mock_update_status,
         patch("app.modules.intent.service.publish_event", new_callable=AsyncMock) as mock_publish,
@@ -155,7 +156,7 @@ async def test_validate_intent_publish_failure_is_fail_open_deferred(mock_db, fa
 
     with (
         patch("app.modules.intent.service.OrgWorkspaceService.get_active_workspace", new_callable=AsyncMock),
-        patch("app.modules.intent.service.NetworkRepository.get_by_id", new_callable=AsyncMock) as mock_get_network,
+        patch("app.modules.intent.service.NetworkService.assert_network_workspace_access", new_callable=AsyncMock) as mock_get_network,
         patch("app.modules.intent.service.IntentRepository.create", new_callable=AsyncMock) as mock_create,
         patch("app.modules.intent.service.IntentRepository.update_status", new_callable=AsyncMock) as mock_update_status,
         patch("app.modules.intent.service.publish_event", new_callable=AsyncMock) as mock_publish,
@@ -212,7 +213,7 @@ async def test_validate_intent_invalid_payload_returns_explicit_reasons(mock_db,
 
     with (
         patch("app.modules.intent.service.OrgWorkspaceService.get_active_workspace", new_callable=AsyncMock) as mock_ws,
-        patch("app.modules.intent.service.NetworkRepository.get_by_id", new_callable=AsyncMock) as mock_get_network,
+        patch("app.modules.intent.service.NetworkService.assert_network_workspace_access", new_callable=AsyncMock) as mock_get_network,
         patch("app.modules.intent.service.IntentRepository.create", new_callable=AsyncMock) as mock_create,
     ):
         mock_ws.return_value = AsyncMock()
@@ -268,7 +269,7 @@ async def test_validate_intent_persists_normalized_idempotency_key(mock_db, fake
 
     with (
         patch("app.modules.intent.service.OrgWorkspaceService.get_active_workspace", new_callable=AsyncMock),
-        patch("app.modules.intent.service.NetworkRepository.get_by_id", new_callable=AsyncMock) as mock_get_network,
+        patch("app.modules.intent.service.NetworkService.assert_network_workspace_access", new_callable=AsyncMock) as mock_get_network,
         patch("app.modules.intent.service.IntentRepository.create", new_callable=AsyncMock) as mock_create,
     ):
         mock_get_network.return_value = network

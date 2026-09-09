@@ -204,7 +204,7 @@ async def handle_ws_alert_event(event: dict) -> None:
             correlation_id=correlation_id,
         )
         logger.info("ws_alert_delta_pushed", event_type=event_type, delta_type=delta_type)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         failure_counter = f"{_ALERT_WS_COUNTER_PREFIX}:{counter_label}:failure"
         await _safe_increment_alert_counter(
             counter_client,
@@ -221,6 +221,7 @@ async def handle_ws_alert_event(event: dict) -> None:
             correlation_id=correlation_id,
             error=str(exc),
         )
+        raise
 
 
 async def handle_ws_digital_twin_event(event: dict) -> None:

@@ -50,7 +50,7 @@ test.describe("VS8 intent parity", () => {
             stream_entry_id: "111",
             warning: null,
           },
-          meta: { request_id: "req-intent-validate", timestamp: "2026-08-13T10:00:10Z" },
+          meta: { request_id: "req-intent-validate", timestamp: "2026-08-13T10:00:10Z", execution_mode: "emulation" },
           errors: null,
         }),
       });
@@ -107,10 +107,8 @@ test.describe("VS8 intent parity", () => {
       });
     });
 
-    let detailCall = 0;
     await page.route("**/api/v1/intents/00000000-0000-0000-0000-000000000901?workspace_id=00000000-0000-0000-0000-000000000222", async (route) => {
-      detailCall += 1;
-      const status = detailCall >= 2 ? "execution_failed" : "execution_started";
+      const status = executeAttempts >= 2 ? "execution_failed" : "validated";
       await route.fulfill({
         status: 200,
         contentType: "application/json",
@@ -163,6 +161,8 @@ test.describe("VS8 intent parity", () => {
     await page.getByRole("button", { name: "Validate" }).click();
     await expect(page.getByText("Intent validated")).toBeVisible();
 
+    await expect(page.getByRole("button", { name: "Execute" })).toBeDisabled();
+    await page.getByRole("checkbox", { name: /explicitly approve/ }).check();
     await page.getByRole("button", { name: "Execute" }).click();
     await expect(page.getByText("Idempotency conflict")).toBeVisible();
 

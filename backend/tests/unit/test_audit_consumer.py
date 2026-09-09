@@ -29,6 +29,7 @@ async def test_audit_consumer_writes_telemetry_sustained_failure_event():
         "observed_at": "2026-08-10T00:00:00+00:00",
     }
     event = {
+        "event_id": str(uuid.uuid4()),
         "event_type": "telemetry.collector.sustained_failure_activated",
         "correlation_id": correlation_id,
         "payload": payload,
@@ -55,6 +56,7 @@ async def test_audit_consumer_writes_telemetry_sustained_failure_event():
     assert append_kwargs["org_id"] is None
     assert append_kwargs["correlation_id"] == uuid.UUID(correlation_id)
     assert append_kwargs["metadata"] == payload
+    assert append_kwargs["event_id"] == uuid.UUID(event["event_id"])
     db.commit.assert_awaited_once()
 
 
@@ -82,6 +84,7 @@ async def test_audit_consumer_handles_invalid_uuid_fields_fail_open():
         "exhausted_streak": 3,
     }
     event = {
+        "event_id": str(uuid.uuid4()),
         "event_type": "telemetry.collector.sustained_failure_recovered",
         "correlation_id": "invalid-correlation-id",
         "payload": payload,
@@ -128,6 +131,7 @@ async def test_audit_consumer_writes_simulation_branch_created_event():
         "network_id": str(uuid.uuid4()),
     }
     event = {
+        "event_id": str(uuid.uuid4()),
         "event_type": "simulation.branch_created",
         "correlation_id": correlation_id,
         "payload": payload,
@@ -174,6 +178,7 @@ async def test_audit_consumer_writes_intent_execution_started_event():
         "status": "execution_started",
     }
     event = {
+        "event_id": str(uuid.uuid4()),
         "event_type": "intent.execution_started",
         "correlation_id": correlation_id,
         "payload": payload,
@@ -216,6 +221,7 @@ async def test_audit_consumer_writes_intent_execution_failed_with_rollback_metad
         },
     }
     event = {
+        "event_id": str(uuid.uuid4()),
         "event_type": "intent.execution_failed",
         "correlation_id": correlation_id,
         "payload": payload,
@@ -262,6 +268,7 @@ async def test_audit_consumer_writes_topology_reconcile_completed_event():
         "checked_edges": 4,
     }
     event = {
+        "event_id": str(uuid.uuid4()),
         "event_type": "network.topology.reconcile_completed",
         "correlation_id": correlation_id,
         "payload": payload,
@@ -307,6 +314,7 @@ async def test_audit_consumer_writes_alert_acknowledged_event_with_actor_and_res
         "status": "acknowledged",
     }
     event = {
+        "event_id": str(uuid.uuid4()),
         "event_type": "alert.acknowledged",
         "correlation_id": correlation_id,
         "payload": payload,
@@ -352,6 +360,7 @@ async def test_audit_consumer_writes_plugin_enabled_event():
         "status": "enabled",
     }
     event = {
+        "event_id": str(uuid.uuid4()),
         "event_type": "plugin.enabled",
         "correlation_id": correlation_id,
         "payload": payload,
@@ -397,6 +406,7 @@ async def test_audit_consumer_writes_report_generated_event():
         "status": "generated",
     }
     event = {
+        "event_id": str(uuid.uuid4()),
         "event_type": "report.generated",
         "correlation_id": correlation_id,
         "payload": payload,
@@ -460,6 +470,7 @@ async def test_audit_consumer_writes_org_workspace_and_org_lifecycle_events():
         patch("app.events.consumers.audit_consumer.AuditLogRepository", return_value=repo),
     ):
         for event in events:
+            event["event_id"] = str(uuid.uuid4())
             await handle_audit_event(event)
 
     assert repo.append.await_count == 4
@@ -470,3 +481,37 @@ def test_audit_handlers_include_org_update_delete_events():
     assert "org.organization.deleted" in AUDIT_HANDLERS
     assert "org.workspace.updated" in AUDIT_HANDLERS
     assert "org.workspace.deleted" in AUDIT_HANDLERS
+
+
+@pytest.mark.asyncio
+async def test_auth_audit_is_owned_by_direct_append_not_bus():
+    with patch("app.events.consumers.audit_consumer.AsyncSessionLocal") as session:
+        for event_type in ("auth.user.logged_in", "auth.user.login_failed",
+                           "auth.user.logged_out", "auth.token.refreshed"):
+            assert event_type not in AUDIT_HANDLERS
+            await handle_audit_event({"event_type": event_type})
+    session.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_audit_rejects_missing_event_identity():
+    with (
+        patch("app.events.consumers.audit_consumer.AsyncSessionLocal", return_value=AsyncMock()),
+        pytest.raises(KeyError),
+    ):
+        await handle_audit_event({"event_type": "intent.validated", "payload": {}})
+
+
+@pytest.mark.asyncio
+async def test_audit_commit_failure_propagates_to_bus():
+    from sqlalchemy.exc import SQLAlchemyError
+
+    db = AsyncMock()
+    db.commit.side_effect = SQLAlchemyError("commit failed")
+    with (
+        patch("app.events.consumers.audit_consumer.AsyncSessionLocal", return_value=_session_context_manager(db)),
+        patch("app.events.consumers.audit_consumer.AuditLogRepository") as repo,
+        pytest.raises(SQLAlchemyError, match="commit failed"),
+    ):
+        repo.return_value.append = AsyncMock()
+        await handle_audit_event({"event_type": "intent.validated", "event_id": str(uuid.uuid4()), "payload": {}})

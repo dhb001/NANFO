@@ -1,5 +1,30 @@
 import { IntentDetailResult } from "@/shared/types/intent";
 
+export interface LabActionInput {
+  operation: "reroute" | "multipath" | "shape" | "police" | "restore";
+  sourceHost: string;
+  destinationHost: string;
+  paths: string;
+  weights: string;
+  rate: string;
+  dscp: string;
+}
+
+export function buildLabIntent(input: LabActionInput) {
+  const routing = input.operation === "reroute" || input.operation === "multipath";
+  return {
+    action: routing ? "reroute_path" : "throttle_qos",
+    scope: { source_host: input.sourceHost, destination_host: input.destinationHost },
+    constraints: {
+      operation: input.operation,
+      paths: routing ? input.paths.split("\n").filter((line) => line.trim()).map((line) => line.trim().split(/[\s,]+/)) : [],
+      ...(routing && input.weights.trim() ? { weights: input.weights.trim().split(/[\s,]+/).map(Number) } : {}),
+      rate_mbps: input.operation === "shape" || input.operation === "police" ? Number(input.rate) : null,
+      dscp: input.dscp.trim() ? Number(input.dscp) : null,
+    },
+  };
+}
+
 export interface LifecycleEvent {
   key: string;
   label: string;
@@ -14,6 +39,11 @@ export interface IntentExecutionDiagnostics {
   rollbackReferenceId: string | null;
   failureReason: string | null;
   eventPublicationWarning: string | null;
+  readbackSha256: string | null;
+  rollbackReadbackSha256: string | null;
+  probeSummary: string | null;
+  completionScope: string | null;
+  noMutationVerified: boolean;
 }
 
 const knownIntentStatuses = new Set([
@@ -54,9 +84,9 @@ export function mapIntentLifecycle(detail: IntentDetailResult): LifecycleEvent[]
     },
     {
       key: "execution_terminal",
-      label: detail.status === "execution_failed" ? "Execution Failed" : "Execution Completed",
+      label: detail.status === "execution_failed" ? "Execution Failed" : detail.status === "execution_completed" ? "Execution Completed" : "Awaiting terminal readback",
       status: detail.status === "execution_failed" ? "failed" : detail.status === "execution_completed" ? "success" : "pending",
-      timestamp: completedAt ?? failedAt,
+      timestamp: detail.status === "execution_completed" ? completedAt : detail.status === "execution_failed" ? failedAt : undefined,
     },
   ];
 }
@@ -84,26 +114,27 @@ export function explainabilitySummary(detail: IntentDetailResult): string {
 
 export function mapExecutionDiagnostics(detail: IntentDetailResult): IntentExecutionDiagnostics {
   const provenance = detail.execution_provenance;
-
-  const verificationRaw = provenance.verification;
-  const verificationStatus =
-    verificationRaw && typeof verificationRaw === "object" && "status" in verificationRaw
-      ? String((verificationRaw as { status?: unknown }).status ?? "").trim() || null
-      : null;
-
-  const rollbackRaw = provenance.rollback;
-  const rollbackStatus =
-    rollbackRaw && typeof rollbackRaw === "object" && "status" in rollbackRaw
-      ? String((rollbackRaw as { status?: unknown }).status ?? "").trim() || null
-      : null;
-  const rollbackAttempted =
-    rollbackRaw && typeof rollbackRaw === "object" && "attempted" in rollbackRaw
-      ? Boolean((rollbackRaw as { attempted?: unknown }).attempted)
-      : false;
-  const rollbackReferenceId =
-    rollbackRaw && typeof rollbackRaw === "object" && "rollback_reference_id" in rollbackRaw
-      ? String((rollbackRaw as { rollback_reference_id?: unknown }).rollback_reference_id ?? "").trim() || null
-      : null;
+  const verification = evidenceObject(provenance.verification);
+  const rollback = evidenceObject(provenance.rollback);
+  const probe = evidenceObject(verification.probe);
+  const readbackSha256 = evidenceText(verification.readback_sha256);
+  const rollbackReadbackSha256 = evidenceText(rollback.readback_sha256);
+  const readbackVerified = verification.readback_verified === true && /^[a-f0-9]{64}$/.test(readbackSha256 ?? "");
+  const rollbackVerified = rollback.verified === true && /^[a-f0-9]{64}$/.test(rollbackReadbackSha256 ?? "");
+  // Explicit evidence takes precedence over historical status strings, including false/malformed values.
+  const verificationStatus = "readback_verified" in verification
+    ? readbackVerified ? "readback verified" : "readback unverified"
+    : evidenceText(verification.status);
+  const rollbackStatus = "verified" in rollback
+    ? rollbackVerified ? "verified" : "unverified"
+    : evidenceText(rollback.status);
+  const rollbackAttempted = rollback.attempted === true;
+  const rollbackReferenceId = evidenceText(rollback.rollback_reference_id);
+  const validProbe = typeof probe.sent === "number" && Number.isInteger(probe.sent) && probe.sent > 0 &&
+    typeof probe.received === "number" && Number.isInteger(probe.received) && probe.received >= 0 && probe.received <= probe.sent;
+  const probeSummary = validProbe ? `${probe.received}/${probe.sent} received` : null;
+  const completionScope = evidenceText(verification.completion_scope) ?? evidenceText(provenance.completion_scope) ??
+    (readbackVerified && validProbe && probe.received === probe.sent ? "config_readback_and_reachability" : null);
 
   const failureReason =
     typeof provenance.failure_reason === "string" && provenance.failure_reason.trim()
@@ -123,7 +154,34 @@ export function mapExecutionDiagnostics(detail: IntentDetailResult): IntentExecu
     rollbackReferenceId,
     failureReason,
     eventPublicationWarning,
+    readbackSha256,
+    rollbackReadbackSha256,
+    probeSummary,
+    completionScope,
+    noMutationVerified: verification.no_mutation_verified === true,
   };
+}
+
+function evidenceObject(value: unknown): Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function evidenceText(value: unknown): string | null {
+  return typeof value === "string" ? value.trim() || null : null;
+}
+
+export function canCancelIntent(detail: IntentDetailResult | null | undefined, requestPending = false): boolean {
+  if (!detail) return false;
+  const provenance = detail.execution_provenance;
+  const diagnostics = mapExecutionDiagnostics(detail);
+  if ((provenance.phase === "cancelled" || provenance.phase === "failed") &&
+    (diagnostics.rollbackStatus === "verified" || diagnostics.noMutationVerified)) return false;
+  if (detail.status === "execution_started") return true;
+  if (detail.status === "validated") return requestPending;
+  if (detail.status !== "execution_completed" || provenance.phase !== "completed" ||
+    !evidenceText(provenance.execution_id) || diagnostics.rollbackStatus === "verified" || diagnostics.noMutationVerified) return false;
+  // No active-policy flag is exposed. A completed non-restore job may be compensated; the server decides ownership.
+  return evidenceObject(detail.intent_payload?.constraints).operation !== "restore";
 }
 
 export function intentSceneObjectId(intentId: string): string {

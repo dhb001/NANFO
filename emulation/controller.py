@@ -40,10 +40,30 @@ class CampusController(app_manager.RyuApp):
             dp.close()
             return
         parser, ofp = dp.ofproto_parser, dp.ofproto
+        dp.send_msg(
+            parser.OFPFlowMod(
+                datapath=dp,
+                command=ofp.OFPFC_DELETE,
+                cookie=1,
+                cookie_mask=0xFFFFFFFFFFFFFFFF,
+                table_id=1,
+                out_port=ofp.OFPP_ANY,
+                out_group=ofp.OFPG_ANY,
+            )
+        )
         actions = [parser.OFPActionOutput(ofp.OFPP_CONTROLLER, ofp.OFPCML_NO_BUFFER)]
         dp.send_msg(
             parser.OFPFlowMod(
                 datapath=dp,
+                priority=0,
+                match=parser.OFPMatch(),
+                instructions=[parser.OFPInstructionGotoTable(1)],
+            )
+        )
+        dp.send_msg(
+            parser.OFPFlowMod(
+                datapath=dp,
+                table_id=1,
                 priority=0,
                 match=parser.OFPMatch(),
                 instructions=[parser.OFPInstructionActions(ofp.OFPIT_APPLY_ACTIONS, actions)],
@@ -127,6 +147,7 @@ class CampusController(app_manager.RyuApp):
             parser.OFPFlowMod(
                 datapath=dp,
                 cookie=1,
+                table_id=1,
                 priority=100,
                 idle_timeout=10,
                 hard_timeout=30,
@@ -146,7 +167,8 @@ class CampusController(app_manager.RyuApp):
                 datapath=dp,
                 buffer_id=ofp.OFP_NO_BUFFER,
                 in_port=inPort,
-                actions=actions,
+                # Re-enter table 0 so a policy installed during PacketIn wins.
+                actions=[parser.OFPActionOutput(ofp.OFPP_TABLE)],
                 data=msg.data,
             )
         )

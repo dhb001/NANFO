@@ -11,6 +11,7 @@ VS10 extends this service with:
 
 from __future__ import annotations
 
+import re
 import uuid
 from collections.abc import Sequence
 from datetime import UTC, datetime
@@ -618,6 +619,96 @@ class TopologyQueryService:
             max_hops=bounded_hops,
             total=len(impacts),
         )
+
+    async def apply_device_event(
+        self, *, event_type: str, payload: dict, timestamp: str, event_id: str,
+    ) -> bool:
+        """Apply a strictly newer event and its durable revision in one transaction.
+
+        Separate revision nodes retain missing-device delete tombstones without
+        fabricating incomplete Device nodes. Direct discovery/seed helpers remain
+        unversioned and retain their existing semantics.
+        """
+        precedence = {"network.device.added": 0, "network.device.updated": 1, "network.device.deleted": 2}
+        rank = precedence[event_type]
+        if not isinstance(timestamp, str) or not re.fullmatch(
+            r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)", timestamp,
+        ):
+            raise ValueError("Device event requires an offset-aware ISO timestamp with microsecond precision")
+        occurred = datetime.fromisoformat(timestamp).astimezone(UTC)
+        delta = occurred - datetime(1970, 1, 1, tzinfo=UTC)
+        epoch_us = (delta.days * 86400 + delta.seconds) * 1000000 + delta.microseconds
+        identity = str(uuid.UUID(event_id))
+        device_id = str(uuid.UUID(payload["device_id"]))
+        properties = {}
+        if rank == 0:
+            properties = {
+                "network_id": str(uuid.UUID(payload["network_id"])),
+                "workspace_id": str(uuid.UUID(payload["workspace_id"])),
+                "hostname": payload["hostname"], "device_type": payload["device_type"],
+                "spatial_ref_id": payload.get("spatial_ref_id"), "status": "active",
+            }
+        elif rank == 1:
+            properties = payload["changed_fields"]
+            allowed = {"hostname", "device_type", "spatial_ref_id", "status"}
+            if not isinstance(properties, dict) or properties.keys() - allowed:
+                raise ValueError("Unsupported device projection fields")
+        if any(value is not None and not isinstance(value, str) for value in properties.values()):
+            raise ValueError("Device projection properties must be strings or null")
+
+        async def apply(tx):
+            # The uniqueness constraint serializes concurrent first deliveries.
+            # Explicit write lock precedes the revision read (Neo4j read-committed).
+            locked = await tx.run("""
+                MERGE (r:DeviceEventRevision {device_id: $device_id})
+                SET r._lock = coalesce(r._lock, 0) + 1
+            """, device_id=device_id)
+            await locked.consume()
+            result = await tx.run("""
+                MATCH (r:DeviceEventRevision {device_id: $device_id})
+                WHERE r.epoch_us IS NULL OR r.epoch_us < $epoch_us
+                    OR (r.epoch_us = $epoch_us AND r.rank < $rank)
+                    OR (r.epoch_us = $epoch_us AND r.rank = $rank AND r.event_id < $event_id)
+                RETURN r.deleted AS deleted
+            """, device_id=device_id, epoch_us=epoch_us, rank=rank, event_id=identity)
+            revision = await result.single()
+            if revision is None:
+                return False
+            if rank == 0:
+                result = await tx.run("""
+                    MERGE (d:Device {device_id: $device_id}) SET d += $properties
+                """, device_id=device_id, properties=properties)
+            elif rank == 2:
+                result = await tx.run("""
+                    MATCH (d:Device {device_id: $device_id}) SET d.status = 'deleted'
+                """, device_id=device_id)
+            elif revision["deleted"]:
+                # Updates cannot undo a tombstone; only a newer explicit add can.
+                return False
+            else:
+                result = await tx.run("""
+                    MATCH (d:Device {device_id: $device_id})
+                    SET d += $properties RETURN count(d) AS matched
+                """, device_id=device_id, properties=properties)
+                if _record_int(await result.single(), "matched") == 0:
+                    raise ValueError("Device update arrived before its add projection")
+            await result.consume()
+            result = await tx.run("""
+                MATCH (r:DeviceEventRevision {device_id: $device_id})
+                SET r.epoch_us = $epoch_us, r.rank = $rank, r.event_id = $event_id,
+                    r.deleted = $deleted
+            """, device_id=device_id, epoch_us=epoch_us, rank=rank,
+                event_id=identity, deleted=rank == 2 or properties.get("status") == "deleted")
+            await result.consume()
+            return True
+
+        async with self._driver.session() as session:
+            result = await session.run("""
+                CREATE CONSTRAINT device_event_revision_identity IF NOT EXISTS
+                FOR (r:DeviceEventRevision) REQUIRE r.device_id IS UNIQUE
+            """)
+            await result.consume()
+            return await session.execute_write(apply)
 
     async def create_device_node(
         self,

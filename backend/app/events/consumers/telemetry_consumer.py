@@ -126,7 +126,7 @@ async def handle_telemetry_event(event: dict) -> None:
                         event_id=event_id,
                         correlation_id=correlation_id,
                     )
-                except Exception as exc:  # noqa: BLE001
+                except Exception as exc:
                     logger.warning(
                         "telemetry_ws_fanout_failed",
                         event_id=event_id,
@@ -139,12 +139,15 @@ async def handle_telemetry_event(event: dict) -> None:
                         event_id=event_id,
                         correlation_id=correlation_id,
                     )
+                    raise
             else:
                 logger.info(
                     "telemetry_record_duplicate_skipped",
                     event_id=event_id,
                     correlation_id=correlation_id,
                 )
+                # Persistence may have committed before the prior fanout failed.
+                await _push_telemetry_delta(event, payload)
     except (ValueError, TypeError) as exc:
         await _safe_increment_counter(
             counter_service.increment_dropped if counter_service else None,
@@ -158,6 +161,7 @@ async def handle_telemetry_event(event: dict) -> None:
             correlation_id=correlation_id,
             error=str(exc),
         )
+        raise
     except SQLAlchemyError as exc:
         logger.warning(
             "telemetry_record_persist_failed",
@@ -198,7 +202,7 @@ async def handle_telemetry_runtime_transition_event(event: dict) -> None:
             correlation_id=correlation_id,
             error=str(exc),
         )
-        return
+        raise
 
     try:
         stream_entry_id = await publish_event(
@@ -207,6 +211,7 @@ async def handle_telemetry_runtime_transition_event(event: dict) -> None:
             source="telemetry",
             payload=payload,
             correlation_id=correlation_id,
+            event_id=str(uuid.uuid5(uuid.NAMESPACE_URL, f"{event_id}:{alert_event_type}")),
         )
         logger.info(
             "telemetry_runtime_transition_alert_published",
@@ -216,7 +221,7 @@ async def handle_telemetry_runtime_transition_event(event: dict) -> None:
             correlation_id=correlation_id,
             stream_entry_id=stream_entry_id,
         )
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.warning(
             "telemetry_runtime_transition_alert_publish_failed",
             source_event_type=source_event_type,
@@ -225,6 +230,7 @@ async def handle_telemetry_runtime_transition_event(event: dict) -> None:
             correlation_id=correlation_id,
             error=str(exc),
         )
+        raise
 
 
 TELEMETRY_HANDLERS: dict[str, object] = {

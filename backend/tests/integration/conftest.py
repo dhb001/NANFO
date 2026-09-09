@@ -11,7 +11,7 @@ receives a working in-memory Redis, not None.
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import fakeredis
 import pytest
@@ -31,7 +31,11 @@ def mock_app_lifespan():
     - run_consumer_loop                → AsyncMock (yields immediately)
     - get_redis_client                 → returns _FAKE_REDIS
     """
+    # Inject infrastructure only. Authentication and authorization remain real.
+    lease = AsyncMock()
+    lease.__aenter__.return_value = MagicMock(healthy=True)
     with (
+        patch("app.main.ApiRealtimeLease", return_value=lease),
         patch("app.main.init_redis", AsyncMock()),
         patch("app.main.init_neo4j", AsyncMock()),
         patch("app.main.close_redis", AsyncMock()),

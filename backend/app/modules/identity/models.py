@@ -8,7 +8,7 @@ audit_logs is immutable — no UPDATE or DELETE ever executed (Authentication.md
 import uuid
 from datetime import datetime
 
-from sqlalchemy import TIMESTAMP, Boolean, ForeignKey, Text, func
+from sqlalchemy import TIMESTAMP, Boolean, ForeignKey, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -66,8 +66,10 @@ class AuditLog(Base):
     """Immutable audit log. INSERT only — no UPDATE or DELETE (Authentication.md §4)."""
 
     __tablename__ = "audit_logs"
+    __table_args__ = (UniqueConstraint("event_id", name="uq_audit_logs_event_id"),)
 
     log_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    event_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     event_type: Mapped[str] = mapped_column(Text, nullable=False)
     actor_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     resource_type: Mapped[str | None] = mapped_column(Text, nullable=True)

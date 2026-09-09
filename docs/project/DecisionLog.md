@@ -2,6 +2,17 @@
 
 Lightweight chronological notes for decisions that do not require a full ADR.
 
+## 2026-09-09: Durable Manual Lab Control
+
+ADR-010 authorizes narrowly scoped manual control in the disconnected lab, not
+production deployment or simulated risk approval. Keep protocol code in emulation,
+use an unprivileged I/O worker and bounded file mailbox, and persist approval/jobs/
+outbox in Intent-owned tables. Receiver dispatch expiry and durable preparation
+bound admission; uncertain recovery blocks rather than guesses. Completion means
+readback/reachability, with performance independently measured by verifier workloads.
+Preserve existing route/channel/event names and require one leased API realtime
+process until cross-process fanout is implemented. See `ManualExecution-Step5-Step6.md`.
+
 ## 2026-09-08: Isolated Measured Emulation
 
 User-authorized Steps 3-4 are governed by ADR-009. Keep legacy Ryu inside a

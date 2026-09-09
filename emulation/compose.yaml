@@ -8,10 +8,24 @@ services:
     # Privilege is only for this disposable namespace/OVS lab. Never add host PID,
     # host networking, a Docker socket, a physical interface, or credential mounts.
     network_mode: none
+    environment:
+      EMULATION_CONTROL_ENABLED: ${EMULATION_CONTROL_ENABLED:-false}
+      EMULATION_BINDING_DIGEST: ${EMULATION_BINDING_DIGEST:-}
     volumes:
       - type: bind
         source: ./output
         target: /output
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./commands
+        target: /commands
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./results
+        target: /results
         bind:
           create_host_path: false
     tmpfs:
@@ -20,6 +34,8 @@ services:
     pids_limit: 256
     mem_limit: 768m
     cpus: 2
+    # experiment-start uses this isolated service as a one-off owner with its own
+    # Unix socket. It never enables the manual mailbox or exposes network ports.
     stop_grace_period: 20s
     healthcheck:
       test: ["CMD", "python", "-m", "emulation.runner", "--request", "status"]

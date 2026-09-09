@@ -1,5 +1,22 @@
 # Current Sprint State
 
+## Completion Plan Steps 5-6: Durable Manual Lab Execution
+
+- Implemented and live-verified on 2026-09-09 under ADR-010 for the isolated lab:
+  reroute/SELECT paths, shaping, policing, restore, explicit approval, actual
+  readback/reachability, compensating rollback, durable jobs/outbox, cancellation,
+  worker recovery, pending-event reclaim, audit dedup and topology replay ordering.
+- Final live gate passed through authenticated HTTP, independent worker, migrated
+  disposable PostgreSQL and actual lab. Concurrent duplicate, worker death/lost
+  result, old-policy cancellation, deadline, outbox replay and traffic tests passed.
+- Gates: 1,359 backend tests; 8 opt-in tests separately passed; 241 frontend tests;
+  27 browser tests on standalone no-retry rerun; lint/type/build/perf passed.
+- Apply migrations 0011/0012 to the intended deployment before use; shared databases
+  were not migrated by the disposable verifier. Control defaults off.
+- Scope/limitations and measured evidence: `ManualExecution-Step5-Step6.md`.
+  One active lab policy, no production execution, no universal exactly-once claim.
+- Next: Step 7 measured DRL environment and routing baselines.
+
 ## Completion Plan Steps 3-4: Measured Emulation
 
 - Implemented and live-verified on 2026-09-08 under ADR-009: isolated Mininet/OVS/

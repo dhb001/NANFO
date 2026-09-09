@@ -115,11 +115,11 @@ async def test_telemetry_consumer_duplicate_skips_commit():
     db.commit.assert_not_awaited()
     db.add.assert_not_called()
     fake_redis.incr.assert_not_awaited()
-    mock_ws_manager.push_delta.assert_not_awaited()
+    mock_ws_manager.push_delta.assert_awaited_once()
 
 
 @pytest.mark.asyncio
-async def test_telemetry_consumer_validation_error_does_not_raise():
+async def test_telemetry_consumer_validation_error_raises_for_dlq():
     db = AsyncMock()
     db.commit = AsyncMock()
 
@@ -137,7 +137,8 @@ async def test_telemetry_consumer_validation_error_does_not_raise():
         fake_redis = AsyncMock()
         fake_redis.incr = AsyncMock(return_value=1)
         mock_get_redis.return_value = fake_redis
-        await handle_telemetry_event(event)
+        with pytest.raises(ValueError):
+            await handle_telemetry_event(event)
 
     db.commit.assert_not_awaited()
     fake_redis.incr.assert_awaited_once()
@@ -168,7 +169,7 @@ async def test_telemetry_consumer_sql_error_is_raised_for_retry():
 
 
 @pytest.mark.asyncio
-async def test_telemetry_consumer_fanout_failure_increments_dropped_and_does_not_raise():
+async def test_telemetry_consumer_fanout_failure_increments_dropped_and_raises():
     db = AsyncMock()
     db.add = MagicMock()
     db.flush = AsyncMock()
@@ -191,7 +192,8 @@ async def test_telemetry_consumer_fanout_failure_increments_dropped_and_does_not
         fake_redis.incr = AsyncMock(side_effect=[1, 1])
         mock_get_redis.return_value = fake_redis
         mock_ws_manager.push_delta = AsyncMock(side_effect=RuntimeError("ws down"))
-        await handle_telemetry_event(_telemetry_event())
+        with pytest.raises(RuntimeError, match="ws down"):
+            await handle_telemetry_event(_telemetry_event())
 
     db.commit.assert_awaited_once()
     assert fake_redis.incr.await_count == 2
@@ -219,6 +221,9 @@ async def test_runtime_transition_activation_publishes_alert_generated():
     assert publish_kwargs["source"] == "telemetry"
     assert publish_kwargs["payload"] == payload
     assert publish_kwargs["correlation_id"] == event["correlation_id"]
+    assert publish_kwargs["event_id"] == str(uuid.uuid5(
+        uuid.NAMESPACE_URL, f"{event['event_id']}:alert.generated",
+    ))
 
 
 @pytest.mark.asyncio
@@ -239,7 +244,7 @@ async def test_runtime_transition_recovery_publishes_alert_resolved():
 
 
 @pytest.mark.asyncio
-async def test_runtime_transition_publish_failure_is_fail_open():
+async def test_runtime_transition_publish_failure_propagates():
     event = _runtime_transition_event("telemetry.collector.sustained_failure_activated")
 
     with (
@@ -249,13 +254,14 @@ async def test_runtime_transition_publish_failure_is_fail_open():
         mock_get_redis.return_value = AsyncMock()
         mock_publish.side_effect = RuntimeError("redis publish failed")
 
-        await handle_telemetry_runtime_transition_event(event)
+        with pytest.raises(RuntimeError, match="redis publish failed"):
+            await handle_telemetry_runtime_transition_event(event)
 
     mock_publish.assert_awaited_once()
 
 
 @pytest.mark.asyncio
-async def test_runtime_transition_client_unavailable_is_fail_open():
+async def test_runtime_transition_client_unavailable_propagates():
     event = _runtime_transition_event("telemetry.collector.sustained_failure_activated")
 
     with (
@@ -264,6 +270,7 @@ async def test_runtime_transition_client_unavailable_is_fail_open():
             side_effect=RuntimeError("redis unavailable"),
         ),
         patch("app.events.consumers.telemetry_consumer.publish_event", new_callable=AsyncMock) as mock_publish,
+        pytest.raises(RuntimeError, match="redis unavailable"),
     ):
         await handle_telemetry_runtime_transition_event(event)
 

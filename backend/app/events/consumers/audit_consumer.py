@@ -1,9 +1,10 @@
 """NANFO Backend — Audit Log event consumer.
 
-Consumes auth.*, network.*, org.*, and selected telemetry collector
+Consumes network.*, org.*, and selected telemetry collector
 runtime transition events, then writes to the audit_logs table.
 Owned by Identity module (audit_logs is an Identity module table).
-Idempotency is handled by the event bus consumer loop via event_id dedup.
+Identity persists event_id atomically with the audit row for durable replay safety.
+AuthService already appends auth audits synchronously; do not append them again.
 """
 
 from __future__ import annotations
@@ -18,10 +19,6 @@ logger = get_logger(__name__)
 
 # Event types to audit and their resource_type labels
 _AUDIT_MAP: dict[str, dict] = {
-    "auth.user.logged_in":   {"resource_type": "user"},
-    "auth.user.login_failed": {"resource_type": "user"},
-    "auth.user.logged_out":   {"resource_type": "user"},
-    "auth.token.refreshed":   {"resource_type": "user"},
     "intent.validated":        {"resource_type": "intent"},
     "intent.execution_started": {"resource_type": "intent"},
     "intent.execution_completed": {"resource_type": "intent"},
@@ -115,6 +112,7 @@ async def handle_audit_event(event: dict) -> None:
     async with AsyncSessionLocal() as db:
         repo = AuditLogRepository(db)
         await repo.append(
+            event_id=uuid.UUID(str(event["event_id"])),
             event_type=event_type,
             actor_id=actor_id,
             resource_type=config["resource_type"],

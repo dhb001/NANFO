@@ -42,6 +42,13 @@ class Settings(BaseSettings):
     REDIS_PASSWORD: str
     REDIS_DB: int = 0
 
+    # ADR-010: always-on single API process guard and bounded stream recovery.
+    API_REALTIME_LEASE_TTL_SECONDS: int = Field(default=30, ge=3, le=300)
+    EVENT_RECLAIM_IDLE_MS: int = Field(default=60000, ge=1000, le=3600000)
+    EVENT_CONSUMER_BATCH_SIZE: int = Field(default=10, ge=1, le=100)
+    EVENT_COMPLETION_TTL_SECONDS: int = Field(default=86400, ge=60, le=604800)
+    EVENT_HANDLER_TIMEOUT_SECONDS: int = Field(default=30, ge=1, le=300)
+
     # JWT — per Authentication.md §5 and §8
     JWT_SECRET_KEY: str
     JWT_ALGORITHM: str = "HS256"
@@ -56,6 +63,13 @@ class Settings(BaseSettings):
     TELEMETRY_RUNTIME_ADAPTER_MODE: str = "stub"
     EMULATION_SNAPSHOT_PATH: str = ""
     EMULATION_BINDING_PATH: str = ""
+    EMULATION_CONTROL_ENABLED: bool = False
+    EMULATION_COMMANDS_PATH: str = ""
+    EMULATION_RESULTS_PATH: str = ""
+    EMULATION_EXECUTION_TIMEOUT_SECONDS: int = Field(default=120, ge=10, le=300)
+    EMULATION_EXECUTION_LEASE_SECONDS: int = Field(default=15, ge=5, le=60)
+    EMULATION_EXECUTION_POLL_SECONDS: float = Field(default=1, gt=0, le=2, allow_inf_nan=False)
+    EMULATION_CONTROL_MAX_BYTES: int = Field(default=1048576, ge=1024, le=4194304)
     EMULATION_SNAPSHOT_MAX_BYTES: int = Field(default=4194304, ge=1, le=16777216)
     EMULATION_SNAPSHOT_MAX_AGE_SECONDS: float = Field(default=30, gt=0, le=3600, allow_inf_nan=False)
     EMULATION_SNAPSHOT_FUTURE_SKEW_SECONDS: float = Field(default=2, ge=0, le=30, allow_inf_nan=False)

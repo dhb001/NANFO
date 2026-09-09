@@ -1,0 +1,42 @@
+[project]
+name = "nanfo-routing"
+version = "0.1.0"
+description = "Operator-only ADR011 measured routing experiment"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "torch==2.8.0+cpu",
+  "gymnasium==1.2.0",
+  "numpy==2.2.6",
+  "pydantic==2.11.7",
+]
+
+[dependency-groups]
+dev = ["pytest==8.4.2", "ruff==0.12.12"]
+
+[build-system]
+requires = ["hatchling==1.27.0"]
+build-backend = "hatchling.build"
+
+[project.scripts]
+nanfo-routing = "nanfo_routing.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/nanfo_routing"]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cpu" }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B"]

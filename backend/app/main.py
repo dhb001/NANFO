@@ -15,7 +15,7 @@ Shutdown lifecycle:
 from __future__ import annotations
 
 import asyncio
-from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Request, status
@@ -51,6 +51,7 @@ from app.events.consumers.simulation_consumer import SIMULATION_HANDLERS
 from app.events.consumers.telemetry_consumer import TELEMETRY_HANDLERS
 from app.events.consumers.topology_consumer import TOPOLOGY_HANDLERS
 from app.events.consumers.ws_push_consumer import WS_PUSH_HANDLERS
+from app.events.realtime import ApiRealtimeLease
 from app.modules.network.topology import TopologyQueryService
 from app.modules.telemetry.service import (
     TelemetryCollectorRunner,
@@ -84,15 +85,7 @@ def _merge_handlers(*handler_dicts: dict) -> dict:
     merged: dict = {}
     for d in handler_dicts:
         for k, v in d.items():
-            if k in merged:
-                # Wrap both handlers so all consumers receive the event
-                existing = merged[k]
-                async def _combined(event, _h1=existing, _h2=v):
-                    await _h1(event)
-                    await _h2(event)
-                merged[k] = _combined
-            else:
-                merged[k] = v
+            merged.setdefault(k, []).append(v)
     return merged
 
 
@@ -146,15 +139,41 @@ async def _build_emulation_adapter(settings, redis):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    """Acquire the mandatory guard before any realtime side effects."""
+    configure_logging(get_settings().LOG_LEVEL)
+    async with AsyncExitStack() as stack:
+        stack.push_async_callback(close_redis)
+        await init_redis()
+        lease = await stack.enter_async_context(ApiRealtimeLease(
+            get_redis_client(), ttl_seconds=get_settings().API_REALTIME_LEASE_TTL_SECONDS,
+        ))
+        app.state.realtime_lease = lease
+        stack.push_async_callback(close_neo4j)
+        await init_neo4j()
+        await stack.enter_async_context(_runtime_lifespan(app, stack))
+        if not lease.healthy:
+            raise RuntimeError("API realtime lease lost during startup")
+        yield
+
+
+@asynccontextmanager
+async def _runtime_lifespan(app: FastAPI, stack: AsyncExitStack):
     settings = get_settings()
-    configure_logging(settings.LOG_LEVEL)
     startup_correlation_id = "startup-topology-workspace-backfill"
     consumer_tasks: list[asyncio.Task] = []
     telemetry_collector: TelemetryCollectorRunner | None = None
 
-    # Initialise external connections
-    await init_redis()
-    await init_neo4j()
+    async def stop_runtime():
+        for task in consumer_tasks:
+            task.cancel()
+        await asyncio.gather(*consumer_tasks, return_exceptions=True)
+        if telemetry_collector is not None:
+            await telemetry_collector.stop()
+        logger.info("nanfo_shutdown_complete")
+
+    # Registered before startup so partial startup/cancellation also stops work
+    # before the lease is released to a successor.
+    stack.push_async_callback(stop_runtime)
 
     redis = get_redis_client()
     await ensure_consumer_groups(redis)
@@ -257,8 +276,12 @@ async def lifespan(app: FastAPI):
                 redis=redis,
                 stream_key=stream_key,
                 group=group,
-                consumer_name="nanfo-main-0",
+                consumer_name="nanfo-api",
                 handlers=all_handlers,
+                reclaim_idle_ms=settings.EVENT_RECLAIM_IDLE_MS,
+                batch_size=settings.EVENT_CONSUMER_BATCH_SIZE,
+                completion_ttl_seconds=settings.EVENT_COMPLETION_TTL_SECONDS,
+                handler_timeout_seconds=settings.EVENT_HANDLER_TIMEOUT_SECONDS,
             ),
             name=f"consumer:{stream_key}",
         )
@@ -266,16 +289,6 @@ async def lifespan(app: FastAPI):
 
     logger.info("nanfo_startup_complete", env=settings.APP_ENV)
     yield
-
-    # Graceful shutdown
-    for task in consumer_tasks:
-        task.cancel()
-    await asyncio.gather(*consumer_tasks, return_exceptions=True)
-    if telemetry_collector is not None:
-        await telemetry_collector.stop()
-    await close_neo4j()
-    await close_redis()
-    logger.info("nanfo_shutdown_complete")
 
 
 app = FastAPI(

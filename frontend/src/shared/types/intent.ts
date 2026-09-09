@@ -101,4 +101,6 @@ export interface ExecuteIntentRequest {
   workspace_id: string;
   intent_id: string;
   idempotency_key?: string;
+  manual_approval?: boolean;
+  cancel?: boolean;
 }

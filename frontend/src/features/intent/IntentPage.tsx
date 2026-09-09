@@ -14,6 +14,7 @@ import {
   mapIntentLifecycle,
   resolveConfidenceTone,
   shouldRefetchIntentFromRealtime,
+  canCancelIntent,
 } from "@/features/intent/logic";
 import { formatTimestamp } from "@/shared/lib/format";
 import { useLiveStore } from "@/features/realtime/store";
@@ -22,9 +23,22 @@ import { useUiStore } from "@/shared/state/ui-store";
 import { ApiClientError, toErrorMessage } from "@/shared/lib/errors";
 import { useIsNarrowViewport } from "@/shared/lib/viewport";
 import { canExecuteIntent, normalizeIntentStatus } from "@/shared/lib/intent";
+import { hasPermission } from "@/features/auth/permissions";
+import { useExecutionModeStore } from "@/shared/state/execution-mode-store";
+import { LabActionFields } from "@/features/intent/LabActionFields";
+import type { ExecuteIntentRequest } from "@/shared/types/intent";
 
 export function IntentPage() {
   const token = useAuthStore((state) => state.accessToken);
+  const workspaceId = useWorkspaceStore((state) => state.workspaceId);
+  const networkId = useWorkspaceStore((state) => state.networkId);
+  return <IntentPageContent key={`${token}:${workspaceId}:${networkId}`} />;
+}
+
+function IntentPageContent() {
+  const token = useAuthStore((state) => state.accessToken);
+  const profile = useAuthStore((state) => state.profile);
+  const mode = useExecutionModeStore((state) => state.mode);
   const workspaceId = useWorkspaceStore((state) => state.workspaceId);
   const networkId = useWorkspaceStore((state) => state.networkId);
 
@@ -35,6 +49,11 @@ export function IntentPage() {
   const [idempotencyKey, setIdempotencyKey] = useState(`intent-${Date.now()}`);
   const [validationError, setValidationError] = useState<string | null>(null);
   const [handoffSummary, setHandoffSummary] = useState<string | null>(null);
+  const [guided, setGuided] = useState(false);
+  const [manualApproval, setManualApproval] = useState(false);
+  const [executionRequest, setExecutionRequest] = useState<ExecuteIntentRequest | null>(null);
+  const [executionNotice, setExecutionNotice] = useState<string | null>(null);
+  const executionPending = useRef(false);
   const pushToast = useUiStore((state) => state.pushToast);
   const isNarrowViewport = useIsNarrowViewport();
   const appliedHandoffRef = useRef(false);
@@ -43,6 +62,10 @@ export function IntentPage() {
   const executeMutation = useExecuteIntent(token);
   const detailQuery = useIntentDetail(token, intentId, workspaceId);
   const canExecute = canExecuteIntent(detailQuery.data);
+  const permitted = hasPermission(profile, "write:config") && hasPermission(profile, "execute:rollback");
+  const available = mode === "emulation" && permitted;
+  const selectedDetail = !detailQuery.isError && detailQuery.data?.intent_id === intentId && detailQuery.data?.workspace_id === workspaceId;
+  const labAction = detailQuery.data?.intent_payload?.action === "reroute_path" || detailQuery.data?.intent_payload?.action === "throttle_qos";
 
   const sceneObjects = useLiveStore((state) => state.sceneObjects);
   const sceneObjectIdsNewestFirst = useLiveStore((state) => state.sceneObjectIdsNewestFirst);
@@ -57,19 +80,28 @@ export function IntentPage() {
     [sceneObjects, sceneObjectIdsNewestFirst],
   );
 
+  const lastRealtime = useRef<unknown>(null);
+  const { refetch } = detailQuery;
   useEffect(() => {
-    if (!intentId || !detailQuery.data || !realtimeIntent) {
+    if (!intentId || !realtimeIntent || lastRealtime.current === realtimeIntent) {
       return;
     }
     const realtimeStatus = typeof realtimeIntent.status === "string" ? realtimeIntent.status : undefined;
-    if (!shouldRefetchIntentFromRealtime(detailQuery.data.status, realtimeStatus)) {
+    lastRealtime.current = realtimeIntent;
+    if (!shouldRefetchIntentFromRealtime(undefined, realtimeStatus)) {
       return;
     }
-    detailQuery.refetch();
-  }, [detailQuery, intentId, realtimeIntent]);
+    void refetch();
+  }, [refetch, intentId, realtimeIntent]);
+
+  useEffect(() => {
+    if (!available) setManualApproval(false);
+  }, [available]);
 
   async function validate(event: FormEvent) {
     event.preventDefault();
+    if (!hasPermission(profile, "write:config") || executionPending.current || executionInFlight) return;
+    setManualApproval(false);
     setValidationError(null);
     if (!workspaceId || !networkId) {
       pushToast({
@@ -90,32 +122,40 @@ export function IntentPage() {
       return;
     }
 
-    if (!scope || Array.isArray(scope) || !constraints || Array.isArray(constraints)) {
+    if (!scope || typeof scope !== "object" || Array.isArray(scope) || !constraints || typeof constraints !== "object" || Array.isArray(constraints)) {
       setValidationError("Scope and constraints must be JSON objects.");
       return;
     }
 
-    const response = await validateMutation.mutateAsync({
-      request: {
-        workspace_id: workspaceId,
-        network_id: networkId,
-        intent: {
-          action,
-          scope,
-          constraints,
+    try {
+      const response = await validateMutation.mutateAsync({
+        request: {
+          workspace_id: workspaceId,
+          network_id: networkId,
+          intent: {
+            action,
+            scope,
+            constraints,
+          },
         },
-      },
-      idempotencyKey,
-    });
-    setIntentId(response.intent_id);
-    pushToast({
-      title: response.status === "validated" ? "Intent validated" : "Intent validation response",
-      description: `Status: ${response.status} | confidence ${response.confidence.band}`,
-      tone: response.status === "validated" ? "ok" : "warn",
-    });
+        idempotencyKey,
+      });
+      setIntentId(response.intent_id);
+      setExecutionRequest(null);
+      setExecutionNotice(null);
+      pushToast({
+        title: response.status === "validated" ? "Intent validated" : "Intent validation response",
+        description: `Status: ${response.status} | confidence ${response.confidence.band}`,
+        tone: response.status === "validated" ? "ok" : "warn",
+      });
+    } catch {
+      // The mutation error is rendered below; never leave a rejected form promise.
+    }
   }
 
-  async function execute() {
+  async function execute(cancel = false) {
+    if (!available || executionPending.current || !selectedDetail ||
+      (!cancel && (terminalState || !manualApproval || !canExecute || !labAction)) || (cancel && !canCancel)) return;
     if (!workspaceId || !intentId) {
       pushToast({
         title: "Nothing to execute",
@@ -124,23 +164,33 @@ export function IntentPage() {
       });
       return;
     }
+    const request: ExecuteIntentRequest = {
+      workspace_id: workspaceId,
+      intent_id: intentId,
+      idempotency_key: executionRequest?.idempotency_key ?? (cancel || detailQuery.data?.status === "execution_started" ? detailQuery.data?.idempotency_key ?? idempotencyKey : idempotencyKey),
+      manual_approval: cancel ? executionRequest?.manual_approval ?? manualApproval : true,
+      cancel,
+    };
+    executionPending.current = true;
+    if (!cancel) setExecutionRequest(request);
     try {
       const response = await executeMutation.mutateAsync({
-        request: {
-          workspace_id: workspaceId,
-          intent_id: intentId,
-          idempotency_key: idempotencyKey,
-        },
-        idempotencyKey,
+        request,
+        idempotencyKey: request.idempotency_key,
       });
+      setExecutionNotice(response.status === "execution_started"
+        ? cancel ? "Cancellation requested. Reconciliation or rollback must finish before a terminal outcome is known."
+          : "Execution accepted, not completed. Waiting for authoritative readback."
+        : "Execution response received. Consult the authoritative detail and verification below.");
       pushToast({
-        title: response.status === "execution_failed" ? "Execution failed" : response.idempotent_replay ? "Execution replayed" : "Execution request received",
+        title: response.status === "execution_failed" ? "Execution failed" : cancel ? "Cancellation requested" : response.idempotent_replay ? "Execution replayed" : "Execution request received",
         description: `Status: ${response.status} | Queue status: ${response.queue_status}${response.warning ? ` | ${response.warning}` : ""}`,
         tone: response.status === "execution_failed" ? "danger" : "warn",
       });
       await detailQuery.refetch();
     } catch (error) {
       if (error instanceof ApiClientError && error.code === "INTENT_IDEMPOTENCY_CONFLICT") {
+        if (!cancel) setExecutionRequest(null);
         pushToast({
           title: "Idempotency conflict",
           description: "This key is bound to another intent. Use a new idempotency key.",
@@ -148,15 +198,21 @@ export function IntentPage() {
         });
         return;
       }
+      setExecutionNotice("Request outcome unknown. A lost response does not mean the action did not run. Refresh detail or retry with the same identity.");
+      void detailQuery.refetch();
       pushToast({
-        title: "Execution failed",
+        title: "Execution request failed",
         description: toErrorMessage(error),
         tone: "danger",
       });
+    } finally {
+      executionPending.current = false;
     }
   }
 
   const terminalState = isIntentTerminalStatus(detailQuery.data?.status);
+  const canCancel = Boolean(intentId && selectedDetail && canCancelIntent(detailQuery.data, Boolean(executionRequest)));
+  const executionInFlight = !terminalState && (detailQuery.data?.status === "execution_started" || Boolean(executionRequest));
 
   useEffect(() => {
     if (appliedHandoffRef.current) {
@@ -221,6 +277,22 @@ export function IntentPage() {
           </div>
         ) : null}
         <form onSubmit={validate} style={{ display: "grid", gap: "0.7rem" }}>
+          <label><input type="checkbox" checked={guided} disabled={validateMutation.isPending || executeMutation.isPending}
+            onChange={(event) => {
+              setGuided(event.target.checked);
+              setManualApproval(false);
+              if (event.target.checked) {
+                setAction("reroute_path");
+                setScopeJson('{"source_host":"h1","destination_host":"h2"}');
+                setConstraintsJson('{"operation":"reroute","paths":[],"rate_mbps":null,"dscp":null}');
+              }
+            }} /> Guided manual lab action</label>
+          {guided ? <LabActionFields onChange={(intent) => {
+            setAction(intent.action);
+            setScopeJson(JSON.stringify(intent.scope));
+            setConstraintsJson(JSON.stringify(intent.constraints));
+            setManualApproval(false);
+          }} /> : <p>Advanced JSON validation remains available for other actions. Validation never grants manual approval.</p>}
           <div
             style={{
               display: "grid",
@@ -233,8 +305,9 @@ export function IntentPage() {
                 Action
               </span>
               <select
+                disabled={guided}
                 value={action}
-                onChange={(event) => setAction(event.target.value)}
+                onChange={(event) => { setAction(event.target.value); setManualApproval(false); }}
                 style={{ border: "1px solid var(--line-soft)", borderRadius: "10px", padding: "0.45rem 0.5rem" }}
               >
                 <option value="reroute_path">reroute_path</option>
@@ -249,6 +322,7 @@ export function IntentPage() {
                 Idempotency Key
               </span>
               <input
+                disabled={Boolean(executionRequest) || executeMutation.isPending}
                 value={idempotencyKey}
                 onChange={(event) => setIdempotencyKey(event.target.value)}
                 style={{ border: "1px solid var(--line-soft)", borderRadius: "10px", padding: "0.45rem 0.5rem" }}
@@ -261,9 +335,10 @@ export function IntentPage() {
               Scope JSON
             </span>
             <textarea
+              readOnly={guided}
               rows={4}
               value={scopeJson}
-              onChange={(event) => setScopeJson(event.target.value)}
+              onChange={(event) => { setScopeJson(event.target.value); setManualApproval(false); }}
               style={{ border: "1px solid var(--line-soft)", borderRadius: "10px", padding: "0.5rem", fontFamily: "var(--font-mono)" }}
             />
           </label>
@@ -273,29 +348,51 @@ export function IntentPage() {
               Constraints JSON
             </span>
             <textarea
+              readOnly={guided}
               rows={4}
               value={constraintsJson}
-              onChange={(event) => setConstraintsJson(event.target.value)}
+              onChange={(event) => { setConstraintsJson(event.target.value); setManualApproval(false); }}
               style={{ border: "1px solid var(--line-soft)", borderRadius: "10px", padding: "0.5rem", fontFamily: "var(--font-mono)" }}
             />
           </label>
 
-          <div style={{ display: "flex", gap: "0.5rem" }}>
-            <Button permission="write:config" type="submit" disabled={validateMutation.isPending}>
+          <p role="status">{mode !== "emulation"
+            ? `Manual execution unavailable: ${mode ?? "unknown"} mode. Only authoritative EMULATION mode permits lab control; demo and production remain non-actuating.`
+            : !permitted ? "Manual execution requires write:config and execute:rollback permissions."
+              : "EMULATION only. Server opt-in, current authorization and trusted lab capabilities are still required."}</p>
+          <label><input type="checkbox" checked={manualApproval}
+            disabled={!available || !intentId || !selectedDetail || !labAction || terminalState || executeMutation.isPending || validateMutation.isPending}
+            onChange={(event) => setManualApproval(event.target.checked)} />
+            I explicitly approve this selected intent's manual lab execution (manual_approval=true)
+          </label>
+          {selectedDetail && !labAction ? <p>This action is validation-only. Manual lab execution supports reroute_path and throttle_qos plans only.</p> : null}
+          <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+            <Button permission="write:config" type="submit" disabled={validateMutation.isPending || executeMutation.isPending || executionInFlight}>
               {validateMutation.isPending ? "Validating..." : "Validate"}
             </Button>
             <Button
               permission="write:config"
               tone="ghost"
               type="button"
-              disabled={!intentId || executeMutation.isPending || terminalState || !canExecute}
-              onClick={execute}
+              disabled={!intentId || !selectedDetail || !labAction || !available || !manualApproval || !idempotencyKey.trim() || executeMutation.isPending || validateMutation.isPending || terminalState || !canExecute}
+              onClick={() => void execute()}
             >
               {executeMutation.isPending ? "Executing..." : "Execute"}
             </Button>
+            <Button permission="execute:rollback" tone="danger" type="button"
+              disabled={!available || !canCancel || executeMutation.isPending}
+              onClick={() => void execute(true)}>Cancel execution</Button>
+            {canCancel && terminalState ? <p>Cancel requests compensation of the completed policy. The server checks current ownership; rollback is not confirmed until readback verifies it.</p> : null}
             <input
+              aria-label="Intent ID"
+              disabled={executeMutation.isPending || validateMutation.isPending}
               value={intentId ?? ""}
-              onChange={(event) => setIntentId(event.target.value || null)}
+              onChange={(event) => {
+                setIntentId(event.target.value || null);
+                setManualApproval(false);
+                setExecutionRequest(null);
+                setExecutionNotice(null);
+              }}
               placeholder="Intent ID"
               style={{
                 border: "1px solid var(--line-soft)",
@@ -306,6 +403,7 @@ export function IntentPage() {
               }}
               />
             </div>
+          {executionNotice ? <p role="status">{executionNotice}</p> : null}
           {validationError ? <AsyncState title="Invalid request body" description={validationError} /> : null}
           {validateMutation.isError ? (
             <AsyncState title="Validation request failed" description={toErrorMessage(validateMutation.error)} />
@@ -318,6 +416,10 @@ export function IntentPage() {
 
       <div style={{ display: "grid", gridTemplateColumns: isNarrowViewport ? "1fr" : "1fr 1fr", gap: "1rem", alignItems: "start" }}>
         <Panel title="Intent Detail" subtitle="GET /intents/{id} + lifecycle timeline">
+          {intentId ? <div style={{ marginBottom: "0.7rem" }}>
+            <p>Detail polling backs off to 15 seconds and stops after 40 reads or a terminal result. Realtime reconnects also reconcile detail. A deadline or connection loss is not proof of cancellation.</p>
+            <Button tone="ghost" disabled={detailQuery.isFetching} onClick={() => void detailQuery.refetch()}>Refresh execution status</Button>
+          </div> : null}
           <QueryState
             query={detailQuery}
             emptyTitle="No intent selected"
@@ -326,6 +428,7 @@ export function IntentPage() {
             {(detail) => {
               const lifecycle = mapIntentLifecycle(detail);
               const diagnostics = mapExecutionDiagnostics(detail);
+              const uncertain = detail.execution_provenance.uncertain === true || detail.execution_provenance.phase === "uncertain" || diagnostics.verificationStatus === "uncertain" || diagnostics.rollbackStatus === "failed" || diagnostics.rollbackStatus === "unverified";
               return (
                 <div style={{ display: "grid", gap: "0.56rem" }}>
                   <div style={{ display: "flex", gap: "0.4rem", flexWrap: "wrap" }}>
@@ -337,18 +440,40 @@ export function IntentPage() {
                     <Badge text={detail.queue_status} tone={detail.queue_status === "queued" ? "ok" : "warn"} />
                   </div>
                   <div style={{ color: "var(--ink-2)", fontSize: "0.9rem" }}>{explainabilitySummary(detail)}</div>
+                  {detail.status === "execution_started" ? <p role="status">Execution in progress, not completed. Awaiting verification and reconciliation.</p> : null}
+                  {uncertain ? <AsyncState title="Execution outcome uncertain" description="Do not assume changes were undone. Reconciliation and verified rollback are required before further lab mutations." /> : null}
+                  {diagnostics.noMutationVerified ? <p role="status">No mutation verified by the backend. This is not successful execution or rollback.</p> : null}
+                  <details>
+                    <summary>Selected intent payload (approval applies to this plan)</summary>
+                    <pre style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{JSON.stringify(detail.intent_payload, null, 2)}</pre>
+                  </details>
+                  <div aria-label="Execution provenance" style={{ overflowWrap: "anywhere" }}>
+                    {(["execution_id", "phase", "deadline"] as const).map((field) => (
+                      <div key={field} className="mono">{field}: {typeof detail.execution_provenance[field] === "string" ? String(detail.execution_provenance[field]) : "Not reported"}</div>
+                    ))}
+                    <p>Completion requires actual readback, not queue acceptance. Missing verification or rollback evidence remains unknown.</p>
+                    <div className="mono">completion_scope: {diagnostics.completionScope ?? "Not reported"}</div>
+                    <p>Configuration readback and reachability do not establish workload performance improvement.</p>
+                    {diagnostics.readbackSha256 ? <div className="mono">readback_sha256: {diagnostics.readbackSha256}</div> : null}
+                    {diagnostics.probeSummary ? <div>Reachability probe: {diagnostics.probeSummary}</div> : null}
+                    {diagnostics.rollbackReadbackSha256 ? <div className="mono">rollback.readback_sha256: {diagnostics.rollbackReadbackSha256}</div> : null}
+                    <details>
+                      <summary>Execution provenance, verification and rollback evidence</summary>
+                      <pre style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{JSON.stringify(detail.execution_provenance, null, 2)}</pre>
+                    </details>
+                  </div>
 
                   <div style={{ display: "flex", gap: "0.35rem", flexWrap: "wrap" }}>
                     {diagnostics.verificationStatus ? (
                       <Badge
                         text={`verification ${diagnostics.verificationStatus}`}
-                        tone={diagnostics.verificationStatus === "passed" ? "ok" : "warn"}
+                        tone={diagnostics.verificationStatus === "passed" || diagnostics.verificationStatus === "readback verified" ? "ok" : "warn"}
                       />
                     ) : null}
-                    {diagnostics.rollbackAttempted ? (
+                    {diagnostics.rollbackAttempted || diagnostics.rollbackStatus ? (
                       <Badge
                         text={`rollback ${diagnostics.rollbackStatus ?? "attempted"}`}
-                        tone={diagnostics.rollbackStatus === "completed" ? "ok" : "danger"}
+                        tone={diagnostics.rollbackStatus === "completed" || diagnostics.rollbackStatus === "verified" ? "ok" : "danger"}
                       />
                     ) : null}
                     {diagnostics.eventPublicationWarning ? (

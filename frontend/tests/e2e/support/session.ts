@@ -505,7 +505,7 @@ export async function installSessionMocks(page: Page, state: SessionMockState): 
           email: state.email,
           display_name: "Operator",
           roles: ["Admin"],
-          permissions: ["read:topology", "read:telemetry", "execute:intent", "write:config"],
+          permissions: ["read:topology", "read:telemetry", "execute:intent", "write:config", "execute:rollback"],
         },
         meta: { request_id: "req-profile", timestamp: "2026-08-13T10:00:01Z" },
         errors: null,

@@ -2,12 +2,26 @@
 
 ## Foundation Capability Boundary
 
-No controller/model is installed in the current foundation. Basic validation is
+No learned model is installed in the current foundation. Basic validation is
 not learned confidence; score zero explicitly denotes unavailable model confidence.
-Execution returns `execution_failed`, verification `not_performed`, and
+Unconfigured, demo or production execution returns `execution_failed`, verification `not_performed`, and
 `executor_unavailable`, with no rollback. Historical deterministic baseline
 success metadata is not evidence of execution. Cross-workspace network references
 are rejected before persistence/publication. Mode selection never enables a driver.
+
+## Manual Lab Execution (ADR-010)
+
+Explicitly configured isolated emulation supports reroute, SELECT multipath,
+shaping, meter policing and restore. Execute requires `manual_approval=true`,
+current capabilities/membership and a trusted fresh binding. `cancel=true` uses
+the existing execute route for cancellation/compensation. Acceptance returns 202
+and `execution_started`, not completion. A separate worker reconciles durable
+execution/outbox state with the lab's journal, readback and reachability evidence.
+Completed configuration does not imply measured performance improvement; workload
+effects are separately tested. Provenance exposes phase, execution ID, hashes,
+deadline, explicit verification/rollback, cancellation actor and uncertainty.
+Read ADR-010, `backend/app/modules/intent/README.md`, and
+`docs/project/ManualExecution-Step5-Step6.md` for scope and verification limits.
 
 ## Purpose
 Translate administrator or AI intent into validated, executable workflows.

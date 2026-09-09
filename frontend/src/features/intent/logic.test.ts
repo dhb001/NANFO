@@ -7,6 +7,8 @@ import {
   mapIntentLifecycle,
   resolveConfidenceTone,
   shouldRefetchIntentFromRealtime,
+  buildLabIntent,
+  canCancelIntent,
 } from "@/features/intent/logic";
 import { IntentDetailResult } from "@/shared/types/intent";
 
@@ -45,6 +47,72 @@ function createDetail(overrides: Partial<IntentDetailResult> = {}): IntentDetail
 }
 
 describe("intent logic", () => {
+  it("maps actual lab readback, reachability and rollback independently of legacy status", () => {
+    const diagnostics = mapExecutionDiagnostics(createDetail({ execution_provenance: {
+      verification: { readback_verified: true, readback_sha256: "a".repeat(64), probe: { sent: 3, received: 3 } },
+      rollback: { verified: true, readback_sha256: "b".repeat(64) },
+    } }));
+    expect(diagnostics).toMatchObject({ verificationStatus: "readback verified", rollbackStatus: "verified",
+      readbackSha256: "a".repeat(64), rollbackReadbackSha256: "b".repeat(64), probeSummary: "3/3 received",
+      completionScope: "config_readback_and_reachability", noMutationVerified: false, rollbackAttempted: false });
+  });
+
+  it.each([false, "true", true])("does not promote incomplete or malformed explicit evidence (%s) via legacy fallback", (flag) => {
+    expect(mapExecutionDiagnostics(createDetail({ execution_provenance: {
+      verification: { readback_verified: flag, status: "passed", no_mutation_verified: "true", probe: { sent: 0, received: 0 } },
+      rollback: { verified: flag, status: "completed", attempted: "true" },
+    } }))).toMatchObject({ verificationStatus: "readback unverified", rollbackStatus: "unverified",
+      completionScope: null, noMutationVerified: false, probeSummary: null, rollbackAttempted: false });
+  });
+
+  it("does not infer completion scope or rollback from no-mutation proof", () => {
+    expect(mapExecutionDiagnostics(createDetail({ status: "execution_failed", execution_provenance: {
+      verification: { no_mutation_verified: true }, rollback: null,
+    } }))).toMatchObject({ noMutationVerified: true, verificationStatus: null, rollbackStatus: null, completionScope: null });
+    expect(mapExecutionDiagnostics(createDetail({ execution_provenance: {} }))).toMatchObject({
+      noMutationVerified: false, verificationStatus: null, rollbackStatus: null, completionScope: null,
+    });
+  });
+
+  it("keeps explicit completion scope without inferring improvement from probes", () => {
+    expect(mapExecutionDiagnostics(createDetail({ execution_provenance: { verification: {
+      readback_verified: true, readback_sha256: "a".repeat(64), probe: { sent: 3, received: 2 },
+    } } }))).toMatchObject({ probeSummary: "2/3 received", completionScope: null });
+    expect(mapExecutionDiagnostics(createDetail({ execution_provenance: { verification: {
+      completion_scope: "config_readback_and_reachability",
+    } } })).completionScope).toBe("config_readback_and_reachability");
+  });
+
+  it("allows completed policy compensation but not restored, safely cancelled, or failed executions", () => {
+    const completed = createDetail({ status: "execution_completed", execution_provenance: { execution_id: "job-1", phase: "completed" } });
+    expect(canCancelIntent(completed)).toBe(true);
+    expect(canCancelIntent({ ...completed, intent_payload: { constraints: { operation: "restore" } } })).toBe(false);
+    expect(canCancelIntent({ ...completed, execution_provenance: { phase: "completed" } })).toBe(false);
+    expect(canCancelIntent({ ...completed, status: "execution_failed" })).toBe(false);
+    expect(canCancelIntent(createDetail({ execution_provenance: { phase: "cancelled", rollback: { verified: true, readback_sha256: "a".repeat(64) } } }))).toBe(false);
+    expect(canCancelIntent(createDetail({ execution_provenance: { phase: "failed", verification: { no_mutation_verified: true } } }))).toBe(false);
+    expect(canCancelIntent(createDetail({ execution_provenance: { phase: "uncertain", rollback: { verified: false } } }))).toBe(true);
+  });
+
+  it("builds complete paths and weights with optional DSCP using only ADR-010 fields", () => {
+    expect(buildLabIntent({ operation: "multipath", sourceHost: "h1", destinationHost: "h4", paths: "s1 s2 s4\ns1,s3,s4", weights: "2, 1", rate: "", dscp: "63" })).toEqual({
+      action: "reroute_path", scope: { source_host: "h1", destination_host: "h4" },
+      constraints: { operation: "multipath", paths: [["s1", "s2", "s4"], ["s1", "s3", "s4"]], weights: [2, 1], rate_mbps: null, dscp: 63 },
+    });
+  });
+
+  it.each(["shape", "police", "restore"] as const)("builds %s without stale routing parameters", (operation) => {
+    expect(buildLabIntent({ operation, sourceHost: "h1", destinationHost: "h2", paths: "s1 s2", weights: "2", rate: "12.5", dscp: "" }).constraints).toEqual({
+      operation, paths: [], rate_mbps: operation === "restore" ? null : 12.5, dscp: null,
+    });
+  });
+
+  it("omits unspecified weights rather than inventing policy", () => {
+    expect(buildLabIntent({ operation: "reroute", sourceHost: "h1", destinationHost: "h2", paths: "s1 s2", weights: "", rate: "", dscp: "" }).constraints).toEqual({
+      operation: "reroute", paths: [["s1", "s2"]], rate_mbps: null, dscp: null,
+    });
+  });
+
   it("maps lifecycle for terminal success", () => {
     const lifecycle = mapIntentLifecycle(createDetail({ status: "execution_completed" }));
     expect(lifecycle).toHaveLength(3);

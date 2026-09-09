@@ -9,6 +9,7 @@ from __future__ import annotations
 import uuid
 
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -92,8 +93,19 @@ class AuditLogRepository:
         org_id: uuid.UUID | None = None,
         correlation_id: uuid.UUID,
         metadata: dict | None = None,
-    ) -> AuditLog:
+        event_id: uuid.UUID | None = None,
+    ) -> AuditLog | None:
         """Append an immutable audit log record. Never updates existing records."""
+        if event_id is not None:
+            # Identity and effect commit together; a crash/replay cannot add a row.
+            result = await self._db.execute(
+                insert(AuditLog).values(
+                    event_id=event_id, event_type=event_type, actor_id=actor_id,
+                    resource_type=resource_type, resource_id=resource_id, org_id=org_id,
+                    correlation_id=correlation_id, metadata_=metadata,
+                ).on_conflict_do_nothing(index_elements=[AuditLog.event_id]).returning(AuditLog)
+            )
+            return result.scalar_one_or_none()
         entry = AuditLog(
             event_type=event_type,
             actor_id=actor_id,

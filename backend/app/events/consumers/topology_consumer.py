@@ -2,7 +2,7 @@
 
 Consumes network.device.* events and writes/updates/removes Device nodes in Neo4j.
 One of the three consumers of network.device.added (EventAPI.md §5).
-Idempotency: MERGE on device_id prevents duplicate nodes on replay.
+Replay ordering and tombstones are persisted atomically by Network in Neo4j.
 """
 
 from __future__ import annotations
@@ -17,37 +17,17 @@ logger = get_logger(__name__)
 async def handle_topology_event(event: dict) -> None:
     """Write topology changes to Neo4j based on network.device.* events."""
     event_type = event.get("event_type", "")
-    payload = event.get("payload", {})
+    if event_type not in TOPOLOGY_HANDLERS:
+        return
+    payload = event["payload"]
     driver = get_neo4j_driver()
     svc = TopologyQueryService(driver)
 
-    if event_type == "network.device.added":
-        await svc.create_device_node(
-            device_id=payload["device_id"],
-            network_id=payload["network_id"],
-            workspace_id=payload["workspace_id"],
-            hostname=payload["hostname"],
-            device_type=payload["device_type"],
-            spatial_ref_id=payload.get("spatial_ref_id"),
-            status="active",
-        )
-        logger.info("topology_node_added", device_id=payload["device_id"])
-
-    elif event_type == "network.device.updated":
-        changed = payload.get("changed_fields", {})
-        if changed:
-            # Build SET clause from changed_fields
-            set_parts = ", ".join(f"d.{k} = ${k}" for k in changed)
-            query = f"MATCH (d:Device {{device_id: $device_id}}) SET {set_parts}"
-            async with driver.session() as session:
-                await session.run(query, device_id=payload["device_id"], **changed)
-            logger.info("topology_node_updated", device_id=payload["device_id"])
-
-    elif event_type == "network.device.deleted":
-        query = "MATCH (d:Device {device_id: $device_id}) SET d.status = 'deleted'"
-        async with driver.session() as session:
-            await session.run(query, device_id=payload["device_id"])
-        logger.info("topology_node_soft_deleted", device_id=payload["device_id"])
+    applied = await svc.apply_device_event(
+        event_type=event_type, payload=payload,
+        timestamp=event["timestamp"], event_id=event["event_id"],
+    )
+    logger.info("topology_event_projected", device_id=payload["device_id"], applied=applied)
 
 
 TOPOLOGY_HANDLERS: dict[str, object] = {

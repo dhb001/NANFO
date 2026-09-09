@@ -1,5 +1,24 @@
 # Development Journal
 
+## [2026-09-09] - Completion Plan Steps 5-6
+
+- Added real isolated-lab manual actions, verification, compensation and durable
+  journal; separate unprivileged execution worker with transactional intent outbox,
+  unique jobs, approval, leases, monotonic cancel and short receiver dispatch window.
+- Fixed review-discovered stale cancellation/publication, old-run recovery replay,
+  cancelled superseded policy, metadata-file capacity, event ordering/audit scope,
+  and deleted-topology resurrection risks with focused regression/live tests.
+- Added guided UI control/approval, asynchronous status polling, cancellation and
+  proof-aware diagnostics without claiming automatic performance improvement.
+- Final live verifier passed: `/tmp/opencode/execution-verification-zzs78rob/result.json`.
+  Reroute 18.689 Mbps, multipath 37.798 Mbps; 5 Mbps shape/police measured 4.758/4.870
+  Mbps, unmatched traffic retained about 17.713 Mbps; restore and recovery passed.
+- Backend 1,359 passed; 8 opt-in tests separately passed. Frontend 241 passed;
+  strict type/lint/build/perf passed. Browser standalone rerun 27 passed, retries
+  disabled, after one login-navigation timeout during concurrent validation.
+- New migrations 0011/0012 tested in disposable databases, not applied to shared
+  deployment. Full evidence, commands and limits: `ManualExecution-Step5-Step6.md`.
+
 ## [2026-09-08] - Completion Plan Steps 3-4
 
 - Added isolated, version-pinned lab with loop-free baseline forwarding, explicit

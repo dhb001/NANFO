@@ -7,6 +7,7 @@ COPY apt-sources.list /etc/apt/sources.list
 RUN apt-get update && apt-get install -y --no-install-recommends \
     mininet=2.3.0-1 openvswitch-switch=2.15.0+ds1-2+deb11u5 \
     iproute2 iputils-ping iperf3 tcpdump procps tini ca-certificates \
+    frr=7.5.1-1.1+deb11u2 \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /opt/nanfo
 COPY requirements.txt /tmp/requirements.txt

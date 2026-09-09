@@ -26,10 +26,11 @@ async def test_topology_consumer_passes_workspace_id_on_device_added():
         "device_type": "router",
         "spatial_ref_id": "campus-a/building-1/floor-2/room-204/rack-3/device-edge-router-01",
     }
-    event = {"event_type": "network.device.added", "payload": payload}
+    event = {"event_type": "network.device.added", "payload": payload,
+             "timestamp": "2026-09-09T00:00:00Z", "event_id": str(uuid.uuid4())}
 
     svc = MagicMock()
-    svc.create_device_node = AsyncMock()
+    svc.apply_device_event = AsyncMock()
 
     with (
         patch("app.events.consumers.topology_consumer.get_neo4j_driver", return_value=MagicMock()),
@@ -37,14 +38,9 @@ async def test_topology_consumer_passes_workspace_id_on_device_added():
     ):
         await handle_topology_event(event)
 
-    svc.create_device_node.assert_awaited_once_with(
-        device_id=payload["device_id"],
-        network_id=payload["network_id"],
-        workspace_id=payload["workspace_id"],
-        hostname=payload["hostname"],
-        device_type=payload["device_type"],
-        spatial_ref_id=payload["spatial_ref_id"],
-        status="active",
+    svc.apply_device_event.assert_awaited_once_with(
+        event_type=event["event_type"], payload=payload,
+        timestamp=event["timestamp"], event_id=event["event_id"],
     )
 
 
@@ -56,25 +52,19 @@ async def test_topology_consumer_updates_spatial_ref_id_on_device_updated_event(
             "spatial_ref_id": "campus-a/building-1/floor-2/room-204/rack-3/device-edge-router-01",
         },
     }
-    event = {"event_type": "network.device.updated", "payload": payload}
-
-    session = AsyncMock()
-    session_cm = AsyncMock()
-    session_cm.__aenter__.return_value = session
-    session_cm.__aexit__.return_value = None
-
-    driver = MagicMock()
-    driver.session.return_value = session_cm
-
-    with patch("app.events.consumers.topology_consumer.get_neo4j_driver", return_value=driver):
+    event = {"event_type": "network.device.updated", "payload": payload,
+             "timestamp": "2026-09-09T00:00:00Z", "event_id": str(uuid.uuid4())}
+    svc = MagicMock()
+    svc.apply_device_event = AsyncMock()
+    with (
+        patch("app.events.consumers.topology_consumer.get_neo4j_driver", return_value=MagicMock()),
+        patch("app.events.consumers.topology_consumer.TopologyQueryService", return_value=svc),
+    ):
         await handle_topology_event(event)
-
-    session.run.assert_awaited_once()
-    query = session.run.await_args.args[0]
-    params = session.run.await_args.kwargs
-    assert "SET d.spatial_ref_id = $spatial_ref_id" in query
-    assert params["device_id"] == payload["device_id"]
-    assert params["spatial_ref_id"] == payload["changed_fields"]["spatial_ref_id"]
+    svc.apply_device_event.assert_awaited_once_with(
+        event_type=event["event_type"], payload=payload,
+        timestamp=event["timestamp"], event_id=event["event_id"],
+    )
 
 
 @pytest.mark.asyncio

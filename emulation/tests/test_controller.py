@@ -46,6 +46,9 @@ class ControllerTests(unittest.TestCase):
         self.assertEqual(self.dp.send_msg.call_count, 2)
         flow = self.dp.send_msg.call_args_list[0].args[0]
         self.assertEqual(flow.instructions[0].actions[0].port, 4)
+        self.assertEqual(flow.table_id, 1)
+        packetOut = self.dp.send_msg.call_args_list[1].args[0]
+        self.assertEqual(packetOut.actions[0].port, self.dp.ofproto.OFPP_TABLE)
         self.assertNotEqual(flow.instructions[0].actions[0].port, self.dp.ofproto.OFPP_FLOOD)
 
     def testLldpAndUnknownHostsNeverFabricateAttachments(self):

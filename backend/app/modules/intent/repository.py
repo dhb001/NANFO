@@ -6,13 +6,14 @@ Persistence operations for intent lifecycle records.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
-from app.modules.intent.models import Intent
+from app.modules.intent.models import Intent, IntentExecution, IntentOutbox
 
 _UNSET: Any = object()
 
@@ -75,6 +76,11 @@ class IntentRepository:
         result = await self._db.execute(select(Intent).where(Intent.intent_id == intent_id))
         return result.scalar_one_or_none()
 
+    async def lock_intent(self, intent_id: uuid.UUID, workspace_id: uuid.UUID) -> Intent | None:
+        return (await self._db.execute(select(Intent).where(
+            Intent.intent_id == intent_id, Intent.workspace_id == workspace_id,
+        ).with_for_update())).scalar_one_or_none()
+
     async def get_by_idempotency_key(
         self,
         *,
@@ -128,3 +134,75 @@ class IntentRepository:
             intent.warning = warning
         await self._db.flush()
         return intent
+
+
+class ExecutionRepository:
+    def __init__(self, db: AsyncSession):
+        self.db = db
+
+    async def existing(self, workspace_id, intent_id, request_key):
+        return list((await self.db.execute(select(IntentExecution).where(
+            IntentExecution.workspace_id == workspace_id,
+            or_(IntentExecution.intent_id == intent_id, IntentExecution.request_key == request_key),
+        ))).scalars())
+
+    async def claim(self, owner: str, lease_seconds: int):
+        row = (await self.db.execute(select(IntentExecution).where(
+            IntentExecution.blocks_lab.is_(True),
+            or_(IntentExecution.lease_until.is_(None), IntentExecution.lease_until < func.now()),
+        ).order_by(IntentExecution.created_at).with_for_update(skip_locked=True).limit(1))).scalar_one_or_none()
+        if row is not None:
+            row.lease_owner = owner
+            row.fence += 1
+            row.lease_until = func.now() + timedelta(seconds=lease_seconds)
+        await self.db.commit()
+        if row is not None:
+            await self.db.refresh(row)
+            await self.db.commit()
+        return row
+
+    async def owned(self, execution_id, owner, fence):
+        return (await self.db.execute(select(IntentExecution).where(
+            IntentExecution.execution_id == execution_id, IntentExecution.lease_owner == owner,
+            IntentExecution.fence == fence, IntentExecution.lease_until > func.now(),
+        ).with_for_update())).scalar_one_or_none()
+
+    async def renew(self, execution_id, owner, fence, seconds):
+        result = await self.db.execute(update(IntentExecution).where(
+            IntentExecution.execution_id == execution_id, IntentExecution.lease_owner == owner,
+            IntentExecution.fence == fence, IntentExecution.lease_until > func.now(),
+        ).values(lease_until=func.now() + timedelta(seconds=seconds)))
+        await self.db.commit()
+        return result.rowcount == 1
+
+    async def request_cancel(self, execution_id, actor_id):
+        result = await self.db.execute(update(IntentExecution).where(
+            IntentExecution.execution_id == execution_id,
+            IntentExecution.cancel_requested.is_(False),
+            or_(IntentExecution.blocks_lab.is_(True), IntentExecution.phase == "completed"),
+        ).values(cancel_requested=True, blocks_lab=True, cancelled_by_user_id=actor_id,
+                 cancellation_requested_at=func.now()))
+        return result.rowcount == 1
+
+    async def claim_event(self, owner, seconds):
+        earlier = aliased(IntentOutbox)
+        row = (await self.db.execute(select(IntentOutbox).where(
+            IntentOutbox.published_at.is_(None),
+            or_(IntentOutbox.lease_until.is_(None), IntentOutbox.lease_until < func.now()),
+            ~select(earlier.event_id).where(
+                earlier.execution_id == IntentOutbox.execution_id,
+                earlier.sequence < IntentOutbox.sequence, earlier.published_at.is_(None),
+            ).exists(),
+        ).order_by(IntentOutbox.created_at).with_for_update(skip_locked=True).limit(1))).scalar_one_or_none()
+        if row is not None:
+            row.lease_owner = owner
+            row.lease_until = func.now() + timedelta(seconds=seconds)
+        await self.db.commit()
+        return row
+
+    async def acknowledge_event(self, event_id, owner):
+        await self.db.execute(update(IntentOutbox).where(
+            IntentOutbox.event_id == event_id, IntentOutbox.lease_owner == owner,
+            IntentOutbox.lease_until > func.now(),
+        ).values(published_at=func.now(), lease_owner=None, lease_until=None))
+        await self.db.commit()
