@@ -19,6 +19,8 @@ Reduce detection latency and improve operator response quality.
 - `GET /api/v1/alerts`
 - `POST /api/v1/alerts/{id}/ack`
 - `POST /api/v1/alerts/{id}/resolve`
+- `GET /api/v1/alerts/{id}`
+- `GET /api/v1/alerts/{id}/history` - scoped immutable lifecycle evidence (ADR-019).
 
 ## Database
 - Alert entity with immutable lifecycle history.

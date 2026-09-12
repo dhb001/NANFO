@@ -429,3 +429,37 @@ def test_alert_endpoints_reject_invalid_org_claim(client):
     assert list_response.status_code == 401
     assert ack_response.status_code == 401
     assert resolve_response.status_code == 401
+
+
+@pytest.mark.parametrize("suffix,method", [("", "get_alert"), ("/history", "get_history")])
+def test_alert_detail_history_permissions_scope_and_envelope(client, suffix, method):
+    alert_id, workspace_id, org_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    token, _ = create_access_token(user_id=str(uuid.uuid4()), email="history@example.invalid",
+        roles=["Read-Only"], permissions=["read:telemetry"],
+        workspace_id=str(workspace_id), org_id=str(org_id))
+    now = datetime.now(UTC)
+    record = dict(alert_id=alert_id, alert_key="fixture", source="telemetry", status="active",
+        severity="warning", correlation_id=uuid.uuid4(), payload={}, acknowledged_by_user_id=None,
+        resolved_by_user_id=None, acknowledged_at=None, resolved_at=None, created_at=now, updated_at=now)
+    payload = record if not suffix else dict(alert_id=alert_id, items=[], total=0)
+    with patch(f"app.modules.alert.service.AlertService.{method}", AsyncMock(return_value=payload)) as get:
+        response = client.get(f"/api/v1/alerts/{alert_id}{suffix}", headers={"Authorization": f"Bearer {token}"})
+    assert response.status_code == 200 and response.json()["success"]
+    assert get.await_args.kwargs["requested_workspace_id"] == workspace_id
+    assert get.await_args.kwargs["claim_org_id"] == org_id
+    response = client.get(f"/api/v1/alerts/{alert_id}{suffix}",
+        headers={"Authorization": f"Bearer {_make_write_only_token()}"})
+    assert response.status_code == 403
+    response = client.get(f"/api/v1/alerts/{alert_id}{suffix}")
+    assert response.status_code == 401
+
+
+@pytest.mark.parametrize("code", [403, 404])
+@pytest.mark.parametrize("suffix,method", [("", "get_alert"), ("/history", "get_history")])
+def test_alert_detail_history_denial_envelope(client, code, suffix, method):
+    with patch(f"app.modules.alert.service.AlertService.{method}",
+               AsyncMock(side_effect=HTTPException(code, detail="Unavailable"))):
+        response = client.get(f"/api/v1/alerts/{uuid.uuid4()}{suffix}",
+            headers={"Authorization": f"Bearer {_make_read_only_token()}"})
+    assert response.status_code == code
+    assert response.json()["success"] is False

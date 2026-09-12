@@ -104,6 +104,9 @@ class Settings(BaseSettings):
 
     # Reporting artifact lifecycle baseline
     REPORTS_ARTIFACT_BUCKET: str = "nanfo-reports"
+    REPORTS_STORAGE_PATH: str = "/var/lib/nanfo/reports"
+    REPORTS_MAX_BYTES: int = Field(default=8388608, ge=1024, le=16777216)
+    REPORTS_LEASE_SECONDS: int = Field(default=120, ge=30, le=300)
 
     @computed_field  # type: ignore[misc]
     @property

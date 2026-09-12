@@ -365,15 +365,16 @@ async def verify(directory, artifact):
                         remaining = (datetime.fromisoformat(enrolled['expires_at']) - datetime.now(UTC)).total_seconds()
                         await asyncio.sleep(max(0, remaining - 1))
                     else:
-                        # Let the completed Intent lease elapse, then align the real
-                        # STOP with the next persisted authority check. Read only:
-                        # no lease/deadline/status edits to manufacture overlap.
+                        # Freeze only our recovery worker after the completed Intent
+                        # lease elapses. Resume after STOP commits, so a stale sample
+                        # of next_check_at cannot let an authority check win the race.
                         await asyncio.sleep(6)
+                        autonomy_worker.send_signal(signal.SIGSTOP)
                         async with sessions() as db:
                             next_check = await db.scalar(text('SELECT next_check_at FROM autonomy_overrides WHERE override_id=:id'),
                                 {'id': uuid.UUID(override_id)})
                         evidence['scheduled_authority_check_at'] = next_check.isoformat()
-                        await asyncio.sleep(max(0, (next_check - datetime.now(UTC)).total_seconds() - .3))
+                        await asyncio.sleep(max(0, (next_check - datetime.now(UTC)).total_seconds()))
                     evidence['capture_requested_at'] = datetime.now(UTC).isoformat()
                     capture_task = asyncio.create_task(capture())
                     capture_tasks.append(capture_task)
@@ -387,6 +388,8 @@ async def verify(directory, artifact):
                         evidence['stop_requested_at'] = datetime.now(UTC).isoformat()
                         stopped = await request('POST', '/api/v1/autonomy/stop', actor=supervisor, json=scope)
                         check(stopped['emergency_stopped'], 'Capture STOP not latched')
+                        evidence['stop_committed_at'] = datetime.now(UTC).isoformat()
+                        autonomy_worker.send_signal(signal.SIGCONT)
                     response = await capture_task
                     evidence['capture_finished_at'] = datetime.now(UTC).isoformat()
                     evidence['capture_response'] = response

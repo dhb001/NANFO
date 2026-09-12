@@ -105,6 +105,17 @@ async def command(*args: str, timeout: float = 110) -> str:
     return stdout.decode()
 
 
+async def drain_owned_batch(redis, group, errors):
+    """Wait for completed delivery, using the verifier's original 40-second bound."""
+    for _ in range(200):
+        check(not errors, "Real backend consumer failed")
+        groups = await redis.xinfo_groups("stream:telemetry")
+        if any(row["name"] == group and row.get("lag") == 0 and row["pending"] == 0 for row in groups):
+            return
+        await asyncio.sleep(0.2)
+    raise ValueError("Owned telemetry batch failed to drain within 40 seconds")
+
+
 async def verify_topology_writers(binding, edges) -> dict:
     """Real Neo4j regression in the dedicated scope; restore its observed graph."""
     from app.db.neo4j import get_neo4j_driver
@@ -185,6 +196,7 @@ async def verify(directory: Path, artifact: dict) -> None:
     from app.events.consumers.telemetry_consumer import handle_telemetry_event
     from app.events.consumers.topology_consumer import handle_topology_event
     from app.events.consumers.ws_push_consumer import WS_PUSH_HANDLERS
+    from app.events.bus import process_entry
     from app.main import _build_emulation_adapter, _merge_handlers, app
     from app.modules.identity.repository import UserRepository
     from app.modules.telemetry.emulation import read_bounded_file
@@ -245,12 +257,14 @@ async def verify(directory: Path, artifact: dict) -> None:
         handlers = _merge_handlers(AUDIT_HANDLERS, WS_PUSH_HANDLERS,
             {"network.device.added": handle_topology_event,
              "telemetry.metric.ingested": handle_telemetry_event})
+        consumer_slots = asyncio.Semaphore(8)
+        series_locks = defaultdict(asyncio.Lock)
 
         async def consume(stream):
             while True:
                 messages = await redis.xreadgroup(group, group, {stream: ">"}, count=100, block=500)
                 for _, entries in messages:
-                    for entry_id, fields in entries:
+                    async def dispatch(entry_id, fields):
                         try:
                             payload = json.loads(fields.get("payload", "{}"))
                             ours = str(payload.get("actor_id", "")) == str(actor_id) or (
@@ -260,9 +274,13 @@ async def verify(directory: Path, artifact: dict) -> None:
                                 if event_type == "network.network.created":
                                     known_networks.add(payload["network_id"])
                                 pending[stream] += 1
-                                handler = handlers.get(event_type)
-                                if handler:
-                                    await handler({**fields, "payload": payload})
+                                tags = payload.get("tags", {})
+                                series = (payload.get("device_id"), payload.get("metric"), tags.get("port_no"),
+                                          tags.get("peer_host"), tags.get("flow_index"))
+                                # Serialize each observed series, while unrelated
+                                # metrics share a bounded connection-pool budget.
+                                async with series_locks[series], consumer_slots:
+                                    await process_entry(redis, stream, group, entry_id, fields, handlers)
                                 scoped_events[event_type] += 1
                         except Exception as exc:  # noqa: BLE001 - sanitized live audit failure
                             errors.append(type(exc).__name__)
@@ -270,6 +288,7 @@ async def verify(directory: Path, artifact: dict) -> None:
                             pending[stream] = max(0, pending[stream] - 1)
                             # ACK only our temporary group; shared group untouched.
                             await redis.xack(stream, group, entry_id)
+                    await asyncio.gather(*(dispatch(entry_id, fields) for entry_id, fields in entries))
 
         for stream in ("stream:auth", "stream:org", "stream:network", "stream:telemetry"):
             await redis.xgroup_create(stream, group, id="$", mkstream=True)
@@ -423,20 +442,23 @@ async def verify(directory: Path, artifact: dict) -> None:
                 # Explicit retry of the exact last adapter batch through real ingestion.
                 for sample in last:
                     await runner.ingest_once(sample, str(uuid.uuid4()), event_id=sample["event_id"])
+                await drain_owned_batch(redis, group, errors)
 
                 artifact["stage"] = "persistence_and_queries"
                 async def history(**params):
                     return (await request("GET", "/api/v1/telemetry/history", params={
                         "network_id": str(binding.network_id), "page_size": 200, **params}))["data"]
 
-                for _ in range(200):
-                    current = await history(page_size=1)
-                    if current["total"] == len(expected_samples) and not any(pending.values()):
-                        info = await redis.xinfo_groups("stream:telemetry")
-                        if any(g["name"] == group and g.get("lag") == 0 and g["pending"] == 0 for g in info):
-                            break
-                    check(not errors, "Real backend consumer failed")
-                    await asyncio.sleep(0.2)
+                # Successful stream ACK follows committed persistence. After the
+                # bounded drain, compare once rather than adding a second wait.
+                current = await history(page_size=1)
+                artifact["persistence_diagnostic"] = {
+                    "expected_samples": len(expected_samples), "persisted_samples": current["total"],
+                    "stream_entries": await redis.xlen("stream:telemetry"),
+                    "groups": await redis.xinfo_groups("stream:telemetry"),
+                    "consumer_events": dict(scoped_events), "consumer_error_types": list(errors),
+                }
+                check(await redis.xlen("stream:dead_letter") == 0, "Owned consumer dead-lettered an event")
                 check(current["total"] == len(expected_samples), "Persistence missing or duplicate samples")
                 rows = []
                 for page in range(1, math.ceil(current["total"] / 200) + 1):
@@ -459,7 +481,8 @@ async def verify(directory: Path, artifact: dict) -> None:
                 maxima = {metric: max((r["value"] for r in rows if r["metric"] == metric), default=None)
                           for metric in ("throughput_mbps", "link_utilization_percent", "latency_ms",
                                          "packet_loss_percent", "queue_backlog_bytes", "queue_backlog_packets",
-                                         "port_tx_bytes", "flow_byte_count")}
+                                          "port_tx_bytes", "flow_byte_count")}
+                artifact["maxima"] = maxima
                 for metric in ("throughput_mbps", "link_utilization_percent", "latency_ms", "queue_backlog_bytes",
                                "queue_backlog_packets", "port_tx_bytes", "flow_byte_count"):
                     check(maxima[metric] is not None and maxima[metric] > 0, f"No nonzero workload measurement: {metric}")

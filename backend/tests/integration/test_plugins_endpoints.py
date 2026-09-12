@@ -129,6 +129,14 @@ def test_list_plugins_returns_envelope_with_status_counts(client):
     assert body["errors"] is None
     assert body["data"]["total"] == 1
     assert body["data"]["status_counts"]["installed"] == 1
+    assert body["data"]["registry_only"] is True
+    assert body["data"]["execution_supported"] is False
+    record = body["data"]["items"][0]
+    assert record["signature_status"] == record["dependency_status"] == "declared_unverified"
+    assert record["sandbox_status"] == "not_executed"
+    assert record["permissions_status"] == "declared_unverified"
+    assert record["lifecycle_semantics"] == "registry_flags_only"
+    assert record["uninstalled_at"] is None
     call_kwargs = mock_list.await_args.kwargs
     assert call_kwargs["status_filter"] == "installed"
     assert call_kwargs["enabled_filter"] == "false"
@@ -429,3 +437,60 @@ def test_plugin_mutations_require_write_config_permission(client):
     assert install_response.status_code == 403
     assert enable_response.status_code == 403
     assert disable_response.status_code == 403
+
+
+def test_uninstall_returns_204_and_passes_authority_context(client):
+    headers = {"Authorization": f"Bearer {_make_token()}"}
+    plugin_id = uuid.uuid4()
+    with patch("app.modules.plugin.service.PluginService.uninstall_plugin", new_callable=AsyncMock) as uninstall:
+        response = client.delete(f"/api/v1/plugins/{plugin_id}", headers=headers)
+    assert response.status_code == 204
+    assert response.content == b""
+    assert uninstall.await_args.kwargs["plugin_id"] == plugin_id
+    assert uninstall.await_args.kwargs["requested_by_user_id"]
+    assert "claim_org_id" in uninstall.await_args.kwargs
+    assert "claim_workspace_id" in uninstall.await_args.kwargs
+
+
+def test_uninstall_requires_auth_and_write_permission(client):
+    path = f"/api/v1/plugins/{uuid.uuid4()}"
+    with patch("app.modules.plugin.service.PluginService.uninstall_plugin", new_callable=AsyncMock) as uninstall:
+        assert client.delete(path).status_code in (401, 403)
+        assert client.delete(path, headers={"Authorization": f"Bearer {_make_read_only_token()}"}).status_code == 403
+    uninstall.assert_not_awaited()
+
+
+def test_uninstall_requires_current_global_admin(client, session_auth):
+    actor = uuid.uuid4()
+    token, _ = create_access_token(user_id=str(actor), email="registry-admin@example.com", roles=["Admin"],
+                                   permissions=["write:config"])
+    session_auth.roles[actor] = ["Operator"]
+    session_auth.permissions[("Operator",)] = ["write:config"]
+    with patch("app.modules.plugin.service.PluginService.uninstall_plugin", new_callable=AsyncMock) as uninstall:
+        response = client.delete(f"/api/v1/plugins/{uuid.uuid4()}", headers={"Authorization": f"Bearer {token}"})
+    assert response.status_code == 403
+    uninstall.assert_not_awaited()
+
+
+@pytest.mark.parametrize("scoped", [False, True])
+def test_uninstall_checks_current_membership_before_registry_access(client, tenant_auth, scoped):
+    actor = uuid.uuid4()
+    token, _ = create_access_token(
+        user_id=str(actor), email="registry-member@example.com", roles=["Admin"], permissions=["write:config"],
+        org_id=str(tenant_auth.org_id) if scoped else None,
+    )
+    tenant_auth.memberships.clear()
+    with patch("app.modules.plugin.repository.PluginRepository.get_by_id", new_callable=AsyncMock) as get:
+        response = client.delete(f"/api/v1/plugins/{uuid.uuid4()}", headers={"Authorization": f"Bearer {token}"})
+    assert response.status_code in (403, 404)
+    assert response.json()["success"] is False
+    get.assert_not_awaited()
+
+
+def test_uninstall_missing_record_returns_canonical_error(client, tenant_auth):
+    with patch("app.modules.plugin.repository.PluginRepository.get_by_id", new_callable=AsyncMock) as get:
+        get.return_value = None
+        response = client.delete(f"/api/v1/plugins/{uuid.uuid4()}",
+                                 headers={"Authorization": f"Bearer {_make_token()}"})
+    assert response.status_code == 404
+    assert response.json()["errors"]["code"] == "PLUGIN_NOT_FOUND"

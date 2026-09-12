@@ -5,12 +5,20 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import HTTPException
 
 from app.modules.alert.service import AlertService
+
+
+@pytest.fixture(autouse=True)
+def isolated_history_repository(monkeypatch):
+    monkeypatch.setattr("app.modules.alert.repository.AlertRepository.append_history", AsyncMock(return_value=uuid.uuid4()))
+    monkeypatch.setattr("app.modules.alert.repository.AlertRepository.consume_generation", AsyncMock(return_value=True))
+    monkeypatch.setattr("app.modules.alert.repository.AlertRepository.link_consumed_generation", AsyncMock())
+    monkeypatch.setattr("app.modules.alert.repository.AlertRepository.lock_legacy_identity", AsyncMock())
 
 
 def _make_alert_row(
@@ -48,6 +56,7 @@ def _make_alert_row(
 async def test_list_alerts_normalizes_filters_and_returns_status_counts(mock_db, fake_redis):
     service = AlertService(db=mock_db, redis=fake_redis)
     service._assert_alert_access = AsyncMock(return_value=None)
+    service._accessible_scopes = AsyncMock(return_value=([], []))
     service._repo.list_alerts = AsyncMock(
         return_value=[
             _make_alert_row(status="active"),
@@ -84,6 +93,7 @@ async def test_list_alerts_normalizes_filters_and_returns_status_counts(mock_db,
 async def test_list_alerts_filters_out_forbidden_alert_rows(mock_db, fake_redis):
     service = AlertService(db=mock_db, redis=fake_redis)
     allowed_row = _make_alert_row(status="active")
+    service._accessible_scopes = AsyncMock(return_value=([], []))
     denied_row = _make_alert_row(status="resolved")
     service._repo.list_alerts = AsyncMock(return_value=[allowed_row, denied_row])
 
@@ -181,7 +191,7 @@ async def test_acknowledge_alert_returns_idempotent_replay_when_already_acknowle
 
 
 @pytest.mark.asyncio
-async def test_acknowledge_alert_marks_state_and_publishes_event(mock_db, fake_redis):
+async def test_acknowledge_alert_commits_state_history_and_outbox(mock_db, fake_redis):
     row = _make_alert_row(status="active")
     actor_id = str(uuid.uuid4())
     service = AlertService(db=mock_db, redis=fake_redis)
@@ -205,21 +215,21 @@ async def test_acknowledge_alert_marks_state_and_publishes_event(mock_db, fake_r
 
     service._repo.mark_acknowledged = AsyncMock(side_effect=_mark_ack)
 
-    with patch("app.modules.alert.service.publish_event", new_callable=AsyncMock) as mock_publish:
-        mock_publish.return_value = "500-0"
-        result = await service.acknowledge_alert(
-            alert_id=row.alert_id,
-            correlation_id=str(uuid.uuid4()),
-            requested_by_user_id=actor_id,
-        )
+    result = await service.acknowledge_alert(
+        alert_id=row.alert_id,
+        correlation_id=str(uuid.uuid4()),
+        requested_by_user_id=actor_id,
+    )
 
     assert result.idempotent_replay is False
-    assert result.queue_status == "queued"
-    assert result.stream_entry_id == "500-0"
+    assert result.queue_status == "deferred"
+    assert result.stream_entry_id is None
     assert result.status == "acknowledged"
     assert result.acknowledged_by_user_id == actor_id
-    assert mock_publish.await_args.kwargs["event_type"] == "alert.acknowledged"
-    assert mock_publish.await_args.kwargs["payload"]["status"] == "acknowledged"
+    assert service._repo.append_history.await_args.kwargs["event_type"] == "alert.acknowledged"
+    assert service._repo.append_history.await_args.kwargs["publish"] is True
+    assert service._repo.append_history.await_args.kwargs["payload"]["status"] == "acknowledged"
+    service._repo.get_by_id.assert_awaited_once_with(row.alert_id, lock=True)
     mock_db.commit.assert_awaited_once()
     mock_db.refresh.assert_awaited_once_with(row)
 
@@ -244,7 +254,7 @@ async def test_resolve_alert_returns_idempotent_replay_when_already_resolved(moc
 
 
 @pytest.mark.asyncio
-async def test_resolve_alert_publish_failure_is_fail_open(mock_db, fake_redis):
+async def test_resolve_alert_delivery_is_deferred_to_durable_worker(mock_db, fake_redis):
     row = _make_alert_row(status="active")
     actor_id = str(uuid.uuid4())
     service = AlertService(db=mock_db, redis=fake_redis)
@@ -268,17 +278,16 @@ async def test_resolve_alert_publish_failure_is_fail_open(mock_db, fake_redis):
 
     service._repo.mark_resolved = AsyncMock(side_effect=_mark_resolved)
 
-    with patch("app.modules.alert.service.publish_event", new_callable=AsyncMock) as mock_publish:
-        mock_publish.side_effect = RuntimeError("stream unavailable")
-        result = await service.resolve_alert(
-            alert_id=row.alert_id,
-            correlation_id=str(uuid.uuid4()),
-            requested_by_user_id=actor_id,
-        )
+    result = await service.resolve_alert(
+        alert_id=row.alert_id,
+        correlation_id=str(uuid.uuid4()),
+        requested_by_user_id=actor_id,
+    )
 
     assert result.idempotent_replay is False
     assert result.queue_status == "deferred"
-    assert result.warning == "event_queue_unavailable"
+    assert result.warning == "event_delivery_pending"
+    assert service._repo.append_history.await_args.kwargs["publish"] is True
     assert result.status == "resolved"
     mock_db.commit.assert_awaited_once()
     mock_db.refresh.assert_awaited_once_with(row)
@@ -382,7 +391,8 @@ async def test_ingest_generated_event_deduplicates_unresolved_by_alert_key(mock_
     )
 
     service._repo.create_generated.assert_not_awaited()
-    mock_db.commit.assert_not_awaited()
+    service._repo.link_consumed_generation.assert_awaited_once()
+    mock_db.commit.assert_awaited_once()
 
 
 @pytest.mark.asyncio

@@ -247,7 +247,10 @@ class ExecutionWorker:
                     safe = (result.status == "completed" and verified) or (
                         result.status in {"failed", "cancelled"}
                         and (rollback_verified or (result.rollback is None and verified_no_mutation(result.verification))))
-                    if ((cancel_requested and not (result.status == "cancelled" and safe))
+                    # A failed execution with verified compensation is already
+                    # terminal. The lab preserves that receipt on a late cancel;
+                    # requiring a new status would retry forever despite proof.
+                    if ((cancel_requested and not (result.status in {"failed", "cancelled"} and safe))
                             or (result.status == "completed" and result.completed_at > command.deadline)):
                         if lost.is_set():
                             return

@@ -73,7 +73,7 @@ describe("reporting logic", () => {
       summarizeArtifactKinds([
         {
           artifact_id: "a1",
-          uri: "s3://x/a1.pdf",
+          uri: "/api/v1/reports/a1/download",
           media_type: "application/pdf",
           checksum_sha256: "x",
           size_bytes: 1,
@@ -81,7 +81,7 @@ describe("reporting logic", () => {
         },
         {
           artifact_id: "a2",
-          uri: "s3://x/a2.csv",
+          uri: "/api/v1/reports/a2/download",
           media_type: "text/csv",
           checksum_sha256: "y",
           size_bytes: 2,

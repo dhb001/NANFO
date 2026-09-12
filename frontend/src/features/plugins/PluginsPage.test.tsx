@@ -1,220 +1,73 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-
-import { PluginsPage } from "@/features/plugins/PluginsPage";
+import { PluginsPage } from "./PluginsPage";
 import { useAuthStore } from "@/shared/state/auth-store";
 import { operatorProfile } from "@/test/profile";
 import { useUiStore } from "@/shared/state/ui-store";
 
-const mockUsePluginsQuery = vi.fn();
-const mockUseInstallPlugin = vi.fn();
-const mockUseEnablePlugin = vi.fn();
-const mockUseDisablePlugin = vi.fn();
-
-vi.mock("@/features/plugins/hooks", () => ({
-  usePluginsQuery: (...args: unknown[]) => mockUsePluginsQuery(...args),
-  useInstallPlugin: (...args: unknown[]) => mockUseInstallPlugin(...args),
-  useEnablePlugin: (...args: unknown[]) => mockUseEnablePlugin(...args),
-  useDisablePlugin: (...args: unknown[]) => mockUseDisablePlugin(...args),
+const mocks = vi.hoisted(() => ({ query: vi.fn(), install: vi.fn(), enable: vi.fn(), disable: vi.fn(), uninstall: vi.fn() }));
+vi.mock("./hooks", () => ({
+  usePluginsQuery: mocks.query,
+  useInstallPlugin: () => ({ mutateAsync: mocks.install }),
+  useEnablePlugin: () => ({ mutateAsync: mocks.enable }),
+  useDisablePlugin: () => ({ mutateAsync: mocks.disable }),
+  useUninstallPlugin: () => ({ mutateAsync: mocks.uninstall }),
 }));
 
-const mockInstallMutateAsync = vi.fn();
-const mockEnableMutateAsync = vi.fn();
-const mockDisableMutateAsync = vi.fn();
-const mockPluginsRefetch = vi.fn();
+beforeEach(() => {
+  vi.clearAllMocks();
+  useAuthStore.setState({ accessToken: "token", profile: { ...operatorProfile, roles: ["Admin"] } });
+  useUiStore.setState({ toasts: [] });
+  mocks.query.mockReturnValue({ data: { items: [{ plugin_id: "p1", name: "Declared Plugin", plugin_key: "declared", version: "1", status: "installed", enabled: false,
+    signature_status: "verified", dependency_status: "compatible", sandbox_status: "isolated", queue_status: "queued" }] }, refetch: vi.fn() });
+  mocks.enable.mockResolvedValue({ status: "enabled" });
+});
 
-function queryResult<T>(data: T, refetch = vi.fn()) {
-  return {
-    isLoading: false,
-    isError: false,
-    data,
-    refetch,
-  };
-}
+it("masks historical safety overclaims and enables registry flags only", async () => {
+  render(<PluginsPage />);
+  expect(screen.getByText("signature declared_unverified")).toBeInTheDocument();
+  expect(screen.getByText("sandbox not_executed")).toBeInTheDocument();
+  expect(screen.queryByText("signature verified")).not.toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "Enable" }));
+  expect(mocks.enable).toHaveBeenCalledWith("p1");
+  expect(screen.getByRole("status")).toHaveTextContent("No package executed");
+});
 
-describe("PluginsPage", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
+it("requires permission and never treats denied or failed updates as success", async () => {
+  mocks.enable.mockRejectedValue(new Error("Permission revoked"));
+  render(<PluginsPage />);
+  await userEvent.click(screen.getByRole("button", { name: "Enable" }));
+  expect(screen.getByText("Permission revoked")).toBeInTheDocument();
+  expect(useUiStore.getState().toasts).toHaveLength(0);
+});
 
-    useAuthStore.setState({
-      profile: { ...operatorProfile, roles: ["Admin"] },
-      accessToken: "token-1",
-      refreshToken: "refresh-1",
-      userId: "00000000-0000-0000-0000-000000000123",
-    });
-    useUiStore.setState({
-      commandPaletteOpen: false,
-      toasts: [],
-    });
+it("disables writes without Admin and write capability", () => {
+  useAuthStore.setState({ profile: operatorProfile });
+  render(<PluginsPage />);
+  expect(screen.getByRole("button", { name: "Register Metadata" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Enable" })).toBeDisabled();
+});
 
-    mockUsePluginsQuery.mockReturnValue(
-      queryResult(
-        {
-          items: [
-            {
-              plugin_id: "00000000-0000-0000-0000-000000000701",
-              plugin_key: "safe-plugin",
-              name: "Safe Plugin",
-              version: "1.0.0",
-              manifest: {
-                plugin_key: "safe-plugin",
-                name: "Safe Plugin",
-                version: "1.0.0",
-                signer: "nanfo-labs",
-                signature: "sig:abcdef1234567890",
-                dependencies: {
-                  platform_version: "0.1.0",
-                  requires: ["core:telemetry"],
-                },
-                sandbox: {
-                  isolation_mode: "process",
-                  permissions: ["read:telemetry"],
-                },
-                metadata: {},
-              },
-              signature_status: "verified",
-              dependency_status: "compatible",
-              sandbox_status: "isolated",
-              status: "installed",
-              enabled: false,
-              failure_reason: null,
-              queue_status: "queued",
-              stream_entry_id: "701-0",
-              warning: null,
-              installed_at: "2026-08-14T12:00:00Z",
-              updated_at: "2026-08-14T12:00:00Z",
-            },
-            {
-              plugin_id: "00000000-0000-0000-0000-000000000702",
-              plugin_key: "failed-plugin",
-              name: "Failed Plugin",
-              version: "2.1.0",
-              manifest: {
-                plugin_key: "failed-plugin",
-                name: "Failed Plugin",
-                version: "2.1.0",
-                signer: "unknown",
-                signature: "sig:zzz",
-                dependencies: {
-                  platform_version: "9.9.9",
-                  requires: [],
-                },
-                sandbox: {
-                  isolation_mode: "process",
-                  permissions: ["write:config"],
-                },
-                metadata: {},
-              },
-              signature_status: "invalid",
-              dependency_status: "incompatible",
-              sandbox_status: "blocked",
-              status: "failed",
-              enabled: false,
-              failure_reason: "PLUGIN_SIGNATURE_INVALID",
-              queue_status: "queued",
-              stream_entry_id: "702-0",
-              warning: null,
-              installed_at: "2026-08-14T12:01:00Z",
-              updated_at: "2026-08-14T12:01:00Z",
-            },
-          ],
-          total: 2,
-          status_counts: {
-            installed: 1,
-            enabled: 0,
-            disabled: 0,
-            failed: 1,
-          },
-        },
-        mockPluginsRefetch,
-      ),
-    );
+it("requires uninstall confirmation and keeps denial visible without success", async () => {
+  mocks.uninstall.mockRejectedValueOnce(new Error("Membership revoked"));
+  render(<PluginsPage />);
+  await userEvent.click(screen.getByRole("button", { name: "Uninstall" }));
+  expect(mocks.uninstall).not.toHaveBeenCalled();
+  await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  expect(screen.queryByRole("button", { name: "Confirm Uninstall" })).not.toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "Uninstall" }));
+  await userEvent.click(screen.getByRole("button", { name: "Confirm Uninstall" }));
+  expect(screen.getByText("Membership revoked")).toBeInTheDocument();
+  expect(useUiStore.getState().toasts).toHaveLength(0);
+  mocks.uninstall.mockResolvedValueOnce(undefined);
+  await userEvent.click(screen.getByRole("button", { name: "Confirm Uninstall" }));
+  expect(screen.getByRole("status")).toHaveTextContent("Registry entry uninstalled");
+});
 
-    mockUseInstallPlugin.mockReturnValue({
-      mutateAsync: mockInstallMutateAsync,
-      isPending: false,
-      isError: false,
-      error: null,
-    });
-    mockUseEnablePlugin.mockReturnValue({
-      mutateAsync: mockEnableMutateAsync,
-      isPending: false,
-      isError: false,
-      error: null,
-    });
-    mockUseDisablePlugin.mockReturnValue({
-      mutateAsync: mockDisableMutateAsync,
-      isPending: false,
-      isError: false,
-      error: null,
-    });
-
-    mockInstallMutateAsync.mockResolvedValue({
-      queue_status: "queued",
-      idempotent_replay: false,
-    });
-    mockEnableMutateAsync.mockResolvedValue({
-      queue_status: "queued",
-      idempotent_replay: false,
-    });
-    mockDisableMutateAsync.mockResolvedValue({
-      queue_status: "queued",
-      idempotent_replay: false,
-    });
-  });
-
-  it("renders plugin registry and failed safety state", () => {
-    render(<PluginsPage />);
-
-    expect(screen.getByText("Plugin Runtime Safety")).toBeInTheDocument();
-    expect(screen.getByText("Plugin Registry")).toBeInTheDocument();
-    expect(screen.getByText("Safe Plugin")).toBeInTheDocument();
-    expect(screen.getByText("Failed Plugin")).toBeInTheDocument();
-    expect(screen.getByText("Failure reason: PLUGIN_SIGNATURE_INVALID")).toBeInTheDocument();
-  });
-
-  it("filters plugins by failed status", async () => {
-    const user = userEvent.setup();
-    render(<PluginsPage />);
-
-    await user.click(screen.getByRole("button", { name: "Failed" }));
-
-    expect(mockUsePluginsQuery).toHaveBeenCalled();
-  });
-
-  it("submits install plugin action", async () => {
-    const user = userEvent.setup();
-    render(<PluginsPage />);
-
-    await user.click(screen.getByRole("button", { name: "Install Plugin" }));
-
-    expect(mockInstallMutateAsync).toHaveBeenCalled();
-  });
-
-  it("submits install even with unsupported permission and lets backend enforce policy", async () => {
-    const user = userEvent.setup();
-    render(<PluginsPage />);
-
-    await user.clear(screen.getByLabelText("Sandbox permissions"));
-    await user.type(screen.getByLabelText("Sandbox permissions"), "write:config");
-    await user.click(screen.getByRole("button", { name: "Install Plugin" }));
-
-    expect(mockInstallMutateAsync).toHaveBeenCalled();
-  });
-
-  it("runs enable action for safe plugin", async () => {
-    const user = userEvent.setup();
-    render(<PluginsPage />);
-
-    await user.click(screen.getAllByRole("button", { name: "Enable" })[0]);
-
-    expect(mockEnableMutateAsync).toHaveBeenCalledWith("00000000-0000-0000-0000-000000000701");
-  });
-
-  it("disable button is unavailable for non-enabled plugins", () => {
-    render(<PluginsPage />);
-    const disableButtons = screen.getAllByRole("button", { name: "Disable" });
-    expect(disableButtons[0]).toBeDisabled();
-  });
+it("uses backend-owned declaration validation without fake prefilled signatures", async () => {
+  render(<PluginsPage />);
+  expect(screen.getByLabelText("Signature")).toHaveValue("");
+  await userEvent.click(screen.getByRole("button", { name: "Register Metadata" }));
+  expect(mocks.install).not.toHaveBeenCalled();
 });

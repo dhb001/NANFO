@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { generateReport, getReport } from "@/features/reporting/api";
+import { generateReport, getReport, listReports } from "@/features/reporting/api";
 
 const fetchMock = vi.fn();
 
@@ -10,6 +10,11 @@ beforeEach(() => {
 });
 
 describe("reporting api", () => {
+  it("requests bounded workspace history pages with bearer authentication", async () => {
+    fetchMock.mockResolvedValueOnce(Response.json({ success: true, data: { items: [], total: 0, page: 2, page_size: 20 }, meta: {}, errors: null }));
+    await listReports("token-1", "workspace-1", 2);
+    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("/api/v1/reports?workspace_id=workspace-1&page=2&page_size=20"), expect.objectContaining({ headers: { Authorization: "Bearer token-1" } }));
+  });
   it("posts generate report with idempotency key", async () => {
     fetchMock.mockResolvedValueOnce({
       ok: true,
@@ -60,7 +65,7 @@ describe("reporting api", () => {
           end: "2026-08-14T00:00:00Z",
         },
         scope: { workspace: "all" },
-        filters: { kpi: "latency" },
+        filters: { metric: "latency" },
       },
       "rep-1",
     );

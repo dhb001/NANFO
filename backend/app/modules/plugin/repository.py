@@ -6,8 +6,9 @@ Persistence operations for plugin lifecycle records.
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime
 
-from sqlalchemy import String, cast, desc, or_, select
+from sqlalchemy import String, cast, desc, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.plugin.models import PluginRecord
@@ -29,6 +30,8 @@ class PluginRepository:
     ):
         if status is not None:
             query = query.where(PluginRecord.status == status)
+        else:
+            query = query.where(PluginRecord.status != "uninstalled")
         if enabled is not None:
             query = query.where(PluginRecord.enabled == enabled)
         if search:
@@ -65,11 +68,22 @@ class PluginRepository:
         return list(result.scalars().all())
 
     async def get_by_id(self, plugin_id: uuid.UUID) -> PluginRecord | None:
-        result = await self._db.execute(select(PluginRecord).where(PluginRecord.plugin_id == plugin_id))
+        result = await self._db.execute(
+            select(PluginRecord).where(PluginRecord.plugin_id == plugin_id).with_for_update()
+            .execution_options(populate_existing=True)
+        )
         return result.scalar_one_or_none()
 
     async def get_by_plugin_key(self, plugin_key: str) -> PluginRecord | None:
-        result = await self._db.execute(select(PluginRecord).where(PluginRecord.plugin_key == plugin_key))
+        # Lock even an absent key; the unique constraint remains the final safeguard.
+        await self._db.execute(
+            text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
+            {"key": f"plugin-registry:{plugin_key}"},
+        )
+        result = await self._db.execute(
+            select(PluginRecord).where(PluginRecord.plugin_key == plugin_key).with_for_update()
+            .execution_options(populate_existing=True)
+        )
         return result.scalar_one_or_none()
 
     async def create(
@@ -126,6 +140,10 @@ class PluginRepository:
         manifest: dict | None = None,
         version: str | None = None,
     ) -> PluginRecord:
+        if status == "uninstalled" and plugin.status != "uninstalled":
+            plugin.uninstalled_at = datetime.now(UTC)
+        elif status == "installed":
+            plugin.uninstalled_at = None
         plugin.status = status
         plugin.enabled = enabled
         plugin.failure_reason = failure_reason

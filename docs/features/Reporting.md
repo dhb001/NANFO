@@ -18,6 +18,9 @@ Provide evidence-driven decision support and audit-ready summaries.
 ## API
 - `POST /api/v1/reports/generate`
 - `GET /api/v1/reports/{id}`
+- `GET /api/v1/reports?workspace_id=UUID` - owner-scoped paginated history.
+- `GET /api/v1/reports/{id}/download?workspace_id=UUID` - authenticated binary
+  CSV/PDF; errors use the canonical JSON envelope (ADR-019).
 
 ## Database
 - Report metadata and artifact references.
@@ -29,13 +32,16 @@ Provide evidence-driven decision support and audit-ready summaries.
 - Long-running report jobs impacting worker pools.
 
 ## Acceptance Criteria
-Current foundation behavior: no renderer is installed. Processing requests yields
-`failed` with `REPORT_RENDERER_UNAVAILABLE` and no artifacts. Historical fabricated
-baseline references are suppressed on reads/replays. Generation requires current
-write capability and org write membership; status reads require membership.
+ADR019 backend implementation: real CSV/ReportLab PDF artifacts from bounded frozen
+owner-service snapshots, durable leased worker and lifecycle outbox. Historical
+fabricated references remain suppressed. Generation rechecks current write authority;
+status/history/download require current membership and report ownership. Authorized
+downloads verify actual bytes/length/SHA256 before streaming. No public storage URI.
+Request schemas, limits, explicit source omissions, deployment and verification:
+`backend/app/modules/report/README.md`.
 
-- [ ] Reports generated with consistent structure and metadata.
-- [ ] Failed jobs provide actionable error context.
+- [x] Backend reports generated with consistent structure and metadata.
+- [x] Failed jobs provide actionable error context.
 
 ## Tests
 - Unit: report configuration validation.

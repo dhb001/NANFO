@@ -1,9 +1,10 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { generateReport, getReport } from "@/features/reporting/api";
+import { generateReport, getReport, listReports } from "@/features/reporting/api";
 import { GenerateReportRequest } from "@/shared/types/reporting";
 
 export function useGenerateReport(token: string | null) {
+  const client = useQueryClient();
   return useMutation({
     mutationFn: async (input: {
       request: GenerateReportRequest;
@@ -15,6 +16,16 @@ export function useGenerateReport(token: string | null) {
       const response = await generateReport(token, input.request, input.idempotencyKey);
       return response.data;
     },
+    onSuccess: () => { client.invalidateQueries({ queryKey: ["reports", token] }); },
+  });
+}
+
+export function useReportHistory(token: string | null, workspaceId: string | null, page: number) {
+  return useQuery({
+    queryKey: ["reports", token, workspaceId, page],
+    queryFn: async () => (await listReports(token as string, workspaceId as string, page)).data,
+    enabled: Boolean(token && workspaceId),
+    refetchInterval: 8_000,
   });
 }
 

@@ -1,23 +1,26 @@
 """Plugin services.
 
 Scope:
-- Plugin registry lifecycle (list/install/enable/disable)
-- Signature/dependency/sandbox safety validation
+- Metadata-only registry lifecycle (list/install/enable/disable/uninstall)
+- Declaration admission checks, not signature verification or sandbox enforcement
 - Fail-open lifecycle event publication for plugin.* contracts
 """
 
 from __future__ import annotations
 
+import json
 import uuid
 from typing import Any
 
 import redis.asyncio as aioredis
 from fastapi import HTTPException, status
+from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.events.publisher import publish_event
+from app.modules.identity.service import append_audit_log
 from app.modules.organization.service import OrgService, WorkspaceService
 from app.modules.plugin.repository import PluginRepository
 from app.modules.plugin.schemas import (
@@ -38,6 +41,7 @@ _PLUGIN_STATUSES = {
     _PLUGIN_STATUS_ENABLED,
     _PLUGIN_STATUS_DISABLED,
     _PLUGIN_STATUS_FAILED,
+    "uninstalled",
 }
 
 
@@ -115,7 +119,7 @@ class PluginService:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail={
                     "code": "PLUGIN_STATUS_INVALID",
-                    "message": "status must be one of: installed, enabled, disabled, failed.",
+                    "message": "status must be one of: installed, enabled, disabled, failed, uninstalled.",
                 },
             )
 
@@ -144,6 +148,7 @@ class PluginService:
             _PLUGIN_STATUS_ENABLED: 0,
             _PLUGIN_STATUS_DISABLED: 0,
             _PLUGIN_STATUS_FAILED: 0,
+            "uninstalled": 0,
         }
         items: list[PluginRecordResponse] = []
         for row in rows:
@@ -167,9 +172,22 @@ class PluginService:
             user_id=requested_by_user_id, claim_org_id=claim_org_id, claim_workspace_id=claim_workspace_id,
         )
         plugin_key = _normalize_text(req.plugin_key).lower()
+        manifest = req.model_dump(mode="json")
         existing = await self._repo.get_by_plugin_key(plugin_key)
         if existing is not None:
-            if _normalize_text(existing.version) == _normalize_text(req.version):
+            if _normalize_text(existing.version) != req.version:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail={"code": "PLUGIN_VERSION_CONFLICT",
+                            "message": "plugin_key is already registered with a different version."},
+                )
+            if self._canonical_manifest(existing.manifest) != self._canonical_manifest(manifest):
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail={"code": "PLUGIN_MANIFEST_CONFLICT",
+                            "message": "plugin_key/version is already registered with different declarations."},
+                )
+            if existing.status != "uninstalled":
                 return self._serialize_action_response(
                     existing,
                     queue_status="replayed",
@@ -177,13 +195,6 @@ class PluginService:
                     warning=None,
                     idempotent_replay=True,
                 )
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail={
-                    "code": "PLUGIN_VERSION_CONFLICT",
-                    "message": "plugin_key is already registered with a different version.",
-                },
-            )
 
         signature_failure = self._validate_signature(signer=req.signer, signature=req.signature)
         if signature_failure is not None:
@@ -242,35 +253,28 @@ class PluginService:
                 },
             )
 
-        manifest = {
-            "plugin_key": plugin_key,
-            "name": _normalize_text(req.name),
-            "version": _normalize_text(req.version),
-            "signer": _normalize_text(req.signer),
-            "signature": _normalize_text(req.signature),
-            "dependencies": req.dependencies,
-            "sandbox": req.sandbox,
-            "metadata": req.metadata,
-        }
-
-        plugin = await self._repo.create(
-            plugin_id=uuid.uuid4(),
-            plugin_key=plugin_key,
-            name=_normalize_text(req.name),
-            version=_normalize_text(req.version),
-            manifest=manifest,
-            signature_status="verified",
-            dependency_status="compatible",
-            sandbox_status="isolated",
-            status=_PLUGIN_STATUS_INSTALLED,
-            enabled=False,
-            failure_reason=None,
-            queue_status="pending",
-            stream_entry_id=None,
-            warning=None,
-        )
-        await self._db.commit()
-        await self._db.refresh(plugin)
+        if existing is not None:
+            plugin = await self._repo.update_lifecycle(
+                existing, status="installed", enabled=False, failure_reason=None,
+                queue_status="pending", stream_entry_id=None, warning=None,
+            )
+        else:
+            plugin = await self._repo.create(
+                plugin_id=uuid.uuid4(),
+                plugin_key=plugin_key,
+                name=_normalize_text(req.name),
+                version=_normalize_text(req.version),
+                manifest=manifest,
+                signature_status="declared_unverified",
+                dependency_status="declared_unverified",
+                sandbox_status="not_executed",
+                status=_PLUGIN_STATUS_INSTALLED,
+                enabled=False,
+                failure_reason=None,
+                queue_status="pending",
+                stream_entry_id=None,
+                warning=None,
+            )
 
         queue_status, stream_entry_id, warning = await self._publish_lifecycle_event(
             event_type="plugin.installed",
@@ -320,6 +324,7 @@ class PluginService:
                 detail={"code": "PLUGIN_NOT_FOUND", "message": "Plugin not found."},
             )
 
+        self._assert_installed(plugin)
         if plugin.enabled and _normalize_status(plugin.status) == _PLUGIN_STATUS_ENABLED:
             return self._serialize_action_response(
                 plugin,
@@ -330,6 +335,12 @@ class PluginService:
             )
 
         manifest = plugin.manifest if isinstance(plugin.manifest, dict) else {}
+        schema_failure = None
+        try:
+            PluginInstallRequest.model_validate(manifest)
+        except ValidationError:
+            schema_failure = {"status_code": 400, "code": "PLUGIN_MANIFEST_INVALID",
+                              "message": "Stored declarations do not satisfy the registry schema."}
 
         signature_failure = self._validate_signature(
             signer=_normalize_text(manifest.get("signer")),
@@ -338,7 +349,7 @@ class PluginService:
         dependency_failure = self._validate_dependencies(manifest.get("dependencies"))
         sandbox_failure = self._validate_sandbox(manifest.get("sandbox"))
 
-        failure = signature_failure or dependency_failure or sandbox_failure
+        failure = schema_failure or signature_failure or dependency_failure or sandbox_failure
         if failure is not None:
             queue_status, stream_entry_id, warning = await self._publish_lifecycle_event(
                 event_type="plugin.failed",
@@ -360,9 +371,6 @@ class PluginService:
                 queue_status=queue_status,
                 stream_entry_id=stream_entry_id,
                 warning=warning,
-                signature_status="invalid" if signature_failure is not None else plugin.signature_status,
-                dependency_status="incompatible" if dependency_failure is not None else plugin.dependency_status,
-                sandbox_status="blocked" if sandbox_failure is not None else plugin.sandbox_status,
             )
             await self._db.commit()
             await self._db.refresh(plugin)
@@ -383,12 +391,7 @@ class PluginService:
             queue_status=plugin.queue_status,
             stream_entry_id=plugin.stream_entry_id,
             warning=plugin.warning,
-            signature_status="verified",
-            dependency_status="compatible",
-            sandbox_status="isolated",
         )
-        await self._db.commit()
-        await self._db.refresh(plugin)
 
         queue_status, stream_entry_id, warning = await self._publish_lifecycle_event(
             event_type="plugin.enabled",
@@ -438,11 +441,8 @@ class PluginService:
                 detail={"code": "PLUGIN_NOT_FOUND", "message": "Plugin not found."},
             )
 
-        if not plugin.enabled and _normalize_status(plugin.status) in {
-            _PLUGIN_STATUS_DISABLED,
-            _PLUGIN_STATUS_INSTALLED,
-            _PLUGIN_STATUS_FAILED,
-        }:
+        self._assert_installed(plugin)
+        if not plugin.enabled and _normalize_status(plugin.status) == _PLUGIN_STATUS_DISABLED:
             return self._serialize_action_response(
                 plugin,
                 queue_status="replayed",
@@ -460,9 +460,6 @@ class PluginService:
             stream_entry_id=plugin.stream_entry_id,
             warning=plugin.warning,
         )
-        await self._db.commit()
-        await self._db.refresh(plugin)
-
         queue_status, stream_entry_id, warning = await self._publish_lifecycle_event(
             event_type="plugin.disabled",
             correlation_id=correlation_id,
@@ -492,6 +489,47 @@ class PluginService:
             idempotent_replay=False,
         )
 
+    async def uninstall_plugin(
+        self, *, plugin_id: uuid.UUID, correlation_id: str, requested_by_user_id: str,
+        claim_org_id: uuid.UUID | None = None, claim_workspace_id: uuid.UUID | None = None,
+    ) -> None:
+        await self._assert_membership(
+            user_id=requested_by_user_id, claim_org_id=claim_org_id, claim_workspace_id=claim_workspace_id,
+        )
+        plugin = await self._repo.get_by_id(plugin_id)
+        if plugin is None:
+            raise HTTPException(status_code=404, detail={"code": "PLUGIN_NOT_FOUND", "message": "Plugin not found."})
+        if plugin.status == "uninstalled":
+            return
+        previous_status = plugin.status
+        await self._repo.update_lifecycle(
+            plugin, status="uninstalled", enabled=False, failure_reason=plugin.failure_reason,
+            queue_status="not_applicable", stream_entry_id=None, warning=None,
+        )
+        await append_audit_log(
+            db=self._db, event_type="plugin.registry.removed", actor_id=uuid.UUID(requested_by_user_id),
+            resource_type="plugin", resource_id=plugin.plugin_id,
+            correlation_id=_coerce_correlation_uuid(correlation_id),
+            metadata={"registry_only": True, "previous_status": previous_status, "status": "uninstalled"},
+        )
+        await self._db.commit()
+
+    @staticmethod
+    def _assert_installed(plugin) -> None:
+        if plugin.status == "uninstalled":
+            raise HTTPException(status_code=409, detail={
+                "code": "PLUGIN_UNINSTALLED", "message": "Explicit identical-manifest reinstall is required.",
+            })
+
+    @staticmethod
+    def _canonical_manifest(manifest: dict) -> str | None:
+        # JSON encoding preserves type distinctions (true != 1); only object order is ignored.
+        try:
+            normalized = PluginInstallRequest.model_validate(manifest).model_dump(mode="json")
+            return json.dumps(normalized, sort_keys=True, separators=(",", ":"), allow_nan=False)
+        except ValidationError:
+            return None
+
     @staticmethod
     def _parse_csv_settings(value: str) -> set[str]:
         return {item.strip().lower() for item in value.split(",") if item.strip()}
@@ -504,7 +542,7 @@ class PluginService:
             return {
                 "status_code": status.HTTP_400_BAD_REQUEST,
                 "code": "PLUGIN_SIGNATURE_INVALID",
-                "message": "Plugin signer is not trusted.",
+                "message": "Declared signer is not on the registry admission allowlist (identity is unverified).",
             }
 
         normalized_signature = signature.strip()
@@ -512,7 +550,7 @@ class PluginService:
             return {
                 "status_code": status.HTTP_400_BAD_REQUEST,
                 "code": "PLUGIN_SIGNATURE_INVALID",
-                "message": "Plugin signature format is invalid.",
+                "message": "Declared signature format is invalid; cryptographic verification is unsupported.",
             }
 
         if len(normalized_signature) < settings.PLUGIN_SIGNATURE_MIN_LENGTH:
@@ -528,6 +566,10 @@ class PluginService:
         settings = get_settings()
         deps = dependencies if isinstance(dependencies, dict) else {}
 
+        if any(key in deps and not isinstance(deps[key], str) for key in ("platform_version", "requires_platform")):
+            return {"status_code": 400, "code": "PLUGIN_DEPENDENCY_INVALID",
+                    "message": "Declared platform versions must be strings."}
+
         required_platform = _normalize_text(
             deps.get("platform_version") or deps.get("requires_platform")
         )
@@ -535,7 +577,7 @@ class PluginService:
             return {
                 "status_code": status.HTTP_409_CONFLICT,
                 "code": "PLUGIN_DEPENDENCY_INCOMPATIBLE",
-                "message": "Plugin dependency requirements are incompatible with this runtime.",
+                "message": "Declared platform version does not match the registry configuration.",
             }
 
         requires_raw = deps.get("requires", [])
@@ -548,11 +590,12 @@ class PluginService:
                 "message": "Plugin requires must be a list when provided.",
             }
 
-        if len(requires_raw) > settings.PLUGIN_MAX_DEPENDENCY_COUNT:
+        if (len(requires_raw) > settings.PLUGIN_MAX_DEPENDENCY_COUNT
+                or any(not isinstance(item, str) or not item.strip() for item in requires_raw)):
             return {
                 "status_code": status.HTTP_400_BAD_REQUEST,
                 "code": "PLUGIN_DEPENDENCY_INVALID",
-                "message": "Plugin declares too many dependencies.",
+                "message": "Dependencies must be nonempty strings within the configured count limit.",
             }
 
         return None
@@ -560,6 +603,9 @@ class PluginService:
     def _validate_sandbox(self, sandbox: Any) -> dict[str, Any] | None:
         settings = get_settings()
         sandbox_data = sandbox if isinstance(sandbox, dict) else {}
+        if "isolation_mode" in sandbox_data and not isinstance(sandbox_data["isolation_mode"], str):
+            return {"status_code": 400, "code": "PLUGIN_SANDBOX_INVALID",
+                    "message": "Declared isolation_mode must be a string."}
         isolation_mode = _normalize_text(sandbox_data.get("isolation_mode") or "process").lower()
         allowed_modes = self._parse_csv_settings(settings.PLUGIN_ALLOWED_ISOLATION_MODES)
         if isolation_mode not in allowed_modes:
@@ -572,7 +618,8 @@ class PluginService:
         permissions_raw = sandbox_data.get("permissions", [])
         if permissions_raw is None:
             permissions_raw = []
-        if not isinstance(permissions_raw, list):
+        if (not isinstance(permissions_raw, list)
+                or any(not isinstance(item, str) or not item.strip() for item in permissions_raw)):
             return {
                 "status_code": status.HTTP_400_BAD_REQUEST,
                 "code": "PLUGIN_SANDBOX_INVALID",
@@ -587,7 +634,7 @@ class PluginService:
             return {
                 "status_code": status.HTTP_403_FORBIDDEN,
                 "code": "PLUGIN_PERMISSION_SCOPE_INVALID",
-                "message": "Plugin requests sandbox permissions outside the allowed safety scope.",
+                "message": "Declared permissions exceed the registry admission allowlist; no runtime enforcement exists.",
             }
 
         return None
@@ -611,9 +658,9 @@ class PluginService:
             "version": _normalize_text(plugin.version),
             "status": status_value,
             "enabled": bool(enabled_value),
-            "signature_status": _normalize_text(plugin.signature_status),
-            "dependency_status": _normalize_text(plugin.dependency_status),
-            "sandbox_status": _normalize_text(plugin.sandbox_status),
+            "signature_status": "declared_unverified",
+            "dependency_status": "declared_unverified",
+            "sandbox_status": "not_executed",
             "failure_reason": _normalize_text(failure_reason) or None,
             "requested_by_user_id": requested_by_user_id,
         }
@@ -636,9 +683,9 @@ class PluginService:
             "version": _normalize_text(version),
             "status": _PLUGIN_STATUS_FAILED,
             "enabled": False,
-            "signature_status": "invalid",
-            "dependency_status": "incompatible",
-            "sandbox_status": "blocked",
+            "signature_status": "declared_unverified",
+            "dependency_status": "declared_unverified",
+            "sandbox_status": "not_executed",
             "failure_reason": failure_code,
             "failure_message": failure_message,
             "requested_by_user_id": requested_by_user_id,

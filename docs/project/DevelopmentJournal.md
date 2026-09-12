@@ -1,5 +1,79 @@
 # Development Journal
 
+## [2026-09-12] - Reports, Measured Alerts, Registry and Acceptance
+
+- Implemented actual CSV/PDF/source snapshots/artifact verification/download/history,
+  durable report worker/outbox, measured alert detector hysteresis/history/recovery
+  and scoped replay receipts. Metadata-only registry gains audited uninstall, no
+  executable/sandbox overclaims. Energy CLI remains estimate/non-actuating.
+- Live campaign uncovered cancellation-receipt bug and verifier backlog/STOP scheduling;
+  fixed root causes, preserved failed attempts, reran affected cases without looser limits.
+  Final8 stages passed,22 cases passed0 failed9 blocked. Measured alerts independently
+  captured sustained threshold and recovery from real traffic.
+- Default backend2,028 tests/frontend487/browser41 passed; scoped lint/full frontend
+  gates passed. Owned resources cleaned, pre-existing stopped lab preserved. Shared
+  deployment not migrated. Details ModulesAcceptance-Step13-Step14.md.
+
+## [2026-09-12] - ADR019 Step13 Frontend
+
+- Consumed concurrently delivered Report, Alert and Plugin schemas instead of
+  inventing API fields. Added typed forms/history, bearer binary download and
+  version/hash/length gates; expanded measured lifecycle evidence and registry-only
+  declarations/uninstall. Reused existing alert cache invalidation prefix.
+- Pruned obsolete plugin safety helpers and duplicate page/mutation code without
+  dependencies, build configuration or budget changes. Bundle passes at410.09KiB
+  against410.16KiB. Typecheck, lint and production build pass; full frontend487 unit
+  tests and41/41 browser tests pass on standalone no-retry run.
+- Initial mobile plugin toast obscured Uninstall; replaced with inline status.
+  A later browser run alongside build/unit work timed out before login rendered;
+  complete standalone rerun passed41/41. Lint/Playwright concurrent output-directory
+  race resolved by running lint separately, not changing its rules.
+- Browser bytes/provenance are explicit fixtures, not worker/network acceptance.
+  No generated artifact files or backend/AI/emulation edits by this workstream.
+  Full schema/route handoff: `Frontend-Step13-ADR019.md`.
+
+## [2026-09-12] - ADR019 Real Backend Reports
+
+- Replaced consumer placeholder failures with report-owned durable leased rendering,
+  immutable bounded owner-service snapshots and transactional lifecycle outbox0017.
+  Real CSV/ReportLab PDF, receipt/status-version/snapshot hash binding, protected
+  atomic filesystem publication, verified-byte streaming and owner-scoped history.
+- Strict date/type/scope/filter limits, no cross-module source SQL, no credentials
+  or free payload exports, historical masking and explicit omissions/Unicode limits.
+  Current authority rechecks; logout does not cancel valid durable work.
+- Backend-only Poetry Python3.14.7 ReportLab4.4.10/pypdf6.8.0 imports verified.
+  Full backend2001 passed/77 skipped; five actual PostgreSQL/isolated-Redis report
+  transaction tests separately passed, including stable lost-ack outbox replay.
+- Final disposable real API/worker generated and parsed both formats with all four
+  source sections; asserted snapshot/tenant isolation, SHA256/length, tamper denial,
+  exact history totals, lease recovery, logout behavior and actor revocation.
+  Evidence `/tmp/opencode/report-verification-oq6764mr/result.json`; three owned
+  containers and two processes cleaned. No lab/shared migration/frozen AI changes.
+- Report contract/deployment/known caps: `backend/app/modules/report/README.md`.
+  Frontend/plugin/alert detector work remains owned by parallel agents.
+
+## [2026-09-12] - ADR019 Alert-Owned Measured Detector
+
+- Alert migration0018 follows Report0017: persistent operator-versioned detector
+  identity/watermark, observation dedup, unique unresolved incident, immutable
+  lifecycle history and transactional outbox. Minimal post-persistence telemetry
+  consumer composition; no main mounts, lab, frontend, AI or report edits.
+- Defaults: utilization85/70percent, RTT100/70ms, probe loss2/1percent,
+  known queue80/40packets; breach>=, recovery<, at least3 samples spanning10s,
+  maximum10s gap, maximum30s age. Exact source/unit/provenance and current binding
+  owner/tenant/device/peer validation. New runs cannot recover old incidents.
+- Scoped SQL before limit, strict detail/history GETs, row-locked ack/resolve and
+  recovery, separate bounded run_alert_worker.py with stable outbox/audit event IDs.
+  Unknown-scope legacy alerts remain denied even to global Admin.
+- Full backend2,017 passed/58 opt-in skips; scoped106 passed including20 disposable
+  PostgreSQL migration/race/retry/consumer cases; scoped Ruff and whitespace pass.
+  An earlier full run saw concurrent report failures, resolved in the latest run
+  by its owning workstream. Fixtures are measured-typed, not live lab captures.
+- Exact schemas, environment configuration, commands, truth boundaries and
+  frontend handoff: backend/app/modules/alert/README.md. Physical collector/lab
+  acceptance remains for the serialized acceptance campaign; no shared migration
+  or implicit worker deployment.
+
 ## [2026-09-11] - Remaining Step12 Operator Workflows
 
 - Added actual correlated probe path capture/replay, historical frozen model API

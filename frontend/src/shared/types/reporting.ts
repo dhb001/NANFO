@@ -10,6 +10,7 @@ export interface ReportArtifactRef {
   checksum_sha256: string;
   size_bytes: number;
   generated_at: string;
+  filename?: string | null;
 }
 
 export interface ReportErrorContext {
@@ -40,6 +41,10 @@ export interface ReportRecord {
   completed_at: string | null;
   created_at: string;
   updated_at: string;
+  artifact_version?: number;
+  status_version?: number;
+  snapshot_sha256?: string | null;
+  snapshot_summary?: Record<string, unknown>;
 }
 
 export interface ReportGenerateResult extends ReportRecord {
@@ -49,9 +54,17 @@ export interface ReportGenerateResult extends ReportRecord {
 export interface GenerateReportRequest {
   workspace_id: string;
   network_id?: string | null;
-  report_type: string;
-  format: "pdf" | "csv" | string;
+  report_type: "executive_summary" | "operational_summary" | "telemetry" | "alerts" | "simulation" | "intent";
+  format: "pdf" | "csv";
   date_range: ReportDateRange;
-  scope: Record<string, unknown>;
-  filters: Record<string, unknown>;
+  scope: { workspace?: "all"; simulation_ids?: string[]; intent_ids?: string[] };
+  filters: { metric?: string | null; alert_status?: "active" | "acknowledged" | "resolved" | null;
+    alert_severity?: "info" | "warning" | "critical" | "low" | "medium" | "high" | null; max_rows?: number };
+}
+
+export interface ReportHistoryResult {
+  items: ReportRecord[];
+  total: number;
+  page: number;
+  page_size: number;
 }

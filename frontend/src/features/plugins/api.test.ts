@@ -5,6 +5,7 @@ import {
   enablePlugin,
   installPlugin,
   listPlugins,
+  uninstallPlugin,
 } from "@/features/plugins/api";
 
 const fetchMock = vi.fn();
@@ -15,6 +16,15 @@ beforeEach(() => {
 });
 
 describe("plugins api", () => {
+  it("requires an authorized DELETE and propagates current permission denial", async () => {
+    fetchMock.mockResolvedValueOnce(new Response(null, { status: 204 }));
+    await uninstallPlugin("token-1", "plugin-1");
+    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("/api/v1/plugins/plugin-1"), expect.objectContaining({ method: "DELETE", headers: { Authorization: "Bearer token-1" } }));
+    fetchMock.mockResolvedValueOnce(Response.json({ success: false, data: null, errors: { code: "DENIED", message: "Permission revoked" } }, { status: 403 }));
+    await expect(uninstallPlugin("token-1", "plugin-1")).rejects.toMatchObject({ code: "DENIED", status: 403 });
+    fetchMock.mockResolvedValueOnce(Response.json({ success: false, errors: { code: "DENIED", message: "Denied envelope" } }));
+    await expect(uninstallPlugin("token-1", "plugin-1")).rejects.toMatchObject({ code: "DENIED" });
+  });
   it("lists plugins with query parameters", async () => {
     fetchMock.mockResolvedValueOnce({
       ok: true,
@@ -65,9 +75,9 @@ describe("plugins api", () => {
           name: "Safe Plugin",
           version: "1.0.0",
           manifest: {},
-          signature_status: "verified",
-          dependency_status: "compatible",
-          sandbox_status: "isolated",
+          signature_status: "declared_unverified",
+          dependency_status: "declared_unverified",
+          sandbox_status: "not_executed",
           status: "installed",
           enabled: false,
           failure_reason: null,
@@ -118,9 +128,9 @@ describe("plugins api", () => {
           name: "Safe Plugin",
           version: "1.0.0",
           manifest: {},
-          signature_status: "verified",
-          dependency_status: "compatible",
-          sandbox_status: "isolated",
+          signature_status: "declared_unverified",
+          dependency_status: "declared_unverified",
+          sandbox_status: "not_executed",
           status: "enabled",
           enabled: true,
           failure_reason: null,

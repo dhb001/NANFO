@@ -17,15 +17,18 @@ from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
-from app.events.publisher import publish_event
 from app.modules.alert.repository import AlertRepository
+from app.modules.alert.detector import identity_key
 from app.modules.alert.schemas import (
     AlertActionResponse,
     AlertListResponse,
     AlertRecordResponse,
+    AlertHistoryResponse,
+    LegacyAlertIdentity,
 )
 from app.modules.network.service import NetworkService
 from app.modules.organization.service import WorkspaceService as OrgWorkspaceService
+from app.modules.organization.service import OrgService
 
 logger = get_logger(__name__)
 
@@ -80,6 +83,47 @@ class AlertService:
         self._repo = AlertRepository(db)
         self._network_svc = NetworkService(db=db, redis=redis)
         self._workspace_svc = OrgWorkspaceService(db=db, redis=redis)
+
+    async def _accessible_scopes(self, actor_user_id, requested_workspace_id, claim_org_id):
+        workspaces = await self._workspace_svc.list_accessible_workspace_ids(
+            user_id=actor_user_id, claim_org_id=claim_org_id, claim_workspace_id=requested_workspace_id)
+        scopes = []
+        for workspace_id in workspaces:
+            workspace = await self._workspace_svc.get_active_workspace(
+                workspace_id, user_id=actor_user_id, claim_org_id=claim_org_id)
+            networks, page = [], 1
+            while True:
+                result = await self._network_svc.list_networks(workspace_id=workspace_id,
+                    actor_user_id=actor_user_id, page=page, page_size=500, claim_org_id=claim_org_id)
+                networks.extend(row.network_id for row in result.items)
+                if len(networks) >= result.total or not result.items:
+                    break
+                page += 1
+            scopes.append((workspace_id, workspace.org_id, networks))
+        org_ids = []
+        if requested_workspace_id is None:
+            page = 1
+            while True:
+                result = await OrgService(self._db, self._redis).list_orgs(
+                    user_id=actor_user_id, page=page, page_size=500, org_id=claim_org_id)
+                org_ids.extend(row.org_id for row in result.items)
+                if len(org_ids) >= result.total or not result.items:
+                    break
+                page += 1
+        return scopes, org_ids
+
+    async def get_alert(self, *, alert_id, actor_user_id, requested_workspace_id=None, claim_org_id=None):
+        alert = await self._repo.get_by_id(alert_id)
+        if alert is None:
+            raise HTTPException(status_code=404, detail={"code": "ALERT_NOT_FOUND", "message": "Alert not found."})
+        await self._assert_alert_access(alert=alert, actor_user_id=actor_user_id,
+            requested_workspace_id=requested_workspace_id, claim_org_id=claim_org_id)
+        return AlertRecordResponse.model_validate(alert)
+
+    async def get_history(self, **scope):
+        alert = await self.get_alert(**scope)
+        rows = await self._repo.history(alert.alert_id)
+        return AlertHistoryResponse(alert_id=alert.alert_id, items=rows, total=len(rows))
 
     @staticmethod
     def _extract_alert_scope_uuid(payload: dict[str, Any], key: str) -> uuid.UUID | None:
@@ -181,6 +225,7 @@ class AlertService:
         normalized_source = _normalize_status(source_filter)
         normalized_search = _coerce_text(search_filter) or None
         bounded_limit = max(1, min(limit, 500))
+        scopes, org_ids = await self._accessible_scopes(actor_user_id, requested_workspace_id, claim_org_id)
 
         rows = await self._repo.list_alerts(
             status=normalized_status,
@@ -189,6 +234,8 @@ class AlertService:
             correlation_id=correlation_id_filter,
             search=normalized_search,
             limit=bounded_limit,
+            scopes=scopes,
+            org_ids=org_ids,
         )
 
         scoped_rows = rows
@@ -235,7 +282,7 @@ class AlertService:
         requested_workspace_id: uuid.UUID | None = None,
         claim_org_id: uuid.UUID | None = None,
     ) -> AlertActionResponse:
-        alert = await self._repo.get_by_id(alert_id)
+        alert = await self._repo.get_by_id(alert_id, lock=True)
         if alert is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -280,27 +327,26 @@ class AlertService:
             occurred_at=acknowledged_at,
         )
 
+        event_id = await self._repo.append_history(
+            alert_id=alert.alert_id, event_type="alert.acknowledged",
+            correlation_id=_coerce_uuid(correlation_id) or uuid.uuid4(),
+            occurred_at=acknowledged_at, payload=ack_payload, publish=True,
+        )
         await self._repo.mark_acknowledged(
             alert,
             acknowledged_by_user_id=requested_by_user_id,
             acknowledged_at=acknowledged_at,
             payload=ack_payload,
-            acknowledged_event_id=None,
+            acknowledged_event_id=event_id,
         )
         await self._db.commit()
         await self._db.refresh(alert)
 
-        queue_status, stream_entry_id, warning = await self._publish_lifecycle_event(
-            event_type="alert.acknowledged",
-            correlation_id=correlation_id,
-            payload=ack_payload,
-        )
-
         return self._serialize_action_response(
             alert,
-            queue_status=queue_status,
-            stream_entry_id=stream_entry_id,
-            warning=warning,
+            queue_status="deferred",
+            stream_entry_id=None,
+            warning="event_delivery_pending",
             idempotent_replay=False,
         )
 
@@ -313,7 +359,7 @@ class AlertService:
         requested_workspace_id: uuid.UUID | None = None,
         claim_org_id: uuid.UUID | None = None,
     ) -> AlertActionResponse:
-        alert = await self._repo.get_by_id(alert_id)
+        alert = await self._repo.get_by_id(alert_id, lock=True)
         if alert is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -349,27 +395,26 @@ class AlertService:
             occurred_at=resolved_at,
         )
 
+        event_id = await self._repo.append_history(
+            alert_id=alert.alert_id, event_type="alert.resolved",
+            correlation_id=_coerce_uuid(correlation_id) or uuid.uuid4(),
+            occurred_at=resolved_at, payload=resolved_payload, publish=True,
+        )
         await self._repo.mark_resolved(
             alert,
             resolved_by_user_id=requested_by_user_id,
             resolved_at=resolved_at,
             payload=resolved_payload,
-            resolved_event_id=None,
+            resolved_event_id=event_id,
         )
         await self._db.commit()
         await self._db.refresh(alert)
 
-        queue_status, stream_entry_id, warning = await self._publish_lifecycle_event(
-            event_type="alert.resolved",
-            correlation_id=correlation_id,
-            payload=resolved_payload,
-        )
-
         return self._serialize_action_response(
             alert,
-            queue_status=queue_status,
-            stream_entry_id=stream_entry_id,
-            warning=warning,
+            queue_status="deferred",
+            stream_entry_id=None,
+            warning="event_delivery_pending",
             idempotent_replay=False,
         )
 
@@ -388,6 +433,10 @@ class AlertService:
         correlation_id = _coerce_uuid(event.get("correlation_id")) or uuid.uuid4()
         source = _coerce_text(event.get("source")) or "unknown"
         occurred_at = _coerce_timestamp(event.get("timestamp")) or datetime.now(UTC)
+        try:
+            LegacyAlertIdentity.normalize(payload)
+        except ValueError:
+            return
 
         if event_type == "alert.generated":
             await self._ingest_generated_event(
@@ -407,6 +456,18 @@ class AlertService:
                 alert_id=payload.get("alert_id"),
                 alert_key=payload.get("alert_key"),
             )
+            return
+
+        # Measured lifecycle is authoritative in Alert transactions, not inbound
+        # lifecycle messages. Outbox replay must never resurrect or resolve it.
+        if target.payload.get("detector_key") is not None:
+            return
+        try:
+            if LegacyAlertIdentity.normalize(target.payload) != LegacyAlertIdentity.normalize(payload):
+                return
+        except ValueError:
+            return
+        if occurred_at < target.created_at:
             return
 
         actor_id = (
@@ -439,6 +500,9 @@ class AlertService:
                     payload=merged_payload,
                     acknowledged_event_id=event_id,
                 )
+                await self._repo.append_history(alert_id=target.alert_id, event_type=event_type,
+                    correlation_id=correlation_id, occurred_at=acknowledged_at,
+                    payload=merged_payload, event_id=event_id)
                 await self._db.commit()
             return
 
@@ -463,6 +527,8 @@ class AlertService:
             payload=merged_payload,
             resolved_event_id=event_id,
         )
+        await self._repo.append_history(alert_id=target.alert_id, event_type=event_type,
+            correlation_id=correlation_id, occurred_at=resolved_at, payload=merged_payload, event_id=event_id)
         await self._db.commit()
 
     async def _ingest_generated_event(
@@ -474,21 +540,33 @@ class AlertService:
         correlation_id: uuid.UUID,
         occurred_at: datetime,
     ) -> None:
-        if event_id is not None:
-            existing = await self._repo.get_by_generated_event_id(event_id)
-            if existing is not None:
-                return
+        if payload.get("detector_key") is not None:
+            return
+        if event_id is None:
+            return
+        if not await self._repo.consume_generation(event_id, identity_key({"source": source, "payload": payload})):
+            await self._db.rollback()
+            return
+        existing = await self._repo.get_by_generated_event_id(event_id)
+        if existing is not None:
+            await self._repo.link_consumed_generation(event_id, existing.alert_id)
+            await self._db.commit()
+            return
 
         alert_id = _coerce_uuid(payload.get("alert_id")) or uuid.uuid4()
         alert_key = _coerce_text(payload.get("alert_key")) or f"{source}:{alert_id}"
-        existing_unresolved = await self._repo.get_latest_unresolved_by_key(alert_key)
+        identity = LegacyAlertIdentity.normalize(payload)
+        await self._repo.lock_legacy_identity(identity_key({"alert_key": alert_key, **identity}))
+        existing_unresolved = await self._repo.get_latest_unresolved_by_key(alert_key, identity=identity)
         if existing_unresolved is not None:
+            await self._repo.link_consumed_generation(event_id, existing_unresolved.alert_id)
+            await self._db.commit()
             return
 
         severity = _normalize_status(_coerce_text(payload.get("severity")))
         merged_payload = self._merge_lifecycle_payload(
             existing_payload={},
-            incoming_payload=payload,
+            incoming_payload={**payload, **identity},
             alert_id=alert_id,
             alert_key=alert_key,
             severity=severity,
@@ -507,47 +585,20 @@ class AlertService:
             generated_event_id=event_id,
             created_at=occurred_at,
         )
+        await self._repo.append_history(alert_id=alert_id, event_type="alert.generated",
+            correlation_id=correlation_id, occurred_at=occurred_at, payload=merged_payload, event_id=event_id)
+        await self._repo.link_consumed_generation(event_id, alert_id)
         await self._db.commit()
 
     async def _resolve_lifecycle_target(self, payload: dict[str, Any]):
         alert_id = _coerce_uuid(payload.get("alert_id"))
         if alert_id is not None:
-            return await self._repo.get_by_id(alert_id)
+            return await self._repo.get_by_id(alert_id, lock=True)
 
         alert_key = _coerce_text(payload.get("alert_key"))
         if not alert_key:
             return None
-        return await self._repo.get_latest_unresolved_by_key(alert_key)
-
-    async def _publish_lifecycle_event(
-        self,
-        *,
-        event_type: str,
-        correlation_id: str,
-        payload: dict[str, Any],
-    ) -> tuple[str, str | None, str | None]:
-        if self._redis is None:
-            return "deferred", None, "event_queue_unavailable"
-
-        correlation_uuid = _coerce_uuid(correlation_id) or uuid.uuid4()
-
-        try:
-            stream_entry_id = await publish_event(
-                redis=self._redis,
-                event_type=event_type,
-                source="alert",
-                payload=payload,
-                correlation_id=str(correlation_uuid),
-            )
-            return "queued", stream_entry_id, None
-        except Exception as exc:  # noqa: BLE001
-            logger.warning(
-                "alert_lifecycle_event_publish_failed",
-                event_type=event_type,
-                correlation_id=str(correlation_uuid),
-                error=str(exc),
-            )
-            return "deferred", None, "event_queue_unavailable"
+        return await self._repo.get_latest_unresolved_by_key(alert_key, identity=LegacyAlertIdentity.normalize(payload))
 
     @staticmethod
     def _merge_lifecycle_payload(

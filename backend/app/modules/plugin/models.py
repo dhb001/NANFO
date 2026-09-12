@@ -16,7 +16,7 @@ from app.db.postgres import Base
 
 
 class PluginRecord(Base):
-    """Persisted plugin registry lifecycle state and safety metadata."""
+    """Persisted registry flags and unverified declarations, never runtime state."""
 
     __tablename__ = "plugins"
 
@@ -26,9 +26,9 @@ class PluginRecord(Base):
     version: Mapped[str] = mapped_column(Text, nullable=False)
     manifest: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
 
-    signature_status: Mapped[str] = mapped_column(Text, nullable=False, default="unverified")
-    dependency_status: Mapped[str] = mapped_column(Text, nullable=False, default="unknown")
-    sandbox_status: Mapped[str] = mapped_column(Text, nullable=False, default="pending")
+    signature_status: Mapped[str] = mapped_column(Text, nullable=False, default="declared_unverified")
+    dependency_status: Mapped[str] = mapped_column(Text, nullable=False, default="declared_unverified")
+    sandbox_status: Mapped[str] = mapped_column(Text, nullable=False, default="not_executed")
 
     status: Mapped[str] = mapped_column(Text, nullable=False, default="installed")
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
@@ -39,6 +39,7 @@ class PluginRecord(Base):
     warning: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     installed_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now())
+    uninstalled_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True),
         nullable=False,

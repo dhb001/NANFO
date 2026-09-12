@@ -1,200 +1,88 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { beforeEach, expect, it, vi } from "vitest";
+import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-
-import { ReportsPage } from "@/features/reporting/ReportsPage";
+import { ReportsPage } from "./ReportsPage";
 import { useAuthStore } from "@/shared/state/auth-store";
 import { operatorProfile } from "@/test/profile";
 import { useUiStore } from "@/shared/state/ui-store";
 import { useWorkspaceStore } from "@/shared/state/workspace-store";
 
-const mockUseGenerateReport = vi.fn();
-const mockUseReportDetail = vi.fn();
-
-vi.mock("@/features/reporting/hooks", () => ({
-  useGenerateReport: (...args: unknown[]) => mockUseGenerateReport(...args),
-  useReportDetail: (...args: unknown[]) => mockUseReportDetail(...args),
+const mocks = vi.hoisted(() => ({ generate: vi.fn(), detail: vi.fn(), history: vi.fn() }));
+vi.mock("./hooks", () => ({
+  useGenerateReport: () => ({ mutateAsync: mocks.generate }),
+  useReportDetail: mocks.detail, useReportHistory: mocks.history,
 }));
+const record = { report_id: "r1", workspace_id: "w1", network_id: "n1", report_type: "executive_summary", format: "csv", status: "failed",
+  artifacts: [], requested_at: "2026-09-11T00:00:00Z", completed_at: null, queue_status: "deferred", error: { code: "REPORT_GENERATION_FAILED", message: "Worker failed" } };
 
-const mutateAsync = vi.fn();
-const detailRefetch = vi.fn();
+beforeEach(() => {
+  vi.clearAllMocks();
+  useAuthStore.setState({ accessToken: "token", profile: operatorProfile });
+  useWorkspaceStore.setState({ workspaceId: "w1", networkId: "n1" });
+  useUiStore.setState({ toasts: [] });
+  mocks.detail.mockReturnValue({ data: null, refetch: vi.fn() });
+  mocks.history.mockReturnValue({ data: { items: [], total: 0, page: 1, page_size: 20 }, refetch: vi.fn() });
+  mocks.generate.mockResolvedValue({ ...record, status: "requested" });
+});
 
-function queryResult<T>(data: T | null) {
-  return {
-    isLoading: false,
-    isError: false,
-    data,
-    refetch: detailRefetch,
-  };
-}
+it("submits only documented fields with sensible current dates and explicit scope", async () => {
+  render(<ReportsPage />);
+  await userEvent.click(screen.getByRole("button", { name: "Generate Report" }));
+  const { request } = mocks.generate.mock.calls[0][0];
+  expect(request).toMatchObject({ workspace_id: "w1", network_id: "n1", scope: {}, filters: { max_rows: 100 }, report_type: "executive_summary" });
+  expect(Date.now() - Date.parse(request.date_range.end)).toBeLessThan(10_000);
+  expect(Date.parse(request.date_range.end) - Date.parse(request.date_range.start)).toBeCloseTo(86400_000, -3);
+  expect(screen.queryByLabelText("Filters JSON")).not.toBeInTheDocument();
+  expect(useUiStore.getState().toasts.at(-1)?.title).toBe("Report request accepted");
+});
 
-describe("ReportsPage", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
+it("does not claim generated for failed or artifact-free responses", async () => {
+  mocks.generate.mockResolvedValue(record);
+  mocks.detail.mockReturnValue({ data: { ...record, status: "generated", error: null }, refetch: vi.fn() });
+  render(<ReportsPage />);
+  await userEvent.click(screen.getByRole("button", { name: "Generate Report" }));
+  expect(useUiStore.getState().toasts.at(-1)?.tone).toBe("danger");
+  expect(screen.getByText("Artifact unavailable / unverified")).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /Download/ })).not.toBeInTheDocument();
+});
 
-    useAuthStore.setState({
-      profile: operatorProfile,
-      accessToken: "token-1",
-      refreshToken: "refresh-1",
-      userId: "00000000-0000-0000-0000-000000000123",
-    });
-    useWorkspaceStore.setState({
-      organizationId: "00000000-0000-0000-0000-000000000111",
-      workspaceId: "00000000-0000-0000-0000-000000000222",
-      networkId: "00000000-0000-0000-0000-000000000333",
-    });
-    useUiStore.setState({
-      commandPaletteOpen: false,
-      toasts: [],
-    });
+it("hides legacy artifact references and never renders them as links or success", () => {
+  mocks.detail.mockReturnValue({ data: { ...record, status: "generated", artifacts: [{ uri: "s3://historical-invalid/ref.pdf", checksum_sha256: "fake", size_bytes: 16384 }] }, refetch: vi.fn() });
+  render(<ReportsPage />);
+  expect(screen.queryByText(/s3:\/\//)).not.toBeInTheDocument();
+  expect(screen.getByText("No verified artifacts available")).toBeInTheDocument();
+});
 
-    mockUseGenerateReport.mockReturnValue({
-      mutateAsync,
-      isPending: false,
-      isError: false,
-      error: null,
-    });
-    mockUseReportDetail.mockReturnValue(queryResult(null));
+it("shows backend validation and failed generation diagnostics; retry uses a new key after review", async () => {
+  mocks.detail.mockReturnValue({ data: record, refetch: vi.fn() });
+  render(<ReportsPage />);
+  expect(screen.getByText("Worker failed")).toBeInTheDocument();
+  const before = (screen.getByLabelText("Idempotency Key") as HTMLInputElement).value;
+  await userEvent.click(screen.getByRole("button", { name: "Retry Failed Report" }));
+  expect(screen.getByLabelText("Idempotency Key")).not.toHaveValue(before);
+  expect(mocks.generate).not.toHaveBeenCalled();
+  mocks.generate.mockRejectedValueOnce(new Error("simulation_ids require a simulation or summary report"));
+  await userEvent.click(screen.getByRole("button", { name: "Generate Report" }));
+  expect(screen.getByText("simulation_ids require a simulation or summary report")).toBeInTheDocument();
+});
 
-    mutateAsync.mockResolvedValue({
-      report_id: "00000000-0000-0000-0000-000000000951",
-      workspace_id: "00000000-0000-0000-0000-000000000222",
-      network_id: "00000000-0000-0000-0000-000000000333",
-      report_type: "executive_summary",
-      format: "pdf",
-      status: "requested",
-      date_range: {
-        start: "2026-08-01T00:00:00Z",
-        end: "2026-08-14T00:00:00Z",
-      },
-      scope: { workspace: "all" },
-      filters: { kpi: "latency" },
-      artifacts: [],
-      error: null,
-      queue_status: "queued",
-      stream_entry_id: "1000-0",
-      warning: null,
-      idempotency_key: "rep-1",
-      correlation_id: "corr-1",
-      requested_by_user_id: "00000000-0000-0000-0000-000000000123",
-      requested_at: "2026-08-14T12:00:00Z",
-      completed_at: null,
-      created_at: "2026-08-14T12:00:00Z",
-      updated_at: "2026-08-14T12:00:00Z",
-      idempotent_replay: false,
-    });
-  });
+it("paginates history, selects records and resets selection on workspace change", async () => {
+  mocks.history.mockReturnValue({ data: { items: [record], total: 21, page: 1, page_size: 20 }, refetch: vi.fn() });
+  const view = render(<ReportsPage />);
+  await userEvent.click(screen.getByRole("button", { name: /executive_summary \/ csv/ }));
+  expect(mocks.detail).toHaveBeenLastCalledWith("token", "r1", "w1");
+  await userEvent.click(screen.getByRole("button", { name: "Next Reports" }));
+  expect(mocks.history).toHaveBeenLastCalledWith("token", "w1", 2);
+  act(() => useWorkspaceStore.setState({ workspaceId: "w2" }));
+  view.rerender(<ReportsPage />);
+  expect(mocks.detail).toHaveBeenLastCalledWith("token", null, "w2");
+  expect(mocks.history).toHaveBeenLastCalledWith("token", "w2", 1);
+});
 
-  it("renders report generator and empty status state", () => {
-    render(<ReportsPage />);
-
-    expect(screen.getByText("Report Generator")).toBeInTheDocument();
-    expect(screen.getByText("Report Status")).toBeInTheDocument();
-    expect(screen.getByText("No report selected")).toBeInTheDocument();
-  });
-
-  it("submits report request and stores toast feedback", async () => {
-    const user = userEvent.setup();
-    render(<ReportsPage />);
-
-    await user.click(screen.getByRole("button", { name: "Generate Report" }));
-
-    expect(mutateAsync).toHaveBeenCalledTimes(1);
-    expect(useUiStore.getState().toasts.some((toast) => toast.title === "Report request accepted")).toBe(true);
-  });
-
-  it("does not call a failed demo report accepted or generated", async () => {
-    mutateAsync.mockResolvedValueOnce({ report_id: "demo-report", status: "failed", queue_status: "blocked", idempotent_replay: false });
-    render(<ReportsPage />);
-    await userEvent.click(screen.getByRole("button", { name: "Generate Report" }));
-    expect(useUiStore.getState().toasts.at(-1)).toMatchObject({
-      title: "Report failed: no artifacts generated", tone: "danger",
-    });
-  });
-
-  it("shows failed report diagnostics and retry action", async () => {
-    mockUseReportDetail.mockReturnValue(
-      queryResult({
-        report_id: "00000000-0000-0000-0000-000000000951",
-        workspace_id: "00000000-0000-0000-0000-000000000222",
-        network_id: "00000000-0000-0000-0000-000000000333",
-        report_type: "executive_summary",
-        format: "pdf",
-        status: "failed",
-        date_range: {
-          start: "2026-08-01T00:00:00Z",
-          end: "2026-08-14T00:00:00Z",
-        },
-        scope: { workspace: "all" },
-        filters: { kpi: "latency" },
-        artifacts: [],
-        error: {
-          code: "REPORT_GENERATION_FAILED",
-          message: "Report generation failed during queue processing.",
-        },
-        queue_status: "queued",
-        stream_entry_id: "1000-0",
-        warning: null,
-        idempotency_key: "rep-1",
-        correlation_id: "corr-1",
-        requested_by_user_id: "00000000-0000-0000-0000-000000000123",
-        requested_at: "2026-08-14T12:00:00Z",
-        completed_at: "2026-08-14T12:00:10Z",
-        created_at: "2026-08-14T12:00:00Z",
-        updated_at: "2026-08-14T12:00:10Z",
-      }),
-    );
-
-    const user = userEvent.setup();
-    render(<ReportsPage />);
-
-    expect(screen.getByText("Report generation failed")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Retry Failed Report" }));
-    expect(mutateAsync).toHaveBeenCalled();
-  });
-
-  it("renders generated artifacts metadata", () => {
-    mockUseReportDetail.mockReturnValue(
-      queryResult({
-        report_id: "00000000-0000-0000-0000-000000000951",
-        workspace_id: "00000000-0000-0000-0000-000000000222",
-        network_id: "00000000-0000-0000-0000-000000000333",
-        report_type: "executive_summary",
-        format: "pdf",
-        status: "generated",
-        date_range: {
-          start: "2026-08-01T00:00:00Z",
-          end: "2026-08-14T00:00:00Z",
-        },
-        scope: { workspace: "all" },
-        filters: { kpi: "latency" },
-        artifacts: [
-          {
-            artifact_id: "artifact-951-pdf",
-            uri: "s3://nanfo-reports/ws/report.pdf",
-            media_type: "application/pdf",
-            checksum_sha256: "abc123",
-            size_bytes: 16384,
-            generated_at: "2026-08-14T12:00:10Z",
-          },
-        ],
-        error: null,
-        queue_status: "queued",
-        stream_entry_id: "1000-0",
-        warning: null,
-        idempotency_key: "rep-1",
-        correlation_id: "corr-1",
-        requested_by_user_id: "00000000-0000-0000-0000-000000000123",
-        requested_at: "2026-08-14T12:00:00Z",
-        completed_at: "2026-08-14T12:00:10Z",
-        created_at: "2026-08-14T12:00:00Z",
-        updated_at: "2026-08-14T12:00:10Z",
-      }),
-    );
-
-    render(<ReportsPage />);
-
-    expect(screen.getByText("artifact-951-pdf")).toBeInTheDocument();
-    expect(screen.getByText("application/pdf")).toBeInTheDocument();
-  });
+it("blocks generation and retries for a read-only user", () => {
+  useAuthStore.setState({ profile: { ...operatorProfile, permissions: ["read:telemetry"] } });
+  mocks.detail.mockReturnValue({ data: record, refetch: vi.fn() });
+  render(<ReportsPage />);
+  expect(screen.getByRole("button", { name: "Generate Report" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Retry Failed Report" })).toBeDisabled();
 });

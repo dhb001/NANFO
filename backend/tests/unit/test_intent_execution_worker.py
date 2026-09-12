@@ -77,6 +77,26 @@ async def test_verified_compensation_is_terminal(worker_case):
     worker.mailbox.write.assert_not_called()
 
 
+@pytest.mark.parametrize("verified", [True, False])
+async def test_deadline_cancel_accepts_already_failed_compensation(worker_case, verified):
+    worker, job, result = worker_case
+    job.cancel_requested = True
+    job.command["deadline"] = (datetime.now(UTC) - timedelta(seconds=1)).isoformat()
+    job.command["dispatch_expires_at"] = (datetime.now(UTC) - timedelta(seconds=2)).isoformat()
+    result.update(status="failed", verification={},
+                  rollback={"verified": verified, "readback_sha256": "d" * 64})
+    worker.mailbox.read.return_value = LabResult.model_validate_json(json.dumps(
+        {**result, "completed_at": result["completed_at"].isoformat()}))
+    await worker._reconcile(job, asyncio.Event())
+    if verified:
+        assert worker._transition.await_args.kwargs["phase"] == "failed"
+        assert worker._transition.await_args.kwargs["safe"] is True
+        worker.mailbox.write.assert_not_called()
+    else:
+        assert worker._transition.await_args.kwargs["phase"] == "uncertain"
+        assert worker.mailbox.write.call_args.args[0].operation == "cancel"
+
+
 async def test_cancelled_unknown_retries_exact_cancellation_not_execute(worker_case):
     worker, job, result = worker_case
     job.cancel_requested = True

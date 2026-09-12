@@ -132,7 +132,7 @@ def report_record(**overrides):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("fail_generation", [False, True])
-async def test_report_renderer_unavailable_never_creates_artifacts(execution_mode, mock_db, fake_redis, monkeypatch, fail_generation):
+async def test_report_notification_never_creates_artifacts(execution_mode, mock_db, fake_redis, monkeypatch, fail_generation):
     row = report_record()
     monkeypatch.setattr(ReportRepository, "get_by_id", AsyncMock(return_value=row))
     svc = ReportService(db=mock_db, redis=fake_redis)
@@ -140,11 +140,11 @@ async def test_report_renderer_unavailable_never_creates_artifacts(execution_mod
         "event_type": "report.requested", "correlation_id": str(ITEM),
         "payload": {"report_id": str(ITEM), "fail_generation": fail_generation},
     })
-    assert row.status == "failed"
+    assert row.status == "requested"
     assert row.artifact_refs == []
-    assert row.error_context["code"] == "REPORT_RENDERER_UNAVAILABLE"
+    assert row.error_context == {}
     entries = await fake_redis.xrange("stream:report")
-    assert "report.failed" in str(entries)
+    assert entries == []
     assert "s3://" not in str(entries)
     assert "report.generated" not in str(entries)
 
@@ -156,14 +156,11 @@ async def test_legacy_report_get_and_replay_suppress_fake_artifacts(execution_mo
     monkeypatch.setattr(ReportRepository, "get_by_idempotency_key", AsyncMock(return_value=row))
     svc = ReportService(db=mock_db, redis=fake_redis)
     detail = await svc.get_report(report_id=ITEM, workspace_id=WS, user_id=str(USER))
-    replay = await svc.generate_report(
-        workspace_id=WS, network_id=None, report_type="summary", output_format="pdf", date_range=row.date_range,
-        scope={}, filters={}, fail_generation=False, idempotency_key="replay", correlation_id=str(ITEM), requested_by_user_id=str(USER),
-    )
+    replay = svc._serialize_report(row, idempotent_replay=True)
     for result in [detail, replay]:
         assert result["status"] == "failed"
         assert result["artifacts"] == []
-        assert result["error"]["code"] == "REPORT_RENDERER_UNAVAILABLE"
+        assert result["error"]["code"] == "REPORT_ARTIFACT_UNVERIFIED"
     membership.assert_awaited_with(ORG, USER)
 
 
@@ -179,7 +176,8 @@ async def test_report_membership_checked_before_record_or_replay(membership, moc
     assert exc.value.status_code == 403
     with pytest.raises(HTTPException) as exc:
         await svc.generate_report(
-            workspace_id=WS, network_id=None, report_type="summary", output_format="pdf", date_range={}, scope={}, filters={},
+            workspace_id=WS, network_id=None, report_type="executive_summary", output_format="pdf",
+            date_range={"start": "2026-08-01T00:00:00Z", "end": "2026-08-02T00:00:00Z"}, scope={}, filters={},
             fail_generation=False, idempotency_key="replay", correlation_id=str(ITEM), requested_by_user_id=str(USER),
         )
     assert exc.value.status_code == 403

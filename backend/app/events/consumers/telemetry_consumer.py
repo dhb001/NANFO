@@ -15,6 +15,7 @@ from app.core.logging import get_logger
 from app.db.postgres import AsyncSessionLocal
 from app.db.redis import get_redis_client
 from app.events.publisher import publish_event
+from app.events.consumers.alert_consumer import handle_persisted_metric_event
 from app.modules.telemetry.counters import TelemetryHealthCounterService
 from app.modules.telemetry.service import TelemetryPersistenceService
 from app.websocket.manager import telemetry_ws_manager
@@ -105,6 +106,7 @@ async def handle_telemetry_event(event: dict) -> None:
             persisted = await TelemetryPersistenceService(db).persist_event(event)
             if persisted:
                 await db.commit()
+                await handle_persisted_metric_event(event)
                 await _safe_increment_counter(
                     counter_service.increment_persisted if counter_service else None,
                     counter_name="persisted_events",
@@ -147,6 +149,7 @@ async def handle_telemetry_event(event: dict) -> None:
                     correlation_id=correlation_id,
                 )
                 # Persistence may have committed before the prior fanout failed.
+                await handle_persisted_metric_event(event)
                 await _push_telemetry_delta(event, payload)
     except (ValueError, TypeError) as exc:
         await _safe_increment_counter(

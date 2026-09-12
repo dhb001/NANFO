@@ -10,6 +10,11 @@ export interface PluginManifest {
 }
 
 export interface PluginRecord {
+  registry_only?: true;
+  execution_supported?: false;
+  lifecycle_semantics?: "registry_flags_only";
+  permissions_status?: "declared_unverified";
+  uninstalled_at?: string | null;
   plugin_id: string;
   plugin_key: string;
   name: string;
@@ -29,6 +34,9 @@ export interface PluginRecord {
 }
 
 export interface PluginListResult {
+  registry_only?: true;
+  execution_supported?: false;
+  lifecycle_semantics?: "registry_flags_only";
   items: PluginRecord[];
   total: number;
   status_counts: Record<string, number>;

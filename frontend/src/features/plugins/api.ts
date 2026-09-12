@@ -1,4 +1,4 @@
-import { apiRequest } from "@/shared/lib/api";
+import { apiRequest, apiRequestNoContent } from "@/shared/lib/api";
 import {
   InstallPluginRequest,
   PluginActionResult,
@@ -14,14 +14,8 @@ interface ListPluginsParams {
 
 function buildListPluginsQuery(params: ListPluginsParams): string {
   const query = new URLSearchParams();
-  if (params.status) {
-    query.set("status", params.status);
-  }
-  if (typeof params.enabled === "boolean") {
-    query.set("enabled", String(params.enabled));
-  }
-  if (params.search) {
-    query.set("search", params.search);
+  for (const key of ["status", "enabled", "search"] as const) {
+    if (params[key] !== undefined) query.set(key, String(params[key]));
   }
   query.set("limit", String(params.limit ?? 200));
   return query.toString();
@@ -53,4 +47,8 @@ export function disablePlugin(token: string, pluginId: string) {
     method: "POST",
     token,
   });
+}
+
+export function uninstallPlugin(token: string, pluginId: string) {
+  return apiRequestNoContent(`/api/v1/plugins/${encodeURIComponent(pluginId)}`, { token });
 }

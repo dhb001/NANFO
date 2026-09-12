@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { acknowledgeAlert, listAlerts, resolveAlert } from "@/features/reliability/api";
+import { acknowledgeAlert, listAlerts, resolveAlert, getAlert, getAlertHistory } from "@/features/reliability/api";
 
 const fetchMock = vi.fn();
 
@@ -9,6 +9,13 @@ beforeEach(() => {
 });
 
 describe("reliability api", () => {
+  it("reads authorized detail and history without invented query scope", async () => {
+    fetchMock.mockImplementation(async () => Response.json({ success: true, data: { alert_id: "a1", items: [], total: 0 }, meta: {}, errors: null }));
+    await getAlert("token-1", "a1"); await getAlertHistory("token-1", "a1");
+    expect(fetchMock.mock.calls[0][0]).toMatch(/\/api\/v1\/alerts\/a1$/);
+    expect(fetchMock.mock.calls[1][0]).toMatch(/\/api\/v1\/alerts\/a1\/history$/);
+    expect(fetchMock.mock.calls[1][1].headers).toEqual({ Authorization: "Bearer token-1" });
+  });
   it("lists alerts with query parameters", async () => {
     fetchMock.mockResolvedValueOnce({
       ok: true,

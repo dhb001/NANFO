@@ -34,6 +34,19 @@ from app.modules.identity.sessions import SessionRepository, invalid_session
 logger = get_logger(__name__)
 
 
+async def append_audit_log(
+    *, db: AsyncSession, event_type: str, actor_id: uuid.UUID,
+    resource_type: str, resource_id: uuid.UUID, correlation_id: uuid.UUID,
+    metadata: dict, org_id: uuid.UUID | None = None,
+) -> None:
+    """Public append boundary; caller commits audit and owned mutation atomically."""
+    await AuditLogRepository(db).append(
+        event_type=event_type, actor_id=actor_id, resource_type=resource_type,
+        resource_id=resource_id, correlation_id=correlation_id, metadata=metadata,
+        org_id=org_id,
+    )
+
+
 class AuthService:
 
     def __init__(self, db: AsyncSession, redis: aioredis.Redis):

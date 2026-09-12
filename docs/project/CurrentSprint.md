@@ -1,5 +1,48 @@
 # Current Sprint State
 
+## Steps 13-14 Module and Acceptance Increment (ADR-019)
+
+- Real CSV/PDF artifacts/history/downloads and measured durable alerts delivered;
+  plugin registry explicitly metadata-only with uninstall; energy estimator only.
+- Live acceptance final:8 runnable stages passed,22 cases passed/0failed/9blocked.
+  Initial failures retained; real cancellation bug and verifier defects fixed and
+  retested. Step14 remains PARTIAL, especially physical load/larger-topology and
+  DRL+safety/repeated-heldout/power-control cases.
+- Final backend2,028 passed/89opt-in skips;frontend487/browser41 and frontend gates
+  passed with unchanged410.09KiB budget. Migrations0017..0019 require deployment.
+- Evidence, limits and operations: `ModulesAcceptance-Step13-Step14.md`.
+
+## Step13 Frontend (ADR019)
+
+- Reports: schema-only form, current date defaults, workspace history pagination,
+  authorized binary downloads, actual byte counts, default-on SHA-256 verification,
+  safe filenames, legacy artifact masking and explicit snapshot omissions.
+- Reliability: expandable authorized detail/history with rule thresholds, sustained
+  windows, observation provenance and exact recovery scope. Existing realtime
+  reconciliation retained. Plugins explicitly metadata-only with confirmed uninstall.
+- Frontend typecheck/lint/build pass; 487 unit tests and 41 no-retry Chromium tests pass.
+  Bundle 410.09 KiB, below unchanged 410.16 KiB limit (very little headroom).
+- No backend/AI/emulation edits by this workstream; no energy page/toggle. Browser
+  PDF/CSV tests verify real fixture bytes, not deployed worker/physical acceptance.
+- Contracts, routes and parent deployment handoff: `Frontend-Step13-ADR019.md`.
+
+## ADR019 Backend Reports
+
+- Real CSV/ReportLab PDF, immutable scoped snapshots through owning services,
+  report-owned leased worker/outbox and migration0017 after0016. Authorized
+  owner-only current-membership downloads/history; actual length/hash verification,
+  historical fake artifacts masked. No inline placeholder generation.
+- Verified backend Poetry Python3.14.7 imports: ReportLab4.4.10/pypdf6.8.0;
+  no frozen AI environment installation or lab use. Full backend2001 passed/77
+  opt-in skips; five report PostgreSQL/real-Redis tests separately passed.
+- Disposable API/independent worker four-source CSV/PDF, frozen values, dual-tenant,
+  exact pagination totals, tamper, lease recovery, logout and revocation verified.
+  Evidence: `/tmp/opencode/report-verification-oq6764mr/result.json`.
+- Deployment requires private backend-owned external filesystem, worker and approved
+  migration0017 (current Alert service also0018). Source-limit omissions and default
+  PDF Unicode escape limitation remain explicit. No shared services migrated.
+  Frontend contract/commands: `backend/app/modules/report/README.md`.
+
 ## Remaining Operator Workflows (ADR-018)
 
 - Implemented selected measured probe paths, confined frozen-model diagnostics,
@@ -771,6 +814,19 @@
 - [x] chapter-01 to chapter-12 conformance audit closure complete (matrix, remediation list, validation outcomes, residual-gap register, and certification statement recorded in `docs/project/ChapterConformanceAudit.md`).
 
 ## Post-VS20 Quality Governance
+
+### ADR019 Measured Alert Backend
+- Alert-owned0018 after Report0017 implemented: persisted detector identity/run/
+  watermark, unique unresolved incidents, immutable history and atomic outbox.
+- Minimal persisted-telemetry composition validates measured provenance and current
+  operator binding authority. Sustained3samples/10s, maxgap10s, distinct recovery
+  thresholds; atomic acknowledgement/recovery, scope-before-limit and strict GETs.
+- Independent lightweight run_alert_worker.py; stable event IDs and audit dedup.
+  Full backend2,017 passed/58 opt-in skips, alert gate106 passed including20
+  disposable PostgreSQL tests. Scoped lint/whitespace clean. No shared migrations.
+- Operator/frontend handoff: backend/app/modules/alert/README.md. Evidence is
+  measured-typed fixtures, not live capture; real collector/lab acceptance stays
+  with the separate serialized acceptance campaign.
 
 ### ADR018 Backend Configuration And Overrides
 - Updated operator image d91efe1717f2 all6 physical cases passed, including

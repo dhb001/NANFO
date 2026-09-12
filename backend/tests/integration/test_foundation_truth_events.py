@@ -44,8 +44,8 @@ async def test_consumers_fail_closed_without_real_evaluator_or_renderer(mode, mo
     assert simulation.risk_gate == "blocked"
     assert all(value is None for value in simulation.run_output.values())
     assert simulation.validation["failure_reason"] == "evaluator_unavailable"
-    assert report.status == "failed"
+    assert report.status == "requested"
     assert report.artifact_refs == []
-    assert report.error_context["code"] == "REPORT_RENDERER_UNAVAILABLE"
+    assert report.error_context == {}
     assert "simulation.completed" not in str(await fake_redis.xrange("stream:simulation"))
-    assert mock_db.commit.await_count == 2
+    assert mock_db.commit.await_count == 1

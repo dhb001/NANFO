@@ -26,3 +26,9 @@ export interface AlertActionResult extends AlertRecord {
   warning: string | null;
   idempotent_replay: boolean;
 }
+
+export interface AlertHistoryResult {
+  alert_id: string;
+  items: { event_id: string; alert_id: string; event_type: string; correlation_id: string; occurred_at: string; payload: Record<string, unknown> }[];
+  total: number;
+}

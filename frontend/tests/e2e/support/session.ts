@@ -1,4 +1,5 @@
 import { expect, Page } from "@playwright/test";
+import { reportBytes, reportHash } from "./report-bytes";
 
 export interface MockNetwork {
   network_id: string;
@@ -65,9 +66,14 @@ export interface MockReportArtifactRef {
   checksum_sha256: string;
   size_bytes: number;
   generated_at: string;
+  filename?: string;
 }
 
 export interface MockReportRecord {
+  artifact_version?: number;
+  status_version?: number;
+  snapshot_sha256?: string;
+  snapshot_summary?: Record<string, unknown>;
   report_id: string;
   workspace_id: string;
   network_id: string | null;
@@ -108,6 +114,7 @@ export interface SessionMockState {
   alerts: MockAlertRecord[];
   plugins: MockPluginRecord[];
   reports: MockReportRecord[];
+  reportFailure?: boolean;
 }
 
 export function createDefaultSessionState(): SessionMockState {
@@ -271,7 +278,7 @@ function validatePluginSignature(signer: string, signature: string): { code: str
   if (!normalizedSigner || !TRUSTED_PLUGIN_SIGNERS.has(normalizedSigner)) {
     return {
       code: "PLUGIN_SIGNATURE_INVALID",
-      message: "Plugin signer is not trusted.",
+      message: "Declared signer is not in the admission allowlist; cryptographic verification is unsupported.",
       status: 400,
     };
   }
@@ -462,17 +469,13 @@ function buildReportArtifact(record: MockReportRecord, generatedAt: string): Moc
   const mediaType = extension === "pdf" ? "application/pdf" : "text/csv";
   return {
     artifact_id: `artifact-${record.report_id}-${extension}`,
-    uri: `s3://nanfo-reports/${record.workspace_id}/${record.report_id}.${extension}`,
+    uri: `/api/v1/reports/${record.report_id}/download?workspace_id=${record.workspace_id}`,
+    filename: `fixture-report.${extension}`,
     media_type: mediaType,
-    checksum_sha256: `sha256-${record.report_id.replace(/-/g, "").slice(0, 18)}`,
-    size_bytes: extension === "pdf" ? 16384 : 8192,
+    checksum_sha256: reportHash(reportBytes(extension)),
+    size_bytes: reportBytes(extension).length,
     generated_at: generatedAt,
   };
-}
-
-function shouldReportFail(record: MockReportRecord): boolean {
-  const filters = record.filters;
-  return filters.force_fail === true || filters.fail_generation === true;
 }
 
 export async function installSessionMocks(page: Page, state: SessionMockState): Promise<void> {
@@ -1034,9 +1037,9 @@ export async function installSessionMocks(page: Page, state: SessionMockState): 
           sandbox: manifest.sandbox,
           metadata: manifest.metadata,
         },
-        signature_status: "verified",
-        dependency_status: "compatible",
-        sandbox_status: "isolated",
+        signature_status: "declared_unverified",
+        dependency_status: "declared_unverified",
+        sandbox_status: "not_executed",
         status: "installed",
         enabled: false,
         failure_reason: null,
@@ -1152,9 +1155,9 @@ export async function installSessionMocks(page: Page, state: SessionMockState): 
       target.status = "enabled";
       target.enabled = true;
       target.failure_reason = null;
-      target.signature_status = "verified";
-      target.dependency_status = "compatible";
-      target.sandbox_status = "isolated";
+      target.signature_status = "declared_unverified";
+      target.dependency_status = "declared_unverified";
+      target.sandbox_status = "not_executed";
       target.queue_status = "queued";
       target.stream_entry_id = `plugin-${Date.now()}`;
       target.warning = null;
@@ -1230,11 +1233,31 @@ export async function installSessionMocks(page: Page, state: SessionMockState): 
     await route.continue();
   });
 
-  await page.route("**/api/v1/reports/**", async (route) => {
+  await page.route("**/api/v1/reports**", async (route) => {
     const request = route.request();
     const requestUrl = new URL(request.url());
     const method = request.method();
     const pathname = requestUrl.pathname;
+
+    if (method === "GET" && pathname === "/api/v1/reports") {
+      const pageNumber = Number(requestUrl.searchParams.get("page") ?? 1);
+      const pageSize = Number(requestUrl.searchParams.get("page_size") ?? 20);
+      const scoped = state.reports.filter((report) => report.workspace_id === requestUrl.searchParams.get("workspace_id"));
+      await route.fulfill({ json: { success: true, data: { items: scoped.slice((pageNumber - 1) * pageSize, pageNumber * pageSize), total: scoped.length, page: pageNumber, page_size: pageSize }, meta: { request_id: "fixture-history", timestamp: "2026-09-11T00:00:00Z" }, errors: null } });
+      return;
+    }
+
+    if (method === "GET" && pathname.endsWith("/download")) {
+      const record = state.reports.find((report) => pathname === `/api/v1/reports/${report.report_id}/download` && report.workspace_id === requestUrl.searchParams.get("workspace_id"));
+      expect(request.headers().authorization).toBe("Bearer token-1");
+      if (!record || record.status !== "generated" || record.artifact_version !== 1) {
+        await route.fulfill({ status: 409, json: { success: false, data: null, meta: {}, errors: { code: "REPORT_ARTIFACT_UNAVAILABLE", message: "No verified generated artifact." } } });
+      } else {
+        const bytes = reportBytes(record.format);
+        await route.fulfill({ body: bytes, headers: { "Content-Type": record.format === "pdf" ? "application/pdf" : "text/csv", "Content-Length": String(bytes.length), ETag: `"${reportHash(bytes)}"`, "Content-Disposition": `attachment; filename="fixture-report.${record.format}"` } });
+      }
+      return;
+    }
 
     if (method === "POST" && pathname === "/api/v1/reports/generate") {
       const payload = parseReportGenerateBody(request.postDataJSON());
@@ -1350,33 +1373,15 @@ export async function installSessionMocks(page: Page, state: SessionMockState): 
 
       const now = "2026-08-14T12:00:00Z";
       const reportId = nextReportId(state);
-      const shouldFail = shouldReportFail({
-        report_id: reportId,
-        workspace_id: payload.workspace_id,
-        network_id: payload.network_id,
-        report_type: payload.report_type,
-        format: payload.format,
-        status: "requested",
-        date_range: payload.date_range,
-        scope: payload.scope,
-        filters: payload.filters,
-        artifacts: [],
-        error: null,
-        queue_status: "queued",
-        stream_entry_id: null,
-        warning: null,
-        idempotency_key: idempotencyKey || null,
-        correlation_id: `corr-${Date.now()}`,
-        requested_by_user_id: state.userId,
-        requested_at: now,
-        completed_at: null,
-        created_at: now,
-        updated_at: now,
-      });
+      const shouldFail = state.reportFailure === true;
 
       const queuedStatus: MockReportRecord["status"] = shouldFail ? "failed" : "generated";
       const terminalTime = "2026-08-14T12:00:05Z";
       const seedRecord: MockReportRecord = {
+        artifact_version: 1,
+        status_version: 2,
+        snapshot_sha256: reportHash(Buffer.from("browser-contract-fixture-snapshot")),
+        snapshot_summary: { telemetry: { row_count: 1, total: 1, truncated: false, omissions: ["fixture_not_live_measurements"], time_field: "observed_at" } },
         report_id: reportId,
         workspace_id: payload.workspace_id,
         network_id: payload.network_id,

@@ -7,7 +7,7 @@ import uuid
 from typing import Annotated
 
 import redis.asyncio as aioredis
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Query, Response, status
 
 from app.core.dependencies import (
     RequestMeta,
@@ -32,6 +32,22 @@ from app.modules.plugin.service import PluginService
 router = APIRouter(
     prefix="/api/v1/plugins", tags=["Plugins"], dependencies=[Depends(require_roles("Admin"))],
 )
+
+
+@router.delete("/{plugin_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def uninstall_plugin(
+    plugin_id: uuid.UUID,
+    claims: Annotated[TokenClaims, Depends(require_permissions("write:config"))],
+    meta: Annotated[RequestMeta, Depends(get_request_meta)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    redis: Annotated[aioredis.Redis, Depends(get_redis)],
+) -> Response:
+    await PluginService(db=db, redis=redis).uninstall_plugin(
+        plugin_id=plugin_id, correlation_id=meta.request_id, requested_by_user_id=claims.user_id,
+        claim_org_id=get_claim_org_scope(claims=claims),
+        claim_workspace_id=get_claim_workspace_scope(claims=claims),
+    )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get("", response_model=APIResponse[PluginListResponse], status_code=status.HTTP_200_OK)

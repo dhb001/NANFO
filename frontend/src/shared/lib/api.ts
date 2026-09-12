@@ -116,12 +116,12 @@ export async function apiRequestNoContent(
     }
   }
 
-  if (!response.ok) {
+  if (response.status !== 204) {
     if (response.status === 401 && !retryAuth && token === useAuthStore.getState().accessToken) {
       useAuthStore.getState().clearSession();
     }
     let code = `HTTP_${response.status}`;
-    let message = `Request failed (${response.status})`;
+    let message = `Expected no-content response (${response.status})`;
     try {
       const payload = (await response.json()) as ApiEnvelope<unknown>;
       code = payload.errors?.code ?? code;

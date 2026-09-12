@@ -81,7 +81,7 @@ def _report_response_payload(*, status: str, queue_status: str, idempotent_repla
             "end": "2026-08-14T00:00:00+00:00",
         },
         "scope": {"workspace": "all"},
-        "filters": {"kpi": "latency"},
+        "filters": {"metric": "latency"},
         "artifacts": [],
         "error": None,
         "queue_status": queue_status,
@@ -144,7 +144,7 @@ def test_generate_report_returns_202_with_requested_payload(client):
                     "end": "2026-08-14T00:00:00Z",
                 },
                 "scope": {"workspace": "all"},
-                "filters": {"kpi": "latency"},
+                "filters": {"metric": "latency"},
             },
             headers=headers,
         )
@@ -188,7 +188,7 @@ def test_generate_report_returns_generated_replay_payload(client):
                     "end": "2026-08-14T00:00:00Z",
                 },
                 "scope": {"workspace": "all"},
-                "filters": {"kpi": "latency"},
+                "filters": {"metric": "latency"},
             },
             headers=headers,
         )
@@ -231,7 +231,7 @@ def test_generate_report_idempotency_conflict_returns_409(client):
                     "end": "2026-08-14T00:00:00Z",
                 },
                 "scope": {"workspace": "all"},
-                "filters": {"kpi": "loss"},
+                "filters": {"metric": "loss"},
             },
             headers=headers,
         )
@@ -242,7 +242,7 @@ def test_generate_report_idempotency_conflict_returns_409(client):
     assert body["errors"]["code"] == "REPORT_IDEMPOTENCY_CONFLICT"
 
 
-def test_generate_report_invalid_date_range_returns_400(client):
+def test_generate_report_invalid_date_range_rejected_by_schema(client):
     headers = {"Authorization": f"Bearer {_make_token()}"}
 
     with patch(
@@ -269,15 +269,15 @@ def test_generate_report_invalid_date_range_returns_400(client):
                     "end": "2026-08-01T00:00:00Z",
                 },
                 "scope": {"workspace": "all"},
-                "filters": {"kpi": "latency"},
+                "filters": {"metric": "latency"},
             },
             headers=headers,
         )
 
-    assert response.status_code == 400
+    assert response.status_code == 422
     body = response.json()
     assert body["success"] is False
-    assert body["errors"]["code"] == "REPORT_DATE_RANGE_INVALID"
+    assert body["errors"]
 
 
 def test_get_report_returns_generated_payload(client):
@@ -368,7 +368,7 @@ def test_report_routes_require_auth(client):
                 "end": "2026-08-14T00:00:00Z",
             },
             "scope": {"workspace": "all"},
-            "filters": {"kpi": "latency"},
+            "filters": {"metric": "latency"},
         },
     )
     get_response = client.get(
@@ -394,7 +394,7 @@ def test_report_routes_require_read_telemetry_permission(client):
                 "end": "2026-08-14T00:00:00Z",
             },
             "scope": {"workspace": "all"},
-            "filters": {"kpi": "latency"},
+            "filters": {"metric": "latency"},
         },
         headers=headers,
     )
@@ -423,7 +423,7 @@ def test_report_generate_workspace_scope_mismatch_returns_403(client):
                 "end": "2026-08-14T00:00:00Z",
             },
             "scope": {"workspace": "all"},
-            "filters": {"kpi": "latency"},
+            "filters": {"metric": "latency"},
         },
         headers=headers,
     )
@@ -441,3 +441,33 @@ def test_report_get_workspace_scope_mismatch_returns_403(client):
     )
 
     assert response.status_code == 403
+
+
+def test_report_history_contract_and_bounded_page(client):
+    payload = _report_response_payload(status="requested", queue_status="outbox_pending", idempotent_replay=False)
+    headers = {"Authorization": f"Bearer {_make_token()}"}
+    with patch("app.modules.report.service.ReportService.history", AsyncMock(return_value={
+        "items": [payload], "total": 7, "page": 2, "page_size": 1,
+    })) as history:
+        response = client.get("/api/v1/reports", params={"workspace_id": str(payload["workspace_id"]), "page": 2, "page_size": 1}, headers=headers)
+    assert response.status_code == 200 and response.json()["data"]["total"] == 7
+    assert history.await_args.kwargs["page"] == 2
+    response = client.get("/api/v1/reports", params={"workspace_id": str(payload["workspace_id"]), "page_size": 101}, headers=headers)
+    assert response.status_code == 422 and not response.json()["success"]
+
+
+def test_report_download_binary_and_json_error_contract(client):
+    payload = _report_response_payload(status="requested", queue_status="outbox_pending", idempotent_replay=False)
+    headers = {"Authorization": f"Bearer {_make_token()}"}
+    path = f"/api/v1/reports/{payload['report_id']}/download"
+    with patch("app.modules.report.service.ReportService.download", AsyncMock(return_value=(b"a,b\r\n", {
+        "media_type": "text/csv", "filename": "safe.csv", "checksum_sha256": "a" * 64,
+    }))):
+        response = client.get(path, params={"workspace_id": str(payload["workspace_id"])}, headers=headers)
+    assert response.status_code == 200 and response.content == b"a,b\r\n"
+    assert response.headers["content-length"] == "5" and response.headers["cache-control"] == "no-store"
+    with patch("app.modules.report.service.ReportService.download", AsyncMock(side_effect=HTTPException(409, detail={
+        "code": "REPORT_ARTIFACT_INVALID", "message": "Invalid artifact",
+    }))):
+        response = client.get(path, params={"workspace_id": str(payload["workspace_id"])}, headers=headers)
+    assert response.status_code == 409 and response.json()["errors"]["code"] == "REPORT_ARTIFACT_INVALID"

@@ -1,5 +1,5 @@
 import { apiRequest } from "@/shared/lib/api";
-import { AlertActionResult, AlertListResult } from "@/shared/types/alerts";
+import { AlertActionResult, AlertListResult, AlertRecord, AlertHistoryResult } from "@/shared/types/alerts";
 
 interface ListAlertsParams {
   status?: "active" | "acknowledged" | "resolved";
@@ -12,20 +12,11 @@ interface ListAlertsParams {
 
 function buildListAlertsQuery(params: ListAlertsParams): string {
   const query = new URLSearchParams();
-  if (params.status) {
-    query.set("status", params.status);
-  }
-  if (params.severity) {
-    query.set("severity", params.severity);
-  }
-  if (params.source) {
-    query.set("source", params.source);
+  for (const key of ["status", "severity", "source", "search"] as const) {
+    if (params[key]) query.set(key, params[key]);
   }
   if (params.correlationId) {
     query.set("correlation_id", params.correlationId);
-  }
-  if (params.search) {
-    query.set("search", params.search);
   }
   query.set("limit", String(params.limit ?? 200));
   return query.toString();
@@ -49,4 +40,12 @@ export function resolveAlert(token: string, alertId: string) {
     method: "POST",
     token,
   });
+}
+
+export function getAlert(token: string, alertId: string) {
+  return apiRequest<AlertRecord>(`/api/v1/alerts/${encodeURIComponent(alertId)}`, { token });
+}
+
+export function getAlertHistory(token: string, alertId: string) {
+  return apiRequest<AlertHistoryResult>(`/api/v1/alerts/${encodeURIComponent(alertId)}/history`, { token });
 }

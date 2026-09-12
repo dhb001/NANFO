@@ -1,4 +1,4 @@
-"""Unit tests for plugin service lifecycle and safety behavior."""
+"""Unit tests for metadata registry lifecycle and declaration admission."""
 
 from __future__ import annotations
 
@@ -9,8 +9,10 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi import HTTPException
+from pydantic import ValidationError
 
-from app.modules.plugin.schemas import PluginInstallRequest
+from app.modules.plugin.repository import PluginRepository
+from app.modules.plugin.schemas import PluginInstallRequest, PluginRecordResponse
 from app.modules.plugin.service import PluginService
 
 
@@ -187,14 +189,19 @@ async def test_install_plugin_creates_record_and_publishes_installed_event(mock_
     assert result.enabled is False
     assert result.queue_status == "queued"
     assert result.stream_entry_id == "700-0"
+    assert result.registry_only is True and result.execution_supported is False
+    assert service._repo.create.await_args.kwargs["signature_status"] == "declared_unverified"
+    assert service._repo.create.await_args.kwargs["dependency_status"] == "declared_unverified"
+    assert service._repo.create.await_args.kwargs["sandbox_status"] == "not_executed"
     assert mock_publish.await_args.kwargs["event_type"] == "plugin.installed"
-    assert mock_db.commit.await_count == 2
+    assert mock_db.commit.await_count == 1
     mock_db.refresh.assert_awaited_with(row)
 
 
 @pytest.mark.asyncio
 async def test_install_plugin_returns_replay_when_same_key_and_version(mock_db, fake_redis):
     row = _make_plugin_row(status="installed", enabled=False, version="1.0.0")
+    row.manifest = _install_request().model_dump()
     service = PluginService(db=mock_db, redis=fake_redis)
     service._repo.get_by_plugin_key = AsyncMock(return_value=row)
 
@@ -347,7 +354,7 @@ async def test_enable_plugin_replay_when_already_enabled(mock_db, fake_redis):
 
 
 @pytest.mark.asyncio
-async def test_enable_plugin_fails_isolated_and_publishes_plugin_failed_event(mock_db, fake_redis):
+async def test_enable_plugin_rejects_declarations_without_claiming_isolation(mock_db, fake_redis):
     row = _make_plugin_row(status="installed", enabled=False)
     row.manifest["sandbox"]["permissions"] = ["write:config"]
     service = PluginService(db=mock_db, redis=fake_redis)
@@ -380,8 +387,9 @@ async def test_enable_plugin_fails_isolated_and_publishes_plugin_failed_event(mo
     assert exc_info.value.detail["code"] == "PLUGIN_PERMISSION_SCOPE_INVALID"
     assert row.status == "failed"
     assert row.enabled is False
-    assert row.sandbox_status == "blocked"
+    assert row.sandbox_status == "isolated"  # Historical stored claim is not rewritten.
     assert mock_publish.await_args.kwargs["event_type"] == "plugin.failed"
+    assert mock_publish.await_args.kwargs["payload"]["sandbox_status"] == "not_executed"
 
 
 @pytest.mark.asyncio
@@ -484,3 +492,193 @@ async def test_disable_plugin_success_transitions_and_publishes_disabled_event(m
     assert result.queue_status == "queued"
     assert result.stream_entry_id == "802-0"
     assert mock_publish.await_args.kwargs["event_type"] == "plugin.disabled"
+
+
+def test_historical_claims_are_masked_without_mutating_manifest_or_row():
+    row = _make_plugin_row()
+    result = PluginRecordResponse.model_validate(row).model_dump(mode="json")
+    assert result["registry_only"] is True
+    assert result["execution_supported"] is False
+    assert result["lifecycle_semantics"] == "registry_flags_only"
+    assert result["signature_status"] == result["dependency_status"] == "declared_unverified"
+    assert result["permissions_status"] == "declared_unverified"
+    assert result["sandbox_status"] == "not_executed"
+    assert result["manifest"] == row.manifest
+    assert (row.signature_status, row.dependency_status, row.sandbox_status) == ("verified", "compatible", "isolated")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("overrides", [
+    {"name": "Other"}, {"signer": "other-signer"}, {"signature": "sig:changed1234567890"},
+    {"dependencies": {"requires": ["core:other"]}},
+    {"sandbox": {"permissions": ["read:topology"], "isolation_mode": "process"}},
+    {"metadata": {"digest": "sha256:changed"}},
+])
+@pytest.mark.parametrize("stored_status", ["installed", "uninstalled"])
+async def test_same_version_conflicting_manifest_is_409(mock_db, fake_redis, overrides, stored_status):
+    row = _make_plugin_row(status=stored_status)
+    row.manifest = _install_request().model_dump()
+    service = PluginService(db=mock_db, redis=fake_redis)
+    service._repo.get_by_plugin_key = AsyncMock(return_value=row)
+    with patch("app.modules.plugin.service.publish_event", new_callable=AsyncMock) as publish:
+        with pytest.raises(HTTPException) as exc:
+            await service.install_plugin(req=_install_request(**overrides), correlation_id=str(uuid.uuid4()),
+                                         requested_by_user_id=str(uuid.uuid4()))
+    assert exc.value.status_code == 409
+    assert exc.value.detail["code"] == "PLUGIN_MANIFEST_CONFLICT"
+    mock_db.commit.assert_not_awaited()
+    publish.assert_not_awaited()
+
+
+def test_canonical_manifest_ignores_object_order_not_json_types():
+    manifest = _install_request().model_dump()
+    assert PluginService._canonical_manifest(manifest) == PluginService._canonical_manifest(
+        dict(reversed(list(manifest.items())))
+    )
+    assert PluginService._canonical_manifest(_install_request(metadata={"flag": True}).model_dump()) != (
+        PluginService._canonical_manifest(_install_request(metadata={"flag": 1}).model_dump())
+    )
+
+
+@pytest.mark.parametrize("overrides", [
+    {"plugin_key": "   "}, {"signer": " "}, {"name": 42}, {"entrypoint": "remote.py"},
+    {"metadata": {"watts": float("nan")}}, {"metadata": {"oversized": "x" * 65_537}},
+])
+def test_manifest_schema_rejects_invalid_metadata(overrides):
+    with pytest.raises(ValidationError):
+        _install_request(**overrides)
+
+
+@pytest.mark.asyncio
+async def test_uninstall_and_identical_reinstall_preserve_id_and_history(mock_db, fake_redis):
+    row = _make_plugin_row(status="enabled", enabled=True)
+    row.manifest = _install_request().model_dump()
+    row.uninstalled_at = None
+    original_id, original_install = row.plugin_id, row.installed_at
+    service = PluginService(db=mock_db, redis=fake_redis)
+    service._repo.get_by_id = AsyncMock(return_value=row)
+    service._repo.get_by_plugin_key = AsyncMock(return_value=row)
+    service._repo.create = AsyncMock()
+    actor = str(uuid.uuid4())
+    correlation = str(uuid.uuid4())
+    with patch("app.modules.identity.service.AuditLogRepository.append", new_callable=AsyncMock) as audit:
+        with patch("app.modules.plugin.service.publish_event", new_callable=AsyncMock) as publish:
+            await service.uninstall_plugin(plugin_id=row.plugin_id, correlation_id=correlation,
+                                           requested_by_user_id=actor)
+            first_removed_at = row.uninstalled_at
+            assert first_removed_at is not None
+            assert row.status == "uninstalled" and row.enabled is False
+            await service.uninstall_plugin(plugin_id=row.plugin_id, correlation_id=correlation,
+                                           requested_by_user_id=actor)
+            assert row.uninstalled_at == first_removed_at
+            assert audit.await_count == 1
+            assert audit.await_args.kwargs["event_type"] == "plugin.registry.removed"
+            assert audit.await_args.kwargs["actor_id"] == uuid.UUID(actor)
+            assert audit.await_args.kwargs["resource_id"] == original_id
+            publish.assert_not_awaited()
+            publish.return_value = "900-0"
+            response = await service.install_plugin(req=_install_request(), correlation_id=correlation,
+                                                    requested_by_user_id=actor)
+    assert response.status == "installed" and response.enabled is False
+    assert response.idempotent_replay is False
+    assert row.plugin_id == original_id and row.installed_at == original_install
+    assert row.uninstalled_at is None
+    assert row.signature_status == "verified"
+    service._repo.create.assert_not_awaited()
+    assert mock_db.commit.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_uninstall_audit_failure_does_not_commit(mock_db, fake_redis):
+    row = _make_plugin_row()
+    service = PluginService(db=mock_db, redis=fake_redis)
+    service._repo.get_by_id = AsyncMock(return_value=row)
+    with patch("app.modules.plugin.service.append_audit_log", side_effect=RuntimeError("audit unavailable")):
+        with pytest.raises(RuntimeError):
+            await service.uninstall_plugin(plugin_id=row.plugin_id, correlation_id=str(uuid.uuid4()),
+                                           requested_by_user_id=str(uuid.uuid4()))
+    mock_db.commit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("action", ["enable_plugin", "disable_plugin"])
+async def test_uninstalled_flags_cannot_be_changed_without_reinstall(mock_db, fake_redis, action):
+    service = PluginService(db=mock_db, redis=fake_redis)
+    row = _make_plugin_row(status="uninstalled")
+    service._repo.get_by_id = AsyncMock(return_value=row)
+    with pytest.raises(HTTPException) as exc:
+        await getattr(service, action)(plugin_id=row.plugin_id, correlation_id=str(uuid.uuid4()),
+                                       requested_by_user_id=str(uuid.uuid4()))
+    assert exc.value.status_code == 409
+    assert exc.value.detail["code"] == "PLUGIN_UNINSTALLED"
+    mock_db.commit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_uninstall_missing_record_is_404(mock_db, fake_redis):
+    service = PluginService(db=mock_db, redis=fake_redis)
+    service._repo.get_by_id = AsyncMock(return_value=None)
+    with pytest.raises(HTTPException) as exc:
+        await service.uninstall_plugin(plugin_id=uuid.uuid4(), correlation_id=str(uuid.uuid4()),
+                                       requested_by_user_id=str(uuid.uuid4()))
+    assert exc.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_repository_serializes_mutations_and_excludes_uninstalled_by_default(mock_db):
+    from unittest.mock import MagicMock
+
+    from sqlalchemy.dialects import postgresql
+
+    mock_db.execute.return_value = MagicMock()
+    repo = PluginRepository(mock_db)
+    await repo.get_by_plugin_key("safe-plugin")
+    assert "pg_advisory_xact_lock" in str(mock_db.execute.await_args_list[0].args[0])
+    assert "FOR UPDATE" in str(mock_db.execute.await_args.args[0])
+    await repo.get_by_id(uuid.uuid4())
+    assert "FOR UPDATE" in str(mock_db.execute.await_args.args[0])
+    for status_filter, operator in [(None, "!="), ("uninstalled", "=")]:
+        await repo.list_plugins(status=status_filter, enabled=None, search=None, limit=20)
+        sql = str(mock_db.execute.await_args.args[0].compile(
+            dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True},
+        ))
+        assert f"plugins.status {operator} 'uninstalled'" in sql
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("overrides,code", [
+    ({"dependencies": {"requires": [42]}}, "PLUGIN_DEPENDENCY_INVALID"),
+    ({"dependencies": {"platform_version": True}}, "PLUGIN_DEPENDENCY_INVALID"),
+    ({"sandbox": {"permissions": [42]}}, "PLUGIN_SANDBOX_INVALID"),
+    ({"sandbox": {"isolation_mode": True}}, "PLUGIN_SANDBOX_INVALID"),
+])
+async def test_invalid_declaration_types_rejected(mock_db, fake_redis, overrides, code):
+    service = PluginService(db=mock_db, redis=None)
+    service._repo.get_by_plugin_key = AsyncMock(return_value=None)
+    with pytest.raises(HTTPException) as exc:
+        await service.install_plugin(req=_install_request(**overrides), correlation_id=str(uuid.uuid4()),
+                                     requested_by_user_id=str(uuid.uuid4()))
+    assert exc.value.detail["code"] == code
+
+
+@pytest.mark.asyncio
+async def test_disable_installed_record_sets_explicit_disabled_status(mock_db):
+    service = PluginService(db=mock_db, redis=None)
+    row = _make_plugin_row()
+    service._repo.get_by_id = AsyncMock(return_value=row)
+    response = await service.disable_plugin(plugin_id=row.plugin_id, correlation_id=str(uuid.uuid4()),
+                                            requested_by_user_id=str(uuid.uuid4()))
+    assert response.status == "disabled" and response.idempotent_replay is False
+
+
+@pytest.mark.asyncio
+async def test_enable_revalidates_historical_manifest_schema(mock_db):
+    service = PluginService(db=mock_db, redis=None)
+    row = _make_plugin_row()
+    row.manifest["sandbox"] = "process"
+    service._repo.get_by_id = AsyncMock(return_value=row)
+    with pytest.raises(HTTPException) as exc:
+        await service.enable_plugin(plugin_id=row.plugin_id, correlation_id=str(uuid.uuid4()),
+                                    requested_by_user_id=str(uuid.uuid4()))
+    assert exc.value.detail["code"] == "PLUGIN_MANIFEST_INVALID"
+    assert row.status == "failed"

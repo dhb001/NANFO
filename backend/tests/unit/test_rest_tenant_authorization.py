@@ -243,8 +243,8 @@ async def test_org_deletion_denies_descendants_with_same_token(tenant_api):
 async def test_claims_only_narrow_report_and_intent_access(tenant_api, org, workspace):
     headers = await tenant_api.headers(org=org, workspace=workspace)
     for path, body in [
-        ("/reports/generate", {"workspace_id": str(WS_A), "report_type": "operational", "format": "csv",
-                               "date_range": {"start": NOW.isoformat(), "end": NOW.isoformat()}}),
+        ("/reports/generate", {"workspace_id": str(WS_A), "report_type": "operational_summary", "format": "csv",
+                               "date_range": {"start": NOW.isoformat(), "end": "2026-01-02T00:00:00Z"}}),
         ("/intents/validate", {"workspace_id": str(WS_A)}),
         ("/intents/execute", {"workspace_id": str(WS_A), "intent_id": str(ITEM)}),
     ]:
@@ -253,8 +253,8 @@ async def test_claims_only_narrow_report_and_intent_access(tenant_api, org, work
 
 
 @pytest.mark.parametrize("path,body", [
-    ("/reports/generate", {"workspace_id": str(WS_B), "report_type": "operational", "format": "csv",
-                           "date_range": {"start": NOW.isoformat(), "end": NOW.isoformat()}}),
+    ("/reports/generate", {"workspace_id": str(WS_B), "report_type": "operational_summary", "format": "csv",
+                           "date_range": {"start": NOW.isoformat(), "end": "2026-01-02T00:00:00Z"}}),
     ("/intents/validate", {"workspace_id": str(WS_B)}),
     ("/intents/execute", {"workspace_id": str(WS_B), "intent_id": str(ITEM)}),
     ("/simulations/start", {"network_id": str(NET_B), "scenario_name": "test"}),
@@ -340,7 +340,9 @@ async def test_alerts_fail_closed_without_tenant_and_check_org_membership(tenant
             assert exc.value.status_code == 403
 
 
-async def test_alert_list_excludes_deleted_revoked_and_unscoped_rows(tenant_api):
+async def test_alert_list_excludes_deleted_revoked_and_unscoped_rows(tenant_api, monkeypatch):
+    monkeypatch.setattr(WorkspaceRepository, "list_accessible_ids", AsyncMock(
+        side_effect=lambda **kwargs: [WS_A] if ORG_A in tenant_api.orgs else []))
     def alert(payload):
         return SimpleNamespace(
             alert_id=ITEM, alert_key="test", source="telemetry", status="active", severity="critical",
@@ -401,8 +403,8 @@ async def test_workspace_id_helper_uses_only_organization_owned_active_membershi
     ("POST", f"/alerts/{ITEM}/ack", {}),
     ("POST", f"/alerts/{ITEM}/resolve", {}),
     ("POST", "/topology/reconcile", {"network_id": str(NET_A)}),
-    ("POST", "/reports/generate", {"workspace_id": str(WS_A), "report_type": "summary", "format": "csv",
-                                     "date_range": {"start": NOW.isoformat(), "end": NOW.isoformat()}}),
+    ("POST", "/reports/generate", {"workspace_id": str(WS_A), "report_type": "executive_summary", "format": "csv",
+                                     "date_range": {"start": NOW.isoformat(), "end": "2026-01-02T00:00:00Z"}}),
 ])
 async def test_global_writer_org_readonly_denies_every_resource_mutation(
     tenant_api, monkeypatch, mock_db, global_role, method, path, body,

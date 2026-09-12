@@ -21,10 +21,40 @@ from app.core.dependencies import (
 )
 from app.core.responses import APIResponse, success_response
 from app.db.postgres import AsyncSession
-from app.modules.alert.schemas import AlertActionResponse, AlertListResponse
+from app.modules.alert.schemas import AlertActionResponse, AlertHistoryResponse, AlertListResponse, AlertRecordResponse
 from app.modules.alert.service import AlertService
 
 router = APIRouter(prefix="/api/v1/alerts", tags=["Alerts"])
+
+
+@router.get("/{alert_id}", response_model=APIResponse[AlertRecordResponse])
+async def get_alert(
+    alert_id: uuid.UUID,
+    claims: Annotated[TokenClaims, Depends(require_permissions("read:telemetry"))],
+    meta: Annotated[RequestMeta, Depends(get_request_meta)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    redis: Annotated[aioredis.Redis, Depends(get_redis)],
+):
+    started = time.monotonic()
+    payload = await AlertService(db=db, redis=redis).get_alert(alert_id=alert_id,
+        actor_user_id=claims.user_id, requested_workspace_id=get_claim_workspace_scope(claims=claims),
+        claim_org_id=get_claim_org_scope(claims=claims))
+    return success_response(payload, meta.request_id, started, meta.timestamp)
+
+
+@router.get("/{alert_id}/history", response_model=APIResponse[AlertHistoryResponse])
+async def get_alert_history(
+    alert_id: uuid.UUID,
+    claims: Annotated[TokenClaims, Depends(require_permissions("read:telemetry"))],
+    meta: Annotated[RequestMeta, Depends(get_request_meta)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    redis: Annotated[aioredis.Redis, Depends(get_redis)],
+):
+    started = time.monotonic()
+    payload = await AlertService(db=db, redis=redis).get_history(alert_id=alert_id,
+        actor_user_id=claims.user_id, requested_workspace_id=get_claim_workspace_scope(claims=claims),
+        claim_org_id=get_claim_org_scope(claims=claims))
+    return success_response(payload, meta.request_id, started, meta.timestamp)
 
 
 @router.get("", response_model=APIResponse[AlertListResponse], status_code=status.HTTP_200_OK)

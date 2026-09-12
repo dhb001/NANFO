@@ -7,6 +7,12 @@ from __future__ import annotations
 
 from app.db.postgres import AsyncSessionLocal
 from app.modules.alert.service import AlertService
+from app.modules.alert.measured import MeasuredAlertService
+
+
+async def handle_persisted_metric_event(event: dict) -> None:
+    async with AsyncSessionLocal() as db:
+        await MeasuredAlertService(db=db).ingest_persisted_event(event)
 
 
 async def handle_alert_lifecycle_event(event: dict) -> None:

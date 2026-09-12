@@ -2,6 +2,28 @@
 
 Lightweight chronological notes for decisions that do not require a full ADR.
 
+## ADR-019: Real Artifacts and Explicit Acceptance Gaps
+
+Report generation must produce verified bytes, not metadata. Alert detection owns
+durable scoped state/history/outbox and rechecks authority/freshness after locks.
+Plugins remain metadata-only until actual executable isolation is implemented;
+energy estimates cannot claim physical savings. Acceptance preserves failed runs,
+distinguishes measured/modeled/fixture/historical evidence and stays partial while
+required physical or DRL+safety cases are blocked. No gate or timeout was relaxed
+to turn the discovered failures green.
+
+## ADR019 Frontend Contract Boundaries
+
+Only version1 artifact metadata with terminal status version and hashes permits
+download presentation; actual binary length is mandatory and browser hashing is
+default-on with explicit opt-out disclosure. Never navigate to storage references.
+Alert history shares the existing realtime invalidation prefix; detector semantics
+remain backend-owned. Registry declarations never imply runtime safety, and removal
+requires explicit confirmation plus authorized204. No energy toggle is added.
+Keep browser fixture verification separate from live parent acceptance. Existing
+bundle budgets remain unchanged; Step13 uses in-scope duplicate-code reduction.
+Integration details: `Frontend-Step13-ADR019.md`.
+
 ## ADR-018: Operator Evidence and Timed Control
 
 Keep measured probes, approved configuration, historical model inference and live
