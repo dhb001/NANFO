@@ -30,13 +30,17 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from app.api.v1.alerts import router as alerts_router
 from app.api.v1.audit import router as audit_router
 from app.api.v1.auth import router as auth_router
+from app.api.v1.autonomy import router as autonomy_router
+from app.api.v1.autonomy_controls import router as autonomy_controls_router
 from app.api.v1.intents import router as intent_router
+from app.api.v1.model_diagnostics import router as model_diagnostics_router
 from app.api.v1.networks import router as network_router
 from app.api.v1.organizations import router as org_router
 from app.api.v1.plugins import router as plugins_router
 from app.api.v1.reports import router as reports_router
 from app.api.v1.simulation import router as simulation_router
 from app.api.v1.telemetry import router as telemetry_router
+from app.api.v1.telemetry_paths import router as telemetry_paths_router
 from app.api.v1.topology import router as topology_router
 from app.core.config import get_settings
 from app.core.logging import configure_logging, get_logger
@@ -425,12 +429,16 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
 # ── Mount routers ─────────────────────────────────────────────────────────────
 
 app.include_router(auth_router)
+app.include_router(autonomy_router)
+app.include_router(autonomy_controls_router)
 app.include_router(org_router)
 app.include_router(network_router)
 app.include_router(topology_router)
 app.include_router(telemetry_router)
+app.include_router(telemetry_paths_router)
 app.include_router(simulation_router)
 app.include_router(intent_router)
+app.include_router(model_diagnostics_router)
 app.include_router(plugins_router)
 app.include_router(reports_router)
 app.include_router(alerts_router)

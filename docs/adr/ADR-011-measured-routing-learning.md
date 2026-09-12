@@ -36,6 +36,11 @@ port direction), `path_queue_packets:[float|null,float|null]` (peak leaf backlog
 `latency_ms:float|null` (foreground ping RTT), `loss_fraction:float|null` (foreground
 UDP receiver loss), `goodput_mbps:float|null`, `offered_mbps:float`,
 `background_mbps:float`, `previous_action:int`, `seconds_since_change:float`.
+Environment-spec V2 additionally requires `actual_offered_mbps:float|null`,
+measured from sender bytes/duration. Evidence includes a versioned environment
+specification and source/image hashes, complete measurement/phase/window proofs,
+and explicit service-outage/censored-latency indicators. Outer transport remains
+version 1; V2 model contracts reject previous feature/spec checkpoints.
 Evidence records source counters/duration windows, probe counts, UDP receiver
 counts, real path/readback, workload phase, desired/measured interval and control
 overhead. Null is unavailable, never zero; incomplete windows truncate and cannot
@@ -65,9 +70,18 @@ entropy regularization, gradient clipping, bounded rollout/minibatch configurati
 and seeded initialization. Static capacity/reference scaling preserves absolute
 load. Fixed topology adjacency and previous action are part of the state; missing
 features have explicit masks but invalid measurement windows are not rewarded.
-Reward components: delivered/offered goodput, RTT, UDP loss, maximum utilization,
+Reward components: delivered/actual-sent goodput, RTT, UDP loss, maximum utilization,
 queue pressure and actual route-change penalty. All weights/scales/dimensions and
 raw component values are versioned. No Lyapunov or convergence claim is inferred.
+
+The workload advances between decisions and includes latent phase context, so this
+is explicitly a sampled partially observed task, not a proven fully observed MDP.
+V2 stacks three measured frames (147 inputs), with reset-local history and no
+future phase, scenario label or PRNG seed entering the actor. History mitigates
+partial observation but does not prove Markov sufficiency. The objective is per
+decision; varying transition overhead is logged, not equated to fixed wall time.
+Verified zero-reply service failures retain null observed RTT and use a separately
+labeled 1000 ms censored-delay penalty; missing instrumentation stays invalid.
 
 Checkpoint stores weights, optimizer state when resuming, normalization/features,
 topology/action map, hyperparameters, seeds, training counters and runtime versions.

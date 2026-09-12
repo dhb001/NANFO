@@ -44,12 +44,16 @@ Baseline payload fields for digital twin synchronization:
 - Cost spikes from unbounded scenario complexity.
 
 ## 6. Acceptance Criteria
-Current foundation behavior: no evaluator is installed. Start/resume persist
-`cancelled` / `blocked` with `evaluator_unavailable` before publishing the existing
-terminal event. Output metrics and comparison deltas are null, including historical
-unmeasured baseline outputs. Queue availability is not a successful risk check.
-The criteria below remain evaluator implementation work, not achieved by the
-foundation lifecycle APIs.
+ADR-017 installs a configured finite-buffer fluid evaluator with an independent
+worker and migration0014. Requests with strict scenario_config persist queued work;
+pause/resume/checkpoint/branch and compatible comparisons use actual modeled
+outputs. Omitted configuration retains legacy cancelled/blocked unavailable behavior.
+All modeled output carries source=operator_configured_model and
+physical_safety_authorized=false. Completion and objective pass are separate.
+Supplied action-bound simulation evidence is retained and revalidated before actual
+dispatch; stale or mismatched evidence blocks without replacing manual approval.
+Exact request/output schemas and model assumptions:
+`backend/app/modules/simulation/README.md` and `MATH.md`.
 
 - [ ] Same seed + same inputs produce identical metric outputs.
 - [ ] Pause/resume preserves simulation state integrity.

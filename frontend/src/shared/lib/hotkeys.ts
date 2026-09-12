@@ -15,6 +15,7 @@ const singleKeyNavigation: Record<string, string> = {
   d: "/ops/digital-twin",
   s: "/ops/simulation",
   i: "/ops/intent",
+  n: "/ops/autonomy",
   a: "/ops/audit",
 };
 
@@ -30,6 +31,7 @@ const prefixedNavigation: Record<string, string> = {
   gd: "/ops/digital-twin",
   gs: "/ops/simulation",
   gi: "/ops/intent",
+  gn: "/ops/autonomy",
   ga: "/ops/audit",
 };
 

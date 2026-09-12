@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import time
 import uuid
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 import redis.asyncio as aioredis
 from fastapi import APIRouter, Depends, status
@@ -22,6 +22,12 @@ from app.core.dependencies import (
 )
 from app.core.responses import APIResponse, success_response
 from app.db.postgres import AsyncSession
+from app.modules.simulation.schemas import (
+    ModeledOutput,
+    ScenarioConfig,
+    SimulationTrace,
+    UnavailableOutput,
+)
 from app.modules.simulation.service import SimulationStartService
 
 router = APIRouter(prefix="/api/v1/simulations", tags=["Simulation"])
@@ -31,6 +37,7 @@ class StartSimulationRequest(BaseModel):
     network_id: uuid.UUID
     scenario_name: str = Field(min_length=1, max_length=120)
     simulation_id: uuid.UUID | None = None
+    scenario_config: ScenarioConfig | None = None
     validation_checks: list[str] = Field(
         default_factory=lambda: ["simulation_before_deployment"],
         min_length=1,
@@ -44,6 +51,7 @@ class PauseSimulationRequest(BaseModel):
 class BranchSimulationRequest(BaseModel):
     parent_simulation_id: uuid.UUID
     scenario_name: str = Field(min_length=1, max_length=120)
+    scenario_config: ScenarioConfig | None = None
 
 
 class ScenarioValidationState(BaseModel):
@@ -55,6 +63,8 @@ class ScenarioValidationState(BaseModel):
     requested_by_user_id: str
     evaluator_status: str = "unavailable"
     failure_reason: str | None = None
+    source: Literal["operator_configured_model", "unavailable"] = "unavailable"
+    physical_safety_authorized: Literal[False] = False
 
 
 class SimulationValidationHandoffResponse(BaseModel):
@@ -113,7 +123,7 @@ class SimulationDetailResponse(BaseModel):
     risk_gate: str
     scenario_name: str
     validation: dict[str, Any]
-    run_output: dict[str, Any]
+    run_output: ModeledOutput | UnavailableOutput
     model_versions: dict[str, Any]
     audit_provenance: dict[str, Any]
     queue_status: str
@@ -123,6 +133,13 @@ class SimulationDetailResponse(BaseModel):
     requested_at: str
     created_at: str
     updated_at: str
+    scenario_config: ScenarioConfig | None = None
+    input_sha256: str | None = None
+    checkpoint_sha256: str | None = None
+    revision: int = 0
+    progress: dict[str, int] | None = None
+    completed_at: str | None = None
+    evidence_expires_at: str | None = None
 
 
 class SimulationMetricsSnapshot(BaseModel):
@@ -140,6 +157,10 @@ class SimulationCompareResponse(BaseModel):
     simulation_metrics: SimulationMetricsSnapshot
     baseline_metrics: SimulationMetricsSnapshot
     deltas: SimulationMetricsSnapshot
+    compatible: bool = False
+    comparison_reason: str | None = None
+    simulation_trace: list[SimulationTrace] | None = None
+    baseline_trace: list[SimulationTrace] | None = None
 
 
 @router.post("/start", response_model=APIResponse[SimulationValidationHandoffResponse], status_code=status.HTTP_202_ACCEPTED)
@@ -157,6 +178,7 @@ async def start_simulation(
         network_id=req.network_id,
         scenario_name=req.scenario_name,
         simulation_id=req.simulation_id,
+        scenario_config=req.scenario_config,
         validation_checks=req.validation_checks,
         correlation_id=meta.request_id,
         requested_by_user_id=claims.user_id,
@@ -209,6 +231,7 @@ async def branch_simulation(
     claim_org_id = get_claim_org_scope(claims=claims)
     result = await SimulationStartService(db=db, redis=redis).branch_simulation(
         parent_simulation_id=req.parent_simulation_id,
+        scenario_config=req.scenario_config,
         scenario_name=req.scenario_name,
         correlation_id=meta.request_id,
         requested_by_user_id=claims.user_id,

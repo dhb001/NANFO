@@ -1,0 +1,40 @@
+import { act, cleanup, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { MeasuredPathPanel } from "./MeasuredPathPanel";
+import { getProbePaths } from "@/features/telemetry/pathApi";
+import { pathsFixture } from "@/features/telemetry/pathFixtures";
+import { useAuthStore } from "@/shared/state/auth-store";
+import { useWorkspaceStore } from "@/shared/state/workspace-store";
+import { operatorProfile } from "@/test/profile";
+vi.mock("@/features/telemetry/pathApi", async (original) => ({ ...await original<object>(), getProbePaths: vi.fn() }));
+describe("Twin measured probe paths", () => {
+  let client: QueryClient;
+  const highlight = vi.fn(); const read = vi.mocked(getProbePaths);
+  beforeEach(() => {
+    vi.clearAllMocks(); client = new QueryClient(); const data = pathsFixture();
+    useAuthStore.setState({ accessToken: "token", generation: 1, endingSession: false, profile: operatorProfile });
+    useWorkspaceStore.setState({ organizationId: "org", networkId: data.network_id, workspaceId: data.workspace_id }); read.mockResolvedValue(data);
+  });
+  afterEach(() => { cleanup(); client.clear(); });
+  it("refreshes explicitly, lists canonical ordered hops and keeps unmapped fallback on fresh/partial/stale data", async () => {
+    render(<QueryClientProvider client={client}><MeasuredPathPanel nodes={[]} links={[]} onHighlight={highlight} /></QueryClientProvider>);
+    expect(read).not.toHaveBeenCalled();
+    await userEvent.click(screen.getByRole("button", { name: "Refresh measured paths" }));
+    await userEvent.selectOptions(await screen.findByLabelText("Selected measured probe"), "probe-1");
+    expect(screen.getByText(/List fallback: canonical link IDs/)).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Ordered observed probe hops" })).toHaveTextContent("30000000-0000-4000-8000-000000000005");
+    expect(highlight.mock.calls.every(([value]) => value === null)).toBe(true);
+    read.mockResolvedValue({ ...pathsFixture(), status: "partial", paths: pathsFixture().paths.map((path) => ({ ...path, status: "partial" })) });
+    await userEvent.click(screen.getByRole("button", { name: "Refresh measured paths" }));
+    await screen.findByText(/Partial or ambiguous evidence/);
+    read.mockRejectedValue(new Error("Offline"));
+    await userEvent.click(screen.getByRole("button", { name: "Refresh measured paths" }));
+    await screen.findByText(/Measured paths unavailable.*Offline/);
+    expect(screen.getByText("stale or unavailable")).toBeInTheDocument();
+    expect(highlight.mock.calls.every(([value]) => value === null)).toBe(true);
+    act(() => useAuthStore.setState({ profile: { ...operatorProfile, permissions: [] } }));
+    expect(screen.getByRole("button", { name: "Refresh measured paths" })).toBeDisabled();
+  });
+});

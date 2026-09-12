@@ -50,6 +50,23 @@ capability/membership revocation blocks first dispatch.
 
 ## Plans and Evidence
 
+ADR-017 adds optional `simulation_id` to execute, without changing the lab command
+schema or making model evidence mandatory for existing manual operations. Unreleased
+migration0014 adds immutable `intent_executions.simulation_evidence`: exact scoped
+reference, plan/current-network/input/checkpoint/output digests and original expiry.
+The Simulation owning service validates it at acceptance and again from the worker's
+fresh `prepare_plan` snapshot before first publication; every evidence field must
+equal the persisted approval. Changing/dropping references on replay conflicts.
+Dispatch authority and delayed filesystem callbacks cannot outlive evidence expiry.
+Cancellation ignores expired evidence and keeps its existing independent permissions.
+
+`execution_provenance.approved_plan` deep-copies only the hash-matching persisted
+command plan, never editable intent input; corrupted/missing plans project as null.
+Invalid commands fail before dispatch or remain uncertain after possible dispatch.
+Configured model admission does not prove graph/action correspondence, packet
+traversal, physical safety or autonomy authorization. Full fields/hash rules and
+non-actuating disposable verification: `../simulation/README.md`.
+
 Validate with the existing endpoint and a bound `network_id`:
 
 ```json

@@ -5,6 +5,7 @@ import { SessionGate } from "@/features/auth/SessionGate";
 import { AppShell } from "@/shared/ui/AppShell";
 import {
   AuditPage,
+  AutonomyPage,
   IntentPage,
   LoginPage,
   OverviewPage,
@@ -52,6 +53,7 @@ export function App() {
             <Route path="digital-twin" element={<TwinPage />} />
             <Route path="simulation" element={<SimulationPage />} />
             <Route path="intent" element={<IntentPage />} />
+            <Route path="autonomy" element={<AutonomyPage />} />
             <Route path="audit" element={<AuditPage />} />
           </Route>
           <Route path="*" element={<Navigate to="/ops" replace />} />

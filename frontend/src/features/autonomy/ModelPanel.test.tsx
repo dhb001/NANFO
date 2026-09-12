@@ -1,0 +1,62 @@
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { ModelPanel } from "./ModelPanel";
+import { diagnoseModel, getModelDiagnostics } from "./modelApi";
+import { modelFixture, modelRecordFixture } from "./operatorFixtures";
+import { useAuthStore } from "@/shared/state/auth-store";
+import { useWorkspaceStore } from "@/shared/state/workspace-store";
+import { operatorProfile } from "@/test/profile";
+vi.mock("./modelApi", () => ({ diagnoseModel: vi.fn(), getModelDiagnostics: vi.fn() }));
+describe("model operator panel", () => {
+  let client: QueryClient;
+  const data = modelFixture();
+  const read = vi.mocked(getModelDiagnostics);
+  const run = vi.mocked(diagnoseModel);
+  const view = (now = Date.now()) => <QueryClientProvider client={client}><ModelPanel now={now} /></QueryClientProvider>;
+  beforeEach(() => {
+    vi.clearAllMocks(); client = new QueryClient();
+    useAuthStore.setState({ accessToken: "token", generation: 1, endingSession: false, profile: { ...operatorProfile, permissions: ["read:telemetry", "write:config", "execute:rollback"] } });
+    useWorkspaceStore.setState({ organizationId: "org", networkId: data.network_id, workspaceId: data.workspace_id });
+    read.mockResolvedValue(data); run.mockResolvedValue(modelRecordFixture());
+  });
+  afterEach(() => { cleanup(); client.clear(); });
+  it("requires explicit history selection and action; distinguishes history, probabilities, hashes and timings", async () => {
+    render(view());
+    await screen.findByLabelText("Operator history reference");
+    expect(screen.getByRole("button", { name: "Run historical inference" })).toBeDisabled();
+    expect(run).not.toHaveBeenCalled();
+    await userEvent.selectOptions(screen.getByLabelText("Operator history reference"), "measured-history-1");
+    await userEvent.click(screen.getByRole("button", { name: "Run historical inference" }));
+    await screen.findByText(/Recorded diagnostic 10000000/);
+    expect(run).toHaveBeenCalledWith("token", data.network_id, data.workspace_id, "measured-history-1");
+    expect(screen.getByText(/Probabilities are action probabilities, not safety confidence/)).toBeInTheDocument();
+    expect(screen.getByText(/Live: false. Execution: not_applied/)).toBeInTheDocument();
+    expect(screen.getByText("Model input SHA-256")).toBeInTheDocument();
+    expect(screen.getByText(/Not network convergence or SPF timing/)).toBeInTheDocument();
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+  });
+  it("retains historical evidence but disables inference after stale age or failed read", async () => {
+    const rendered = render(view());
+    await screen.findByLabelText("Operator history reference");
+    await userEvent.selectOptions(screen.getByLabelText("Operator history reference"), "measured-history-1");
+    rendered.rerender(view(Date.now() + 31_000));
+    expect(screen.getByRole("button", { name: "Run historical inference" })).toBeDisabled();
+    read.mockRejectedValue(new Error("Registry offline"));
+    await userEvent.click(screen.getByRole("button", { name: "Refresh model registry" }));
+    await screen.findByText(/Model read unavailable/);
+    expect(screen.getByText("Model input SHA-256")).toBeInTheDocument();
+    expect(run).not.toHaveBeenCalled();
+  });
+  it("shows failed inference and never retries; revocation prevents writes", async () => {
+    run.mockRejectedValue(new Error("Model tampered"));
+    render(view()); await screen.findByLabelText("Operator history reference");
+    await userEvent.selectOptions(screen.getByLabelText("Operator history reference"), "measured-history-1");
+    await userEvent.click(screen.getByRole("button", { name: "Run historical inference" }));
+    await screen.findByText(/Inference not confirmed.*Model tampered/);
+    expect(run).toHaveBeenCalledTimes(1);
+    act(() => useAuthStore.setState({ profile: { ...operatorProfile, permissions: ["read:telemetry"] } }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Run historical inference" })).toBeDisabled());
+  });
+});

@@ -5,6 +5,7 @@ import {
   SimulationCompare,
   SimulationDetail,
   SimulationValidationHandoff,
+  ScenarioConfig,
 } from "@/shared/types/simulation";
 
 export function startSimulation(
@@ -14,6 +15,7 @@ export function startSimulation(
     scenario_name: string;
     simulation_id?: string;
     validation_checks: string[];
+    scenario_config?: ScenarioConfig;
   },
 ) {
   return apiRequest<SimulationValidationHandoff>("/api/v1/simulations/start", {
@@ -31,20 +33,22 @@ export function pauseSimulation(token: string, simulationId: string) {
   });
 }
 
-export function branchSimulation(token: string, parentSimulationId: string, scenarioName: string) {
+export function branchSimulation(token: string, parentSimulationId: string, scenarioName: string, scenarioConfig?: ScenarioConfig) {
   return apiRequest<BranchSimulationResult>("/api/v1/simulations/branch", {
     method: "POST",
     body: {
       parent_simulation_id: parentSimulationId,
       scenario_name: scenarioName,
+      ...(scenarioConfig ? { scenario_config: scenarioConfig } : {}),
     },
     token,
   });
 }
 
-export function getSimulationDetail(token: string, simulationId: string) {
+export function getSimulationDetail(token: string, simulationId: string, signal?: AbortSignal) {
   return apiRequest<SimulationDetail>(`/api/v1/simulations/${simulationId}`, {
     token,
+    signal,
   });
 }
 

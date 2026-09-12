@@ -22,6 +22,9 @@ from app.modules.intent.lab import (
     verified_rollback,
 )
 from app.modules.intent.repository import ExecutionRepository, IntentRepository
+from app.modules.simulation.modeled import current_network_state_hash
+from app.modules.simulation.schemas import SimulationEvidence
+from app.modules.simulation.service import SimulationStartService
 
 logger = get_logger(__name__)
 
@@ -140,7 +143,12 @@ class ExecutionWorker:
         return True
 
     async def _reconcile(self, job, lost):
-        command = (PendingLabCommand if job.dispatched_at is None else LabCommand).model_validate_json(json.dumps(job.command))
+        try:
+            command = (PendingLabCommand if job.dispatched_at is None else LabCommand).model_validate_json(json.dumps(job.command))
+        except (ValueError, TypeError):
+            await self._transition(job, phase="failed" if job.dispatched_at is None else "uncertain",
+                reason="approved_command_invalid", safe=job.dispatched_at is None)
+            return
         # Persist dispatch *possibility* before writing. Crash in between cannot be
         # distinguished from a lost acknowledgment and must reconcile this identity.
         if job.dispatched_at is None:
@@ -156,16 +164,6 @@ class ExecutionWorker:
                 await self._transition(job, phase="cancelled" if cancelled else "failed",
                     reason="cancelled_before_dispatch" if cancelled else "deadline_before_dispatch", safe=True)
                 return
-            try:
-                async with self.sessions() as db:
-                    plan, binding, snapshot = await prepare_plan(settings=self.settings, db=db, redis=self.redis,
-                        workspace_id=workspace_id, network_id=network_id, actor_id=job.actor_id, payload=payload)
-                if (digest(plan.model_dump(mode="json")) != command.plan_hash
-                        or digest(binding.model_dump(mode="json")) != command.binding_digest or snapshot.run_id != command.run_id):
-                    raise ValueError("approved lab identity changed")
-            except Exception:  # noqa: BLE001 - deny before any dispatch on authority/infrastructure failure
-                await self._transition(job, phase="failed", reason="dispatch_precondition_failed", safe=True)
-                return
             if lost.is_set():
                 return
             async with self.sessions() as db:
@@ -177,6 +175,29 @@ class ExecutionWorker:
                     await db.commit()
                     await self._transition(job, phase="cancelled", reason="cancelled_before_dispatch", safe=True)
                     return
+                try:
+                    plan, binding, snapshot = await prepare_plan(settings=self.settings, db=db, redis=self.redis,
+                        workspace_id=workspace_id, network_id=network_id, actor_id=job.actor_id, payload=payload)
+                    if (digest(plan.model_dump(mode="json")) != command.plan_hash
+                            or digest(binding.model_dump(mode="json")) != command.binding_digest or snapshot.run_id != command.run_id
+                            or current.command != job.command):
+                        raise ValueError("approved lab identity changed")
+                    evidence_expiry = command.deadline
+                    if current.simulation_evidence is not None:
+                        evidence = SimulationEvidence.model_validate(current.simulation_evidence)
+                        checked = await SimulationStartService(db=db, redis=self.redis).validate_execution_reference(
+                            simulation_id=uuid.UUID(evidence.simulation_id), workspace_id=workspace_id,
+                            network_id=network_id, intent_id=current.intent_id, actor_id=job.actor_id,
+                            plan_sha256=digest(plan.model_dump(mode="json")),
+                            network_state_sha256=current_network_state_hash(binding=binding, snapshot=snapshot), lock=True)
+                        if checked != current.simulation_evidence or current.simulation_evidence != job.simulation_evidence:
+                            raise ValueError("approved simulation evidence changed")
+                        evidence_expiry = min(datetime.fromisoformat(evidence.evidence_expires_at),
+                            datetime.fromisoformat(evidence.completed_at) + timedelta(seconds=300))
+                except Exception:  # noqa: BLE001 - fail closed before recording dispatch possibility
+                    await db.rollback()
+                    await self._transition(job, phase="failed", reason="dispatch_precondition_failed", safe=True)
+                    return
                 # Sample UTC before monotonic remaining authority: a pause between
                 # samples can only shorten the authorization, never extend it.
                 issued = datetime.now(UTC)
@@ -184,7 +205,11 @@ class ExecutionWorker:
                                 (current.lease_until - issued).total_seconds() - .1)
                 if lost.is_set() or remaining <= 0:
                     return
-                expires = min(command.deadline, issued + timedelta(seconds=remaining))
+                expires = min(command.deadline, evidence_expiry, issued + timedelta(seconds=remaining))
+                if issued >= expires:
+                    await db.rollback()
+                    await self._transition(job, phase="failed", reason="dispatch_precondition_failed", safe=True)
+                    return
                 command = LabCommand.model_validate({**command.model_dump(), "dispatch_expires_at": expires})
                 current.command = command.model_dump(mode="json")
                 current.dispatched_at = issued
@@ -195,7 +220,8 @@ class ExecutionWorker:
             if lost.is_set():
                 return
             command.assert_new_dispatch(datetime.now(UTC))
-            await asyncio.to_thread(self.mailbox.write, command, can_publish=lambda: not lost.is_set())
+            await asyncio.to_thread(self.mailbox.write, command, can_publish=lambda: not lost.is_set()
+                and datetime.now(UTC) < command.dispatch_expires_at)
         # Recovered workers do not rewrite execute or change its fence. The lab
         # journal sees the original mailbox command and reconciles its before-state.
         while not lost.is_set():
@@ -221,7 +247,8 @@ class ExecutionWorker:
                     safe = (result.status == "completed" and verified) or (
                         result.status in {"failed", "cancelled"}
                         and (rollback_verified or (result.rollback is None and verified_no_mutation(result.verification))))
-                    if result.status == "completed" and (cancel_requested or result.completed_at > command.deadline):
+                    if ((cancel_requested and not (result.status == "cancelled" and safe))
+                            or (result.status == "completed" and result.completed_at > command.deadline)):
                         if lost.is_set():
                             return
                         await asyncio.to_thread(self.mailbox.write, command.model_copy(update={"operation": "cancel"}),

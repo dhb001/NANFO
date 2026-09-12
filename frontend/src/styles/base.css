@@ -22,3 +22,83 @@ select {
 .mono {
   font-family: var(--font-mono);
 }
+
+.async-state-enter {
+  animation: async-state-enter 220ms ease-out;
+}
+
+.toast-presence {
+  animation: toast-enter 200ms ease-out both;
+}
+
+.toast-presence[data-open="false"] {
+  animation: toast-exit 200ms ease-in both;
+  pointer-events: none;
+}
+
+.command-palette-backdrop {
+  backdrop-filter: blur(4px);
+  animation: palette-backdrop-enter 180ms ease-out both;
+}
+
+.command-palette-surface {
+  animation: palette-enter 200ms cubic-bezier(0.21, 1, 0.32, 1) both;
+}
+
+.command-palette-backdrop[data-open="false"] {
+  animation: palette-backdrop-exit 180ms ease-in both;
+  pointer-events: none;
+}
+
+.command-palette-backdrop[data-open="false"] .command-palette-surface {
+  animation: palette-exit 200ms cubic-bezier(0.21, 1, 0.32, 1) both;
+}
+
+@keyframes async-state-enter {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes toast-enter {
+  from { opacity: 0; transform: translateY(8px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes toast-exit {
+  from { opacity: 1; transform: translateY(0) scale(1); }
+  to { opacity: 0; transform: translateY(8px) scale(0.98); }
+}
+
+@keyframes palette-enter {
+  from { opacity: 0; transform: translateY(18px) scale(0.985); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes palette-exit {
+  from { opacity: 1; transform: translateY(0) scale(1); }
+  to { opacity: 0; transform: translateY(10px) scale(0.99); }
+}
+
+@keyframes palette-backdrop-enter {
+  from { opacity: 0; backdrop-filter: blur(0); }
+  to { opacity: 1; backdrop-filter: blur(4px); }
+}
+
+@keyframes palette-backdrop-exit {
+  from { opacity: 1; backdrop-filter: blur(4px); }
+  to { opacity: 0; backdrop-filter: blur(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .async-state-enter,
+  .toast-presence,
+  .command-palette-backdrop,
+  .command-palette-surface {
+    animation: none !important;
+    transform: none !important;
+  }
+
+  .command-palette-backdrop { backdrop-filter: none; }
+  .toast-presence[data-open="false"],
+  .command-palette-backdrop[data-open="false"] { opacity: 0; }
+}

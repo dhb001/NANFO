@@ -1,7 +1,7 @@
 name: nanfo-emulation
 services:
   lab:
-    image: nanfo-emulation:campus-small-v1
+    image: ${NANFO_EMULATION_IMAGE:-nanfo-emulation:campus-small-v1}
     build:
       context: .
     privileged: true
@@ -38,7 +38,7 @@ services:
     # Unix socket. It never enables the manual mailbox or exposes network ports.
     stop_grace_period: 20s
     healthcheck:
-      test: ["CMD", "python", "-m", "emulation.runner", "--request", "status"]
+      test: ["CMD", "python", "-c", "from pathlib import Path; import subprocess,sys; sys.exit(0 if Path('/run/nanfo/experiment.sock').is_socket() else subprocess.call(['python','-m','emulation.runner','--request','status']))"]
       interval: 10s
       timeout: 5s
       retries: 3

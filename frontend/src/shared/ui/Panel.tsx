@@ -1,4 +1,4 @@
-import { PropsWithChildren, ReactNode } from "react";
+import { PropsWithChildren, ReactNode, useId } from "react";
 
 interface PanelProps extends PropsWithChildren {
   title?: string;
@@ -7,8 +7,10 @@ interface PanelProps extends PropsWithChildren {
 }
 
 export function Panel({ title, subtitle, action, children }: PanelProps) {
+  const titleId = useId();
   return (
     <section
+      aria-labelledby={title ? titleId : undefined}
       style={{
         border: "1px solid var(--line-soft)",
         borderRadius: "var(--radius-m)",
@@ -29,7 +31,7 @@ export function Panel({ title, subtitle, action, children }: PanelProps) {
           }}
         >
           <div>
-            <h3 style={{ fontSize: "0.98rem", fontWeight: 700 }}>{title}</h3>
+            <h3 id={titleId} style={{ fontSize: "0.98rem", fontWeight: 700 }}>{title}</h3>
             {subtitle ? <p style={{ color: "var(--ink-3)", fontSize: "0.84rem" }}>{subtitle}</p> : null}
           </div>
           {action}

@@ -73,8 +73,10 @@ export const CONGESTION_POLICY_RULES: readonly CongestionPolicyRule[] = [
 
 const MAX_CONGESTION_METRICS_PER_DEVICE = 12;
 const MAX_CONGESTION_KEYS = 240;
+export const TWIN_METRIC_MAX_AGE_MS = 60_000;
 
 export interface TwinMetricSnapshot {
+  stale?: boolean;
   tags: Record<string, unknown>;
   metric: string;
   value: number;
@@ -141,6 +143,8 @@ interface CanonicalTwinNode {
 }
 
 interface SceneAdapterInput {
+  now?: number;
+  topologyTombstones?: Record<string, number>;
   baseNodes: TopologyNode[];
   baseEdges: TopologyEdge[];
   liveNodesByDeviceId: Record<string, TopologyDeltaData["node"]>;
@@ -293,11 +297,13 @@ export function mapCongestionSeverity(score: number | null): CongestionSeverity 
   return "high";
 }
 
-export function deriveDeviceCongestion(metrics: TelemetryDeltaData["metric"][]): TwinCongestion {
+export function deriveDeviceCongestion(metrics: TelemetryDeltaData["metric"][], now = Date.now()): TwinCongestion {
   const candidates = metrics
     .map(toCongestionMetricScore)
     .filter((item): item is TwinMetricSnapshot => item !== null)
+    .map((item) => ({ ...item, stale: item.tags.stale === true || !Number.isFinite(Date.parse(item.observedAt)) || now - Date.parse(item.observedAt) > TWIN_METRIC_MAX_AGE_MS || Date.parse(item.observedAt) > now }))
     .sort((left, right) => {
+      if (left.stale !== right.stale) return left.stale ? 1 : -1;
       const severityDelta = congestionSeverityRank(right.severity) - congestionSeverityRank(left.severity);
       if (severityDelta !== 0) {
         return severityDelta;
@@ -347,11 +353,11 @@ export function deriveDeviceCongestion(metrics: TelemetryDeltaData["metric"][]):
 
   const primary = candidates[0];
   return {
-    severity: primary.severity,
-    score: primary.normalizedScore,
+    severity: primary.stale ? "neutral" : primary.severity,
+    score: primary.stale ? null : primary.normalizedScore,
     metrics: candidates.slice(0, 6),
     policyVersion: CONGESTION_POLICY_VERSION,
-    primaryPolicyId: primary.policyId,
+    primaryPolicyId: primary.stale ? null : primary.policyId,
   };
 }
 
@@ -373,7 +379,8 @@ function getSceneObjectSpatialRef(sceneObject: DigitalTwinDeltaData["scene_objec
 }
 
 export function buildTwinSceneModel(input: SceneAdapterInput): TwinSceneModel {
-  const mergedNodes = mergeCanonicalNodes(input.baseNodes, Object.values(input.liveNodesByDeviceId));
+  const mergedNodes = mergeCanonicalNodes(input.baseNodes, Object.values(input.liveNodesByDeviceId))
+    .filter((node) => !Object.hasOwn(input.topologyTombstones ?? {}, node.device_id));
 
   const telemetryByDeviceId = (
     input.telemetryKeysNewestFirst.length > 0
@@ -400,9 +407,9 @@ export function buildTwinSceneModel(input: SceneAdapterInput): TwinSceneModel {
   const nodes = mergedNodes.map((node) => {
     const id = node.device_id;
     const importedSpatialRef = input.importedSpatialRefByDeviceId?.[id] ?? null;
-    const spatialRefId = node.spatial_ref_id ?? importedSpatialRef;
+    const spatialRefId = importedSpatialRef ?? node.spatial_ref_id;
     const placement = deriveDeterministicPlacement(spatialRefId, id);
-    const congestion = deriveDeviceCongestion(telemetryByDeviceId[id] ?? []);
+    const congestion = deriveDeviceCongestion(telemetryByDeviceId[id] ?? [], input.now);
 
     return {
       id,

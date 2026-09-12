@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   CONGESTION_POLICY_VERSION,
   buildTwinSceneModel,
@@ -9,6 +9,8 @@ import {
 } from "@/features/digitalTwin/sceneAdapter";
 
 describe("digital twin scene adapter", () => {
+  beforeEach(() => vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-08-18T10:01:00Z")));
+  afterEach(() => vi.restoreAllMocks());
   it("parses hierarchical spatial_ref_id paths", () => {
     const parsed = parseSpatialRefPath("campus-a/building-1/floor-2/rack-3/device-9");
     expect(parsed).not.toBeNull();

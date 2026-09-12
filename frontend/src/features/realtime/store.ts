@@ -15,6 +15,17 @@ export interface LiveAlertItem {
 }
 
 interface LiveState {
+  epoch: number;
+  topologyRevision: number;
+  topologyVersions: Record<string, { revision: number; timestamp: number }>;
+  topologyTombstones: Record<string, number>;
+  sceneObjectLastSeen: Record<string, number>;
+  sceneObjectScopes: Record<string, { workspaceId: string; networkId: string }>;
+  sceneObjectAvailability: Record<string, "pending" | "stale" | "reconciled">;
+  sceneObjectServerRevisions: Record<string, number>;
+  sceneReconciliation: { known: number; attempted: number; unavailable: number; omitted: number } | null;
+  reconcileSceneObject: (id: string, expected: DigitalTwinDeltaData["scene_object"], epoch: number, result: { object: DigitalTwinDeltaData["scene_object"]; timestamp: string; revision?: number } | "remove" | "stale") => void;
+  reconcileTopologySnapshot: (ids: string[], epoch: number, revision: number) => void;
   reset: () => void;
   topologyByDeviceId: Record<string, TopologyDeltaData["node"]>;
   telemetryByDeviceMetric: Record<string, TelemetryDeltaData["metric"]>;
@@ -26,9 +37,9 @@ interface LiveState {
   telemetryStatus: "connecting" | "open" | "closed";
   alertsStatus: "connecting" | "open" | "closed";
   digitalTwinStatus: "connecting" | "open" | "closed";
-  applyTopologyDelta: (delta: TopologyDeltaData) => void;
+  applyTopologyDelta: (delta: TopologyDeltaData, timestamp?: string) => void;
   applyTelemetryDelta: (delta: TelemetryDeltaData) => void;
-  applyDigitalTwinDelta: (delta: DigitalTwinDeltaData) => void;
+  applyDigitalTwinDelta: (delta: DigitalTwinDeltaData, timestamp?: string, scope?: { workspaceId: string; networkId: string }) => void;
   applyAlertDelta: (delta: AlertDeltaData, context: { correlation_id?: string; timestamp?: string }) => void;
   setConnectionStatus: (
     channel: "topology" | "telemetry" | "alerts" | "digitalTwin",
@@ -37,7 +48,8 @@ interface LiveState {
 }
 
 function metricKey(metric: TelemetryDeltaData["metric"]) {
-  return JSON.stringify([metric.device_id, metric.metric, metric.unit, metric.source, metric.tags?.port_no ?? null, metric.tags?.peer_host ?? null, metric.tags?.flow_index ?? null]);
+  return JSON.stringify([metric.workspace_id, metric.network_id, metric.device_id, metric.metric, metric.unit, metric.source, metric.tags?.run_id ?? null, metric.tags?.port_no ?? null, metric.tags?.peer_host ?? null,
+    metric.metric.startsWith("flow_") ? [metric.observed_at, metric.tags?.table_id, metric.tags?.cookie, metric.tags?.priority, metric.tags?.flow_index, metric.event_id] : null]);
 }
 
 function pushNewestKey(keys: string[], key: string, maxItems: number) {
@@ -57,10 +69,55 @@ function pushNewestKey(keys: string[], key: string, maxItems: number) {
 }
 
 export const useLiveStore = create<LiveState>((set) => ({
-  reset: () => set({
+  epoch: 0,
+  topologyRevision: 0,
+  topologyVersions: {},
+  topologyTombstones: {},
+  sceneObjectLastSeen: {},
+  sceneObjectScopes: {}, sceneObjectAvailability: {}, sceneObjectServerRevisions: {}, sceneReconciliation: null,
+  reset: () => set((state) => ({
+    epoch: state.epoch + 1, topologyRevision: 0, topologyVersions: {}, topologyTombstones: {}, sceneObjectLastSeen: {},
+    sceneObjectScopes: {}, sceneObjectAvailability: {}, sceneObjectServerRevisions: {}, sceneReconciliation: null,
     topologyByDeviceId: {}, telemetryByDeviceMetric: {}, telemetryKeysNewestFirst: [],
     sceneObjects: {}, sceneObjectIdsNewestFirst: [], alerts: [],
     topologyStatus: "closed", telemetryStatus: "closed", alertsStatus: "closed", digitalTwinStatus: "closed",
+  })),
+  reconcileSceneObject: (id, expected, epoch, result) => set((state) => {
+    if (state.epoch !== epoch || state.sceneObjects[id] !== expected) return state;
+    if (result === "stale") return { sceneObjectAvailability: { ...state.sceneObjectAvailability, [id]: "stale" } };
+    if (result === "remove") {
+      const sceneObjects = { ...state.sceneObjects };
+      const sceneObjectScopes = { ...state.sceneObjectScopes };
+      const sceneObjectAvailability = { ...state.sceneObjectAvailability };
+      const sceneObjectLastSeen = { ...state.sceneObjectLastSeen };
+      const sceneObjectServerRevisions = { ...state.sceneObjectServerRevisions };
+      delete sceneObjects[id]; delete sceneObjectScopes[id]; delete sceneObjectAvailability[id]; delete sceneObjectLastSeen[id]; delete sceneObjectServerRevisions[id];
+      return { sceneObjects, sceneObjectScopes, sceneObjectAvailability, sceneObjectLastSeen, sceneObjectServerRevisions,
+        sceneObjectIdsNewestFirst: state.sceneObjectIdsNewestFirst.filter((key) => key !== id) };
+    }
+    const observed = Date.parse(result.timestamp);
+    const revision = result.revision;
+    if (!Number.isFinite(observed) || observed < (state.sceneObjectLastSeen[id] ?? -Infinity) ||
+        (revision !== undefined && (!Number.isSafeInteger(revision) || revision < (state.sceneObjectServerRevisions[id] ?? 0)))) {
+      return { sceneObjectAvailability: { ...state.sceneObjectAvailability, [id]: "stale" } };
+    }
+    return { sceneObjects: { ...state.sceneObjects, [id]: { ...result.object, id } },
+      sceneObjectLastSeen: { ...state.sceneObjectLastSeen, [id]: observed },
+      sceneObjectAvailability: { ...state.sceneObjectAvailability, [id]: "reconciled" },
+      sceneObjectServerRevisions: revision === undefined ? state.sceneObjectServerRevisions : { ...state.sceneObjectServerRevisions, [id]: revision } };
+  }),
+  reconcileTopologySnapshot: (ids, epoch, revision) => set((state) => {
+    if (state.epoch !== epoch) return state;
+    const present = new Set(ids);
+    const topologyByDeviceId = { ...state.topologyByDeviceId };
+    const topologyTombstones = { ...state.topologyTombstones };
+    // Only a complete REST snapshot started after the delta can retire its overlay.
+    for (const [id, version] of Object.entries(state.topologyVersions)) {
+      if (version.revision > revision) continue;
+      delete topologyByDeviceId[id];
+      if (!present.has(id)) delete topologyTombstones[id];
+    }
+    return { topologyByDeviceId, topologyTombstones };
   }),
   topologyByDeviceId: {},
   telemetryByDeviceMetric: {},
@@ -72,22 +129,37 @@ export const useLiveStore = create<LiveState>((set) => ({
   telemetryStatus: "closed",
   alertsStatus: "closed",
   digitalTwinStatus: "closed",
-  applyTopologyDelta: (delta) =>
+  applyTopologyDelta: (delta, timestamp) =>
     set((state) => {
+      if (!delta.node?.device_id || !["add", "update", "remove"].includes(delta.delta_type)) return state;
+      const id = delta.node.device_id;
+      const observed = timestamp === undefined ? Math.max(Date.now(), (state.topologyVersions[id]?.timestamp ?? 0) + 1) : Date.parse(timestamp);
+      if (!Number.isFinite(observed) || observed <= (state.topologyVersions[id]?.timestamp ?? -Infinity)) return state;
+      const revision = state.topologyRevision + 1;
       const current = { ...state.topologyByDeviceId };
+      const topologyTombstones = { ...state.topologyTombstones };
       if (delta.delta_type === "remove") {
         delete current[delta.node.device_id];
+        topologyTombstones[id] = revision;
       } else {
+        delete topologyTombstones[id];
         current[delta.node.device_id] = {
           ...(current[delta.node.device_id] ?? {}),
           ...delta.node,
         };
       }
-      return { topologyByDeviceId: current };
+      return { topologyByDeviceId: current, topologyTombstones, topologyRevision: revision,
+        topologyVersions: { ...state.topologyVersions, [id]: { revision, timestamp: observed } } };
     }),
   applyTelemetryDelta: (delta) =>
     set((state) => {
+      if (!delta.metric || typeof delta.metric.device_id !== "string" || typeof delta.metric.metric !== "string" ||
+          typeof delta.metric.source !== "string" || typeof delta.metric.observed_at !== "string" ||
+          (delta.metric.unit !== null && typeof delta.metric.unit !== "string") || !delta.metric.tags || typeof delta.metric.tags !== "object") return state;
       const key = metricKey(delta.metric);
+      const observed = Date.parse(delta.metric.observed_at);
+      if (!Number.isFinite(observed) || !Number.isFinite(delta.metric.value) ||
+          observed <= Date.parse(state.telemetryByDeviceMetric[key]?.observed_at ?? "")) return state;
       const nextMetrics = {
         ...state.telemetryByDeviceMetric,
         [key]: delta.metric,
@@ -108,14 +180,25 @@ export const useLiveStore = create<LiveState>((set) => ({
         telemetryKeysNewestFirst: nextKeys,
       };
     }),
-  applyDigitalTwinDelta: (delta) =>
+  applyDigitalTwinDelta: (delta, timestamp, scope) =>
     set((state) => {
-      const objectId = delta.scene_object.id;
+      const object = delta.scene_object;
+      if (!object?.id || delta.delta_type !== "update") return state;
+      const objectId = object.object_type === "simulation_state" && object.simulation_id
+        ? `simulation:${object.simulation_id}`
+        : object.object_type === "intent_state" && object.intent_id ? `intent:${object.intent_id}` : object.id;
+      const observed = timestamp === undefined ? Math.max(Date.now(), (state.sceneObjectLastSeen[objectId] ?? 0) + 1) : Date.parse(timestamp);
+      if (!Number.isFinite(observed) || observed <= (state.sceneObjectLastSeen[objectId] ?? -Infinity)) return state;
+      const sceneObjectLastSeen = { ...state.sceneObjectLastSeen, [objectId]: observed };
+      const sceneObjectScopes = { ...state.sceneObjectScopes, ...(scope ? { [objectId]: scope } : {}) };
+      const sceneObjectAvailability = { ...state.sceneObjectAvailability, [objectId]: "stale" as const };
+      const sceneObjectServerRevisions = { ...state.sceneObjectServerRevisions };
       const nextSceneObjects = {
         ...state.sceneObjects,
         [objectId]: {
           ...(state.sceneObjects[objectId] ?? {}),
           ...delta.scene_object,
+          id: objectId,
         },
       };
 
@@ -127,10 +210,14 @@ export const useLiveStore = create<LiveState>((set) => ({
 
       for (const evictedId of evictedKeys) {
         delete nextSceneObjects[evictedId];
+        delete sceneObjectLastSeen[evictedId];
+        delete sceneObjectScopes[evictedId]; delete sceneObjectAvailability[evictedId]; delete sceneObjectServerRevisions[evictedId];
       }
 
       return {
         sceneObjects: nextSceneObjects,
+        sceneObjectLastSeen,
+        sceneObjectScopes, sceneObjectAvailability, sceneObjectServerRevisions,
         sceneObjectIdsNewestFirst: nextKeys,
       };
     }),

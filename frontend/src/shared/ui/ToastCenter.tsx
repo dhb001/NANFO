@@ -1,23 +1,29 @@
-import { AnimatePresence, m } from "framer-motion";
+import { useEffect, useState } from "react";
 import { useUiStore } from "@/shared/state/ui-store";
 
 export function ToastCenter() {
   const toasts = useUiStore((state) => state.toasts);
   const dismissToast = useUiStore((state) => state.dismissToast);
+  const [retained, setRetained] = useState(toasts);
+  useEffect(() => {
+    setRetained((previous) => [...toasts, ...previous.filter((item) => !toasts.some((toast) => toast.id === item.id))]);
+    const timer = window.setTimeout(() => setRetained(toasts), 200);
+    return () => window.clearTimeout(timer);
+  }, [toasts]);
+  const visible = [...toasts, ...retained.filter((item) => !toasts.some((toast) => toast.id === item.id))];
 
   return (
     <div style={{ position: "fixed", right: 16, bottom: 16, display: "grid", gap: "0.6rem", zIndex: 1100 }}>
-      <AnimatePresence>
-        {toasts.map((toast) => (
-          <m.button
+        {visible.map((toast) => (
+          <button
             key={toast.id}
-            initial={{ opacity: 0, y: 8, scale: 0.98 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 8, scale: 0.98 }}
-            transition={{ duration: 0.2 }}
+            className="toast-presence"
+            data-open={toasts.some((item) => item.id === toast.id)}
+            disabled={!toasts.some((item) => item.id === toast.id)}
+            aria-hidden={!toasts.some((item) => item.id === toast.id) || undefined}
             onClick={() => dismissToast(toast.id)}
             style={{
-              width: 320,
+              width: "min(320px, calc(100vw - 32px))",
               textAlign: "left",
               border: "1px solid var(--line-soft)",
               background: "var(--surface-card)",
@@ -29,9 +35,8 @@ export function ToastCenter() {
           >
             <div style={{ fontWeight: 700 }}>{toast.title}</div>
             {toast.description ? <div style={{ color: "var(--ink-3)", fontSize: "0.82rem" }}>{toast.description}</div> : null}
-          </m.button>
+          </button>
         ))}
-      </AnimatePresence>
     </div>
   );
 }

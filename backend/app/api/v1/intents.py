@@ -90,6 +90,7 @@ async def execute_intent(
         requested_permissions=claims.permissions,
         manual_approval=req.manual_approval,
         cancel=req.cancel,
+        simulation_id=req.simulation_id,
     )
     payload = ExecuteIntentResponse.model_validate(result)
     return success_response(payload, meta.request_id, started, meta.timestamp)

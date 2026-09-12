@@ -504,27 +504,36 @@ def main():
     parser.add_argument(
         "--verify", action="store_true", help="One-shot live gate; exits and cleans its lab"
     )
-    parser.add_argument("--request", choices=("status", "smoke", "traffic"))
+    parser.add_argument("--request", choices=("status", "smoke", "traffic", "paths"))
     parser.add_argument("--experiment", action="store_true", help="Exclusive opt-in ADR-011 server")
-    parser.add_argument("--mode", choices=("sdn", "ospf"), default="sdn")
+    parser.add_argument("--mode", choices=("sdn", "matched", "ospf"), default="sdn")
     parser.add_argument(
         "--verify-actions", action="store_true", help="One-shot local real control/fault gate"
     )
     args = parser.parse_args()
     if args.request:
         return request(args.request)
-    if args.experiment and (args.verify or args.verify_actions or
-                           os.environ.get("EMULATION_CONTROL_ENABLED", "false").lower() != "false"):
+    if args.experiment and (
+        args.verify
+        or args.verify_actions
+        or os.environ.get("EMULATION_CONTROL_ENABLED", "false").lower() != "false"
+    ):
         parser.error("Experiment mode cannot coexist with verification or manual mailbox control")
-    if args.experiment and (Path("/results/.journal.json").exists() or
-                           Path("/results/.journal.json").is_symlink()):
+    if args.experiment and (
+        Path("/results/.journal.json").exists() or Path("/results/.journal.json").is_symlink()
+    ):
         parser.error("Manual journal exists; never remove a live journal to enable experiments")
     if not args.experiment and args.mode != "sdn":
         parser.error("OSPF requires explicit --experiment")
     requireContainer()
     if args.output.resolve() != Path("/output"):
         parser.error("Container output must be the dedicated /output mount")
-    lab = Lab(args.output)
+    if args.experiment and args.mode in ("matched", "ospf"):
+        from emulation.experiment import OspfLab
+
+        lab = OspfLab(args.output)
+    else:
+        lab = Lab(args.output)
 
     def stop(signum, frame):
         lab.stopping = True
@@ -536,8 +545,6 @@ def main():
         if args.experiment:
             from emulation.experiment import Experiment
 
-            if args.mode != "sdn":
-                raise RuntimeError("OSPF adapter not yet available")
             Experiment(lab, args.mode).serve()
             return 0
         if args.verify_actions:
@@ -578,6 +585,19 @@ def main():
                         result = lab.verify()
                     elif command == "traffic":
                         result = lab.traffic()
+                    elif command == "paths":
+                        from emulation.probe_paths import CaptureInterrupted, capturePaths
+
+                        try:
+                            result = capturePaths(lab)
+                        except CaptureInterrupted:
+                            result = {
+                                "passed": False,
+                                "status": "partial",
+                                "error": "Probe capture interrupted by controls; no new path artifact",
+                            }
+                        except (RuntimeError, OSError, ValueError, subprocess.SubprocessError):
+                            result = {"passed": False, "error": "Probe capture unavailable"}
                     else:
                         result = {"passed": False, "error": "Unknown command"}
                     with suppress(BrokenPipeError, socket.timeout):

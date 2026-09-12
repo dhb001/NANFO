@@ -48,10 +48,10 @@ async def migrated_sessions():
         scripts = ScriptDirectory.from_config(config)
         with sync.begin() as connection:
             connection.execute(text(f'SET LOCAL search_path TO "{schema}"'))
-            with EnvironmentContext(config, scripts, fn=lambda rev, _: scripts._upgrade_revs("0011", rev)) as context:
+            with EnvironmentContext(config, scripts, fn=lambda rev, _: scripts._upgrade_revs("0014", rev)) as context:
                 context.configure(connection=connection)
                 context.run_migrations()
-            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "0011"
+            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "0014"
             assert connection.scalar(text("SELECT count(*) FROM intent_executions")) == 0
         engine = create_async_engine(url.set(drivername="postgresql+asyncpg"),
                                      connect_args={"server_settings": {"search_path": schema}})

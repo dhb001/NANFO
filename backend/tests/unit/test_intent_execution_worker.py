@@ -77,6 +77,19 @@ async def test_verified_compensation_is_terminal(worker_case):
     worker.mailbox.write.assert_not_called()
 
 
+async def test_cancelled_unknown_retries_exact_cancellation_not_execute(worker_case):
+    worker, job, result = worker_case
+    job.cancel_requested = True
+    result.update(status="cancelled", verification={}, rollback={"verified": False})
+    worker.mailbox.read.return_value = LabResult.model_validate_json(json.dumps(
+        {**result, "completed_at": result["completed_at"].isoformat()}))
+    await worker._reconcile(job, asyncio.Event())
+    sent = worker.mailbox.write.call_args.args[0]
+    assert sent.operation == "cancel" and sent.execution_id == job.execution_id
+    assert sent.model_dump(mode="json") == {**job.command, "operation": "cancel"}
+    assert worker._transition.await_args.kwargs["phase"] == "uncertain"
+
+
 async def test_lost_lease_does_not_publish_or_dispatch(worker_case):
     worker, job, _ = worker_case
     lost = asyncio.Event()

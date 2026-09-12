@@ -23,6 +23,11 @@ def cli(args):
 
 def tcRead(kind, interface):
     text = cli(["tc", "-j", kind, "show", "dev", interface]).strip()
+    return parseTc(kind, text)
+
+
+def parseTc(kind, text):
+    text = text.strip()
     if not text or text.startswith("["):
         return json.loads(text or "[]")
     # Bullseye iproute2 supports JSON qdiscs/filters but still prints HTB classes.
@@ -192,7 +197,29 @@ class Actions:
 
     def reconcile(self, prepared=None):
         if prepared is not None:
-            return self.verify(prepared)
+            actual = self.verify(prepared)
+            # Presence of the new policy alone cannot prove obsolete resources absent.
+            for name, row in actual["switches"].items():
+                owned = [line for line in row["flows"].splitlines() if COOKIE in line]
+                if len(owned) != sum(switch == name for switch, _ in prepared["flows"]):
+                    raise RuntimeError("Unexpected reserved flows alongside active policy")
+                for kind, key in (("groups", "group_id"), ("meters", "meter")):
+                    if bool(re.search(rf"{key}={RESOURCE}\b", row[kind])) != any(
+                        switch == name for switch, _ in prepared[kind]
+                    ):
+                        raise RuntimeError("Unexpected reserved resource alongside active policy")
+            shaped = {shape["interface"] for shape in prepared["shapes"]}
+            for interface, queue in actual["queues"].items():
+                if interface not in shaped and (
+                    any(
+                        row.get("handle") in ("5:100", "20:")
+                        for kind in ("qdisc", "class")
+                        for row in queue[kind]
+                    )
+                    or any(row.get("pref") == 30000 for row in queue["filter"])
+                ):
+                    raise RuntimeError("Unexpected reserved queue alongside active policy")
+            return actual
         actual = self.capture()
         for row in actual["switches"].values():
             if (

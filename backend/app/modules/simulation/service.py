@@ -22,7 +22,15 @@ from app.core.logging import get_logger
 from app.events.publisher import publish_event
 from app.modules.network.service import NetworkService
 from app.modules.organization.service import WorkspaceService as OrgWorkspaceService
+from app.modules.simulation.modeled import (
+    configured,
+    create_modeled,
+    transition_modeled,
+    validate_execution_reference,
+    verified_output,
+)
 from app.modules.simulation.repository import SimulationRepository
+from app.modules.simulation.schemas import ScenarioConfig
 
 logger = get_logger(__name__)
 
@@ -232,6 +240,9 @@ class SimulationTerminalEventService:
             )
             return
 
+        if configured(simulation):
+            return  # Dedicated worker exclusively owns versioned computation.
+
         current_state = str(simulation.state).strip().lower()
         current_status = str(simulation.status).strip().lower()
         if current_state in {"completed", "cancelled"} or current_status in {"completed", "cancelled"}:
@@ -319,6 +330,9 @@ class SimulationStartService:
         self._network_svc = NetworkService(db=db, redis=redis)
         self._workspace_svc = OrgWorkspaceService(db=db, redis=redis)
 
+    async def validate_execution_reference(self, **kwargs):
+        return await validate_execution_reference(self, **kwargs)
+
     async def _assert_simulation_workspace_access(
         self,
         *,
@@ -349,6 +363,7 @@ class SimulationStartService:
         requested_by_user_id: str,
         requested_workspace_id: uuid.UUID | None,
         claim_org_id: uuid.UUID | None,
+        scenario_config: ScenarioConfig | None = None,
     ) -> dict[str, Any]:
         if simulation_id is not None:
             return await self._resume_simulation(
@@ -357,6 +372,8 @@ class SimulationStartService:
                 requested_by_user_id=requested_by_user_id,
                 requested_workspace_id=requested_workspace_id,
                 claim_org_id=claim_org_id,
+                network_id=network_id,
+                scenario_config=scenario_config,
             )
 
         network = await self._network_svc.assert_network_workspace_access(
@@ -366,6 +383,10 @@ class SimulationStartService:
             claim_org_id=claim_org_id,
             require_write=True,
         )
+
+        if scenario_config is not None:
+            return await create_modeled(self, network=network, config=scenario_config,
+                scenario_name=scenario_name, actor_id=requested_by_user_id, correlation_id=correlation_id)
 
         handoff = ScenarioValidationHandoffService().build_handoff_payload(
             network_id=network_id,
@@ -434,6 +455,8 @@ class SimulationStartService:
         requested_by_user_id: str,
         requested_workspace_id: uuid.UUID | None,
         claim_org_id: uuid.UUID | None,
+        network_id: uuid.UUID | None = None,
+        scenario_config: ScenarioConfig | None = None,
     ) -> dict[str, Any]:
         simulation = await self._repo.get_by_id(simulation_id)
         if simulation is None:
@@ -446,6 +469,21 @@ class SimulationStartService:
             claim_org_id=claim_org_id,
             require_write=True,
         )
+
+        if configured(simulation):
+            simulation = await self._repo.lock(simulation_id)
+            if network_id is not None and simulation.network_id != network_id:
+                raise HTTPException(409, detail="Resume network mismatch.")
+            await self._network_svc.assert_network_workspace_access(network_id=simulation.network_id,
+                requested_workspace_id=simulation.workspace_id, actor_user_id=requested_by_user_id,
+                claim_org_id=claim_org_id, require_write=True)
+            if scenario_config is not None:
+                from app.modules.simulation.evaluator import canonical_config
+                if canonical_config(scenario_config) != simulation.scenario_config:
+                    raise HTTPException(409, detail="Resume cannot change input; branch with an override instead.")
+            return await transition_modeled(self, record=simulation, state="queued", correlation_id=correlation_id)
+        if scenario_config is not None:
+            raise HTTPException(409, detail="Legacy resume cannot install new input; create a configured branch.")
 
         if simulation.state not in {"paused", "queued"}:
             raise HTTPException(
@@ -502,6 +540,10 @@ class SimulationStartService:
             claim_org_id=claim_org_id,
             require_write=True,
         )
+
+        if configured(simulation):
+            simulation = await self._repo.lock(simulation_id)
+            return await transition_modeled(self, record=simulation, state="paused", correlation_id=correlation_id)
 
         if simulation.state == "paused":
             return {
@@ -575,6 +617,7 @@ class SimulationStartService:
         requested_by_user_id: str,
         requested_workspace_id: uuid.UUID | None,
         claim_org_id: uuid.UUID | None,
+        scenario_config: ScenarioConfig | None = None,
     ) -> dict[str, Any]:
         parent = await self._repo.get_by_id(parent_simulation_id)
         if parent is None:
@@ -587,6 +630,18 @@ class SimulationStartService:
             claim_org_id=claim_org_id,
             require_write=True,
         )
+
+        if configured(parent) or scenario_config is not None:
+            parent = await self._repo.lock(parent_simulation_id)
+            network = await self._network_svc.assert_network_workspace_access(network_id=parent.network_id,
+                requested_workspace_id=parent.workspace_id, actor_user_id=requested_by_user_id,
+                claim_org_id=claim_org_id, require_write=True)
+            try:
+                config = scenario_config or ScenarioConfig.model_validate(parent.scenario_config)
+            except ValueError as exc:
+                raise HTTPException(409, detail="Parent simulation input invalid.") from exc
+            return await create_modeled(self, network=network, config=config, scenario_name=scenario_name,
+                actor_id=requested_by_user_id, correlation_id=correlation_id, parent=parent)
 
         normalized_scenario_name = _coerce_non_empty_text(
             scenario_name,
@@ -714,8 +769,14 @@ class SimulationStartService:
         )
 
         validation = dict(simulation.validation) if isinstance(simulation.validation, dict) else {}
-        validation.update(evaluator_status="unavailable", failure_reason="evaluator_unavailable")
-        legacy_completed = simulation.state == "completed" or simulation.status == "completed"
+        modeled = configured(simulation)
+        result = verified_output(simulation) if modeled else None
+        if not modeled:
+            validation.update(evaluator_status="unavailable", failure_reason="evaluator_unavailable")
+        legacy_completed = not modeled and (simulation.state == "completed" or simulation.status == "completed")
+        invalid_completed = modeled and simulation.state == "completed" and result is None
+        if invalid_completed:
+            validation.update(failure_reason="model_evidence_invalid", status="blocked")
         if legacy_completed:
             validation.update(status="cancelled", pipeline_stage="terminal", legacy_baseline_unverified=True)
         return {
@@ -728,13 +789,21 @@ class SimulationStartService:
             "scenario_id": str(simulation.scenario_id),
             "network_id": str(simulation.network_id),
             "workspace_id": str(simulation.workspace_id),
-            "scene_object_id": _DEFAULT_SIMULATION_OBJECT_ID,
+            "scene_object_id": f"simulation:{simulation.simulation_id}" if modeled else _DEFAULT_SIMULATION_OBJECT_ID,
             "state": "cancelled" if legacy_completed else str(simulation.state),
             "status": "cancelled" if legacy_completed else str(simulation.status),
-            "risk_gate": "blocked" if legacy_completed else str(simulation.risk_gate),
+            "risk_gate": "blocked" if legacy_completed or invalid_completed else str(simulation.risk_gate),
             "scenario_name": str(simulation.scenario_name),
             "validation": validation,
-            "run_output": _unavailable_metrics(),
+            "run_output": result or _unavailable_metrics(),
+            "scenario_config": simulation.scenario_config if modeled else None,
+            "input_sha256": simulation.input_sha256 if modeled else None,
+            "checkpoint_sha256": simulation.checkpoint.get("checkpoint_sha256") if modeled and simulation.checkpoint else None,
+            "revision": simulation.revision if modeled else 0,
+            "progress": {"tick": simulation.checkpoint.get("state", {}).get("tick", 0),
+                         "duration_ticks": simulation.scenario_config.get("duration_ticks", 0)} if modeled and simulation.checkpoint else None,
+            "completed_at": simulation.completed_at.isoformat() if modeled and simulation.completed_at else None,
+            "evidence_expires_at": simulation.evidence_expires_at.isoformat() if modeled and simulation.evidence_expires_at else None,
             "model_versions": (
                 dict(simulation.model_versions)
                 if isinstance(simulation.model_versions, dict)
@@ -793,6 +862,15 @@ class SimulationStartService:
         simulation_metrics = _unavailable_metrics()
         baseline_metrics = _unavailable_metrics()
         deltas = _unavailable_metrics()
+        current_output, baseline_output = verified_output(simulation), verified_output(baseline)
+        compatible = bool(current_output and baseline_output and simulation.state == baseline.state == "completed"
+            and current_output["workload_sha256"] == baseline_output["workload_sha256"]
+            and current_output["elapsed_ms"] == baseline_output["elapsed_ms"])
+        if compatible:
+            simulation_metrics = {key: current_output[key] for key in deltas}
+            baseline_metrics = {key: baseline_output[key] for key in deltas}
+            deltas = {key: simulation_metrics[key] - baseline_metrics[key]
+                      if simulation_metrics[key] is not None and baseline_metrics[key] is not None else None for key in deltas}
 
         return {
             "simulation_id": str(simulation.simulation_id),
@@ -803,6 +881,10 @@ class SimulationStartService:
             "simulation_metrics": simulation_metrics,
             "baseline_metrics": baseline_metrics,
             "deltas": deltas,
+            "compatible": compatible,
+            "comparison_reason": None if compatible else "completed_common_modeled_workload_required",
+            "simulation_trace": current_output["trace"] if compatible else None,
+            "baseline_trace": baseline_output["trace"] if compatible else None,
         }
 
 

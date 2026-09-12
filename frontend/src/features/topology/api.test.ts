@@ -25,6 +25,12 @@ function okEnvelope<T>(data: T, nextCursor: string | null = null) {
 }
 
 describe("topology api", () => {
+  it("stops a repeated cursor and exposes the partial snapshot", async () => {
+    fetchMock.mockResolvedValue({ ok: true, status: 200, json: async () => okEnvelope({ nodes: [], edges: [] }, "repeated") });
+    const result = await getTopologyGraphAll("token", "network");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(result.nextCursor).toBe("repeated");
+  });
   it("requests paginated graph page with limit and optional cursor", async () => {
     fetchMock.mockResolvedValueOnce({
       ok: true,

@@ -25,8 +25,9 @@ export function executeIntent(token: string, body: ExecuteIntentRequest, idempot
   });
 }
 
-export function getIntentDetail(token: string, intentId: string, workspaceId: string) {
+export function getIntentDetail(token: string, intentId: string, workspaceId: string, signal?: AbortSignal) {
   return apiRequest<IntentDetailResult>(`/api/v1/intents/${intentId}?workspace_id=${workspaceId}`, {
     token,
+    signal,
   });
 }

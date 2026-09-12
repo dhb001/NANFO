@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { TwinPage } from "@/features/digitalTwin/TwinPage";
 import { parseImportSummary } from "@/features/digitalTwin/twinImport";
@@ -97,12 +97,12 @@ function queryResult<T>(data: T | null, options?: { isLoading?: boolean; isError
     isLoading: options?.isLoading ?? false,
     isError: options?.isError ?? false,
     data,
-    refetch: options?.refetch ?? vi.fn(),
+    refetch: options?.refetch ?? vi.fn().mockResolvedValue({ data, isError: false }),
   };
 }
 
 async function waitForTwinScene() {
-  return screen.findByTestId("twin-scene");
+  return screen.findByTestId("twin-scene", {}, { timeout: 5000 });
 }
 
 describe("TwinPage", () => {
@@ -142,7 +142,7 @@ describe("TwinPage", () => {
           metric: "cpu_usage",
           value: 45,
           unit: "%",
-          observed_at: "2026-08-18T08:00:00Z",
+          observed_at: new Date().toISOString(),
           source: "runtime",
           tags: {},
         },
@@ -218,6 +218,59 @@ describe("TwinPage", () => {
     render(<TwinPage />);
 
     expect(await screen.findByText(/loading/i)).toBeInTheDocument();
+  });
+
+  it("restores explicitly, confirms replacement, and revokes URLs on scope change and unmount", async () => {
+    const user = userEvent.setup();
+    const id = "00000000-0000-0000-0000-000000000444";
+    mockUseTopologyGraph.mockReturnValue(queryResult({ data: { nodes: [{ device_id: id, hostname: "edge", device_type: "switch", status: "active", spatial_ref_id: null }], edges: [] }, nextCursor: null }));
+    mockUseTopologyNode.mockReturnValue(queryResult(null));
+    const json = '{"asset":{"version":"2.0"},"scene":0,"scenes":[{}]}';
+    const bytes = new TextEncoder().encode(json);
+    const record = { campus_model_asset_id: "asset", network_id: useWorkspaceStore.getState().networkId, model_file_name: "saved.gltf", model_mime_type: "model/gltf+json",
+      model_data_base64: btoa(json), model_size_bytes: bytes.length, model_sha256: "0".repeat(64), mapping_by_device_id: { [id]: "campus/building/f1" }, updated_at: "2026-09-10T00:00:00Z" };
+    mockUseCampusModelAssets.mockReturnValue(queryResult({ items: [record], total: 1 }));
+    cryptoSubtleDigestMock.mockResolvedValue(new Uint8Array(32).buffer);
+    const create = vi.fn().mockReturnValueOnce("blob:first").mockReturnValueOnce("blob:second").mockReturnValueOnce("blob:third");
+    const revoke = vi.fn();
+    const previousCreate = URL.createObjectURL;
+    const previousRevoke = URL.revokeObjectURL;
+    URL.createObjectURL = create; URL.revokeObjectURL = revoke;
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    const { unmount } = render(<TwinPage />);
+    await waitForTwinScene();
+    expect(create).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Restore Persisted Model" }));
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
+    expect(twinScenePropsSpy.mock.calls.at(-1)?.[0].nodes[0].spatialRefId).toBe("campus/building/f1");
+    await user.click(screen.getByRole("button", { name: "Restore Persisted Model" }));
+    expect(confirm).toHaveBeenCalledOnce();
+    expect(create).toHaveBeenCalledTimes(1);
+    confirm.mockReturnValue(true);
+    await user.click(screen.getByRole("button", { name: "Restore Persisted Model" }));
+    await waitFor(() => expect(revoke).toHaveBeenCalledWith("blob:first"));
+    act(() => useWorkspaceStore.getState().setNetworkId("other"));
+    await waitFor(() => expect(revoke).toHaveBeenCalledWith("blob:second"));
+    await waitFor(() => expect(screen.getByText("model idle", { exact: true })).toBeInTheDocument());
+    await user.click(screen.getByRole("button", { name: "Restore Persisted Model" }));
+    expect(await screen.findByText("Persisted model belongs to another network.")).toBeInTheDocument();
+    expect(create).toHaveBeenCalledTimes(2);
+    act(() => useWorkspaceStore.getState().setNetworkId(record.network_id));
+    await user.click(await screen.findByRole("button", { name: "Restore Persisted Model" }));
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(3));
+    unmount();
+    expect(revoke).toHaveBeenCalledWith("blob:third");
+    URL.createObjectURL = previousCreate; URL.revokeObjectURL = previousRevoke;
+    confirm.mockRestore();
+  }, 15_000);
+
+  it("warns about a partial graph and disables mapping restore and group persistence", async () => {
+    mockUseTopologyGraph.mockReturnValue(queryResult({ data: { nodes: [{ device_id: "d", hostname: "edge", device_type: "switch", status: "active", spatial_ref_id: null }], edges: [] }, nextCursor: "more" }));
+    mockUseTopologyNode.mockReturnValue(queryResult(null));
+    render(<TwinPage />);
+    expect(await screen.findByText(/Partial topology: pagination cap reached/, {}, { timeout: 5000 })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Restore Persisted Model" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Persist Device Groups" })).toBeDisabled();
   });
 
   it("renders empty state", async () => {
@@ -588,7 +641,7 @@ describe("TwinPage", () => {
 
     await waitFor(() => {
       expect(mockUpsertDeviceGroupsMutateAsync).toHaveBeenCalledWith({
-        replaceExisting: true,
+        replaceExisting: false,
         groups: [
           {
             group_key: "wireless-campus-a-building-1-f01",

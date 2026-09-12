@@ -398,6 +398,66 @@ class MailboxTests(unittest.TestCase):
         self.box.poll()
         self.assertEqual(safeRead(self.results / (self.cmd["execution_id"] + ".json")), proof)
 
+    def testRecoveredCompletedOldRunCancelFreshlyProvesNoMutation(self):
+        completed = self.box.handle(self.cmd)
+        self.box.runId = str(uuid.uuid4())
+        self.box.recover(self.box.load())
+        self.driver.reconcile.reset_mock()
+        cancelled = self.box.handle({**self.cmd, "operation": "cancel", "fence": 2})
+        self.assertEqual(cancelled["status"], "cancelled")
+        self.assertEqual(cancelled["run_id"], self.cmd["run_id"])
+        self.assertEqual(cancelled["plan_hash"], self.cmd["plan_hash"])
+        self.assertEqual(cancelled["fence"], 2)
+        self.assertTrue(cancelled["verification"]["no_mutation_verified"])
+        self.assertEqual(cancelled["verification"]["current_run_id"], self.box.runId)
+        self.assertEqual(
+            cancelled["verification"]["readback_sha256"], planHash({"reconciled": True})
+        )
+        self.driver.reconcile.assert_called_once_with(None)
+        self.driver.rollback.assert_not_called()
+        record = self.box.load()["records"][self.cmd["execution_id"]]
+        self.assertEqual(record["obsolete_result"], completed)
+        self.box.handle({**self.cmd, "operation": "cancel", "fence": 3})
+        self.assertEqual(self.driver.reconcile.call_count, 2)
+
+    def testRecoveredOldCancelPreservesUnrelatedCurrentActivePolicy(self):
+        self.box.handle(self.cmd)
+        self.box.runId = str(uuid.uuid4())
+        self.box.recover(self.box.load())
+        newer = {**command(), "run_id": self.box.runId}
+        with patch("emulation.mailbox.HOLD_DOWN", 0):
+            self.assertEqual(self.box.handle(newer)["status"], "completed")
+        before = self.box.load()["records"][newer["execution_id"]]
+        self.driver.reconcile.reset_mock()
+        cancelled = self.box.handle({**self.cmd, "operation": "cancel", "fence": 2})
+        self.assertEqual(cancelled["status"], "cancelled")
+        self.driver.reconcile.assert_called_once_with(before["prepared"])
+        self.assertEqual(self.box.load()["active"], newer["execution_id"])
+        self.assertEqual(self.box.load()["records"][newer["execution_id"]], before)
+        self.assertEqual(self.driver.apply.call_count, 2)
+        self.driver.rollback.assert_not_called()
+
+    def testObsoleteCancelCannotReuseOldProofOrBypassIdentity(self):
+        self.box.handle(self.cmd)
+        self.box.runId = str(uuid.uuid4())
+        self.box.recover(self.box.load())
+        result = self.box.handle({**self.cmd, "operation": "cancel", "plan_hash": "b" * 64})
+        self.assertEqual(result["status"], "failed")
+        self.driver.reconcile.side_effect = RuntimeError("reserved resources remain")
+        result = self.box.handle({**self.cmd, "operation": "cancel", "fence": 2})
+        self.assertEqual(result["status"], "uncertain")
+        self.assertFalse(result["verification"].get("no_mutation_verified"))
+        self.assertTrue(self.box.load()["blocked"])
+        self.driver.rollback.assert_not_called()
+
+    def testCancelOnlyPollNeverDispatchesPendingExecute(self):
+        safeWrite(self.commands / (self.cmd["execution_id"] + ".json"), self.cmd)
+        self.box.poll(cancel_only=True)
+        self.driver.apply.assert_not_called()
+        self.assertNotIn(self.cmd["execution_id"] + ".json", self.box.seen)
+        self.box.poll()
+        self.assertEqual(self.driver.apply.call_count, 1)
+
     def testPollSeparatesMetadataAndRejectsCapacityDurably(self):
         for _ in range(33):
             cmd = {**self.cmd, "execution_id": str(uuid.uuid4()), "operation": "cancel"}
@@ -419,6 +479,35 @@ class MailboxTests(unittest.TestCase):
 
 
 class DriverTests(unittest.TestCase):
+    def testReconcileCurrentPolicyRejectsAdditionalReservedResources(self):
+        prepared = {"flows": [["access1", "expected"]], "groups": [], "meters": [], "shapes": []}
+        actual = {
+            "switches": {
+                "access1": {
+                    "flows": "cookie=0x4e414e4600000001,expected",
+                    "groups": "",
+                    "meters": "",
+                }
+            },
+            "queues": {"access1-eth3": {"class": [], "qdisc": [], "filter": []}},
+        }
+        driver = Actions(None)
+        driver.verify = Mock(return_value=actual)
+        self.assertEqual(driver.reconcile(prepared), actual)
+        for fault in ("flow", "group", "queue"):
+            bad = copy.deepcopy(actual)
+            if fault == "flow":
+                bad["switches"]["access1"]["flows"] += "\ncookie=0x4e414e4600000001,old"
+            elif fault == "group":
+                from emulation.actions import RESOURCE
+
+                bad["switches"]["access1"]["groups"] = f"group_id={RESOURCE}"
+            else:
+                bad["queues"]["access1-eth3"]["filter"] = [{"pref": 30000}]
+            driver.verify.return_value = bad
+            with self.assertRaises(RuntimeError):
+                driver.reconcile(prepared)
+
     def testDscpMustMatchSameConcreteFilter(self):
         shape = {"src": "10.77.0.1", "dst": "10.77.0.3", "dscp": 10}
         row = {

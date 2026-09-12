@@ -140,6 +140,12 @@ class ExecutionRepository:
     def __init__(self, db: AsyncSession):
         self.db = db
 
+    async def get_execution(self, execution_id, *, lock=False):
+        query = select(IntentExecution).where(IntentExecution.execution_id == execution_id)
+        if lock:
+            query = query.with_for_update().execution_options(populate_existing=True)
+        return await self.db.scalar(query)
+
     async def existing(self, workspace_id, intent_id, request_key):
         return list((await self.db.execute(select(IntentExecution).where(
             IntentExecution.workspace_id == workspace_id,

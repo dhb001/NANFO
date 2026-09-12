@@ -1,8 +1,11 @@
 import json
 import os
+import time
 import unittest
+from pathlib import Path
 from unittest.mock import Mock, patch
 
+from emulation.measurements import atomicJson
 from emulation.ospf import (
     HOSTS,
     LINKS,
@@ -26,10 +29,13 @@ class OSPFTests(unittest.TestCase):
             for key, value in source.items():
                 self.assertEqual(link[key], value)
             self.assertEqual(link["subnet"], f"10.78.{index}.0/30")
-            self.assertEqual([row["cidr"] for row in link["endpoints"]],
-                             [f"10.78.{index}.1/30", f"10.78.{index}.2/30"])
-        self.assertEqual([row["cost"] for row in plan],
-                         [101, 102, 203, 504, 505, 506, 507, 108, 109, 110, 111])
+            self.assertEqual(
+                [row["cidr"] for row in link["endpoints"]],
+                [f"10.78.{index}.1/30", f"10.78.{index}.2/30"],
+            )
+        self.assertEqual(
+            [row["cost"] for row in plan], [101, 102, 203, 504, 505, 506, 507, 108, 109, 110, 111]
+        )
 
     def testConfigUsesRealOspfAndExplicitSinglePathPolicy(self):
         self.assertEqual(len(set(ROUTER_IDS.values())), 5)
@@ -37,6 +43,7 @@ class OSPFTests(unittest.TestCase):
             config = routerConfig(name)
             self.assertIn(f"ospf router-id {ROUTER_IDS[name]}", config)
             self.assertIn("maximum-paths 1", config)
+            self.assertIn("ip ospf dead-interval 10", config)
             self.assertIn("passive-interface default", config)
             self.assertNotIn("ip route ", config)
             for link in linkPlan():
@@ -45,8 +52,10 @@ class OSPFTests(unittest.TestCase):
                         continue
                     self.assertIn(f"interface {endpoint['interface']}\n", config)
                     self.assertIn(f" ip ospf cost {link['cost']}\n", config)
-                    self.assertEqual(f" no passive-interface {endpoint['interface']}\n" in config,
-                                     endpoint["peer"] in ROUTERS)
+                    self.assertEqual(
+                        f" no passive-interface {endpoint['interface']}\n" in config,
+                        endpoint["peer"] in ROUTERS,
+                    )
         with self.assertRaises(ValueError):
             routerConfig("h1")
 
@@ -59,7 +68,7 @@ class OSPFTests(unittest.TestCase):
     def testHostAndMeasurementInterfaceContract(self):
         env = OSPFEnv()
         self.assertIs(OSPFEnv, OSPFNetwork)
-        self.assertEqual(env.hostAddresses, {f"h{i}": f"10.78.{i+7}.2" for i in range(1, 5)})
+        self.assertEqual(env.hostAddresses, {f"h{i}": f"10.78.{i + 7}.2" for i in range(1, 5)})
         for index, host in enumerate(HOSTS, 8):
             self.assertEqual(env.hosts[host["name"]]["gateway"], f"10.78.{index}.1")
         for action in (0, 1):
@@ -76,10 +85,18 @@ class OSPFTests(unittest.TestCase):
         env.close()
 
     def testNeighborsRequireExactFullPeersAndInterfaces(self):
-        value = {ROUTER_IDS["dist1"]: [{"nbrState": "Full/-", "ifaceName": "core-eth1:10.78.1.1"}],
-                 ROUTER_IDS["dist2"]: [{"nbrState": "Full/-", "ifaceName": "core-eth2:10.78.2.1"}]}
+        value = {
+            "neighbors": {
+                ROUTER_IDS["dist1"]: [
+                    {"state": "Full/DROther", "ifaceName": "core-eth1:10.78.1.1"}
+                ],
+                ROUTER_IDS["dist2"]: [
+                    {"state": "Full/DROther", "ifaceName": "core-eth2:10.78.2.1"}
+                ],
+            }
+        }
         self.assertTrue(fullNeighbors(value, "core"))
-        value[ROUTER_IDS["dist2"]][0]["nbrState"] = "ExStart/-"
+        value["neighbors"][ROUTER_IDS["dist2"]][0]["state"] = "ExStart/-"
         self.assertFalse(fullNeighbors(value, "core"))
         self.assertFalse(fullNeighbors({}, "core"))
         self.assertFalse(fullNeighbors([], "core"))
@@ -92,7 +109,9 @@ class OSPFTests(unittest.TestCase):
             "dist1": {"dev": "dist1-eth4", "gateway": "10.78.6.2"},
             "access2": {"dev": "access2-eth3"},
         }
-        with patch.object(env, "command", side_effect=lambda name, args: json.dumps([routes[name]])):
+        with patch.object(
+            env, "command", side_effect=lambda name, args: json.dumps([routes[name]])
+        ):
             self.assertEqual(env.routePath()["nodes"], ["h1", "access1", "dist1", "access2", "h3"])
             self.assertEqual(env.routePath()["action"], 0)
             routes["dist1"] = {"dev": "dist1-eth3", "gateway": "10.78.4.2"}
@@ -104,16 +123,20 @@ class OSPFTests(unittest.TestCase):
 
     def testHostGuardRunsBeforeMininetImportOrMutation(self):
         env = OSPFEnv()
-        with patch("emulation.ospf.requireContainer", side_effect=RuntimeError("isolated")), \
-                self.assertRaisesRegex(RuntimeError, "isolated"):
+        with (
+            patch("emulation.ospf.requireContainer", side_effect=RuntimeError("isolated")),
+            self.assertRaisesRegex(RuntimeError, "isolated"),
+        ):
             env.start()
         self.assertIsNone(env.net)
         self.assertIsNone(env.directory)
 
     def testRejectsManualControl(self):
-        with patch("emulation.ospf.requireContainer"), \
-                patch.dict(os.environ, {"EMULATION_CONTROL_ENABLED": "true"}), \
-                self.assertRaisesRegex(RuntimeError, "manual"):
+        with (
+            patch("emulation.ospf.requireContainer"),
+            patch.dict(os.environ, {"EMULATION_CONTROL_ENABLED": "true"}),
+            self.assertRaisesRegex(RuntimeError, "manual"),
+        ):
             OSPFEnv().start()
 
     def testCommandTimeoutStopsOwnedChild(self):
@@ -122,9 +145,11 @@ class OSPFTests(unittest.TestCase):
         env = OSPFEnv()
         process = Mock()
         process.communicate.side_effect = subprocess.TimeoutExpired("ip", 5)
-        with patch.object(env, "get", return_value=Mock(popen=Mock(return_value=process))), \
-                patch("emulation.ospf.stopProcess") as stop, \
-                self.assertRaises(subprocess.TimeoutExpired):
+        with (
+            patch.object(env, "get", return_value=Mock(popen=Mock(return_value=process))),
+            patch("emulation.ospf.stopProcess") as stop,
+            self.assertRaises(subprocess.TimeoutExpired),
+        ):
             env.command("core", ["ip", "-j", "route"])
         stop.assert_called_once_with(process)
 
@@ -144,6 +169,39 @@ class OSPFLiveTests(unittest.TestCase):
             self.assertEqual(len(result["counters"]), 18)
             self.assertEqual(len(result["queues"]), 18)
             self.assertTrue(all(row["queue"] is not None for row in result["queues"]))
+            # Removing the preferred physical link must cause FRR, not a Python
+            # routing implementation, to install the surviving dist2 path.
+            network.command("access1", ["ip", "link", "set", "access1-eth1", "down"])
+            failedAt = time.monotonic()
+            deadline = time.monotonic() + 20
+            while True:
+                try:
+                    if network.routePath()["action"] == 1:
+                        result["failover_path"] = network.routePath()
+                        result["failover_seconds"] = time.monotonic() - failedAt
+                        break
+                except RuntimeError:
+                    pass
+                if time.monotonic() >= deadline:
+                    self.fail("Actual OSPF did not reconverge onto dist2")
+                time.sleep(0.25)
+            self.assertIn(
+                "3 received",
+                network.command(
+                    "h1",
+                    ["ping", "-n", "-c", "3", "-i", "0.2", "-W", "1", network.hostAddresses["h3"]],
+                ),
+            )
+            network.command("access1", ["ip", "link", "set", "access1-eth1", "up"])
+            network.waitReady()
+            # Full adjacency precedes the delayed SPF/FIB update after restoration.
+            deadline = time.monotonic() + 20
+            while network.routePath()["action"] != 0 and time.monotonic() < deadline:
+                time.sleep(0.25)
+            result["restored_path"] = network.routePath()
+            self.assertEqual(result["restored_path"]["action"], 0)
+            result["passed"] = True
+            atomicJson(Path("/output/experiment-ospf-reconvergence.json"), result)
         finally:
             network.close()
 

@@ -27,6 +27,8 @@ import { hasPermission } from "@/features/auth/permissions";
 import { useExecutionModeStore } from "@/shared/state/execution-mode-store";
 import { LabActionFields } from "@/features/intent/LabActionFields";
 import type { ExecuteIntentRequest } from "@/shared/types/intent";
+import { PathEvidencePanel } from "./PathEvidencePanel";
+import { SceneReconciliationStatus } from "@/features/realtime/SceneReconciliationStatus";
 
 export function IntentPage() {
   const token = useAuthStore((state) => state.accessToken);
@@ -51,6 +53,8 @@ function IntentPageContent() {
   const [handoffSummary, setHandoffSummary] = useState<string | null>(null);
   const [guided, setGuided] = useState(false);
   const [manualApproval, setManualApproval] = useState(false);
+  const [simulationId, setSimulationId] = useState("");
+  const simulationIdValid = !simulationId || /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(simulationId);
   const [executionRequest, setExecutionRequest] = useState<ExecuteIntentRequest | null>(null);
   const [executionNotice, setExecutionNotice] = useState<string | null>(null);
   const executionPending = useRef(false);
@@ -141,6 +145,7 @@ function IntentPageContent() {
         idempotencyKey,
       });
       setIntentId(response.intent_id);
+      setSimulationId("");
       setExecutionRequest(null);
       setExecutionNotice(null);
       pushToast({
@@ -155,7 +160,7 @@ function IntentPageContent() {
 
   async function execute(cancel = false) {
     if (!available || executionPending.current || !selectedDetail ||
-      (!cancel && (terminalState || !manualApproval || !canExecute || !labAction)) || (cancel && !canCancel)) return;
+      (!cancel && (terminalState || !manualApproval || !canExecute || !labAction || !simulationIdValid)) || (cancel && !canCancel)) return;
     if (!workspaceId || !intentId) {
       pushToast({
         title: "Nothing to execute",
@@ -170,6 +175,7 @@ function IntentPageContent() {
       idempotency_key: executionRequest?.idempotency_key ?? (cancel || detailQuery.data?.status === "execution_started" ? detailQuery.data?.idempotency_key ?? idempotencyKey : idempotencyKey),
       manual_approval: cancel ? executionRequest?.manual_approval ?? manualApproval : true,
       cancel,
+      ...(!cancel && (executionRequest?.simulation_id ?? simulationId) ? { simulation_id: executionRequest?.simulation_id ?? simulationId } : {}),
     };
     executionPending.current = true;
     if (!cancel) setExecutionRequest(request);
@@ -365,7 +371,15 @@ function IntentPageContent() {
             onChange={(event) => setManualApproval(event.target.checked)} />
             I explicitly approve this selected intent's manual lab execution (manual_approval=true)
           </label>
+          <label style={{ display: "grid", gap: "0.3rem" }}>Referenced simulation UUID (optional)
+            <input aria-label="Referenced simulation UUID" value={simulationId} aria-invalid={!simulationIdValid}
+              disabled={Boolean(executionRequest) || executeMutation.isPending || executionInFlight || terminalState}
+              onChange={(event) => { setSimulationId(event.target.value.trim()); setManualApproval(false); }} />
+          </label>
+          {!simulationIdValid && <p role="alert">Referenced simulation must be a UUID or empty.</p>}
+          <p>An explicit simulation reference requires a prepared artifact bound to the exact intent, approved plan and current network-state hashes. Selecting an ID cannot synthesize those hashes or prepare evidence. No preparation endpoint is available here; the server rejects missing, mismatched, expired or failing evidence. Cancellation omits the simulation reference.</p>
           {selectedDetail && !labAction ? <p>This action is validation-only. Manual lab execution supports reroute_path and throttle_qos plans only.</p> : null}
+          <p>Operator override is scoped to the selected manual lab policy: Cancel execution requests cancellation or compensation, not immediate rollback. Guided restore creates a separately approved restore plan. Neither control disables global safety gates or edits live PPO weights.</p>
           <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
             <Button permission="write:config" type="submit" disabled={validateMutation.isPending || executeMutation.isPending || executionInFlight}>
               {validateMutation.isPending ? "Validating..." : "Validate"}
@@ -374,7 +388,7 @@ function IntentPageContent() {
               permission="write:config"
               tone="ghost"
               type="button"
-              disabled={!intentId || !selectedDetail || !labAction || !available || !manualApproval || !idempotencyKey.trim() || executeMutation.isPending || validateMutation.isPending || terminalState || !canExecute}
+              disabled={!intentId || !selectedDetail || !labAction || !available || !manualApproval || !simulationIdValid || !idempotencyKey.trim() || executeMutation.isPending || validateMutation.isPending || terminalState || !canExecute}
               onClick={() => void execute()}
             >
               {executeMutation.isPending ? "Executing..." : "Execute"}
@@ -389,6 +403,7 @@ function IntentPageContent() {
               value={intentId ?? ""}
               onChange={(event) => {
                 setIntentId(event.target.value || null);
+                setSimulationId("");
                 setManualApproval(false);
                 setExecutionRequest(null);
                 setExecutionNotice(null);
@@ -448,6 +463,7 @@ function IntentPageContent() {
                     <pre style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{JSON.stringify(detail.intent_payload, null, 2)}</pre>
                   </details>
                   <div aria-label="Execution provenance" style={{ overflowWrap: "anywhere" }}>
+                    <PathEvidencePanel detail={detail} />
                     {(["execution_id", "phase", "deadline"] as const).map((field) => (
                       <div key={field} className="mono">{field}: {typeof detail.execution_provenance[field] === "string" ? String(detail.execution_provenance[field]) : "Not reported"}</div>
                     ))}
@@ -520,6 +536,7 @@ function IntentPageContent() {
         </Panel>
 
         <Panel title="Realtime Intent Deltas" subtitle="/ws/digital-twin intent.* mapped scene_object updates">
+          <SceneReconciliationStatus />
           {intentRealtimeCards.length === 0 ? (
             <div style={{ color: "var(--ink-3)" }}>No intent realtime deltas observed yet.</div>
           ) : (

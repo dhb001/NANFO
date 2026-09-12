@@ -75,6 +75,7 @@ class ExecuteIntentRequest(BaseModel):
     idempotency_key: str | None = Field(default=None, min_length=1, max_length=120)
     manual_approval: StrictBool = False
     cancel: StrictBool = False
+    simulation_id: uuid.UUID | None = None
 
 
 class ExecuteIntentResponse(BaseModel):

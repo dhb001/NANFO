@@ -110,14 +110,16 @@ export async function getTopologyGraphAll(
   const pages: TopologyGraphPage[] = [];
   let cursor: string | undefined;
   let nextCursor: string | null = null;
+  const seenCursors = new Set<string>();
 
   for (let page = 0; page < maxPages; page += 1) {
     const response = await getTopologyGraph(token, networkId, pageLimit, cursor);
     pages.push(response);
     nextCursor = response.nextCursor;
-    if (!nextCursor) {
+    if (!nextCursor || seenCursors.has(nextCursor)) {
       break;
     }
+    seenCursors.add(nextCursor);
     cursor = nextCursor;
   }
 

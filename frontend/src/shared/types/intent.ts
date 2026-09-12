@@ -98,6 +98,7 @@ export interface ValidateIntentRequest {
 }
 
 export interface ExecuteIntentRequest {
+  simulation_id?: string;
   workspace_id: string;
   intent_id: string;
   idempotency_key?: string;

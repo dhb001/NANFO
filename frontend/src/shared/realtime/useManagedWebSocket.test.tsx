@@ -33,6 +33,11 @@ class MockWebSocket {
   }
 }
 
+function acknowledge(socket: MockWebSocket, filters: Record<string, unknown> = {}) {
+  socket.onopen?.(new Event("open"));
+  socket.onmessage?.(new MessageEvent("message", { data: JSON.stringify({ event: "subscribed", channel: "telemetry", filters }) }));
+}
+
 interface HarnessProps {
   onFrame: (frame: TestFrame) => void;
   onUnauthorized: () => void;
@@ -60,6 +65,49 @@ describe("useManagedWebSocket", () => {
     vi.stubGlobal("WebSocket", MockWebSocket as unknown as typeof WebSocket);
   });
 
+  it("requires the matching subscribed ACK before readiness or data, and bounds unauthorized rotation", () => {
+    const onFrame = vi.fn();
+    const onSubscribed = vi.fn();
+    const onStatusChange = vi.fn();
+    const onUnauthorized = vi.fn();
+    const { rerender } = renderHook(({ token }) => useManagedWebSocket<TestFrame>({
+      path: "/ws/telemetry", token, channel: "telemetry", filters: { network_id: "n" }, enabled: true,
+      onFrame, onSubscribed, onStatusChange, onUnauthorized,
+    }), { initialProps: { token: "first" } });
+    const socket = MockWebSocket.instances[0];
+    act(() => {
+      socket.onopen?.(new Event("open"));
+      socket.onmessage?.(new MessageEvent("message", { data: JSON.stringify({ event: "telemetry.received" }) }));
+      socket.onmessage?.(new MessageEvent("message", { data: JSON.stringify({ event: "subscribed", channel: "telemetry", filters: { network_id: "wrong" } }) }));
+    });
+    expect(onStatusChange).not.toHaveBeenCalledWith("open");
+    expect(onFrame).not.toHaveBeenCalled();
+    act(() => acknowledge(socket, { network_id: "n" }));
+    expect(onStatusChange).toHaveBeenLastCalledWith("open");
+    expect(onSubscribed).toHaveBeenCalledTimes(1);
+    act(() => { void socket.onclose?.(new CloseEvent("close", { code: 1008 })); });
+    expect(onUnauthorized).toHaveBeenCalledTimes(1);
+    rerender({ token: "rotated" });
+    act(() => {
+      MockWebSocket.instances[1].onopen?.(new Event("open"));
+      MockWebSocket.instances[1].onclose?.(new CloseEvent("close", { code: 1008 }));
+    });
+    expect(onUnauthorized).toHaveBeenCalledTimes(1);
+  });
+
+  it("times out missing acknowledgments without falsely opening or refreshing auth", () => {
+    vi.useFakeTimers();
+    const onStatusChange = vi.fn();
+    const onUnauthorized = vi.fn();
+    const { unmount } = renderHook(() => useManagedWebSocket<TestFrame>({ path: "/ws/telemetry", token: "t", channel: "telemetry", enabled: true, onFrame: vi.fn(), onStatusChange, onUnauthorized }));
+    act(() => { MockWebSocket.instances[0].onopen?.(new Event("open")); vi.advanceTimersByTime(10_000); });
+    expect(MockWebSocket.instances[0].close).toHaveBeenCalledOnce();
+    expect(onStatusChange).not.toHaveBeenCalledWith("open");
+    expect(onUnauthorized).not.toHaveBeenCalled();
+    unmount();
+    vi.useRealTimers();
+  });
+
   it("subscribes on open and routes frames/errors correctly", () => {
     const onFrame = vi.fn();
     const onUnauthorized = vi.fn();
@@ -77,6 +125,7 @@ describe("useManagedWebSocket", () => {
     expect(socket.send).toHaveBeenCalledWith(
       JSON.stringify({ action: "subscribe", channel: "telemetry", filters: { network_id: "network-1" } }),
     );
+    act(() => socket.onmessage?.(new MessageEvent("message", { data: JSON.stringify({ event: "subscribed", channel: "telemetry", filters: { network_id: "network-1" } }) })));
 
     act(() => {
       socket.onmessage?.({
@@ -159,7 +208,10 @@ describe("useManagedWebSocket", () => {
     expect(onFrame).not.toHaveBeenCalled();
     expect(onUnauthorized).not.toHaveBeenCalled();
     expect(onStatusChange).not.toHaveBeenCalled();
-    act(() => MockWebSocket.instances[1].onmessage?.(new MessageEvent("message", { data: JSON.stringify({ event: "telemetry.received" }) })));
+    act(() => {
+      acknowledge(MockWebSocket.instances[1], { network_id: "new" });
+      MockWebSocket.instances[1].onmessage?.(new MessageEvent("message", { data: JSON.stringify({ event: "telemetry.received" }) }));
+    });
     expect(onFrame).toHaveBeenCalledTimes(1);
   });
 
@@ -185,6 +237,7 @@ describe("useManagedWebSocket", () => {
     const { unmount } = render(<Harness onFrame={onFrame} onUnauthorized={vi.fn()} onError={vi.fn()} />);
     act(() => {
       const socket = MockWebSocket.instances[0];
+      acknowledge(socket, { network_id: "network-1" });
       socket.onmessage?.(new MessageEvent("message", { data: "invalid-json" }));
       socket.onmessage?.(new MessageEvent("message", { data: JSON.stringify({ event: "telemetry.received" }) }));
       socket.onclose?.(new CloseEvent("close", { code: 1006 }));
@@ -214,7 +267,7 @@ describe("useManagedWebSocket", () => {
       await vi.advanceTimersByTimeAsync(60_000);
     });
     expect(onUpgradeFailure).toHaveBeenCalledTimes(1);
-    act(() => MockWebSocket.instances.at(-1)?.onopen?.(new Event("open")));
+    act(() => acknowledge(MockWebSocket.instances.at(-1)!));
     await act(async () => {
       MockWebSocket.instances.at(-1)?.onclose?.(new CloseEvent("close", { code: 1006 }));
       await vi.advanceTimersByTimeAsync(60_000);
@@ -285,7 +338,7 @@ describe("useManagedWebSocket", () => {
     });
     expect(fetchMock).toHaveBeenCalledTimes(4);
     act(() => {
-      MockWebSocket.instances.at(-1)?.onopen?.(new Event("open"));
+      acknowledge(MockWebSocket.instances.at(-1)!);
       MockWebSocket.instances.at(-1)?.onmessage?.(new MessageEvent("message", { data: JSON.stringify({ event: "telemetry.received" }) }));
     });
     expect(onFrame).toHaveBeenCalledWith({ event: "telemetry.received" });

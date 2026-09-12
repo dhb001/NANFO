@@ -28,13 +28,21 @@ def project_execution(intent, job, *, event: bool = False, db=None):
     intent.confidence_score = 0.0
     intent.confidence_band = "below_60"
     intent.approval_required = True
+    command = job.command if isinstance(job.command, dict) else {}
+    approved_plan = command.get("plan")
+    try:
+        if not isinstance(approved_plan, dict) or digest(approved_plan) != command.get("plan_hash"):
+            approved_plan = None
+    except (ValueError, TypeError):
+        approved_plan = None
     intent.execution_provenance = {
         "executor": "manual_lab_v1", "policy_reference": "ADR-010", "execution_id": str(job.execution_id),
         "status": status, "phase": job.phase, "pipeline_stage": status,
         "manual_approval": True, "approved_by_user_id": job.actor_id, "approved_at": job.approved_at.isoformat(),
-        "plan_hash": job.command["plan_hash"], "binding_digest": job.command["binding_digest"],
-        "run_id": job.command["run_id"], "deadline": job.command["deadline"],
-        "dispatch_expires_at": job.command.get("dispatch_expires_at"),
+        "plan_hash": command.get("plan_hash"), "binding_digest": command.get("binding_digest"),
+        "approved_plan": copy.deepcopy(approved_plan),
+        "run_id": command.get("run_id"), "deadline": command.get("deadline"),
+        "dispatch_expires_at": command.get("dispatch_expires_at"),
         "verification": result.get("verification", {"status": "not_performed"}),
         "rollback": result.get("rollback"), "failure_reason": job.failure_reason,
         "uncertain": job.phase == "uncertain", "blocks_lab": job.blocks_lab,
@@ -72,7 +80,7 @@ def project_execution(intent, job, *, event: bool = False, db=None):
 
 
 async def accept_execution(*, db, redis, workspace_id, intent_id, idempotency_key, correlation_id,
-                           actor_id, permissions, manual_approval, cancel):
+                           actor_id, permissions, manual_approval, cancel, simulation_id=None):
     if not {"write:config", "execute:rollback"}.issubset(permissions):
         raise HTTPException(403, detail={"code": "INTENT_EXECUTION_PERMISSION_DENIED", "message": "Execution permissions required."})
     workspace = await WorkspaceService(db=db, redis=redis).get_active_workspace(workspace_id, user_id=actor_id, require_write=True)
@@ -84,9 +92,26 @@ async def accept_execution(*, db, redis, workspace_id, intent_id, idempotency_ke
               else await IntentRepository(db).lock_intent(intent_id, workspace_id))
     if intent is None or intent.workspace_id != workspace_id:
         raise HTTPException(404, detail={"code": "INTENT_NOT_FOUND", "message": "Intent not found."})
+    prepared, simulation_evidence = None, None
+    if simulation_id is not None and not cancel:
+        from app.modules.simulation.modeled import current_network_state_hash
+        from app.modules.simulation.service import SimulationStartService
+
+        try:
+            prepared = await prepare_plan(settings=get_settings(), db=db, redis=redis,
+                workspace_id=workspace_id, network_id=intent.network_id, actor_id=actor_id, payload=intent.intent_payload)
+        except (ValueError, OSError, ImportError) as exc:
+            raise HTTPException(409, detail={"code": "SIMULATION_EVIDENCE_REJECTED",
+                "message": "Current actual network state and normalized plan unavailable."}) from exc
+        plan, binding, snapshot = prepared
+        simulation_evidence = await SimulationStartService(db=db, redis=redis).validate_execution_reference(
+            simulation_id=simulation_id, workspace_id=workspace_id, network_id=intent.network_id,
+            intent_id=intent_id, actor_id=actor_id, plan_sha256=digest(plan.model_dump(mode="json")),
+            network_state_sha256=current_network_state_hash(binding=binding, snapshot=snapshot))
     request_hash = digest({"intent_id": str(intent_id), "workspace_id": str(workspace_id),
                            "actor_id": actor_id, "manual_approval": manual_approval,
-                           "intent": intent.intent_payload})
+                           "intent": intent.intent_payload,
+                           **({"simulation_id": str(simulation_id)} if simulation_id else {})})
     existing = await repo.existing(workspace_id, intent_id, key)
     if cancel:
         job = next((job for job in existing if job.intent_id == intent_id), None)
@@ -110,6 +135,8 @@ async def accept_execution(*, db, redis, workspace_id, intent_id, idempotency_ke
     if existing:
         if len(existing) != 1 or existing[0].request_key != key or existing[0].request_hash != request_hash:
             raise HTTPException(409, detail={"code": "INTENT_IDEMPOTENCY_CONFLICT", "message": "Execution request identity already used."})
+        if existing[0].simulation_evidence != simulation_evidence:
+            raise HTTPException(409, detail={"code": "INTENT_IDEMPOTENCY_CONFLICT", "message": "Approved simulation evidence changed."})
         await db.commit()
         return intent, True
     if intent.status != "validated":
@@ -119,7 +146,7 @@ async def accept_execution(*, db, redis, workspace_id, intent_id, idempotency_ke
     settings = get_settings()
     try:
         Mailbox(settings)
-        plan, binding, snapshot = await prepare_plan(settings=settings, db=db, redis=redis,
+        plan, binding, snapshot = prepared or await prepare_plan(settings=settings, db=db, redis=redis,
             workspace_id=workspace_id, network_id=intent.network_id, actor_id=actor_id, payload=intent.intent_payload)
     except (ValueError, OSError, ImportError) as exc:
         raise HTTPException(409, detail={"code": "LAB_PRECONDITION_FAILED", "message": "Lab plan, binding, authority or observation unavailable."}) from exc
@@ -131,6 +158,7 @@ async def accept_execution(*, db, redis, workspace_id, intent_id, idempotency_ke
         org_id=workspace.org_id, outbox_sequence=0,
         request_key=key, request_hash=request_hash, lab_key=binding.topology_id,
         actor_id=actor_id, approved_at=now, command=command.model_dump(mode="json"),
+        simulation_evidence=copy.deepcopy(simulation_evidence),
         phase="accepted", blocks_lab=True, cancel_requested=False, fence=0)
     intent.correlation_id = correlation_id
     intent.idempotency_key = key

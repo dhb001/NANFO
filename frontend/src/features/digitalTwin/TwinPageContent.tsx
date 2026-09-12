@@ -1,4 +1,4 @@
-import { ChangeEvent, Suspense, lazy, useCallback, useEffect, useMemo, useState } from "react";
+import { ChangeEvent, Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { CampusFocusControls } from "@/features/digitalTwin/CampusFocusControls";
 import { DeviceLegendPanel } from "@/features/digitalTwin/DeviceLegendPanel";
@@ -27,8 +27,9 @@ import { useLiveStore } from "@/features/realtime/store";
 import { Badge } from "@/shared/ui/Badge";
 import { Button } from "@/shared/ui/Button";
 import { usePrefersReducedMotion } from "@/shared/lib/reduced-motion";
+import { SceneReconciliationStatus } from "@/features/realtime/SceneReconciliationStatus";
 import { useIsNarrowViewport } from "@/shared/lib/viewport";
-import { formatNumber } from "@/shared/lib/format";
+import { formatNumber, formatTimestamp } from "@/shared/lib/format";
 import {
   useCampusModelAssets,
   useCampusBuildings,
@@ -39,6 +40,9 @@ import {
   useUpsertDeviceGroups,
 } from "@/features/networks/hooks";
 import { useUiStore } from "@/shared/state/ui-store";
+import type { MeasuredPathSegment } from "./measuredPathMapping";
+
+const MeasuredPathPanel = lazy(() => import("./MeasuredPathPanel").then((module) => ({ default: module.MeasuredPathPanel })));
 
 interface LayerState {
   showLinks: boolean;
@@ -155,6 +159,8 @@ export function TwinPageContent() {
   const baseGraph = graphQuery.data?.data;
 
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [measuredPath, setMeasuredPath] = useState<MeasuredPathSegment[] | null>(null);
+  const [showMeasuredPaths, setShowMeasuredPaths] = useState(false);
   const [layers, setLayers] = useState<LayerState>(DEFAULT_LAYERS);
   const [importSummary, setImportSummary] = useState<ImportSummary | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
@@ -176,6 +182,12 @@ export function TwinPageContent() {
   const [focusSelectedBuildingOnly, setFocusSelectedBuildingOnly] = useState(false);
   const [filterSelectedFloorOnly, setFilterSelectedFloorOnly] = useState(false);
   const [currentModelFile, setCurrentModelFile] = useState<File | null>(null);
+  const modelOperation = useRef(0);
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; modelOperation.current += 1; };
+  }, []);
 
   useEffect(() => {
     return () => {
@@ -189,6 +201,8 @@ export function TwinPageContent() {
   const topologyStatus = useLiveStore((state) => state.topologyStatus);
   const digitalTwinStatus = useLiveStore((state) => state.digitalTwinStatus);
   const liveAlerts = useLiveStore((state) => state.alerts);
+  const sceneObjectLastSeen = useLiveStore((state) => state.sceneObjectLastSeen);
+  const sceneObjectAvailability = useLiveStore((state) => state.sceneObjectAvailability);
   const updateSpatialRefMutation = useUpdateDeviceSpatialRef(token, networkId);
   const campusBuildingsQuery = useCampusBuildings(token, networkId);
   const campusModelAssetsQuery = useCampusModelAssets(token, networkId);
@@ -414,10 +428,15 @@ export function TwinPageContent() {
     }
 
     setIsPersistingModelAsset(true);
+    const epoch = useLiveStore.getState().epoch;
     try {
+      const { MAX_MODEL_BYTES, validateModelBytes } = await import("@/features/digitalTwin/modelAsset");
+      if (currentModelFile.size > MAX_MODEL_BYTES) throw new Error("Model must be no larger than 8 MiB.");
       const modelBuffer = await currentModelFile.arrayBuffer();
+      await validateModelBytes(modelBuffer, currentModelFile.name, currentModelFile.type || "application/octet-stream");
       const modelDataBase64 = toBase64(modelBuffer);
       const modelSha256 = await sha256Hex(modelBuffer);
+      if (!mounted.current || useLiveStore.getState().epoch !== epoch || useAuthStore.getState().endingSession) return;
 
       await upsertCampusModelAssetsMutation.mutateAsync({
         model_file_name: currentModelFile.name,
@@ -454,7 +473,7 @@ export function TwinPageContent() {
   ]);
 
   const persistDerivedDeviceGroups = useCallback(async () => {
-    if (!networkId || !token || sceneModel.nodes.length === 0) {
+    if (!networkId || !token || sceneModel.nodes.length === 0 || graphQuery.data?.nextCursor || graphQuery.isFetching) {
       return;
     }
 
@@ -518,7 +537,7 @@ export function TwinPageContent() {
       }
 
       await upsertDeviceGroupsMutation.mutateAsync({
-        replaceExisting: true,
+        replaceExisting: false,
         groups: [
           {
             group_key: `wireless-${scopeToken}`.slice(0, 160),
@@ -559,6 +578,8 @@ export function TwinPageContent() {
     sceneModel.nodes,
     token,
     upsertDeviceGroupsMutation,
+    graphQuery.data?.nextCursor,
+    graphQuery.isFetching,
   ]);
 
   const handleConfigureIntentWorkflow = useCallback(async () => {
@@ -590,7 +611,9 @@ export function TwinPageContent() {
       return;
     }
 
+    const operation = ++modelOperation.current;
     const importModule = await import("@/features/digitalTwin/twinImport");
+    if (!mounted.current || operation !== modelOperation.current) return;
 
     const modelValidation = importModule.validateModelFile(modelFile);
     if (!modelValidation.ok) {
@@ -603,29 +626,59 @@ export function TwinPageContent() {
       return;
     }
 
-    if (options.replaceModelAsset) {
-      const modelUrl = createSessionModelUrl(modelFile);
-      revokeSessionModelUrl(importedModelUrl);
-      setImportedModelUrl(modelUrl);
-      setImportedModelStatus("loading");
-      setImportedModelStatusMessage(null);
-    }
-
     setIsImporting(true);
     setImportError(null);
     try {
       const summary = await importModule.parseImportSummary(modelFile, mappingFile, graphNodes);
+      if (!mounted.current || operation !== modelOperation.current) return;
       setImportSummary(summary);
       setModelFileName(modelFile.name);
       if (options.replaceModelAsset) {
+        setImportedModelUrl(createSessionModelUrl(modelFile));
+        setImportedModelStatus("loading");
+        setImportedModelStatusMessage(null);
         setCurrentModelFile(modelFile);
       }
     } catch (error) {
-      setImportError(error instanceof Error ? error.message : "Import validation failed.");
+      if (mounted.current && operation === modelOperation.current) setImportError(error instanceof Error ? error.message : "Import validation failed.");
     } finally {
-      setIsImporting(false);
+      if (mounted.current && operation === modelOperation.current) setIsImporting(false);
     }
-  }, [graphNodes, importedModelUrl]);
+  }, [graphNodes]);
+
+  const restorePersistedModel = async () => {
+    if (!latestPersistedModelAsset || !token || !networkId || graphQuery.isFetching || graphQuery.isError || !baseGraph || graphQuery.data?.nextCursor) return;
+    if (currentModelFile && !window.confirm("Replace the current local model and mapping with the persisted asset? Unsaved imports will be lost.")) return;
+    const operation = ++modelOperation.current;
+    const epoch = useLiveStore.getState().epoch;
+    const revision = useLiveStore.getState().topologyRevision;
+    setIsImporting(true);
+    setImportError(null);
+    try {
+      const { decodePersistedModel } = await import("@/features/digitalTwin/modelAsset");
+      const [assets, graph] = await Promise.all([campusModelAssetsQuery.refetch(), graphQuery.refetch()]);
+      if (!mounted.current || operation !== modelOperation.current || useLiveStore.getState().epoch !== epoch) return;
+      if (assets.isError || graph.isError || !graph.data || graph.data.nextCursor) throw new Error("Restore requires a fresh, complete topology and persisted asset read.");
+      const asset = assets.data?.items.find((item) => item.campus_model_asset_id === latestPersistedModelAsset.campus_model_asset_id);
+      if (!asset) throw new Error("Persisted model is no longer available. Refresh and try again.");
+      const ids = new Set(graph.data.data.nodes.filter((node) => !Object.hasOwn(useLiveStore.getState().topologyTombstones, node.device_id)).map((node) => node.device_id));
+      const file = await decodePersistedModel(asset, networkId, ids);
+      if (!mounted.current || operation !== modelOperation.current || useLiveStore.getState().epoch !== epoch) return;
+      if (useLiveStore.getState().topologyRevision !== revision) throw new Error("Topology changed during restore. Reconcile and try again.");
+      const mapping = { ...asset.mapping_by_device_id };
+      setImportSummary({ modelFileName: file.name, modelType: file.name.toLowerCase().endsWith(".glb") ? "glb" : "gltf", mappingFileName: null,
+        totalRows: Object.keys(mapping).length, matched: Object.keys(mapping).length, unmatched: 0, duplicateKeys: [], mappingByDeviceId: mapping });
+      setCurrentModelFile(file);
+      setModelFileName(file.name);
+      setImportedModelUrl(createSessionModelUrl(file));
+      setImportedModelStatus("loading");
+      setImportedModelStatusMessage(null);
+    } catch (error) {
+      if (mounted.current && operation === modelOperation.current) setImportError(error instanceof Error ? error.message : "Model restore failed.");
+    } finally {
+      if (mounted.current && operation === modelOperation.current) setIsImporting(false);
+    }
+  };
 
   const handleModelUpload = useCallback(async (event: ChangeEvent<HTMLInputElement>) => {
     const modelFile = event.target.files?.[0] ?? null;
@@ -689,6 +742,7 @@ export function TwinPageContent() {
           </div>
         }
       >
+        {graphQuery.data?.nextCursor ? <div role="status">Partial topology: pagination cap reached. Mapping restore and group persistence require a complete graph.</div> : null}
         <QueryState
           query={graphQuery}
           hasData={(data) => data.data.nodes.length > 0 || sceneModel.nodes.length > 0}
@@ -858,6 +912,10 @@ export function TwinPageContent() {
                   >
                     {isPersistingModelAsset ? "Persisting model asset..." : "Persist Model Asset"}
                   </Button>
+                  <Button type="button" tone="ghost" onClick={restorePersistedModel}
+                    disabled={!latestPersistedModelAsset || !baseGraph || Boolean(graphQuery.data?.nextCursor) || graphQuery.isFetching || graphQuery.isError || isImporting}>
+                    {isImporting ? "Validating model..." : "Restore Persisted Model"}
+                  </Button>
                 </div>
                 {importedModelStatusMessage ? (
                   <div role="status" style={{ color: "var(--danger)", fontSize: "0.78rem" }}>
@@ -938,7 +996,7 @@ export function TwinPageContent() {
                   <Button
                     type="button"
                     tone="ghost"
-                    disabled={sceneModel.nodes.length === 0 || isPersistingDeviceGroups || !networkId || !token}
+                    disabled={sceneModel.nodes.length === 0 || Boolean(graphQuery.data?.nextCursor) || graphQuery.isFetching || isPersistingDeviceGroups || !networkId || !token}
                     permission="write:config"
                     onClick={persistDerivedDeviceGroups}
                   >
@@ -951,6 +1009,7 @@ export function TwinPageContent() {
                 <TwinScene
                   nodes={sceneModel.nodes}
                   links={sceneModel.links}
+                  measuredPath={measuredPath ?? undefined}
                   overlays={sceneModel.overlays}
                   selectedNodeId={selectedNodeId}
                   onSelectNode={setSelectedNodeId}
@@ -968,6 +1027,11 @@ export function TwinPageContent() {
           )}
         </QueryState>
       </Panel>
+
+      <Button tone="ghost" aria-expanded={showMeasuredPaths} aria-controls="twin-measured-paths" onClick={() => setShowMeasuredPaths(!showMeasuredPaths)}>{showMeasuredPaths ? "Hide measured probe paths" : "Show measured probe paths"}</Button>
+      {showMeasuredPaths && <div id="twin-measured-paths"><Suspense fallback={<p>Loading probe path panel...</p>}>
+        <MeasuredPathPanel nodes={sceneModel.nodes} links={sceneModel.links} onHighlight={setMeasuredPath} />
+      </Suspense></div>}
 
       <div style={{ display: "grid", gridTemplateColumns: isNarrowViewport ? "1fr" : "1fr 1fr", gap: "1rem", alignItems: "start" }}>
         <Panel title="Inspector" subtitle="Device identity, topology, spatial reference, and congestion">
@@ -1066,6 +1130,7 @@ export function TwinPageContent() {
         </Panel>
 
         <Panel title="Live Scene Deltas" subtitle="simulation and intent websocket deltas">
+          <SceneReconciliationStatus />
           {liveSceneCards.length === 0 ? (
             <div style={{ color: "var(--ink-3)" }}>No scene deltas observed yet.</div>
           ) : (
@@ -1078,6 +1143,9 @@ export function TwinPageContent() {
                   <div style={{ display: "flex", justifyContent: "space-between", gap: "0.45rem" }}>
                     <strong>{sceneObject.id}</strong>
                     <Badge text={sceneObject.object_type} tone="info" />
+                  </div>
+                  <div style={{ color: "var(--ink-3)", fontSize: "0.74rem" }}>
+                    Last observed: {sceneObjectLastSeen[sceneObject.id] ? formatTimestamp(new Date(sceneObjectLastSeen[sceneObject.id]).toISOString()) : "unavailable"}. Detail reconciliation: {sceneObjectAvailability[sceneObject.id] ?? "stale"}. Snapshot only, not continuous proof.
                   </div>
                   {sceneObject.status ? (
                     <div style={{ marginTop: "0.2rem" }}>

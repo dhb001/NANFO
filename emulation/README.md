@@ -1,5 +1,15 @@
 # Isolated Campus SDN Lab
 
+For the explicit opt-in ADR-011 measured reset/step environment, fixed AI client
+transport, baseline smoke and real OSPF mode, see [EXPERIMENT.md](EXPERIMENT.md).
+ADR-013 adds matched Linux/FRR learned routing and stationary V3 scenarios; see
+[MATCHED-VALIDATION.md](MATCHED-VALIDATION.md) for the historical V3 validation.
+ADR-014 supersedes fixed receiver cutoff with bounded verified drain, spec **V4**:
+[DRAIN-V4-VALIDATION.md](DRAIN-V4-VALIDATION.md) records the preserved v4 release.
+ADR-015 expands matched/OSPF stationary profiles under explicit spec **V5**:
+[REFINEMENT-V5.md](REFINEMENT-V5.md) is the current operator/schema handoff.
+Historical v4 image/source identity is in [ADR015-V4-PRESERVATION.md](ADR015-V4-PRESERVATION.md).
+
 Measured observation and bounded manual lab controls, implementing
 [`ADR-009`](../docs/adr/ADR-009-isolated-sdn-emulation-observation.md).
 This is actual Mininet host namespaces, kernel Open vSwitch, Ryu OpenFlow 1.3,

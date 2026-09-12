@@ -88,6 +88,7 @@ class IntentExecution(Base):
     actor_id: Mapped[str] = mapped_column(Text, nullable=False)
     approved_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), nullable=False)
     command: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    simulation_evidence: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     phase: Mapped[str] = mapped_column(Text, nullable=False, default="accepted")
     blocks_lab: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     cancel_requested: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)

@@ -34,7 +34,7 @@ function recommendIntentAction(severity: "low" | "medium" | "high" | "neutral") 
 
 export function buildIntentHandoffFromNode(node: IntentHandoffNode): IntentHandoffPrefill {
   const action = recommendIntentAction(node.congestion.severity);
-  const topMetric = node.congestion.metrics[0] ?? null;
+  const topMetric = node.congestion.metrics.find((metric) => !metric.stale) ?? null;
   const scope = {
     source: "digital_twin",
     device_id: node.id,

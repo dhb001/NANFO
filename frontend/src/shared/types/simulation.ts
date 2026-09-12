@@ -1,4 +1,6 @@
 export interface ScenarioValidationState {
+  source?: "operator_configured_model" | "unavailable";
+  physical_safety_authorized?: false;
   pipeline_stage: string;
   required_checks: string[];
   policy_reference: string;
@@ -64,6 +66,10 @@ export interface SimulationDetail {
   scenario_name: string;
   validation: Record<string, unknown>;
   run_output: Record<string, unknown>;
+  scenario_config?: ScenarioConfig | null;
+  progress?: { tick: number; duration_ticks: number } | null;
+  evidence_expires_at?: string | null;
+  revision?: number;
   model_versions: Record<string, unknown>;
   audit_provenance: Record<string, unknown>;
   queue_status: string;
@@ -82,6 +88,8 @@ export interface SimulationMetricsSnapshot {
 }
 
 export interface SimulationCompare {
+  compatible?: boolean;
+  comparison_reason?: string | null;
   simulation_id: string;
   baseline_simulation_id: string;
   scenario_id: string;
@@ -90,4 +98,14 @@ export interface SimulationCompare {
   simulation_metrics: SimulationMetricsSnapshot;
   baseline_metrics: SimulationMetricsSnapshot;
   deltas: SimulationMetricsSnapshot;
+}
+export interface ScenarioConfig {
+  version: 1;
+  seed: number;
+  tick_ms: number;
+  duration_ticks: number;
+  links: { link_id: string; source: string; target: string; capacity_mbps: number; buffer_bytes: number; delay_ms: number; initial_queue_bytes: number }[];
+  flows: { flow_id: string; source: string; target: string; path: string[]; demand_mbps: number[] }[];
+  action_binding: null | { intent_id: string; plan_sha256: string; network_state_sha256: string };
+  limits: { max_loss_pct: number; max_latency_ms: number; min_throughput_mbps: number };
 }

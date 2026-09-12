@@ -171,7 +171,13 @@ test.describe("VS5 digital twin realtime resilience", () => {
     await page.getByLabel("Campus model file").setInputFiles({
       name: "campus.glb",
       mimeType: "model/gltf-binary",
-      buffer: Buffer.from("glb-binary"),
+      buffer: (() => {
+        const json = JSON.stringify({ asset: { version: "2.0" }, scenes: [{ nodes: [0] }], nodes: [{ name: "campus" }], scene: 0 });
+        const chunk = Buffer.from(json.padEnd(Math.ceil(json.length / 4) * 4, " "));
+        const header = Buffer.alloc(20);
+        [0x46546c67, 2, chunk.length + 20, chunk.length, 0x4e4f534a].forEach((value, index) => header.writeUInt32LE(value, index * 4));
+        return Buffer.concat([header, chunk]);
+      })(),
     });
     await expect(page.getByText(/model GLB/i)).toBeVisible();
 

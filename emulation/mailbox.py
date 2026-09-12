@@ -170,6 +170,7 @@ class Mailbox:
         )
         self.seen = {}
         self.recovered = False
+        self.control_generation = 0
 
     def close(self):
         os.close(self.lock)
@@ -203,6 +204,7 @@ class Mailbox:
         safeWrite(self.results / (result["execution_id"] + ".json"), result)
 
     def finish(self, state, record, result):
+        self.control_generation += 1
         record["result"], record["phase"] = result, "terminal"
         if result["status"] == "uncertain":
             state["blocked"] = True
@@ -267,7 +269,7 @@ class Mailbox:
             self.save(state)
         self.recovered = True
 
-    def noMutation(self, state, command, status, reason):
+    def noMutation(self, state, command, status, reason, obsolete=False):
         record = state["records"].get(
             command["execution_id"], {"command": command, "phase": "terminal"}
         )
@@ -275,13 +277,27 @@ class Mailbox:
         state["records"][command["execution_id"]] = record
         verification = {}
         try:
+            if obsolete and not (
+                record.get("recovered_obsolete")
+                and record["phase"] == "terminal"
+                and command["operation"] == "cancel"
+                and state["active"] != command["execution_id"]
+            ):
+                raise ValueError("Exact recovered obsolete cancellation required")
             if (
                 state["blocked"]
-                or command["run_id"] != self.runId
-                or command["binding_digest"] != self.digest
+                or (not obsolete and command["run_id"] != self.runId)
+                or (not obsolete and command["binding_digest"] != self.digest)
             ):
                 raise ValueError("Cannot certify unreconciled run/binding")
             active = state["records"].get(state["active"])
+            if active and (
+                active["command"]["run_id"] != self.runId
+                or active["command"]["binding_digest"] != self.digest
+                or active["phase"] != "terminal"
+                or active["result"]["status"] != "completed"
+            ):
+                raise ValueError("Current active policy is not reconciled")
             actual = self.driver.reconcile(active["prepared"] if active else None)
             record["after"] = actual
             verification = {
@@ -293,6 +309,8 @@ class Mailbox:
             }
             if record.get("restored_by"):
                 verification["already_restored"] = True
+            if obsolete:
+                verification.update(recovered_obsolete=True, current_run_id=self.runId)
         except Exception as error:
             status = "uncertain"
             reason = f"{reason}; no-mutation reconciliation failed: {type(error).__name__}"
@@ -328,6 +346,15 @@ class Mailbox:
             if record and command["fence"] < record["command"]["fence"]:
                 raise ValueError("Stale fence")
             if record and record.get("recovered_obsolete") and record["phase"] == "terminal":
+                if command["operation"] == "cancel":
+                    record.setdefault("obsolete_result", record["result"])
+                    return self.noMutation(
+                        state,
+                        command,
+                        "cancelled",
+                        "Obsolete execution absent; current run reconciled without mutation",
+                        obsolete=True,
+                    )
                 record["command"]["fence"] = command["fence"]
                 record["result"]["fence"] = command["fence"]
                 return self.finish(state, record, record["result"])
@@ -511,7 +538,7 @@ class Mailbox:
                 state, record, status, f"{type(error).__name__}: {str(error)[:200]}"
             )
 
-    def poll(self):
+    def poll(self, cancel_only=False):
         paths = []
         metadata = unknown = 0
         with os.scandir(self.commands) as entries:
@@ -535,6 +562,8 @@ class Mailbox:
                 if self.seen.get(path.name) == fingerprint and (self.results / path.name).exists():
                     continue
                 command = validateEnvelope(safeRead(path), path.name)
+                if cancel_only and command["operation"] != "cancel":
+                    continue
                 self.handle(command)
                 self.seen[path.name] = fingerprint
             except (OSError, ValueError, TypeError, KeyError) as error:

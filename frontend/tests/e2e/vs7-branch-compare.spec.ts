@@ -6,9 +6,15 @@ import {
 } from "./support/session";
 
 test.describe("VS7 branch and compare", () => {
-  test("branches simulation and displays compare deltas", async ({ page }) => {
+  test("branches legacy simulation without treating unversioned compare deltas as evidence", async ({ page }) => {
     const state = createDefaultSessionState();
     await installSessionMocks(page, state);
+    await page.route("**/api/v1/simulations/00000000-0000-0000-0000-000000000801", async (route) => {
+      await route.fulfill({ json: { success: true, meta: {}, errors: null, data: {
+        simulation_id: "00000000-0000-0000-0000-000000000801", network_id: "00000000-0000-0000-0000-000000000333",
+        scenario_name: "Legacy parent", status: "cancelled", queue_status: "blocked", risk_gate: "blocked", validation: {}, run_output: {},
+      } } });
+    });
 
     await page.route("**/api/v1/simulations/start", async (route) => {
       await route.fulfill({
@@ -147,7 +153,7 @@ test.describe("VS7 branch and compare", () => {
     await page.getByRole("button", { name: "Branch" }).click();
 
     await expect(page.getByRole("heading", { name: "Compare" })).toBeVisible();
-    await expect(page.getByText(/5\s*ms/)).toBeVisible();
-    await expect(page.getByText(/0\.4\s*%/)).toBeVisible();
+    await expect(page.getByText("Unavailable (no compatible modeled evidence)")).toHaveCount(3);
+    await expect(page.getByText(/Comparison histories unavailable or incompatible/)).toBeVisible();
   });
 });

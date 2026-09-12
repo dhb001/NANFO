@@ -27,9 +27,11 @@ import tempfile
 import time
 from pathlib import Path
 
+from emulation.actions import parseTc
 from emulation.measurements import parsePing, parseQueue, utcNow
 from emulation.runner import requireContainer, stopProcess
 from emulation.topology import HOSTS, LINKS, SWITCHES, TOPOLOGY_ID
+from emulation.workloads import MATCHED_CAPACITIES
 
 ROUTERS = tuple(row["name"] for row in SWITCHES)
 ROUTER_IDS = {name: f"10.255.0.{i}" for i, name in enumerate(ROUTERS, 1)}
@@ -38,9 +40,13 @@ POLICY = {
     "protocol": "FRRouting OSPFv2 (IP protocol 89)",
     "area": "0.0.0.0",
     "maximum_paths": 1,
-    "cost": "100 * ceil(100 / capacity_mbps) + one_based_manifest_link_index",
+    "hello_interval_seconds": 1,
+    "dead_interval_seconds": 10,
+    "cost": "100 * ceil(100 / nominal_capacity_mbps) + one_based_manifest_link_index; frozen before exogenous episode shaping",
     "tie_break": "Explicit link-index cost perturbation; dist1 preferred on this graph",
     "background": "h2->h4 follows actual OSPF/kernel routes, never fixture-pinned",
+    "matched_comparison": "Same Linux/FRR graph, addresses, qdiscs, demand and impairments; only foreground policy routes differ",
+    "impairment_policy": "Stationary HTB capacity degradation is not advertised to OSPF; comparison is against static nominal costs, not capacity-aware OSPF",
     "comparison_limitations": [
         "Linux L3 forwarding rather than OVS OpenFlow L2 forwarding",
         "Per-link 10.78.k.0/30 addressing rather than the SDN shared 10.77.0.0/24",
@@ -85,27 +91,36 @@ def routerConfig(name):
             if endpoint["node"] != name:
                 continue
             interface = endpoint["interface"]
-            lines.extend([
-                f"interface {interface}",
-                f" bandwidth {link['capacity_mbps'] * 1000}",
-                " ip ospf area 0.0.0.0",
-                f" ip ospf cost {link['cost']}",
-            ])
+            lines.extend(
+                [
+                    f"interface {interface}",
+                    f" bandwidth {link['capacity_mbps'] * 1000}",
+                    " ip ospf area 0.0.0.0",
+                    f" ip ospf cost {link['cost']}",
+                ]
+            )
             if endpoint["peer"] in ROUTERS:
                 active.append(interface)
-                lines.extend([
-                    " ip ospf network point-to-point",
-                    " ip ospf hello-interval 1",
-                    " ip ospf dead-interval 4",
-                ])
+                lines.extend(
+                    [
+                        " ip ospf network point-to-point",
+                        " ip ospf hello-interval 1",
+                        " ip ospf dead-interval 10",
+                    ]
+                )
             lines.append("!")
-    lines.extend([
-        "router ospf", f" ospf router-id {ROUTER_IDS[name]}",
-        " auto-cost reference-bandwidth 100", " maximum-paths 1",
-        " passive-interface default",
-        *(f" no passive-interface {interface}" for interface in active),
-        "!", "",
-    ])
+    lines.extend(
+        [
+            "router ospf",
+            f" ospf router-id {ROUTER_IDS[name]}",
+            " auto-cost reference-bandwidth 100",
+            " maximum-paths 1",
+            " passive-interface default",
+            *(f" no passive-interface {interface}" for interface in active),
+            "!",
+            "",
+        ]
+    )
     return "\n".join(lines)
 
 
@@ -113,17 +128,18 @@ def fullNeighbors(value, name):
     """Validate identities AND interfaces, not just a count of 'Full' strings."""
     expected = {
         (ROUTER_IDS[endpoint["peer"]], endpoint["interface"])
-        for link in linkPlan() for endpoint in link["endpoints"]
+        for link in linkPlan()
+        for endpoint in link["endpoints"]
         if endpoint["node"] == name and endpoint["peer"] in ROUTERS
     }
-    if not isinstance(value, dict):
+    if not isinstance(value, dict) or not isinstance(value.get("neighbors"), dict):
         return False
     observed = set()
-    for routerId, rows in value.items():
+    for routerId, rows in value["neighbors"].items():
         if not isinstance(rows, list):
             return False
         for row in rows:
-            if not isinstance(row, dict) or not row.get("nbrState", "").startswith("Full"):
+            if not isinstance(row, dict) or not row.get("state", "").startswith("Full/"):
                 return False
             observed.add((routerId, row.get("ifaceName", "").split(":")[0]))
     return observed == expected
@@ -140,11 +156,12 @@ class OSPFNetwork:
         self.logs = []
         self.plan = linkPlan()
         self.policy = dict(POLICY)
+        self.capacities = None
         self.hosts = {
-            endpoint["node"]: {
-                key: endpoint[key] for key in ("ipv4", "cidr", "interface")
-            } | {"gateway": link["endpoints"][0]["ipv4"]}
-            for link in self.plan for endpoint in link["endpoints"]
+            endpoint["node"]: {key: endpoint[key] for key in ("ipv4", "cidr", "interface")}
+            | {"gateway": link["endpoints"][0]["ipv4"]}
+            for link in self.plan
+            for endpoint in link["endpoints"]
             if endpoint["node"] not in ROUTERS
         }
         self.hostAddresses = {name: host["ipv4"] for name, host in self.hosts.items()}
@@ -168,12 +185,23 @@ class OSPFNetwork:
     def vty(self, name, command):
         if name not in ROUTERS or self.directory is None:
             raise ValueError("Unknown or unstarted OSPF router")
-        if command not in ("show ip ospf neighbor json", "show ip route ospf json",
-                           "show ip ospf interface json", "show version"):
+        if command not in (
+            "show ip ospf neighbor json",
+            "show ip route ospf json",
+            "show ip ospf interface json",
+            "show version",
+        ):
             raise ValueError("Only fixed read-only FRR evidence commands are allowed")
-        text = self.command(name, [
-            "vtysh", "--vty_socket", str(self.directory / name), "-c", command,
-        ])
+        text = self.command(
+            name,
+            [
+                "vtysh",
+                "--vty_socket",
+                str(self.directory / name),
+                "-c",
+                command,
+            ],
+        )
         return json.loads(text) if command.endswith(" json") else text
 
     def checkProcesses(self):
@@ -203,8 +231,9 @@ class OSPFNetwork:
             self.directory.chmod(0o755)
             # Upstream Mininet.init writes global limits/sysctls even with no OVS.
             Mininet.inited = True
-            self.net = Mininet(controller=None, link=TCLink, build=False,
-                               autoSetMacs=False, autoStaticArp=False)
+            self.net = Mininet(
+                controller=None, link=TCLink, build=False, autoSetMacs=False, autoStaticArp=False
+            )
             for name in ROUTERS:
                 self.net.addHost(name, cls=LinuxRouter, ip=None, inNamespace=True)
             for host in HOSTS:
@@ -212,21 +241,33 @@ class OSPFNetwork:
             for link in self.plan:
                 a, ap = link["a"]
                 b, bp = link["b"]
-                self.net.addLink(a, b, port1=ap, port2=bp, bw=link["capacity_mbps"],
-                                 delay=f"{link['delay_ms']}ms",
-                                 max_queue_size=link["max_queue_size"], use_htb=True)
+                self.net.addLink(
+                    a,
+                    b,
+                    port1=ap,
+                    port2=bp,
+                    bw=link["capacity_mbps"],
+                    delay=f"{link['delay_ms']}ms",
+                    max_queue_size=link["max_queue_size"],
+                    use_htb=True,
+                )
             self.net.build()
             self.net.start()
             for link in self.plan:
                 for endpoint in link["endpoints"]:
-                    self.command(endpoint["node"], ["ip", "addr", "replace", endpoint["cidr"],
-                                                    "dev", endpoint["interface"]])
+                    self.command(
+                        endpoint["node"],
+                        ["ip", "addr", "replace", endpoint["cidr"], "dev", endpoint["interface"]],
+                    )
             for name in (*ROUTERS, *self.hosts):
                 self.command(name, ["ip", "link", "set", "lo", "up"])
                 settings = ["net.ipv4.conf.all.rp_filter=0", "net.ipv4.conf.default.rp_filter=0"]
                 if name in ROUTERS:
-                    settings += ["net.ipv4.ip_forward=1", "net.ipv4.conf.all.send_redirects=0",
-                                 "net.ipv4.conf.default.send_redirects=0"]
+                    settings += [
+                        "net.ipv4.ip_forward=1",
+                        "net.ipv4.conf.all.send_redirects=0",
+                        "net.ipv4.conf.default.send_redirects=0",
+                    ]
                 for interface in self.get(name).intfList():
                     settings += [f"net.ipv4.conf.{interface.name}.rp_filter=0"]
                     if name in ROUTERS:
@@ -242,16 +283,32 @@ class OSPFNetwork:
                 os.chown(directory, user.pw_uid, user.pw_gid)
                 for daemon in ("zebra", "ospfd"):
                     config = directory / f"{daemon}.conf"
-                    config.write_text(routerConfig(name) if daemon == "ospfd" else
-                                      f"hostname {name}\nlog stdout\n")
+                    config.write_text(
+                        routerConfig(name)
+                        if daemon == "ospfd"
+                        else f"hostname {name}\nlog stdout\n"
+                    )
                     log = (directory / f"{daemon}.log").open("w")
                     self.logs.append(log)
-                    process = self.get(name).popen([
-                        f"/usr/lib/frr/{daemon}", "-f", str(config),
-                        "-i", str(directory / f"{daemon}.pid"),
-                        "-z", str(directory / "zserv.api"), "--vty_socket", str(directory),
-                        "-A", "127.0.0.1", "-P", "0",
-                    ], stdout=log, stderr=subprocess.STDOUT)
+                    process = self.get(name).popen(
+                        [
+                            f"/usr/lib/frr/{daemon}",
+                            "-f",
+                            str(config),
+                            "-i",
+                            str(directory / f"{daemon}.pid"),
+                            "-z",
+                            str(directory / "zserv.api"),
+                            "--vty_socket",
+                            str(directory),
+                            "-A",
+                            "127.0.0.1",
+                            "-P",
+                            "0",
+                        ],
+                        stdout=log,
+                        stderr=subprocess.STDOUT,
+                    )
                     self.processes.append((name, daemon, process))
                     deadline = time.monotonic() + 10
                     while not (directory / f"{daemon}.vty").exists():
@@ -289,15 +346,27 @@ class OSPFNetwork:
         if source not in self.hosts or destination not in self.hosts or source == destination:
             raise ValueError("Two distinct manifest hosts required")
         current, path, readback = source, [source], []
+        ingress = None
         while current != destination:
-            rows = json.loads(self.command(current, [
-                "ip", "-j", "route", "get", self.hostAddresses[destination],
-            ]))
+            args = [
+                "ip",
+                "-j",
+                "route",
+                "get",
+                self.hostAddresses[destination],
+                "from",
+                self.hostAddresses[source],
+            ]
+            if ingress is not None:
+                args += ["iif", ingress]
+            rows = json.loads(self.command(current, args))
             if len(rows) != 1 or not rows[0].get("dev"):
                 raise RuntimeError("Missing or ambiguous kernel next hop")
             route = rows[0]
             matches = [
-                (link, endpoint) for link in self.plan for endpoint in link["endpoints"]
+                (link, endpoint)
+                for link in self.plan
+                for endpoint in link["endpoints"]
                 if endpoint["node"] == current and endpoint["interface"] == route["dev"]
             ]
             if len(matches) != 1:
@@ -308,12 +377,17 @@ class OSPFNetwork:
                 raise RuntimeError("Kernel gateway does not match the connected peer")
             readback.append({"node": current, "route": route})
             current = endpoint["peer"]
+            ingress = peer["interface"]
             if current in path or len(path) >= len(ROUTERS) + 2:
                 raise RuntimeError("Kernel forwarding loop")
             path.append(current)
         routerPath = tuple(path[1:-1])
-        return {"nodes": path, "action": PATHS.index(routerPath) if routerPath in PATHS else None,
-                "kernel_routes": readback}
+        canonicalPath = routerPath if source < destination else tuple(reversed(routerPath))
+        return {
+            "nodes": path,
+            "action": PATHS.index(canonicalPath) if canonicalPath in PATHS else None,
+            "kernel_routes": readback,
+        }
 
     def pathInterfaces(self, action):
         """Both directions of the two inter-router links, excluding host access links."""
@@ -321,11 +395,90 @@ class OSPFNetwork:
             raise ValueError("Path action must be 0 or 1")
         pairs = [set(pair) for pair in zip(PATHS[action], PATHS[action][1:])]
         return [
-            {"node": endpoint["node"], "interface": endpoint["interface"],
-             "port_no": endpoint["port_no"], "capacity_mbps": link["capacity_mbps"]}
-            for link in self.plan if {link["a"][0], link["b"][0]} in pairs
+            {
+                "node": endpoint["node"],
+                "interface": endpoint["interface"],
+                "port_no": endpoint["port_no"],
+                "capacity_mbps": self.capacities[action]
+                if self.capacities is not None
+                else link["capacity_mbps"],
+            }
+            for link in self.plan
+            if {link["a"][0], link["b"][0]} in pairs
             for endpoint in link["endpoints"]
         ]
+
+    def shape(self, capacities=None):
+        """Change only existing owned HTB classes between episodes; verify rates each window."""
+        if capacities is not None and (
+            not isinstance(capacities, list)
+            or len(capacities) != 2
+            or any(type(v) is not int or v not in MATCHED_CAPACITIES for v in capacities)
+        ):
+            raise ValueError("Two fixed path capacities required")
+        target = capacities if capacities is not None else self.capacities
+        if target is None:
+            raise RuntimeError("Episode capacities not configured")
+        result = []
+        for action in (0, 1):
+            for interface in self.pathInterfaces(action):
+                node, dev = interface["node"], interface["interface"]
+                if capacities is not None:
+                    self.command(
+                        node,
+                        [
+                            "tc",
+                            "class",
+                            "change",
+                            "dev",
+                            dev,
+                            "parent",
+                            "5:0",
+                            "classid",
+                            "5:1",
+                            "htb",
+                            "rate",
+                            f"{target[action]}mbit",
+                            "ceil",
+                            f"{target[action]}mbit",
+                        ],
+                    )
+                raw = self.command(node, ["tc", "-j", "class", "show", "dev", dev])
+                classes = parseTc("class", raw)
+                owned = [r for r in classes if r.get("kind") == "htb" and r.get("handle") == "5:1"]
+                if len(owned) != 1 or any(
+                    owned[0].get("options", {}).get(k) != target[action] * 1e6 / 8
+                    for k in ("rate", "ceil")
+                ):
+                    raise RuntimeError("Actual HTB capacity readback mismatch")
+                result.append(
+                    {**interface, "capacity_mbps": target[action], "classes": classes, "raw": raw}
+                )
+        self.capacities = list(target)
+        return result
+
+    def stationaryReadback(self, foregroundAction):
+        """Fail closed on sampled adjacency/path drift, without waiting or retuning FRR."""
+        if type(foregroundAction) is not int or foregroundAction not in (0, 1):
+            raise ValueError("Foreground action must be 0 or 1")
+        began = time.monotonic()
+        self.checkProcesses()
+        neighbors = {name: self.vty(name, "show ip ospf neighbor json") for name in ROUTERS}
+        if not all(fullNeighbors(neighbors[name], name) for name in ROUTERS):
+            raise RuntimeError("Stationary OSPF adjacency drift")
+        paths = {}
+        for source, destination, action in (
+            ("h1", "h3", foregroundAction),
+            ("h3", "h1", foregroundAction),
+            ("h2", "h4", 0),
+            ("h4", "h2", 0),
+        ):
+            path = self.routePath(source, destination)
+            expected = PATHS[action] if source < destination else tuple(reversed(PATHS[action]))
+            if path["nodes"] != [source, *expected, destination]:
+                raise RuntimeError("Stationary bidirectional kernel path drift")
+            paths[f"{source}->{destination}"] = path
+        return {"start": began, "end": time.monotonic(), "neighbors": neighbors, "paths": paths}
 
     def counters(self):
         """Actual kernel counters, timestamps per node; includes protocol overhead."""
@@ -338,13 +491,19 @@ class OSPFNetwork:
                 if row["ifname"] == "lo":
                     continue
                 stats = row.get("stats64", row.get("stats"))
-                result.append({"node": name, "interface": row["ifname"],
-                               "started_monotonic": started, "finished_monotonic": finished,
-                               "rx_bytes": stats["rx"]["bytes"] if stats else None,
-                               "tx_bytes": stats["tx"]["bytes"] if stats else None,
-                               "rx_packets": stats["rx"]["packets"] if stats else None,
-                               "tx_packets": stats["tx"]["packets"] if stats else None,
-                               "raw": row})
+                result.append(
+                    {
+                        "node": name,
+                        "interface": row["ifname"],
+                        "started_monotonic": started,
+                        "finished_monotonic": finished,
+                        "rx_bytes": stats["rx"]["bytes"] if stats else None,
+                        "tx_bytes": stats["tx"]["bytes"] if stats else None,
+                        "rx_packets": stats["rx"]["packets"] if stats else None,
+                        "tx_packets": stats["tx"]["packets"] if stats else None,
+                        "raw": row,
+                    }
+                )
         return result
 
     def queues(self):
@@ -355,20 +514,39 @@ class OSPFNetwork:
                 if endpoint["node"] not in ROUTERS:
                     continue
                 started = time.monotonic()
-                raw = self.command(endpoint["node"], ["tc", "-j", "-s", "qdisc", "show",
-                                                       "dev", endpoint["interface"]])
-                result.append({"node": endpoint["node"], "interface": endpoint["interface"],
-                               "started_monotonic": started,
-                               "finished_monotonic": time.monotonic(),
-                               "queue": parseQueue(raw), "raw": json.loads(raw)})
+                raw = self.command(
+                    endpoint["node"],
+                    ["tc", "-j", "-s", "qdisc", "show", "dev", endpoint["interface"]],
+                )
+                result.append(
+                    {
+                        "node": endpoint["node"],
+                        "interface": endpoint["interface"],
+                        "started_monotonic": started,
+                        "finished_monotonic": time.monotonic(),
+                        "queue": parseQueue(raw),
+                        "raw": json.loads(raw),
+                    }
+                )
         return result
 
     def verify(self):
         """Full adjacencies, FRR/kernel RIBs, captured IP89 and all-pairs real ICMP."""
         neighbors = self.waitReady()
-        capture = self.get("core").popen([
-            "tcpdump", "-nn", "-l", "-i", "core-eth1", "-c", "2", "ip proto 89",
-        ], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        capture = self.get("core").popen(
+            [
+                "tcpdump",
+                "-nn",
+                "-l",
+                "-i",
+                "core-eth1",
+                "-c",
+                "2",
+                "ip proto 89",
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
         try:
             packets, captureError = capture.communicate(timeout=8)
         finally:
@@ -382,8 +560,20 @@ class OSPFNetwork:
                     continue
                 paths[f"{source}->{destination}"] = self.routePath(source, destination)
                 started = time.monotonic()
-                text = self.command(source, ["ping", "-n", "-c", "3", "-i", "0.2", "-W", "1",
-                                             self.hostAddresses[destination]])
+                text = self.command(
+                    source,
+                    [
+                        "ping",
+                        "-n",
+                        "-c",
+                        "3",
+                        "-i",
+                        "0.2",
+                        "-W",
+                        "1",
+                        self.hostAddresses[destination],
+                    ],
+                )
                 probe = parsePing(text, source, destination, time.monotonic() - started, utcNow())
                 if probe is None or probe["sent"] != 3 or probe["received"] != 3:
                     raise RuntimeError(f"Host reachability failed: {source}->{destination}: {text}")
@@ -391,16 +581,29 @@ class OSPFNetwork:
         routes = {name: self.vty(name, "show ip route ospf json") for name in ROUTERS}
         if any(not routes[name] for name in ROUTERS):
             raise RuntimeError("FRR has no OSPF routes")
-        return {"mode": "ospf", "topology_id": TOPOLOGY_ID, "policy": self.policy,
-                "router_count": len(ROUTERS), "host_count": len(self.hosts),
-                "link_count": len(self.plan), "full_directed_adjacencies": 14,
-                "hosts": self.hosts, "neighbors": neighbors, "frr_routes": routes,
-                "frr_version": self.vty("core", "show version"),
-                "ospf_packet_count": packets.count(b"OSPFv2"),
-                "ospf_packets": packets.decode(errors="replace"),
-                "paths": paths, "probes": probes, "ping_sent": sum(p["sent"] for p in probes),
-                "ping_received": sum(p["received"] for p in probes),
-                "counters": self.counters(), "queues": self.queues()}
+        return {
+            "mode": "ospf",
+            "topology_id": TOPOLOGY_ID,
+            "policy": self.policy,
+            "router_count": len(ROUTERS),
+            "host_count": len(self.hosts),
+            "link_count": len(self.plan),
+            "full_directed_adjacencies": sum(
+                len(rows) for value in neighbors.values() for rows in value["neighbors"].values()
+            ),
+            "hosts": self.hosts,
+            "neighbors": neighbors,
+            "frr_routes": routes,
+            "frr_version": self.vty("core", "show version"),
+            "ospf_packet_count": packets.count(b"OSPFv2"),
+            "ospf_packets": packets.decode(errors="replace"),
+            "paths": paths,
+            "probes": probes,
+            "ping_sent": sum(p["sent"] for p in probes),
+            "ping_received": sum(p["received"] for p in probes),
+            "counters": self.counters(),
+            "queues": self.queues(),
+        }
 
     def close(self):
         """Stop only owned processes/namespaces; no mn -c, pkill or OVS cleanup."""

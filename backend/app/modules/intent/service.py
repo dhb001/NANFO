@@ -368,15 +368,21 @@ class IntentExecutionService:
         requested_permissions: list[str],
         manual_approval: bool = False,
         cancel: bool = False,
+        simulation_id: uuid.UUID | None = None,
     ) -> dict[str, Any]:
         settings = get_settings()
+        if simulation_id is not None and not cancel and (settings.EXECUTION_MODE != "emulation"
+                                                        or not settings.EMULATION_CONTROL_ENABLED):
+            raise HTTPException(409, detail={"code": "SIMULATION_EVIDENCE_REJECTED",
+                "message": "Referenced simulation requires a current prepared plan; model evidence cannot authorize production."})
         if cancel or (settings.EXECUTION_MODE == "emulation" and settings.EMULATION_CONTROL_ENABLED):
             from app.modules.intent.execution import accept_execution
 
             intent, replay = await accept_execution(db=self._db, redis=self._redis, workspace_id=workspace_id,
                 intent_id=intent_id, idempotency_key=_coerce_non_empty_text(idempotency_key) or None,
                 correlation_id=_coerce_correlation_uuid(correlation_id), actor_id=requested_by_user_id,
-                permissions=requested_permissions, manual_approval=manual_approval, cancel=cancel)
+                permissions=requested_permissions, manual_approval=manual_approval, cancel=cancel,
+                simulation_id=simulation_id)
             return await self._serialize_with_fresh_timestamps(intent, idempotent_replay=replay,
                 confidence_override={"score": 0.0, "band": "below_60", "approval_required": True})
         normalized_idempotency_key = _coerce_non_empty_text(idempotency_key) or None

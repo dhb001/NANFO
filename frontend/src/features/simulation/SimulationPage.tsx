@@ -16,10 +16,24 @@ import { formatNumber } from "@/shared/lib/format";
 import { useLiveStore } from "@/features/realtime/store";
 import { useIsNarrowViewport } from "@/shared/lib/viewport";
 import { AsyncState } from "@/shared/ui/AsyncState";
+import { ScenarioEditor } from "./ScenarioEditor";
+import { exampleScenario, parseScenarioConfig } from "./scenarioConfig";
+import { ModeledEvidence } from "./ModeledEvidence";
+import { modeledMetrics, modeledOutput, modelHistorySeries, type ModeledMetric } from "./modeledOutput";
+import { TimeSeriesChart } from "@/features/telemetry/TimeSeriesChart";
+import { SceneReconciliationStatus } from "@/features/realtime/SceneReconciliationStatus";
+import type { ScenarioValidationState } from "@/shared/types/simulation";
 
 const defaultChecks = ["simulation_before_deployment", "blast_radius_assessment"];
 
 export function SimulationPage() {
+  const token = useAuthStore((state) => state.accessToken);
+  const workspaceId = useWorkspaceStore((state) => state.workspaceId);
+  const networkId = useWorkspaceStore((state) => state.networkId);
+  return <SimulationPageContent key={`${token}:${workspaceId}:${networkId}`} />;
+}
+
+function SimulationPageContent() {
   const token = useAuthStore((state) => state.accessToken);
   const networkId = useWorkspaceStore((state) => state.networkId);
 
@@ -27,6 +41,11 @@ export function SimulationPage() {
   const [trackedSimulationId, setTrackedSimulationId] = useState<string | null>(null);
   const [baselineSimulationId, setBaselineSimulationId] = useState<string | null>(null);
   const [branchScenario, setBranchScenario] = useState("Branch candidate");
+  const [scenarioJson, setScenarioJson] = useState(JSON.stringify(exampleScenario, null, 2));
+  const [editBranchInputs, setEditBranchInputs] = useState(false);
+  const [inputError, setInputError] = useState<string | null>(null);
+  const [handoff, setHandoff] = useState<ScenarioValidationState | undefined>();
+  const [metric, setMetric] = useState<ModeledMetric>("latency_ms");
   const isNarrowViewport = useIsNarrowViewport();
 
   const startMutation = useStartSimulation(token);
@@ -35,6 +54,14 @@ export function SimulationPage() {
 
   const detailQuery = useSimulationDetail(token, trackedSimulationId);
   const compareQuery = useSimulationCompare(token, trackedSimulationId, baselineSimulationId);
+  const baselineQuery = useSimulationDetail(token, baselineSimulationId && baselineSimulationId !== trackedSimulationId ? baselineSimulationId : null);
+  const selectedDetail = detailQuery.data?.simulation_id === trackedSimulationId && detailQuery.data.network_id === networkId && !detailQuery.isError ? detailQuery.data : undefined;
+  const baselineDetail = baselineSimulationId === trackedSimulationId ? selectedDetail : baselineQuery.data;
+  const currentOutput = modeledOutput(selectedDetail);
+  const baselineOutput = modeledOutput(baselineDetail);
+  const compatible = compareQuery.data?.compatible === true && compareQuery.data.simulation_id === trackedSimulationId && compareQuery.data.baseline_simulation_id === baselineSimulationId &&
+    selectedDetail?.status === "completed" && baselineDetail?.status === "completed" && Boolean(currentOutput && baselineOutput && currentOutput.workload_sha256 === baselineOutput.workload_sha256 && currentOutput.elapsed_ms === baselineOutput.elapsed_ms);
+  const busy = startMutation.isPending || pauseMutation.isPending || branchMutation.isPending;
 
   const sceneObjects = useLiveStore((state) => state.sceneObjects);
   const sceneObjectIdsNewestFirst = useLiveStore((state) => state.sceneObjectIdsNewestFirst);
@@ -50,40 +77,60 @@ export function SimulationPage() {
 
   async function start(event: FormEvent) {
     event.preventDefault();
-    if (!networkId) {
+    if (!networkId || busy) {
       return;
     }
-    const response = await startMutation.mutateAsync({
-      network_id: networkId,
-      scenario_name: scenarioName,
-      validation_checks: defaultChecks,
-    });
-    setTrackedSimulationId(response.simulation_id);
-    if (!baselineSimulationId) {
-      setBaselineSimulationId(response.simulation_id);
+    setInputError(null);
+    try {
+      const scenarioConfig = parseScenarioConfig(scenarioJson);
+      const response = await startMutation.mutateAsync({
+        network_id: networkId,
+        scenario_name: scenarioName,
+        validation_checks: defaultChecks,
+        scenario_config: scenarioConfig,
+      });
+      setTrackedSimulationId(response.simulation_id);
+      setHandoff(response.validation);
+      if (!baselineSimulationId) setBaselineSimulationId(response.simulation_id);
+    } catch (error) {
+      setInputError(error instanceof Error ? error.message : "Simulation start failed.");
     }
   }
 
+  async function resume() {
+    if (!selectedDetail || !["draft", "paused"].includes(selectedDetail.status) || busy) return;
+    try {
+      const response = await startMutation.mutateAsync({ network_id: selectedDetail.network_id, scenario_name: selectedDetail.scenario_name,
+        simulation_id: selectedDetail.simulation_id, validation_checks: defaultChecks });
+      setHandoff(response.validation);
+    } catch { /* Mutation failure is rendered below. Resume never resubmits edited inputs. */ }
+  }
+
   async function branch() {
-    if (!trackedSimulationId) {
+    if (!selectedDetail || busy) {
       return;
     }
-    const response = await branchMutation.mutateAsync({
-      parentSimulationId: trackedSimulationId,
-      scenarioName: branchScenario,
-    });
-    setBaselineSimulationId(trackedSimulationId);
-    setTrackedSimulationId(response.simulation_id);
+    setInputError(null);
+    try {
+      const response = await branchMutation.mutateAsync({
+        parentSimulationId: selectedDetail.simulation_id,
+        scenarioName: branchScenario,
+        ...(editBranchInputs ? { scenarioConfig: parseScenarioConfig(scenarioJson) } : {}),
+      });
+      setBaselineSimulationId(selectedDetail.simulation_id);
+      setTrackedSimulationId(response.simulation_id);
+      setHandoff(response.validation);
+    } catch (error) { setInputError(error instanceof Error ? error.message : "Branch failed."); }
   }
 
   return (
     <div style={{ display: "grid", gap: "1rem" }}>
-      <Panel title="Simulation Lifecycle" subtitle="VS4-VS7 what-if orchestration with branch and compare views">
+      <Panel title="Simulation Lifecycle" subtitle="Configured deterministic what-if model, never live traffic or production authorization">
         <form
           onSubmit={start}
           style={{
             display: "grid",
-            gridTemplateColumns: isNarrowViewport ? "1fr" : "1fr auto",
+            gridTemplateColumns: "minmax(0, 1fr)",
             gap: "0.6rem",
             alignItems: "end",
           }}
@@ -96,13 +143,17 @@ export function SimulationPage() {
               value={scenarioName}
               onChange={(event) => setScenarioName(event.target.value)}
               required
+              maxLength={120}
               style={{ border: "1px solid var(--line-soft)", borderRadius: "10px", padding: "0.52rem 0.56rem" }}
             />
           </label>
-          <Button permission="write:config" type="submit" disabled={!networkId || startMutation.isPending}>
+          <ScenarioEditor value={scenarioJson} onChange={setScenarioJson} />
+          <Button permission="write:config" type="submit" disabled={!networkId || busy}>
             {startMutation.isPending ? "Starting..." : "Start Simulation"}
           </Button>
         </form>
+        {inputError && <p role="alert">{inputError}</p>}
+        {handoff && <p role="status">Lifecycle handoff source: {handoff.source ?? "Unavailable"}. Physical safety authorization: {handoff.physical_safety_authorized === false ? "false (not authorized)" : "Unavailable / unsupported"}. Queue acceptance is not completed computation or deployment approval.</p>}
 
         {startMutation.isError ? (
           <div style={{ marginTop: "0.6rem" }}>
@@ -141,14 +192,17 @@ export function SimulationPage() {
             permission="write:config"
             tone="ghost"
             onClick={() => trackedSimulationId && pauseMutation.mutate(trackedSimulationId)}
-            disabled={!trackedSimulationId || pauseMutation.isPending}
+            disabled={!selectedDetail || !["queued", "running"].includes(selectedDetail.status) || busy}
           >
             Pause
           </Button>
-          <Button permission="write:config" tone="ghost" onClick={branch} disabled={!trackedSimulationId || branchMutation.isPending}>
+          <Button permission="write:config" tone="ghost" onClick={() => void resume()} disabled={!selectedDetail || !["draft", "paused"].includes(selectedDetail.status) || busy}>Resume / start draft</Button>
+          <Button permission="write:config" tone="ghost" onClick={branch} disabled={!selectedDetail || busy || !branchScenario.trim()}>
             Branch
           </Button>
           <input
+            aria-label="Branch scenario name"
+            maxLength={120}
             value={branchScenario}
             onChange={(event) => setBranchScenario(event.target.value)}
             placeholder="Branch scenario name"
@@ -160,6 +214,7 @@ export function SimulationPage() {
             }}
           />
           <input
+            aria-label="Simulation ID"
             value={trackedSimulationId ?? ""}
             onChange={(event) => setTrackedSimulationId(event.target.value || null)}
             placeholder="Simulation ID"
@@ -167,11 +222,12 @@ export function SimulationPage() {
               border: "1px solid var(--line-soft)",
               borderRadius: "10px",
               padding: "0.45rem 0.5rem",
-              minWidth: 300,
+              minWidth: 0, width: isNarrowViewport ? "100%" : 300,
               fontFamily: "var(--font-mono)",
             }}
           />
           <input
+            aria-label="Baseline simulation ID"
             value={baselineSimulationId ?? ""}
             onChange={(event) => setBaselineSimulationId(event.target.value || null)}
             placeholder="Baseline simulation ID"
@@ -179,15 +235,19 @@ export function SimulationPage() {
               border: "1px solid var(--line-soft)",
               borderRadius: "10px",
               padding: "0.45rem 0.5rem",
-              minWidth: 300,
+              minWidth: 0, width: isNarrowViewport ? "100%" : 300,
               fontFamily: "var(--font-mono)",
             }}
           />
         </div>
+        <label><input type="checkbox" checked={editBranchInputs} onChange={(event) => setEditBranchInputs(event.target.checked)} /> Branch with editor inputs (changed inputs restart at tick 0)</label>
+        <p>Default branch copies the checkpoint and compatible inputs. Resume uses the same simulation ID and persisted inputs/checkpoint, ignoring editor changes. Pause is committed safely between worker batches.</p>
       </Panel>
 
-      <div style={{ display: "grid", gridTemplateColumns: isNarrowViewport ? "1fr" : "1fr 1fr", gap: "1rem", alignItems: "start" }}>
+      <div style={{ display: "grid", gridTemplateColumns: isNarrowViewport ? "minmax(0, 1fr)" : "repeat(2, minmax(0, 1fr))", gap: "1rem", alignItems: "start" }}>
         <Panel title="Simulation Detail" subtitle="GET /simulations/{id}">
+          <Button tone="ghost" disabled={!trackedSimulationId || detailQuery.isFetching} onClick={() => void detailQuery.refetch()}>Refresh simulation status</Button>
+          <p>Active detail polling is bounded to 40 reads, then use Refresh. A stalled worker or lost connection is not completion.</p>
           <QueryState
             query={detailQuery}
             emptyTitle="No simulation selected"
@@ -212,12 +272,17 @@ export function SimulationPage() {
                     {JSON.stringify(detail.validation, null, 2)}
                   </pre>
                 </div>
+                <ModeledEvidence detail={detail} />
+                <TimeSeriesChart title="Modeled flow history" modeled series={modelHistorySeries(detail, metric, "Candidate")} />
               </div>
             )}
           </QueryState>
         </Panel>
 
         <Panel title="Compare" subtitle="GET /simulations/{id}/compare/{baselineId}">
+          {baselineQuery.isError && <AsyncState title="Baseline detail unavailable" description="Comparison remains unavailable until the baseline can be read." action={<Button tone="ghost" onClick={() => void baselineQuery.refetch()}>Retry baseline</Button>} />}
+          <label style={{ display: "grid" }}>Comparison metric<select aria-label="Comparison metric" value={metric} onChange={(event) => setMetric(event.target.value as ModeledMetric)}>{Object.entries(modeledMetrics).map(([key, value]) => <option key={key} value={key}>{value.label} ({value.unit}; {value.higherIsBetter ? "higher" : "lower"} is better)</option>)}</select></label>
+          <p>Candidate minus baseline; latency/loss decreases and goodput increases are favorable. Model-only comparisons require matching workload and modeled time. Missing or incompatible metrics are unavailable, never zero.</p>
           <QueryState
             query={compareQuery}
             emptyTitle="No compare inputs"
@@ -225,9 +290,11 @@ export function SimulationPage() {
           >
             {(compare) => (
               <div style={{ display: "grid", gap: "0.5rem" }}>
-                <MetricRow label="Latency delta" value={compare.deltas.latency_ms} unit="ms" />
-                <MetricRow label="Loss delta" value={compare.deltas.loss_pct} unit="%" />
-                <MetricRow label="Throughput delta" value={compare.deltas.throughput_mbps} unit="mbps" higherIsBetter />
+                <MetricRow label="Latency delta" value={compatible ? compare.deltas.latency_ms : null} unit="ms" />
+                <MetricRow label="Loss delta" value={compatible ? compare.deltas.loss_pct : null} unit="%" />
+                <MetricRow label="Goodput delta" value={compatible ? compare.deltas.throughput_mbps : null} unit="Mbps" higherIsBetter />
+                {compatible ? <TimeSeriesChart title="Modeled comparison history" modeled series={[...modelHistorySeries(selectedDetail, metric, "Candidate"), ...modelHistorySeries(baselineDetail, metric, "Baseline")]} /> : <p>Comparison histories unavailable or incompatible. Both completed versioned model outputs and a common workload/time basis are required. {compare.comparison_reason}</p>}
+                <Button tone="ghost" disabled={compareQuery.isFetching} onClick={() => { void compareQuery.refetch(); if (baselineSimulationId !== trackedSimulationId) void baselineQuery.refetch(); }}>Refresh comparison</Button>
               </div>
             )}
           </QueryState>
@@ -235,6 +302,7 @@ export function SimulationPage() {
       </div>
 
       <Panel title="Realtime Simulation Timeline" subtitle="/ws/digital-twin scene-object updates for simulation lifecycle">
+        <SceneReconciliationStatus />
         {simulationSceneObjects.length === 0 ? (
           <div style={{ color: "var(--ink-3)" }}>Awaiting simulation scene deltas...</div>
         ) : (
@@ -283,7 +351,7 @@ function MetricRow({ label, value, unit, higherIsBetter = false }: {
       }}
     >
       <span>{label}</span>
-      <Badge text={available ? `${formatNumber(value)} ${unit}` : "Unavailable (not measured)"} tone={tone} />
+      <Badge text={available ? `${formatNumber(value)} ${unit}` : "Unavailable (no compatible modeled evidence)"} tone={tone} />
     </div>
   );
 }

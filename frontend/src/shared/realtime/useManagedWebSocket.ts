@@ -15,6 +15,7 @@ interface ManagedSocketOptions<TFrame> {
   onUnauthorized?: () => void;
   onUpgradeFailure?: (token: string) => Promise<SocketUpgradeRecovery>;
   onError?: (error: WebSocketErrorData) => void;
+  onSubscribed?: () => void;
   onStatusChange?: (status: "connecting" | "open" | "closed") => void;
 }
 
@@ -49,8 +50,10 @@ export function useManagedWebSocket<TFrame>(options: ManagedSocketOptions<TFrame
   const onUpgradeFailureRef = useRef(options.onUpgradeFailure);
   // A conclusive attempt survives rotation; an outage allows only cooldown probes.
   const upgradeRecoveryAttemptedRef = useRef(false);
+  const unauthorizedAttemptedRef = useRef(false);
   const upgradeProbeRetryRef = useRef({ failures: 0, after: 0 });
   const onErrorRef = useRef(options.onError);
+  const onSubscribedRef = useRef(options.onSubscribed);
   const onStatusChangeRef = useRef(options.onStatusChange);
   const filtersRef = useRef<Record<string, unknown>>(options.filters ?? {});
 
@@ -61,9 +64,10 @@ export function useManagedWebSocket<TFrame>(options: ManagedSocketOptions<TFrame
     onUnauthorizedRef.current = options.onUnauthorized;
     onUpgradeFailureRef.current = options.onUpgradeFailure;
     onErrorRef.current = options.onError;
+    onSubscribedRef.current = options.onSubscribed;
     onStatusChangeRef.current = options.onStatusChange;
     filtersRef.current = options.filters ?? {};
-  }, [options.filters, options.onError, options.onFrame, options.onUnauthorized, options.onUpgradeFailure, options.onStatusChange]);
+  }, [options.filters, options.onError, options.onFrame, options.onUnauthorized, options.onUpgradeFailure, options.onStatusChange, options.onSubscribed]);
 
   useEffect(() => {
     if (!options.enabled || !options.token) {
@@ -75,6 +79,7 @@ export function useManagedWebSocket<TFrame>(options: ManagedSocketOptions<TFrame
     const isCurrent = options.isCurrent;
     let socket: WebSocket | null = null;
     let attempt = 0;
+    let acknowledgmentTimeout: number | undefined;
 
     const clearReconnect = () => {
       if (reconnectRef.current !== null) {
@@ -92,34 +97,38 @@ export function useManagedWebSocket<TFrame>(options: ManagedSocketOptions<TFrame
       const connection = new WebSocket(buildSocketUrl(options.path, token));
       socket = connection;
       let opened = false;
+      let subscribed = false;
       const isActive = () => !closed && socket === connection && isCurrent?.() !== false;
 
       socket.onopen = () => {
         if (!isActive()) return;
         opened = true;
-        upgradeRecoveryAttemptedRef.current = false;
-        upgradeProbeRetryRef.current = { failures: 0, after: 0 };
-        attempt = 0;
-        onStatusChangeRef.current?.("open");
         const frame = {
           action: "subscribe",
           channel: options.channel,
           filters: filtersRef.current,
         };
         socket?.send(JSON.stringify(frame));
+        acknowledgmentTimeout = window.setTimeout(() => {
+          if (isActive() && !subscribed) connection.close();
+        }, 10_000);
       };
 
       socket.onmessage = (event) => {
         if (!isActive()) return;
         try {
           const parsed = JSON.parse(String(event.data)) as Record<string, unknown>;
+          if (!parsed || typeof parsed !== "object" || typeof parsed.event !== "string") return;
           const wsError = toWebSocketError(parsed);
           if (wsError) {
             onErrorRef.current?.(wsError);
           }
 
           if (wsError?.code === "WS_UNAUTHORIZED") {
-            onUnauthorizedRef.current?.();
+            if (!unauthorizedAttemptedRef.current) {
+              unauthorizedAttemptedRef.current = true;
+              onUnauthorizedRef.current?.();
+            }
             closed = true;
             onStatusChangeRef.current?.("closed");
             socket?.close();
@@ -135,7 +144,22 @@ export function useManagedWebSocket<TFrame>(options: ManagedSocketOptions<TFrame
             return;
           }
 
-          onFrameRef.current(parsed as TFrame);
+          if (parsed.event === "subscribed") {
+            const filters = parsed.filters;
+            if (subscribed || !opened || parsed.channel !== options.channel || !filters || typeof filters !== "object" ||
+                Object.keys(filters).length !== Object.keys(filtersRef.current).length ||
+                !Object.entries(filtersRef.current).every(([key, value]) => (filters as Record<string, unknown>)[key] === value)) return;
+            subscribed = true;
+            window.clearTimeout(acknowledgmentTimeout);
+            upgradeRecoveryAttemptedRef.current = false;
+            unauthorizedAttemptedRef.current = false;
+            upgradeProbeRetryRef.current = { failures: 0, after: 0 };
+            attempt = 0;
+            onStatusChangeRef.current?.("open");
+            onSubscribedRef.current?.();
+            return;
+          }
+          if (subscribed) onFrameRef.current(parsed as TFrame);
         } catch {
           return;
         }
@@ -143,9 +167,13 @@ export function useManagedWebSocket<TFrame>(options: ManagedSocketOptions<TFrame
 
       socket.onclose = async (event) => {
         if (!isActive()) return;
+        window.clearTimeout(acknowledgmentTimeout);
         onStatusChangeRef.current?.("closed");
         if (event.code === 1008 || event.reason.toUpperCase().includes("WS_UNAUTHORIZED")) {
-          onUnauthorizedRef.current?.();
+          if (!unauthorizedAttemptedRef.current) {
+            unauthorizedAttemptedRef.current = true;
+            onUnauthorizedRef.current?.();
+          }
           closed = true;
           return;
         }
@@ -177,6 +205,7 @@ export function useManagedWebSocket<TFrame>(options: ManagedSocketOptions<TFrame
     return () => {
       closed = true;
       clearReconnect();
+      window.clearTimeout(acknowledgmentTimeout);
       onStatusChangeRef.current?.("closed");
       socket?.close();
     };

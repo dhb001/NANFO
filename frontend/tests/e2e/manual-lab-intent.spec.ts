@@ -37,6 +37,7 @@ test("manual approval, lost response replay, cancellation and uncertain readback
   await page.setViewportSize({ width: 390, height: 844 });
   await page.getByLabel("Intent ID", { exact: true }).fill("lab-intent");
   await page.getByLabel("Idempotency Key").fill("manual-lab-key");
+  await page.getByLabel("Referenced simulation UUID").fill("00000000-0000-0000-0000-000000000701");
   await expect(page.getByRole("checkbox", { name: /explicitly approve/ })).toBeEnabled();
   await expect(page.getByRole("button", { name: "Execute", exact: true })).toBeDisabled();
   expect(requests).toHaveLength(0);
@@ -47,8 +48,11 @@ test("manual approval, lost response replay, cancellation and uncertain readback
   await expect(page.getByText(/Execution accepted, not completed/)).toBeVisible();
   expect(requests[0]).toEqual(requests[1]);
   expect(requests[0]).toMatchObject({ manual_approval: true, cancel: false });
+  expect(requests[0].simulation_id).toBe("00000000-0000-0000-0000-000000000701");
+  await expect(page.getByLabel("Referenced simulation UUID")).toBeDisabled();
   await page.getByRole("button", { name: "Cancel execution" }).click();
-  expect(requests[2]).toEqual({ ...requests[0], cancel: true });
+  expect(requests[2]).toEqual({ workspace_id: requests[0].workspace_id, intent_id: requests[0].intent_id, idempotency_key: requests[0].idempotency_key, manual_approval: true, cancel: true });
+  expect(requests[2]).not.toHaveProperty("simulation_id");
   await expect(page.getByText("Execution outcome uncertain")).toBeVisible();
   await expect(page.getByText("Execution Completed", { exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Cancel execution" })).toBeDisabled();
@@ -70,7 +74,7 @@ test("completed policy cancellation reconciles to verified rollback; safe failur
       idempotency_key: "persisted-key", queue_status: "outbox_pending",
       execution_provenance: safeFailure ? { phase: "failed", verification: { no_mutation_verified: true }, rollback: null, failure_reason: "deadline_before_dispatch" }
         : cancelled ? { execution_id: "job-1", phase: "cancelled", rollback: { verified: true, readback_sha256: "b".repeat(64) } }
-          : { execution_id: "job-1", phase: "completed", verification: { readback_verified: true, readback_sha256: "a".repeat(64), probe: { sent: 3, received: 3 } } },
+          : { execution_id: "job-1", phase: "completed", plan_hash: "c".repeat(64), approved_plan: { operation: "reroute", source_host: "h1", destination_host: "h2", paths: [["s1", "s3", "s4"]], weights: [1], rate_mbps: null, dscp: null }, verification: { readback_verified: true, readback_sha256: "a".repeat(64), probe: { sent: 3, received: 3 } } },
     }) });
   });
   await page.route("**/api/v1/intents/execute", async (route) => {
@@ -85,10 +89,14 @@ test("completed policy cancellation reconciles to verified rollback; safe failur
   await expect(page.getByText("verification readback verified")).toBeVisible();
   await expect(page.getByText("completion_scope: config_readback_and_reachability")).toBeVisible();
   await expect(page.getByText("Reachability probe: 3/3 received")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Configuration-verified path evidence" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Configuration path evidence" }).getByRole("listitem")).toHaveText(["s1", "s3", "s4"]);
+  await expect(page.getByText(/Observed packet traversal unavailable/)).toBeVisible();
   await expect(page.getByRole("button", { name: "Execute", exact: true })).toBeDisabled();
   await page.getByRole("button", { name: "Cancel execution" }).click();
   expect(requests).toEqual([{ workspace_id: state.workspaceId, intent_id: "completed-policy", idempotency_key: "persisted-key", manual_approval: false, cancel: true }]);
   await expect(page.getByText("rollback verified")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Configuration path evidence unavailable" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Cancel execution" })).toBeDisabled();
   await page.getByLabel("Intent ID", { exact: true }).fill("safe-failure");
   await expect(page.getByText(/No mutation verified by the backend/)).toBeVisible();

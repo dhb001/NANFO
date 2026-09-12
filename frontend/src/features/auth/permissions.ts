@@ -13,7 +13,7 @@ export function canAccessRoute(profile: UserProfile | null, path: string): boole
   if (!profile) return false;
   if (path === "/ops/audit") return profile.roles.includes("Admin");
   if (path === "/ops/plugins") return profile.roles.includes("Admin") && hasPermission(profile, "read:topology");
-  if (["/ops/telemetry", "/ops/reliability", "/ops/reports"].includes(path)) {
+  if (["/ops/telemetry", "/ops/reliability", "/ops/reports", "/ops/autonomy"].includes(path)) {
     return hasPermission(profile, "read:telemetry");
   }
   if (["/ops/topology-analysis", "/ops/digital-twin", "/ops/intent", "/ops/simulation"].includes(path)) {

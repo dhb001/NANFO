@@ -1,6 +1,7 @@
 """One bounded ADR-011 JSON request on stdin, one response on stdout."""
 
 import json
+import math
 import socket
 import sys
 
@@ -21,7 +22,18 @@ def decode(data):
     def constant(value):
         raise ValueError("Nonfinite JSON number")
 
-    return json.loads(data, object_pairs_hook=pairs, parse_constant=constant)
+    def number(value):
+        result = float(value)
+        if not math.isfinite(result):
+            raise ValueError("Nonfinite JSON number")
+        return result
+
+    try:
+        return json.loads(
+            data, object_pairs_hook=pairs, parse_constant=constant, parse_float=number
+        )
+    except RecursionError as error:
+        raise ValueError("JSON nesting exceeds parser limit") from error
 
 
 def exchange(value):
@@ -31,7 +43,7 @@ def exchange(value):
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
         client.settimeout(60)
         client.connect(SOCKET)
-        client.sendall(data + b"\n")
+        client.sendall(data)
         client.shutdown(socket.SHUT_WR)
         response = bytearray()
         while len(response) <= RESPONSE_LIMIT:

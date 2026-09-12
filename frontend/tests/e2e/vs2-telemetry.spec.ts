@@ -178,8 +178,8 @@ test.describe("VS2 telemetry and topology", () => {
     await page.getByRole("link", { name: "Telemetry" }).click();
     await expect(page).toHaveURL(/\/ops\/telemetry$/);
     await expect(page.getByText("Telemetry Health")).toBeVisible();
-    await expect(page.getByText(/1,?220/)).toBeVisible();
-    await expect(page.getByText("cpu_usage")).toBeVisible();
+    await expect(page.getByRole("region", { name: "Telemetry Health", exact: true }).getByText(/1,?220/)).toBeVisible();
+    await expect(page.getByRole("region", { name: "Telemetry History", exact: true }).getByRole("button", { name: /cpu_usage/ })).toBeVisible();
 
     await page.getByRole("link", { name: "Digital Twin" }).click();
     await expect(page).toHaveURL(/\/ops\/digital-twin$/);

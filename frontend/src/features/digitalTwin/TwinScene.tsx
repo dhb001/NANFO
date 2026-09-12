@@ -4,6 +4,7 @@ import { Html, Line, OrbitControls } from "@react-three/drei";
 import { Box3, Group, Object3D, Vector3 } from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { TwinLink, TwinNode, TwinOverlayObject } from "@/features/digitalTwin/hooks";
+import type { MeasuredPathSegment } from "./measuredPathMapping";
 import { CampusBuildings } from "@/features/digitalTwin/CampusBuildings";
 import {
   deriveWirelessCoverageCells,
@@ -34,6 +35,7 @@ interface AlertLike {
 }
 
 interface TwinSceneProps {
+  measuredPath?: readonly MeasuredPathSegment[];
   nodes: TwinNode[];
   links: TwinLink[];
   overlays: TwinOverlayObject[];
@@ -562,6 +564,15 @@ function WirelessCoverageLayer({
 
 const EMPTY_ALERTS: readonly AlertLike[] = [];
 
+function MeasuredPathLayer({ segments }: { segments: readonly MeasuredPathSegment[] }) {
+  return <group>{segments.map((segment) => {
+    const source = new Vector3(...segment.source);
+    const delta = new Vector3(...segment.target).sub(source);
+    const length = delta.length();
+    return length > 0 ? <arrowHelper key={segment.id} args={[delta.normalize(), source, length, "#a332d1", Math.min(0.9, length / 3), Math.min(0.5, length / 5)]} /> : null;
+  })}</group>;
+}
+
 export function TwinScene({
   nodes,
   links,
@@ -577,6 +588,7 @@ export function TwinScene({
   onImportedModelStatusChange,
   buildingViewState,
   onSelectBuilding,
+  measuredPath,
 }: TwinSceneProps) {
   const campusBuildings = useMemo(() => {
     if (importedCampusBuildings && importedCampusBuildings.length > 0) {
@@ -695,6 +707,7 @@ export function TwinScene({
       {layers.showLinks ? (
         <LinksLayer links={links} showLabels={layers.showLabels} maxLabels={maxDeviceLabels} />
       ) : null}
+      {layers.showLinks && measuredPath ? <MeasuredPathLayer segments={measuredPath} /> : null}
       <NodesLayer
         nodes={nodes}
         selectedNodeId={selectedNodeId}

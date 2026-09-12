@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useLiveStore } from "@/features/realtime/store";
 import { TopologyEdge, TopologyNode } from "@/shared/types/network";
 import { topologyEdgeIdentity } from "@/features/topology/edgeIdentity";
@@ -12,7 +12,18 @@ import {
 
 export type { TwinCongestion, TwinLink, TwinNode, TwinOverlayObject };
 
+function useFreshnessClock() {
+  const [now, setNow] = useState(Date.now);
+  useEffect(() => {
+    const interval = window.setInterval(() => setNow(Date.now()), 5_000);
+    return () => window.clearInterval(interval);
+  }, []);
+  return now;
+}
+
 export function useTwinNodes(baseNodes: TopologyNode[] = []) {
+  const now = useFreshnessClock();
+  const topologyTombstones = useLiveStore((state) => state.topologyTombstones);
   const baseEdges = useMemo(() => [], []);
   const topologyByDeviceId = useLiveStore((state) => state.topologyByDeviceId);
   const telemetryByDeviceMetric = useLiveStore((state) => state.telemetryByDeviceMetric);
@@ -23,6 +34,8 @@ export function useTwinNodes(baseNodes: TopologyNode[] = []) {
   return useMemo(() => {
     return buildTwinSceneModel({
       baseNodes,
+      now,
+      topologyTombstones,
         baseEdges,
         liveNodesByDeviceId: topologyByDeviceId,
         telemetryByDeviceMetric,
@@ -32,6 +45,8 @@ export function useTwinNodes(baseNodes: TopologyNode[] = []) {
       }).nodes;
   }, [
     baseNodes,
+    now,
+    topologyTombstones,
     baseEdges,
     topologyByDeviceId,
     telemetryByDeviceMetric,
@@ -46,6 +61,8 @@ export function useTwinSceneModel(
   baseEdges: TopologyEdge[] = [],
   importedSpatialRefByDeviceId?: Record<string, string>,
 ) {
+  const now = useFreshnessClock();
+  const topologyTombstones = useLiveStore((state) => state.topologyTombstones);
   const topologyByDeviceId = useLiveStore((state) => state.topologyByDeviceId);
   const telemetryByDeviceMetric = useLiveStore((state) => state.telemetryByDeviceMetric);
   const telemetryKeysNewestFirst = useLiveStore((state) => state.telemetryKeysNewestFirst);
@@ -55,6 +72,8 @@ export function useTwinSceneModel(
   return useMemo(() => {
     return buildTwinSceneModel({
       baseNodes,
+      now,
+      topologyTombstones,
         baseEdges,
         liveNodesByDeviceId: topologyByDeviceId,
         telemetryByDeviceMetric,
@@ -65,6 +84,8 @@ export function useTwinSceneModel(
     });
   }, [
     baseEdges,
+    now,
+    topologyTombstones,
     baseNodes,
     importedSpatialRefByDeviceId,
     telemetryKeysNewestFirst,

@@ -19,8 +19,8 @@ describe("simulation truthfulness", () => {
     render(<SimulationPage />);
     expect(screen.getByText("cancelled")).toBeInTheDocument();
     expect(screen.getAllByText("blocked")).toHaveLength(2);
-    expect(screen.getAllByText("Unavailable (not measured)")).toHaveLength(3);
-    expect(screen.queryByText(/0(?:\.00)? (ms|%|mbps)/)).not.toBeInTheDocument();
+    expect(screen.getAllByText("Unavailable (no compatible modeled evidence)")).toHaveLength(3);
+    expect(screen.queryByText(/^0(?:\.00)? (ms|%|Mbps)$/)).not.toBeInTheDocument();
     expect(screen.queryByText(/improved/i)).not.toBeInTheDocument();
   });
 });

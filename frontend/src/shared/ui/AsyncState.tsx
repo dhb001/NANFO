@@ -1,5 +1,4 @@
 import { ReactNode } from "react";
-import { m } from "framer-motion";
 
 interface AsyncStateProps {
   title: string;
@@ -9,10 +8,8 @@ interface AsyncStateProps {
 
 export function AsyncState({ title, description, action }: AsyncStateProps) {
   return (
-    <m.div
-      initial={{ opacity: 0, y: 8 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.22 }}
+    <div
+      className="async-state-enter"
       style={{
         border: "1px solid var(--line-soft)",
         borderRadius: "var(--radius-m)",
@@ -26,6 +23,6 @@ export function AsyncState({ title, description, action }: AsyncStateProps) {
       <div style={{ fontWeight: 700, marginBottom: "0.35rem" }}>{title}</div>
       {description ? <div style={{ color: "var(--ink-3)", marginBottom: action ? "0.75rem" : 0 }}>{description}</div> : null}
       {action}
-    </m.div>
+    </div>
   );
 }

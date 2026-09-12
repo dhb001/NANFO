@@ -11,4 +11,5 @@ export const ReportsPage = lazy(() => import("@/features/reporting/ReportsPage")
 export const TwinPage = lazy(() => import("@/features/digitalTwin/TwinPage").then((module) => ({ default: module.TwinPage })));
 export const SimulationPage = lazy(() => import("@/features/simulation/SimulationPage").then((module) => ({ default: module.SimulationPage })));
 export const IntentPage = lazy(() => import("@/features/intent/IntentPage").then((module) => ({ default: module.IntentPage })));
+export const AutonomyPage = lazy(() => import("@/features/autonomy/AutonomyPage").then((module) => ({ default: module.AutonomyPage })));
 export const AuditPage = lazy(() => import("@/features/audit/AuditPage").then((module) => ({ default: module.AuditPage })));

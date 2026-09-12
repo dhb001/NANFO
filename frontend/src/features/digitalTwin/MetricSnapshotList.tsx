@@ -15,7 +15,7 @@ export function MetricSnapshotList({ metrics }: MetricSnapshotListProps) {
     <div style={{ display: "grid", gap: "0.3rem" }}>
       {metrics.slice(0, 4).map((metric) => (
         <div
-          key={`${metric.metric}:${metric.observedAt}`}
+          key={JSON.stringify([metric.metric, metric.observedAt, metric.source, metric.tags.run_id, metric.tags.port_no, metric.tags.peer_host, metric.tags.flow_index])}
           style={{
             border: "1px solid var(--line-soft)",
             borderRadius: "8px",
@@ -31,7 +31,7 @@ export function MetricSnapshotList({ metrics }: MetricSnapshotListProps) {
             </span>
           </div>
           <div className="mono" style={{ color: "var(--ink-3)", fontSize: "0.72rem" }}>
-            score {formatNumber(metric.normalizedScore * 100, 0)}% | {metric.policyId} {metric.severity} | {metric.source}
+            {metric.stale ? "Stale observation, excluded from current congestion" : `score ${formatNumber(metric.normalizedScore * 100, 0)}%`} | {metric.policyId} {metric.severity} | {metric.source}
           </div>
           <TelemetryProvenance tags={metric.tags} />
           <div style={{ color: "var(--ink-3)", fontSize: "0.74rem" }}>{formatTimestamp(metric.observedAt)}</div>

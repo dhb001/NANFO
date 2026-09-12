@@ -120,11 +120,35 @@ describe("IntentPage", () => {
     expect(screen.getByLabelText("Idempotency Key")).toBeDisabled();
     const first = mockExecuteAsync.mock.calls[0][0];
     expect(first.request).toMatchObject({ manual_approval: true, cancel: false, intent_id: "lab-intent" });
+    expect(first.request).not.toHaveProperty("simulation_id");
     expect(first.idempotencyKey).toBe(first.request.idempotency_key);
     await userEvent.click(screen.getByRole("button", { name: "Execute" }));
     expect(mockExecuteAsync.mock.calls[1][0]).toEqual(first);
     expect(screen.getByText(/Execution accepted, not completed/)).toBeInTheDocument();
     expect(screen.queryByText("Execution Completed")).not.toBeInTheDocument();
+  });
+  it("sends only an explicit valid simulation UUID, preserves it on retry, and omits it for cancel", async () => {
+    authorizeLab();
+    mockExecuteAsync.mockRejectedValueOnce(new Error("lost response")).mockResolvedValue({ status: "execution_started", queue_status: "pending" });
+    render(<IntentPage />);
+    await userEvent.type(screen.getByLabelText("Intent ID"), "lab-intent");
+    const input = screen.getByLabelText("Referenced simulation UUID");
+    await userEvent.type(input, "invalid");
+    await userEvent.click(screen.getByRole("checkbox", { name: /explicitly approve/ }));
+    expect(screen.getByRole("button", { name: "Execute" })).toBeDisabled();
+    await userEvent.clear(input);
+    await userEvent.type(input, "00000000-0000-0000-0000-000000000701");
+    expect(screen.getByRole("checkbox", { name: /explicitly approve/ })).not.toBeChecked();
+    await userEvent.click(screen.getByRole("checkbox", { name: /explicitly approve/ }));
+    await userEvent.click(screen.getByRole("button", { name: "Execute" }));
+    expect(input).toBeDisabled();
+    expect(mockExecuteAsync.mock.calls[0][0].request.simulation_id).toBe("00000000-0000-0000-0000-000000000701");
+    expect(mockExecuteAsync.mock.calls[0][0].request).not.toHaveProperty("action_binding");
+    await userEvent.click(screen.getByRole("button", { name: "Execute" }));
+    expect(mockExecuteAsync.mock.calls[1][0]).toEqual(mockExecuteAsync.mock.calls[0][0]);
+    await userEvent.click(screen.getByRole("button", { name: "Cancel execution" }));
+    expect(mockExecuteAsync.mock.calls[2][0].request.cancel).toBe(true);
+    expect(mockExecuteAsync.mock.calls[2][0].request).not.toHaveProperty("simulation_id");
   });
 
   it("cancels an in-flight execution through the same route and identity without auto approval", async () => {

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { AnimatePresence, m, useReducedMotion } from "framer-motion";
+import { useExitPresence } from "@/shared/ui/useExitPresence";
 import { useNavigate } from "react-router-dom";
 import { useUiStore } from "@/shared/state/ui-store";
 import { useAuthStore } from "@/shared/state/auth-store";
@@ -25,6 +25,7 @@ const commands: CommandEntry[] = [
   { id: "go-twin", label: "Go to Digital Twin", hint: "G D", path: "/ops/digital-twin", group: "Navigation" },
   { id: "go-simulation", label: "Go to Simulation", hint: "G S", path: "/ops/simulation", group: "Navigation" },
   { id: "go-intent", label: "Go to Intent", hint: "G I", path: "/ops/intent", group: "Navigation" },
+  { id: "go-autonomy", label: "Go to Autonomy", hint: "G N", path: "/ops/autonomy", group: "Navigation" },
   { id: "go-audit", label: "Go to Audit", hint: "G A", path: "/ops/audit", group: "Navigation" },
 ];
 
@@ -33,7 +34,7 @@ export function CommandPalette() {
   const navigate = useNavigate();
   const open = useUiStore((state) => state.commandPaletteOpen);
   const setOpen = useUiStore((state) => state.setCommandPaletteOpen);
-  const prefersReducedMotion = useReducedMotion();
+  const present = useExitPresence(open);
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
 
@@ -93,13 +94,12 @@ export function CommandPalette() {
   }, [activeIndex, filtered, navigate, open, setOpen]);
 
   return (
-    <AnimatePresence>
-      {open ? (
-        <m.div
-          initial={prefersReducedMotion ? { opacity: 0 } : { opacity: 0, backdropFilter: "blur(0px)" }}
-          animate={prefersReducedMotion ? { opacity: 1 } : { opacity: 1, backdropFilter: "blur(4px)" }}
-          exit={prefersReducedMotion ? { opacity: 0 } : { opacity: 0, backdropFilter: "blur(0px)" }}
-          transition={{ duration: 0.18 }}
+      present ? (
+        <div
+          className="command-palette-backdrop"
+          data-open={open}
+          aria-hidden={!open || undefined}
+          {...(!open ? { inert: "" } : {})}
           role="dialog"
           aria-modal="true"
           aria-label="Command palette"
@@ -118,11 +118,8 @@ export function CommandPalette() {
             paddingTop: "14vh",
           }}
         >
-          <m.div
-            initial={prefersReducedMotion ? { opacity: 0 } : { opacity: 0, y: 18, scale: 0.985 }}
-            animate={prefersReducedMotion ? { opacity: 1 } : { opacity: 1, y: 0, scale: 1 }}
-            exit={prefersReducedMotion ? { opacity: 0 } : { opacity: 0, y: 10, scale: 0.99 }}
-            transition={{ duration: 0.2, ease: [0.21, 1, 0.32, 1] }}
+          <div
+            className="command-palette-surface"
             style={{
               width: "min(720px, calc(100vw - 1.4rem))",
               borderRadius: 16,
@@ -188,9 +185,8 @@ export function CommandPalette() {
                 })
               )}
             </div>
-          </m.div>
-        </m.div>
-      ) : null}
-    </AnimatePresence>
+          </div>
+        </div>
+      ) : null
   );
 }

@@ -17,8 +17,18 @@ import { AsyncState } from "@/shared/ui/AsyncState";
 import { TelemetryAggregation } from "@/shared/types/telemetry";
 import { validateHistoryFilters } from "@/features/telemetry/historyFilters";
 import { Button } from "@/shared/ui/Button";
+import { TimeSeriesChart } from "./TimeSeriesChart";
+import { telemetryChartSeries } from "./chartSeries";
+import { FlowCounterIdentity } from "./FlowCounterIdentity";
 
 export function TelemetryPage() {
+  const token = useAuthStore((state) => state.accessToken);
+  const workspaceId = useWorkspaceStore((state) => state.workspaceId);
+  const networkId = useWorkspaceStore((state) => state.networkId);
+  return <TelemetryPageContent key={`${token}:${workspaceId}:${networkId}`} />;
+}
+
+function TelemetryPageContent() {
   const canReadHealth = useAuthStore((state) => canReadTelemetryHealth(state.profile));
   const token = useAuthStore((state) => state.accessToken);
   const workspaceId = useWorkspaceStore((state) => state.workspaceId);
@@ -132,7 +142,9 @@ export function TelemetryPage() {
           </div>
           <p style={{ color: "var(--ink-3)", fontSize: "0.78rem" }}>Times are sent in UTC. Aggregation: maximum 7 days, grouped by device, metric, unit, source, port, peer and run. Flow counters require raw history: snapshot v1 has no durable flow match identity. Queue backlog is bytes or packets, not occupancy percent. Emulation latency is ping RTT; probe loss is not application delivery ratio. Missing measurements are unavailable, not zero.</p>
           {filterError ? <p role="alert">{filterError}</p> : <QueryState query={historyQuery} hasData={(data) => data.items.length > 0} emptyTitle="No telemetry history" emptyDescription="Measurements are unavailable for this filter. No zero values are inferred.">
-            {() => (
+            {() => (<>
+              <p role="status">Fetched {historyRows.length} {aggregation ? "buckets" : "records"} on this page (limit 120). This is a bounded filtered view, not a full-network total. Invalid timestamps are omitted from the chart.</p>
+              <TimeSeriesChart title="Telemetry time series" series={telemetryChartSeries(historyRows, aggregation ? bucketSeconds : undefined)} />
               <div
                 ref={historyParentRef}
                 style={{
@@ -158,7 +170,7 @@ export function TelemetryPage() {
 
                     return (
                       <button
-                        key={"record_id" in row ? row.record_id : JSON.stringify([row.device_id, row.metric, row.unit, row.source, row.port_no, row.peer_host, row.run_id, row.bucket_start])}
+                        key={"record_id" in row ? `${row.record_id}:${virtualRow.index}` : JSON.stringify([row.device_id, row.metric, row.unit, row.source, row.port_no, row.peer_host, row.run_id, row.bucket_start])}
                         ref={historyVirtualizer.measureElement}
                         data-index={virtualRow.index}
                         onClick={() => setSelectedDeviceId(row.device_id)}
@@ -188,12 +200,14 @@ export function TelemetryPage() {
                           {"bucket_start" in row ? "Bucket start: " : ""}{formatTimestamp("observed_at" in row ? row.observed_at : row.bucket_start)} | {row.source} | Port {String("tags" in row ? row.tags.port_no ?? "unavailable" : row.port_no ?? "unavailable")}
                           {"tags" in row && row.tags.measurement_method ? ` | ${String(row.tags.measurement_method)}` : ""}
                           {` | Peer ${String("tags" in row ? row.tags.peer_host ?? "unavailable" : row.peer_host ?? "unavailable")} | Run ${String("tags" in row ? row.tags.run_id ?? "unavailable" : row.run_id ?? "unavailable")}`}
+                          {"tags" in row && <FlowCounterIdentity metric={row.metric} observedAt={row.observed_at} tags={row.tags} />}
                         </div>
                       </button>
                     );
                   })}
                 </div>
               </div>
+              </>
             )}
           </QueryState>}
           {!filterError && historyQuery.data && <nav aria-label="Telemetry history pagination" style={{ display: "flex", flexWrap: "wrap", gap: "0.6rem", alignItems: "center", marginTop: "0.6rem" }}>
@@ -232,7 +246,8 @@ export function TelemetryPage() {
                   emptyTitle="No device telemetry"
                   emptyDescription="No records available for the selected device."
                 >
-                  {(deviceHistory) => (
+                  {(deviceHistory) => (<>
+                    <p>Fetched {deviceHistory.items.length} of {deviceHistory.total} filtered device records (fetch limit 100); preview limited to 20. Not a network total.</p>
                     <div style={{ display: "grid", gap: "0.35rem", maxHeight: 280, overflow: "auto" }}>
                       {deviceHistory.items.slice(0, 20).map((row) => (
                         <div
@@ -246,10 +261,11 @@ export function TelemetryPage() {
                               {Number.isFinite(row.value) ? `${formatNumber(row.value)} ${row.unit ?? "(unit unavailable)"}` : "Unavailable"}
                             </span>
                           </div>
-                          <div style={{ color: "var(--ink-3)", fontSize: "0.76rem" }}>{formatTimestamp(row.observed_at)} | {row.source} | Port {String(row.tags.port_no ?? "unavailable")}</div>
+                           <div style={{ color: "var(--ink-3)", fontSize: "0.76rem" }}>{formatTimestamp(row.observed_at)} | {row.source} | Port {String(row.tags.port_no ?? "unavailable")}</div>
+                           <FlowCounterIdentity metric={row.metric} observedAt={row.observed_at} tags={row.tags} />
                         </div>
                       ))}
-                    </div>
+                    </div></>
                   )}
                 </QueryState>}
               </div>
@@ -271,7 +287,7 @@ export function TelemetryPage() {
           ) : (
             liveMetricEntries.map((metric) => (
               <div
-                key={JSON.stringify([metric.device_id, metric.metric, metric.unit, metric.source, metric.tags])}
+                key={JSON.stringify([metric.device_id, metric.metric, metric.unit, metric.source, metric.tags, metric.observed_at, metric.event_id])}
                 style={{
                   border: "1px solid var(--line-soft)",
                   borderRadius: "10px",
@@ -279,7 +295,8 @@ export function TelemetryPage() {
                 }}
               >
                 <div style={{ fontWeight: 600 }}>{metric.metric}</div>
-                <TelemetryProvenance tags={metric.tags} />
+                 <TelemetryProvenance tags={metric.tags} />
+                 <FlowCounterIdentity metric={metric.metric} observedAt={metric.observed_at} tags={metric.tags} />
                 <div className="mono" style={{ fontSize: "1.1rem", color: "var(--ink-2)" }}>
                   {Number.isFinite(metric.value) ? `${formatNumber(metric.value)} ${metric.unit ?? "(unit unavailable)"}` : "Unavailable"}
                 </div>

@@ -9,6 +9,13 @@ import { operatorProfile } from "@/test/profile";
 
 describe("CommandPalette", () => {
   beforeEach(() => useAuthStore.setState({ profile: operatorProfile }));
+  it.each([true, false])("gates the autonomy command by read permission (%s)", async (permitted) => {
+    useAuthStore.setState({ profile: { ...operatorProfile, permissions: permitted ? ["read:telemetry"] : [] } });
+    useUiStore.setState({ commandPaletteOpen: true });
+    render(<MemoryRouter><CommandPalette /></MemoryRouter>);
+    await userEvent.type(screen.getByLabelText("Search commands"), "autonomy");
+    expect(screen.queryByText("Go to Autonomy") !== null).toBe(permitted);
+  });
   it("filters commands and closes on escape", async () => {
     const user = userEvent.setup();
 

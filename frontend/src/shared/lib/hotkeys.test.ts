@@ -2,6 +2,11 @@ import { describe, expect, it } from "vitest";
 import { resolveChordNavigation, shouldIgnoreHotkeyTarget } from "@/shared/lib/hotkeys";
 
 describe("hotkeys", () => {
+  it("resolves autonomy navigation without changing the audit shortcut", () => {
+    expect(resolveChordNavigation(null, "n").path).toBe("/ops/autonomy");
+    expect(resolveChordNavigation("g", "n").path).toBe("/ops/autonomy");
+    expect(resolveChordNavigation("g", "a").path).toBe("/ops/audit");
+  });
   it("ignores editable input targets", () => {
     const input = document.createElement("input");
     const textarea = document.createElement("textarea");

@@ -126,9 +126,8 @@ test.describe("VS19 frontend continuity", () => {
     await expect(page).toHaveURL(/\/ops\/telemetry$/);
     await expect(page.getByRole("heading", { name: "Telemetry History" })).toBeVisible();
     await page.getByLabel("Filter telemetry metric").fill("packet_loss");
-    await expect(page.getByText("packet_loss").first()).toBeVisible();
-
-    const firstHistoryButton = page.locator("button").filter({ hasText: "packet_loss" }).first();
+    const firstHistoryButton = page.getByRole("region", { name: "Telemetry History", exact: true }).getByRole("button", { name: /packet_loss/ }).first();
+    await expect(firstHistoryButton).toBeVisible();
     await firstHistoryButton.click();
     await expect(page.getByText("Device Drilldown")).toBeVisible();
 

@@ -1,11 +1,30 @@
-import { describe, expect, it } from "vitest";
-import { renderHook } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
+import { act, renderHook } from "@testing-library/react";
 import { useTwinLinks, useTwinNodes, useTwinSceneModel } from "@/features/digitalTwin/hooks";
 import { useLiveStore } from "@/features/realtime/store";
 import { buildTwinSceneModel, type TwinNode } from "@/features/digitalTwin/sceneAdapter";
 import { topologyEdgeIdentity } from "@/features/topology/edgeIdentity";
 
 describe("digital twin hooks", () => {
+  it("suppresses removed REST nodes and expires congestion on the clock without another push", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-10T00:00:00Z"));
+    useLiveStore.getState().reset();
+    const base = [{ device_id: "d", hostname: "device", device_type: "switch", status: "active", spatial_ref_id: null }];
+    useLiveStore.getState().applyTelemetryDelta({ delta_type: "metric", metric: {
+      event_id: "m", workspace_id: "w", network_id: "n", device_id: "d", metric: "cpu", value: 90, unit: "%", source: "plugin", observed_at: new Date().toISOString(), tags: { run_id: "r", port_no: 1 },
+    } });
+    const { result, unmount } = renderHook(() => useTwinSceneModel(base));
+    expect(result.current.nodes[0].congestion.severity).toBe("high");
+    act(() => vi.advanceTimersByTime(65_000));
+    expect(result.current.nodes[0].congestion.severity).toBe("neutral");
+    expect(result.current.nodes[0].congestion.metrics[0]).toMatchObject({ stale: true, value: 90, tags: { run_id: "r", port_no: 1 } });
+    act(() => useLiveStore.getState().applyTopologyDelta({ delta_type: "remove", node: { device_id: "d" } }));
+    expect(result.current.nodes).toHaveLength(0);
+    unmount();
+    useLiveStore.getState().reset();
+    vi.useRealTimers();
+  });
   it("merges base topology and live deltas into node list", () => {
     useLiveStore.setState({
       topologyByDeviceId: {

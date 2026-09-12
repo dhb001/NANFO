@@ -2,6 +2,71 @@
 
 Lightweight chronological notes for decisions that do not require a full ADR.
 
+## ADR-018: Operator Evidence and Timed Control
+
+Keep measured probes, approved configuration, historical model inference and live
+autonomy readiness distinct. Reward edits create retraining requests; operational
+edits are versioned and enforced. Timed override expiry invokes exact-owned
+server compensation even after actorrevocation, never impersonates that actor for
+new execute. Return requires verified restoration and current gates, STOP dominates.
+Model subprocess denies filesystem/control authority via Landlock plus seccomp.
+No silent deployment or inference-to-actuation bridge is introduced.
+
+## ADR-017: Configured Models Are Not Physical Evidence
+
+Use a deterministic bounded Simulation-owned evaluator and explicit inputs without
+competing with active training. Output completion means computation completed;
+objective pass is model-only and never physical authorization. Persist and recheck
+referenced evidence before dispatch; preserve independent manual/autonomy gates.
+Display approved plans only from immutable persisted commands, snapshot-local flow
+counters without inferred identity, and bounded REST reconnect reconciliation.
+Keep remaining packet-path/live-model/override scope open rather than claim UI
+parity from placeholders. Verification in SimulationOperator-Step11-Step12.md.
+
+## 2026-09-10: ADR017 Twin Consistency Implementation
+
+Only subscribed ACKs declare realtime readiness. Reconcile existing scoped REST
+caches with a 500ms coalescer and one trailing pass during pending requests; never
+invent websocket snapshots. Retain removal observation watermarks after complete
+REST snapshots confirm absence, rejecting delayed adds. Treat 60s-old Twin metrics
+as stale on a 5s presentation heartbeat, not as a polling acquisition mechanism.
+Keep stale values inspectable. Restore explicitly rereads asset/complete graph with
+8MiB, hash, MIME, supported self-contained glTF and scoped mapping checks; decline
+external resources/required extensions instead of fetching arbitrary URLs. Keep
+group saves non-destructive and Blob resources scope-owned. No new domain fields,
+events or measured-path claims. Combined bundle overage remains a closure blocker
+rather than weakening the existing performance gate.
+
+## ADR-014 Test-Only Continuation
+
+After the extended training stage produced a validation-qualified384-transition
+model but its conservative reservation prevented512 transitions/final evaluation,
+authorized a separately frozen test-only stage selecting by existing validation
+reward. Preserve original minimum exception and ledger; no new training, validation,
+selection or hyperparameter tuning after test access. All five methods use reserved
+12seed matched conditions. Recognize measured scoped goodput/RTT pass, never general
+OSPF superiority or autonomous safety authorization. See ExpandedTraining-ADR014-Outcome.md.
+
+## 2026-09-09: Safety/Autonomy Fail-Closed Activation
+
+ADR-012 adds the governed foundation without pretending the experiment PPO accepts
+continuous telemetry or the failed-quality model is deployable. Safety certificates
+are conditional on calibrated bounds and must travel with exact selected actions
+to durable acceptance. Emergency stop dominates older revisions. Verification and
+server-owned compensation remain separate from revoked operator authority; missing
+providers never fabricate manual approval. Mark end-to-end Steps9/10 OPEN until
+calibration, qualified compatible model and live authorized intervention exist.
+
+## 2026-09-09: Measured Routing Learning Boundary
+
+ADR-011 separates operator-launched learning from the web application and durable
+manual-control worker. Use real FRR rather than relabeled shortest-path code;
+disclose L3/background-policy comparison differences. V2 history/actual-rate and
+source/spec validation invalidate earlier checkpoints instead of silently loading
+incompatible semantics. Mark useful-policy acceptance incomplete when learned
+argmax remains unchanged; do not infer improvement from weights or reward movement.
+No new public endpoint or autonomous application dispatch is introduced.
+
 ## 2026-09-09: Durable Manual Lab Control
 
 ADR-010 authorizes narrowly scoped manual control in the disconnected lab, not

@@ -1,8 +1,10 @@
 """Host-side Docker controls. Never installs or runs Mininet/OVS on the host."""
 
 import argparse
+import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 
@@ -18,13 +20,14 @@ def main():
             "status",
             "smoke",
             "traffic",
+            "paths",
             "verify",
             "verify-actions",
             "experiment-start",
             "experiment-stop",
         ),
     )
-    parser.add_argument("--mode", choices=("sdn", "ospf"), default="sdn")
+    parser.add_argument("--mode", choices=("sdn", "matched", "ospf"), default="sdn")
     args = parser.parse_args()
     directory = Path(__file__).resolve().parent
     output = directory / "output"
@@ -44,24 +47,89 @@ def main():
     ]
 
     def execute(arguments):
-        return subprocess.run(docker + arguments, check=True).returncode
+        return subprocess.run(docker + arguments, check=True, timeout=900).returncode
 
     try:
         if args.command == "experiment-start":
             running = subprocess.run(
-                [*docker, "ps", "-q", "--status", "running"], check=True,
-                capture_output=True, text=True,
+                [*docker, "ps", "-q", "--status", "running"],
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=10,
             ).stdout.strip()
             if running:
                 parser.error("Another lab owns the slot; stop it explicitly first")
-            if (directory / "results" / ".journal.json").exists() or (directory / "results" / ".journal.json").is_symlink():
-                parser.error("Manual journal exists; reconcile it through manual control, never delete it")
-            return execute(["run", "--rm", "-d", "--no-deps", "--name", "nanfo-experiment",
-                            "-e", "EMULATION_CONTROL_ENABLED=false", "lab",
-                            "--experiment", "--mode", args.mode, "--output", "/output"])
+            if (directory / "results" / ".journal.json").exists() or (
+                directory / "results" / ".journal.json"
+            ).is_symlink():
+                parser.error(
+                    "Manual journal exists; reconcile it through manual control, never delete it"
+                )
+            image = subprocess.run(
+                [
+                    "docker",
+                    "image",
+                    "inspect",
+                    os.environ.get("NANFO_EMULATION_IMAGE", "nanfo-emulation:campus-small-v1"),
+                    "--format",
+                    "{{.Id}}",
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=10,
+            ).stdout.strip()
+            execute(
+                [
+                    "run",
+                    "--rm",
+                    "-d",
+                    "--no-deps",
+                    "--name",
+                    "nanfo-experiment",
+                    "-e",
+                    "EMULATION_CONTROL_ENABLED=false",
+                    "-e",
+                    "NANFO_LAB_IMAGE_ID=" + image,
+                    "lab",
+                    "--experiment",
+                    "--mode",
+                    args.mode,
+                    "--output",
+                    "/output",
+                ]
+            )
+            deadline = time.monotonic() + 90
+            while time.monotonic() < deadline:
+                ready = subprocess.run(
+                    [
+                        "docker",
+                        "exec",
+                        "nanfo-experiment",
+                        "python",
+                        "-c",
+                        "from pathlib import Path; import sys; sys.exit(not Path('/run/nanfo/experiment.sock').is_socket())",
+                    ],
+                    capture_output=True,
+                    timeout=5,
+                )
+                if ready.returncode == 0:
+                    return 0
+                time.sleep(0.5)
+            subprocess.run(
+                ["docker", "stop", "--time", "20", "nanfo-experiment"], check=False, timeout=30
+            )
+            parser.error(
+                "Experiment failed readiness within 90 seconds; inspect container diagnostics"
+            )
         if args.command == "experiment-stop":
-            return subprocess.run(["docker", "stop", "--time", "20", "nanfo-experiment"], check=True).returncode
+            return subprocess.run(
+                ["docker", "stop", "--time", "20", "nanfo-experiment"], check=True, timeout=30
+            ).returncode
         if args.command == "build":
+            if os.environ.get("NANFO_EMULATION_IMAGE"):
+                parser.error("Build only the working tag; never rebuild a pinned/replay image")
             return execute(["build", "--pull"])
         if args.command == "start":
             return execute(["up", "-d", "--wait", "--wait-timeout", "90"])
@@ -76,6 +144,7 @@ def main():
                 check=True,
                 capture_output=True,
                 text=True,
+                timeout=10,
             ).stdout.strip()
             if running:
                 parser.error(
@@ -99,6 +168,9 @@ def main():
         )
     except subprocess.CalledProcessError as error:
         return error.returncode
+    except subprocess.TimeoutExpired:
+        print("Docker command timed out; inspect and stop only the owned lab", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":

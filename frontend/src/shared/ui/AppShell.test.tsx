@@ -16,6 +16,7 @@ function renderShell(path = "/ops/audit") {
   return render(<MemoryRouter initialEntries={[path]}><Routes>
     <Route path="/ops" element={<AppShell />}>
       <Route path="audit" element={<div>Private audit content</div>} />
+      <Route path="autonomy" element={<div>Scoped autonomy content</div>} />
       <Route path="overview" element={<input aria-label="Local draft" defaultValue="" />} />
     </Route>
     <Route path="/login" element={<div>Login destination</div>} />
@@ -37,6 +38,17 @@ describe("authenticated shell", () => {
     useAuthStore.getState().setProfile({ ...operatorProfile, roles: ["Admin"] });
     renderShell();
     expect(screen.getByText("Private audit content")).toBeInTheDocument();
+  });
+
+  it("gates autonomy navigation and direct access on read:telemetry", () => {
+    useAuthStore.getState().setProfile({ ...operatorProfile, permissions: ["read:topology"] });
+    renderShell("/ops/autonomy");
+    expect(screen.getByText("Permission denied")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /Autonomy/ })).not.toBeInTheDocument();
+    expect(screen.queryByText("Scoped autonomy content")).not.toBeInTheDocument();
+    act(() => useAuthStore.getState().setProfile(operatorProfile));
+    expect(screen.getByRole("link", { name: /Autonomy/ })).toBeInTheDocument();
+    expect(screen.getByText("Scoped autonomy content")).toBeInTheDocument();
   });
 
   it("disables denied actions without invoking them", async () => {

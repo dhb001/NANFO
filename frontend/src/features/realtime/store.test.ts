@@ -2,6 +2,58 @@ import { describe, expect, it } from "vitest";
 import { useLiveStore } from "@/features/realtime/store";
 
 describe("realtime store", () => {
+  it("retains snapshot-local flow entries with repeated cookie/index across snapshots", () => {
+    useLiveStore.getState().reset();
+    const metric = { event_id: "flow-a", workspace_id: "w", network_id: "n", device_id: "d", metric: "flow_byte_count", unit: "bytes", source: "emulation", observed_at: "2026-09-10T00:00:00Z", value: 100, tags: { table_id: 0, cookie: "0", priority: 100, flow_index: 1 } };
+    const apply = useLiveStore.getState().applyTelemetryDelta;
+    apply({ delta_type: "metric", metric });
+    apply({ delta_type: "metric", metric: { ...metric, event_id: "flow-b", value: 200 } });
+    apply({ delta_type: "metric", metric: { ...metric, event_id: "flow-c", observed_at: "2026-09-10T00:01:00Z", value: 5 } });
+    apply({ delta_type: "metric", metric });
+    expect(Object.values(useLiveStore.getState().telemetryByDeviceMetric).map((row) => row.value)).toEqual([100, 200, 5]);
+  });
+  it("keeps removal tombstones until a later complete snapshot confirms absence, rejecting old deltas and scopes", () => {
+    useLiveStore.getState().reset();
+    const { epoch, reconcileTopologySnapshot, applyTopologyDelta } = useLiveStore.getState();
+    applyTopologyDelta({ delta_type: "remove", node: { device_id: "removed" } }, "2026-09-10T00:01:00Z");
+    applyTopologyDelta({ delta_type: "add", node: { device_id: "removed" } }, "2026-09-10T00:00:00Z");
+    expect(useLiveStore.getState().topologyByDeviceId.removed).toBeUndefined();
+    reconcileTopologySnapshot([], epoch, 0);
+    expect(useLiveStore.getState().topologyTombstones.removed).toBe(1);
+    reconcileTopologySnapshot(["removed"], epoch, 1);
+    expect(useLiveStore.getState().topologyTombstones.removed).toBe(1);
+    reconcileTopologySnapshot([], epoch - 1, 1);
+    expect(useLiveStore.getState().topologyTombstones.removed).toBe(1);
+    reconcileTopologySnapshot([], epoch, 1);
+    expect(useLiveStore.getState().topologyTombstones.removed).toBeUndefined();
+    applyTopologyDelta({ delta_type: "add", node: { device_id: "removed" } }, "2026-09-10T00:00:00Z");
+    expect(useLiveStore.getState().topologyByDeviceId.removed).toBeUndefined();
+    applyTopologyDelta({ delta_type: "add", node: { device_id: "removed" } }, "2026-09-10T00:02:00Z");
+    expect(useLiveStore.getState().topologyByDeviceId.removed).toBeDefined();
+  });
+
+  it("retains independent simulation IDs and latest timestamps despite constant producer IDs", () => {
+    useLiveStore.getState().reset();
+    const apply = useLiveStore.getState().applyDigitalTwinDelta;
+    const object = { id: "simulation-state", object_type: "simulation_state", simulation_id: "a", status: "completed" };
+    apply({ delta_type: "update", scene_object: object }, "2026-09-10T00:02:00Z");
+    apply({ delta_type: "update", scene_object: { ...object, simulation_id: "b" } }, "2026-09-10T00:01:00Z");
+    apply({ delta_type: "update", scene_object: { ...object, status: "queued" } }, "2026-09-10T00:01:00Z");
+    expect(useLiveStore.getState().sceneObjectIdsNewestFirst).toHaveLength(2);
+    expect(useLiveStore.getState().sceneObjects["simulation:a"]).toMatchObject({ id: "simulation:a", status: "completed" });
+    expect(useLiveStore.getState().sceneObjectLastSeen["simulation:a"]).toBe(Date.parse("2026-09-10T00:02:00Z"));
+  });
+
+  it("uses observed_at ordering within run, port and peer identity", () => {
+    useLiveStore.getState().reset();
+    const metric = { event_id: "m", workspace_id: "w", network_id: "n", device_id: "d", metric: "cpu", value: 90, unit: "%", source: "plugin", observed_at: "2026-09-10T00:02:00Z", tags: { run_id: "run-a", port_no: 1, peer_host: "a" } };
+    const apply = useLiveStore.getState().applyTelemetryDelta;
+    apply({ delta_type: "metric", metric });
+    apply({ delta_type: "metric", metric: { ...metric, value: 1, observed_at: "2026-09-10T00:01:00Z" } });
+    for (const tags of [{ ...metric.tags, run_id: "run-b" }, { ...metric.tags, port_no: 2 }, { ...metric.tags, peer_host: "b" }]) apply({ delta_type: "metric", metric: { ...metric, tags } });
+    expect(Object.values(useLiveStore.getState().telemetryByDeviceMetric)).toHaveLength(4);
+    expect(Object.values(useLiveStore.getState().telemetryByDeviceMetric).every((value) => value.value === 90)).toBe(true);
+  });
   it("deduplicates alerts by event_id and keeps latest first", () => {
     useLiveStore.setState({
       topologyByDeviceId: {},

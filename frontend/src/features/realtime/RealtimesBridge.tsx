@@ -1,4 +1,5 @@
-import { useCallback, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useAuthStore } from "@/shared/state/auth-store";
 import { useWorkspaceStore } from "@/shared/state/workspace-store";
 import { useManagedWebSocket } from "@/shared/realtime/useManagedWebSocket";
@@ -6,6 +7,7 @@ import { useLiveStore } from "@/features/realtime/store";
 import { recoverSocketUpgrade, refreshSession } from "@/features/auth/session";
 import { hasPermission } from "@/features/auth/permissions";
 import { useUiStore } from "@/shared/state/ui-store";
+import { reconcileKnownScenes } from "./reconcileScenes";
 import {
   AlertDeltaData,
   DigitalTwinDeltaData,
@@ -38,6 +40,7 @@ function isDigitalTwinFrame(frame: WebSocketEnvelope<unknown>): frame is WebSock
 }
 
 export function RealtimeBridge() {
+  const queryClient = useQueryClient();
   const token = useAuthStore((state) => state.accessToken);
   const userId = useAuthStore((state) => state.userId);
   const generation = useAuthStore((state) => state.generation);
@@ -57,6 +60,58 @@ export function RealtimeBridge() {
   }, [token, contextKey]);
   const scoped = { contextKey, isCurrent, onUpgradeFailure: recoverSocketUpgrade };
   const lastToastByCodeRef = useRef<Record<string, number>>({});
+  const reconcileTimer = useRef<number | null>(null);
+  const pendingChannels = useRef(new Set<string>());
+  const sceneAbort = useRef<AbortController | null>(null);
+  useEffect(() => () => {
+    if (reconcileTimer.current !== null) window.clearTimeout(reconcileTimer.current);
+    reconcileTimer.current = null;
+    pendingChannels.current.clear();
+    sceneAbort.current?.abort();
+  }, [contextKey, token]);
+
+  const reconcile = useCallback(function queueReconciliation(channel: string) {
+    if (!isCurrent()) return;
+    pendingChannels.current.add(channel);
+    if (reconcileTimer.current !== null) return;
+    const timer = window.setTimeout(() => {
+      const channels = new Set(pendingChannels.current);
+      pendingChannels.current.clear();
+      if (!isCurrent()) return;
+      const graph = queryClient.getQueryData<{ data: { nodes: { device_id: string }[] } }>(["topology", token, networkId]);
+      const deviceIds = new Set(graph?.data.nodes.map((node) => node.device_id));
+      const controller = new AbortController();
+      sceneAbort.current = controller;
+      const scenes = channels.has("digitalTwin") && token && workspaceId && networkId && hasPermission(useAuthStore.getState().profile, "read:topology")
+        ? reconcileKnownScenes(token, workspaceId, networkId, isCurrent, controller.signal) : Promise.resolve();
+      void Promise.all([scenes, queryClient.invalidateQueries({ predicate: (query) => {
+        const key = query.queryKey;
+        if (channels.has("topology") && key[1] === token) {
+          if (key[0] === "topology" || key[0] === "devices") return key[2] === networkId;
+          if (["topology-node", "topology-neighbours", "topology-impact"].includes(String(key[0]))) return deviceIds.has(String(key[2]));
+        }
+        if (channels.has("telemetry") && key[0] === "telemetry" && key[2] === token) {
+          if (key[1] === "device") return deviceIds.has(String(key[3]));
+          if (key[1] === "history") {
+            const scope = key[3] as { networkId?: string; workspaceId?: string } | undefined;
+            return scope?.networkId ? scope.networkId === networkId : scope?.workspaceId === workspaceId;
+          }
+        }
+        // Alerts and simulation detail keys have no network dimension in the existing contract.
+        if (channels.has("alerts") && key[0] === "alerts") return key[1] === token;
+        if (channels.has("digitalTwin") && key[1] === token) {
+          if (key[0] === "intent") return key[3] === workspaceId;
+          if (key[0] === "simulation" || key[0] === "simulation-compare") return query.isActive();
+        }
+        return false;
+      } }, { cancelRefetch: false })]).finally(() => {
+        if (reconcileTimer.current !== timer) return;
+        reconcileTimer.current = null;
+        if (pendingChannels.current.size && isCurrent()) queueReconciliation(pendingChannels.current.values().next().value!);
+      });
+    }, 500);
+    reconcileTimer.current = timer;
+  }, [isCurrent, networkId, queryClient, token, workspaceId]);
 
   const applyTopologyDelta = useLiveStore((state) => state.applyTopologyDelta);
   const applyTelemetryDelta = useLiveStore((state) => state.applyTelemetryDelta);
@@ -112,11 +167,13 @@ export function RealtimeBridge() {
     filters: networkId ? { network_id: networkId } : {},
     enabled: Boolean(token && workspaceId && networkId && !endingSession && hasPermission(profile, "read:topology")),
     onUnauthorized,
-    onError: onSocketError,
+    onError: (error) => { onSocketError(error); if (error.code === "WS_BACKPRESSURE") reconcile("topology"); },
+    onSubscribed: () => reconcile("topology"),
     onStatusChange: (status) => setConnectionStatus("topology", status),
     onFrame: (frame) => {
       if (isTopologyFrame(frame) && frame.data?.node) {
-        applyTopologyDelta(frame.data);
+        applyTopologyDelta(frame.data, frame.timestamp);
+        reconcile("topology");
       }
     },
   });
@@ -129,7 +186,8 @@ export function RealtimeBridge() {
     filters: networkId ? { network_id: networkId } : {},
     enabled: Boolean(token && workspaceId && networkId && !endingSession && hasPermission(profile, "read:telemetry")),
     onUnauthorized,
-    onError: onSocketError,
+    onError: (error) => { onSocketError(error); if (error.code === "WS_BACKPRESSURE") reconcile("telemetry"); },
+    onSubscribed: () => reconcile("telemetry"),
     onStatusChange: (status) => setConnectionStatus("telemetry", status),
     onFrame: (frame) => {
       if (isTelemetryFrame(frame) && frame.data?.metric &&
@@ -147,7 +205,8 @@ export function RealtimeBridge() {
     filters: {},
     enabled: Boolean(token && workspaceId && !endingSession && hasPermission(profile, "read:telemetry")),
     onUnauthorized,
-    onError: onSocketError,
+    onError: (error) => { onSocketError(error); if (error.code === "WS_BACKPRESSURE") reconcile("alerts"); },
+    onSubscribed: () => reconcile("alerts"),
     onStatusChange: (status) => setConnectionStatus("alerts", status),
     onFrame: (frame) => {
       if (isAlertFrame(frame) && frame.data?.alert) {
@@ -158,6 +217,7 @@ export function RealtimeBridge() {
           correlation_id: frame.correlation_id,
           timestamp: frame.timestamp,
         });
+        reconcile("alerts");
       }
     },
   });
@@ -170,11 +230,14 @@ export function RealtimeBridge() {
     filters: networkId ? { network_id: networkId } : {},
     enabled: Boolean(token && workspaceId && networkId && !endingSession && hasPermission(profile, "read:topology")),
     onUnauthorized,
-    onError: onSocketError,
+    onError: (error) => { onSocketError(error); if (error.code === "WS_BACKPRESSURE") reconcile("digitalTwin"); },
+    onSubscribed: () => reconcile("digitalTwin"),
     onStatusChange: (status) => setConnectionStatus("digitalTwin", status),
     onFrame: (frame) => {
       if (isDigitalTwinFrame(frame) && frame.data?.scene_object) {
-        applyDigitalTwinDelta(frame.data);
+        if (!isCurrent() || !workspaceId || !networkId) return;
+        applyDigitalTwinDelta(frame.data, frame.timestamp, { workspaceId, networkId });
+        reconcile("digitalTwin");
       }
     },
   });

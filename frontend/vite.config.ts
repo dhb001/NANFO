@@ -12,12 +12,15 @@ export default defineConfig({
   build: {
     sourcemap: true,
     target: "es2022",
+    minify: "terser",
+    terserOptions: {
+      compress: { passes: 2 },
+    },
     rollupOptions: {
       output: {
         manualChunks: {
           react: ["react", "react-dom", "react-router-dom"],
           three: ["three", "@react-three/fiber", "@react-three/drei"],
-          motion: ["framer-motion"],
           query: ["@tanstack/react-query"],
         },
       },

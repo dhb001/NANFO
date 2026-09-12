@@ -1,5 +1,266 @@
 # Development Journal
 
+## [2026-09-11] - Remaining Step12 Operator Workflows
+
+- Added actual correlated probe path capture/replay, historical frozen model API
+  diagnostics with Landlock/seccomp, immutable operational/training config and
+  persisted expiry-driven override recovery/gatedreturn with actor/revision checks.
+- Review fixes: obsolete-run cancellation retains fresh verified no-mutation proof;
+  capture services cancellation without falsecompletepath; UI enrollment uses
+  execution approver not intentrequester; inference denied filesystem/control access.
+- Real six-case override recovery removed10->0flows with3/3ping; actual frozen
+  inference reproduced exactweightsoutputs; owned infrastructure cleaned up.
+- Backend1,858 passed/50skips;frontend465 tests/browser38 and type/lint/build/perf
+  passed. Full backend linttool/version drift documented, scoped0.15.6 clean.
+- No shared migration or implicit registry/worker deployment. Details/limits in
+  OperatorCompletion-ADR018.md; calibrated autonomy remains independently gated.
+
+## [2026-09-10] - ADR018 Updated-Image Capture And Restart Verification
+
+- Pinned operator image d91efe1717f2 in the backend-only physical verifier; no
+  frozen incumbent/source/model/frontend modifications. Explicit backend Python
+  used despite active AI environment. Disposable PostgreSQL migrated0016 only.
+- All6 cases pass, including real expiry/STOP during capture: partial response,
+  prior artifact unchanged, no child leaks, lab receipts0.649446s/0.486143s after
+  trigger. Backend verified6.407527s/6.201908s after trigger.
+- Actual container restart whileholding retains original completed receipt and
+  backend completion, newrun reconciles physical absence, then exact expiry cancel
+  produces fresh current-run obsolete/no-mutation proof; backend verified+6.419123s.
+- Each reroute10 owned flows ->0, active=null, independent ping3/3, no execute
+  replay or impersonation. Four capture directories of8maximum, six cancellations,
+  no model inference/training. All4 containers/volumes and5 processes cleaned.
+- Evidence:`/tmp/opencode/operator-override-verification-1j3zdsiz/result.json`;
+  elapsed274.307833s. Prior failed STOP overlap attempt retained truthfully.
+- Final aggregate backend1,858 passed/50 opt-in skips; scoped edited-file Ruff0.15.6
+  passes, no full-repository lint claim. Incumbent image aliases unchanged31c749ef7962.
+
+## [2026-09-10] - ADR018 Physical Override Closure
+
+- Added opt-in `backend/scripts/verify_operator_override.py`: dedicated PostgreSQL
+  through0016, Redis, Neo4j, existing image isolated manual campus, real authenticated
+  API plus Intent/Autonomy worker processes. Read-only Bubblewrap mounts prove API/
+  workers cannot write journal/results or access Docker socket; only Intent can
+  write commands. No frontend/AI/emulation source or shared services changed.
+- Passed3 real reroutes:60s expiry after Autonomy SIGKILL/restart (verified expiry+
+  6.307542s), actor revocation (+8.126447s), STOP during pending restoration
+  (+6.152762s). Each10 owned flows ->0, active=null, independent ping3/3. No execute
+  replay, flow reinstall or impersonation. STOP/explicit return remain blocked.
+- Operational interval3s observed3.087494s/3.046758s; no requested training/inference.
+  Four owned containers/volumes and5 processes cleaned; total149.688682s.
+- Evidence: `/tmp/opencode/operator-override-verification-qtqweffq/result.json`.
+  Aggregate full backend1,856 passed/50 opt-in skips; verifier unit tests, scoped
+  Ruff and whitespace checks passed after physical execution.
+  Earlier physical attempt hit existing member re-add500; reordered harness removes
+  that dependency, no membership workaround/change. Bounded lab, not production
+  autonomy certification.
+
+## [2026-09-10] - ADR018 Backend Configuration And Timed Overrides
+
+- Autonomy owns migration0015 configuration revisions and timed override tables;
+  model diagnostic migration0016 remains a separate workstream after0015.
+- Added immutable requested operational/training config, actual worker interval/
+  age/hold/rate gates, scoped REST contracts and immutable enrollment identity.
+- Exact actor/network/manual execution enrollment requires fresh readback plus
+  current journal ownership, never executes/replays. Independent leased recovery
+  calls Intent-owned restore_override with exact persisted capability; revocation,
+  expiry and STOP cannot impersonate users or authorize new execution.
+- Cancelled-unknown Intent evidence retries without release; verified restoration
+  precedes model/live-readiness/revision-gated return. Return never clears STOP.
+- Full backend1,845 passed/49 opt-in skips;20 disposable migration0015 transaction
+  tests passed; scoped Ruff/whitespace passed. Live HTTP/worker evidence:
+  `/tmp/opencode/autonomy-verification-6bsvbujm/result.json`.
+- No shared database migration/reset, physical lab rollback claim, or AI/emulation/
+  frontend edits by this workstream. Operator journal read-only access and both
+  Autonomy/Intent workers are required; exact fields/runbook in Autonomy README.
+
+## [2026-09-10] - Configured Evaluator and Operator Integration
+
+- Added ADR017 configured finite-buffer fluid engine, exact traffic accounting,
+  typed modeled outputs, checkpointed independent worker, branch/pause/resume and
+  scoped outbox migration0014. Preserved legacy-unavailable truth semantics.
+- Review fixes persisted simulation reference through dispatch, rechecked state/hash/
+  expiry, added approved_plan from actual persisted command and preserved physical
+  authorization=false. No physical/calibrated safety claim.
+- Added scenario/metric charts and operator controls, safe model restore/groups,
+  authenticated reconnect lifecycle reconstruction, stale-data/tombstone protections,
+  snapshot-local flow counters and responsive keyboard/table alternatives.
+- Final backend1,757 tests/lint;23 new live database tests;frontend369 tests and37
+  browser tests (dev and production) passed;bundle395.25KiB within unchanged limits.
+- ADR016 sources untouched; campaign observed stopped successfully at384transitions
+  for remaining-budget reservation. Details/limits in SimulationOperator-Step11-Step12.md.
+
+## [2026-09-10] - ADR017 Frontend Realtime and Twin Persistence
+
+- Subscription ACK, not transport-open, establishes readiness and resets auth
+  recovery bounds. Missing ACK closes after 10s; denial/revocation and rotation stay
+  bounded. Reconnect/backpressure REST reconciliation coalesces 500ms and queues one
+  trailing pass while pending, using existing selected query-key dimensions.
+- Removed nodes stay suppressed over stale REST bases. Complete snapshots started
+  after a delta retire overlays/tombstones only in their scope epoch; retained
+  observation watermarks reject delayed pushes. Scene identity derives from existing
+  simulation/intent IDs; metric identity preserves run/port/peer and observation order.
+- Explicit fresh-read Restore validates 8MiB bounds, SHA256/size/base64/MIME, supported
+  self-contained glTF parsing and complete-graph mapping. Replacements require consent;
+  async work and Blob URLs are scope-owned. Group requests preserve unrelated groups.
+- Validation: full unit 356 passed;
+  lint/typecheck passed. Twin browser 5/5 and mobile keyboard restore 2/2 passed.
+  Full browser 31/34, with two other-workstream telemetry selector failures and one
+  plugin login timeout (plugin tests pass 2/2 on isolated rerun).
+  Build passed; observed total gzip gate failed at 416.89/410.16KiB,
+  other limits passed. No dependency or performance-budget changes by this agent.
+
+## [2026-09-10] - Incumbent-Preserving Broader Refinement
+
+- Completed ADR015 broader-profile512transition campaign; validation RTT/switches
+  improved modestly but preregistered quality thresholds failed. No promotion or
+  final-test access. Independent raw replay verified learning and historical hashes.
+- Launched separate ADR016 balanced32-sample updates/2048transition plan with24h
+  service cap, resource limits, source preservation and validation/final separation.
+  Verified complete first128transition session, checkpoint/cleanup and next real
+  optimizer update. Active not completed; see ModelRefinement-ADR015-ADR016.md.
+-336 AI tests/lint/format passed before launch; incumbent default unchanged.
+
+## [2026-09-10] - ADR015 Isolated Refinement Completed
+
+- Added AI-only `scripts/refinement/`, separate V5 semantic/evidence adapter and
+  original copied-source incumbent loader; no frozen routing package, backend,
+  frontend or emulation implementation edits by this workstream.
+- Pinned completed V5 release and independently replayed48 campaign-profile smoke
+  windows. Full AI324 tests and scoped Ruff pass; historical V4 test fixture now
+  explicitly reads its historical release instead of the evolving V5 workspace.
+- Single fixed lower-LR warm-start campaign: minimum256/maximum512 transitions,
+  validation2800..2815, final3600..3623, six methods and frozen grouped gates.
+- Initial attempt stopped on tuple serialization with zero PPO updates. Preserved
+  it and exact cleanup; corrected serialization and recorded fresh-seed recovery
+  in `ai-engine/artifacts/adr015-002`, sharing original four-hour deadline.
+- Completed512 fresh transitions/32updates and all four validation checkpoints.
+  Best reward gain0.01313 and20% route-change reduction fell short of frozen
+  >0.02/25% meaningful-effect gates despite all nonregression groups passing.
+- No final seeds accessed; incumbent remains default. Service inactive and exact
+  owned containers absent;1437 original artifact hashes unchanged. Approx107.8min
+  including recovery, within shared4h cap. Results and elapsed-status caveat:
+  `ai-engine/ADR015-RESULTS-001.md`.
+
+## [2026-09-09] - Extended PPO Training and Locked Holdout Pass
+
+- Implemented V4 verified queue-drain measurement and extended fresh on-policy
+  PPO with train-fixed0.003 learning rate/gamma0.9. At384 transitions/24updates,
+  validation demonstrated both routing directions with about97% probabilities.
+- Original budget reserve stopped before512 target; preserved outcome and explicitly
+  authorized test-only selection from existing qualified validation checkpoints.
+  No further training/tuning, test seeds3900..3911 untouched until selection.
+- Five methods/12seeds each measured once; PPO goodput5.922Mbps/RTT25.155ms versus
+  OSPF3.946Mbps/104.090ms; pairedseed intervals passed predefined criterion within
+  stationary impairment/nominal-cost scope. Independent raw audit reproduced values,
+  actions, checkpoint hashes and chronology. No general superiority claim.
+- AI305 tests/lint/format passed; all campaign owners cleaned up. Scope, raw artifacts,
+  exceptions and remaining safety/autonomy gates in ExpandedTraining-ADR014-Outcome.md.
+
+## [2026-09-09] - Matched Benchmark and Bounded Completion Attempt
+
+- Added common FRR/Linux topology/dataplane/background for OSPF and policy control,
+  stationary balanced impairments, compact V3 PPO and frozen qualification plan.
+- Collected220 real windows; both PPO pilots remained fixed argmax and unqualified.
+  Budget respected, no gate relaxation or test access, all lab owners cleaned up.
+- Independent backend evidence parser validated122 artifact hashes and reconstructed
+  decisions/rewards; safety calibration correctly refused missing endpoint/arrival
+  guarantees. Autonomous providers remain disabled; no additional placeholders
+  represented as completed control.
+- Review strengthened exact seed/demand validation and labeled UDP cutoff censoring;
+  retained historical gates/artifacts and noted pressure-swap diagnostic limitation.
+- AI275 tests/lint/format passed; backend1,704 passed/16 skips (actual campaign
+  opt-ins separately passed); full disposition in MatchedRouting-ADR013-Outcome.md.
+
+## [2026-09-09] - Actual ADR013 Campaign Backend Reconstruction
+
+- Fixed strict final V3 schema mismatch: three required producer fields and required
+  manifest client-source hashes. No field stripping or qualification-flag trust.
+- Independently read raw UDP/counter/netem/route/decision evidence, reconstructed
+  reward/paired metrics and directionality; verified 122 files/8,269,065 bytes through
+  operator-pinned inventory and checkpoint/source hashes. Test ledger has zero attempts.
+- Both pilot41/42 are unqualified fixed route0; means -0.2921034355/-0.3519930303,
+  both below heuristic. Recorded actual assessments outside immutable campaign inputs
+  at `/tmp/opencode/adr013-backend-assessment-41.json` and `-42.json` (exit2).
+- Calibration uses raw training bytes, not arbitrary normalized endpoint q values;
+  endpoints/attribution/fit-holdout missing, no fitted safety certificate or promotion.
+- Full backend 1,706 passed/14 infrastructure skips with both actual campaign tests;
+  21 new campaign regressions, scoped Ruff passed. No AI/emulation edits or live lab.
+  Detailed limitations and reproducible commands: backend Autonomy `TOOLING.md`.
+
+## [2026-09-09] - ADR-013 Backend Read-Only Qualification and Calibration
+
+- Added backend-only operator scripts `assess_autonomy_readiness.py` and
+  `calibrate_autonomy.py`, bounded read-only allowlist I/O, independent actual AI
+  qualification V3 parsing, dossier/checkpoint hash checks, matched comparison and
+  train-only/holdout calibration diagnostics with explicit unqualified outcomes.
+- No APIs, migrations, installed-provider changes, AI/emulation edits or live lab run.
+  Raw normalized measurement derivation remains unverified and explicitly blocking;
+  neither hashes nor producer flags are remote attestation. No calibration promotion.
+- Quantified conditional A=20 Mbps, dt=2s, q=E=0, service=0 bound: U=5,000,000 bytes;
+  drift=12,500,000,000,000 bytes squared, failing zero budget. A itself needs proof.
+- Verified real historical best.json rejection and missing-calibration/config reasons;
+  CLI also records passive-observer ownership and Linux/FRR/manual-OVS incompatibility.
+- Tests: 84 new offline tests passed; full backend 1,685 passed/14 opt-in skips;
+  scoped Ruff and formatting/whitespace checks passed. No physical qualification or
+  end-to-end intervention claimed. Runbook: `backend/app/modules/autonomy/TOOLING.md`.
+
+## [2026-09-09] - Safety/Autonomy Foundation and Open Activation Gates
+
+- Implemented conditional one-step queue/drift evaluator, strict bound provenance,
+  expiry, deterministic safe projection/refusal and rate/dwell limits.
+- Added Autonomy-owned migration0013, API/worker/UI with monitor/recommendation,
+  provider blockers, current authorization, durable stop and revision conflicts.
+- Review fixes: older pending mode PUT cannot clear newer STOP; durable acceptance
+  carries complete immutable safety certificate/action; outstanding execution is
+  verified before revoked-user checks, recovery requires explicit server authority.
+- Training002 stopped cleanly under quality rule (144 transitions, no qualified
+  model). Existing AI/lab sources were not changed by this increment.
+- Final tests backend1,601 passed/14 skips, six new real Postgres tests passed;
+  real HTTP/worker stop/denial verification produced zero executions. Frontend313
+  tests/browser31 passed with lint/type/build/perf. Full Step9/10 acceptance remains
+  open; see SafetyAutonomy-Step9-Step10.md.
+
+## [2026-09-09] - Supervisor Cleanup Repair and Verified Relaunch
+
+- User reported failed run001; preserved status/logs show calibration completed
+  but Docker asynchronous auto-removal outlasted a single cleanup existence query.
+  Added bounded exact-container-ID polling with regression/error/timeout coverage;
+  186 tests and Ruff lint/format passed. Never stop unrelated containers.
+- Launched fresh run002 at 21:32:38 EAT, capped at two hours; did not resume/erase
+  failed artifacts. Waited through both calibrations and all three baselines and
+  confirmed actual PPO update after 16 measured transitions, with live heartbeat.
+  Status/stop commands and truthful ongoing limits in BackgroundTraining-Supervisor.md.
+
+## [2026-09-09] - Two-Hour Training Supervisor Launch
+
+- Implemented operator-only background supervision, frozen seeds/budgets, calibration,
+  baselines, checkpoint selection, plateau/low-quality stopping, ownership-checked
+  cleanup, status/cancellation and bounded logging/storage. No failed-step replay.
+- Fixed reviewed container auto-removal race and full-round budget reservation.
+  AI/supervisor tests: 173 passed; Ruff lint/format passed before launch.
+- Launched `nanfo-training-two-hour-001.service` at 21:12:17 EAT with RuntimeMaxSec
+  7200, cleanup reserve, CPU/memory limits and post-stop owned-container cleanup.
+  Actual service/container and calibration heartbeat verified; final learning result
+  is pending. Details in `BackgroundTraining-Supervisor.md`.
+
+## [2026-09-09] - Measured Learning Environment and PPO Pipeline
+
+- Completed operator-only SDN/FRR reset/step/close service with real concurrent
+  workload/counter/queue/probe evidence. Added separate CPU PyTorch/Gymnasium PPO,
+  strict checkpoints, train/evaluate/infer commands and failure-preserving logs.
+- Review corrected evidence/termination validation, actual sender-rate reward,
+  explicit outage censoring, environment source/version compatibility and three
+  measured history frames. Dynamic phase remains partially observed, not a proven MDP.
+- V1 smoke: 24 transitions/1 update; heuristic outperformed fixed-argmax PPO.
+  V2 frozen campaign: 48 transitions/3 updates, 430.8 seconds, 32 held-out decisions;
+  weights/replay/inference verified but deterministic policy remained fixed route 1.
+- Step 8 useful-policy acceptance is intentionally OPEN. No convergence,
+  superiority, production autonomy or Lyapunov safety claim. Full data and next
+  acceptance gate: `Learning-Step7-Step8.md`.
+- Final checks: AI 116 passed, lint/format clean; host lab 60 passed/6 skips;
+  backend 1,359 passed/8 skips and lint clean. Live lab tests/training completed;
+  no experiment owner remains. Existing unrelated worktree changes preserved.
+
 ## [2026-09-09] - Completion Plan Steps 5-6
 
 - Added real isolated-lab manual actions, verification, compensation and durable

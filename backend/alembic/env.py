@@ -12,6 +12,8 @@ from alembic import context
 from app.core.config import get_settings
 from app.db.postgres import Base
 from app.modules.alert.models import AlertRecord  # noqa: F401
+from app.modules.autonomy.model_diagnostic_models import ModelDiagnostic  # noqa: F401
+from app.modules.autonomy.models import AutonomyControl, AutonomyDecision  # noqa: F401
 
 # Import all models to register metadata — must come before Base import
 from app.modules.identity.models import (  # noqa: F401
@@ -38,6 +40,7 @@ from app.modules.organization.models import (  # noqa: F401
 )
 from app.modules.plugin.models import PluginRecord  # noqa: F401
 from app.modules.report.models import ReportRecord  # noqa: F401
+from app.modules.simulation.models import Simulation, SimulationOutbox  # noqa: F401
 from app.modules.telemetry.models import TelemetryRecord  # noqa: F401
 
 config = context.config

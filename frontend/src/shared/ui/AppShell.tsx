@@ -21,6 +21,7 @@ const navItems = [
   { to: "/ops/digital-twin", label: "Digital Twin", keyHint: "G D" },
   { to: "/ops/simulation", label: "Simulation", keyHint: "G S" },
   { to: "/ops/intent", label: "Intent", keyHint: "G I" },
+  { to: "/ops/autonomy", label: "Autonomy", keyHint: "G N" },
   { to: "/ops/audit", label: "Audit", keyHint: "G A" },
 ];
 

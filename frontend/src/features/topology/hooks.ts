@@ -1,4 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect } from "react";
+import { useLiveStore } from "@/features/realtime/store";
 import {
   getTopologyDeviceNeighbours,
   getTopologyGraphAll,
@@ -8,11 +10,22 @@ import {
 } from "@/features/topology/api";
 
 export function useTopologyGraph(token: string | null, networkId: string | null) {
-  return useQuery({
+  const query = useQuery({
     queryKey: ["topology", token, networkId],
-    queryFn: () => getTopologyGraphAll(token as string, networkId as string),
+    queryFn: async () => {
+      const { epoch, topologyRevision: revision } = useLiveStore.getState();
+      const result = await getTopologyGraphAll(token as string, networkId as string);
+      return { ...result, snapshot: { epoch, revision } };
+    },
     enabled: Boolean(token && networkId),
   });
+  useEffect(() => {
+    const result = query.data;
+    if (result && !result.nextCursor) {
+      useLiveStore.getState().reconcileTopologySnapshot(result.data.nodes.map((node) => node.device_id), result.snapshot.epoch, result.snapshot.revision);
+    }
+  }, [query.data]);
+  return query;
 }
 
 export function useTopologyNode(token: string | null, deviceId: string | null) {

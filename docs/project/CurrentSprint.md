@@ -1,5 +1,173 @@
 # Current Sprint State
 
+## Remaining Operator Workflows (ADR-018)
+
+- Implemented selected measured probe paths, confined frozen-model diagnostics,
+  immutable effective/requested configuration, durable timed overrides and guarded
+  return after verified restoration. No arbitrary live model mutation or autoapproval.
+- Verified real capture reroute/restore, actual six-case expiry/restart/STOP/revocation
+  restoration, same-UID filesystem confinement and real frozen inference replay.
+- Backend1,858 passed/50 skips;frontend465 tests/browser38;frontend gates passed
+  unchanged408.48KiB budget. Scoped backend lint passed; full-lint version debt noted.
+- Deployment needs migrations0015/0016, worker/journal/modelregistry configuration.
+  Defaults remain unavailable where unconfigured. Exact capabilities/limits:
+  `OperatorCompletion-ADR018.md`. Operator completion does not certify autonomy.
+
+## Completion Plan Steps 11-12 (ADR-017)
+
+- Configured deterministic evaluator implemented with real numerical outputs,
+  checkpointed worker/lifecycle/branch/compare and predispatch-bound expiring evidence.
+- Operator scenario UI, telemetry charts, persisted-plan evidence, reconnect snapshot
+  reconciliation, non-destructive groups and validated model restore delivered.
+- Gates:backend1,757 passed/35opt-in skips;23 new live database tests separately
+  passed;frontend369 tests/browser37;lint/type/build/perf passed unchanged limits.
+- Migration0014 required before deployment; shared databases were not migrated.
+- Step12 residuals remain:actual packet traversal, integrated inference/live-policy
+  controls and time-limited override/qualified autonomy return. Do not relabel model
+  predictions or approved paths as measured physical behavior. Details:
+  `SimulationOperator-Step11-Step12.md`.
+- Separate ADR016 training stopped cleanly at384transitions under its remaining-
+  budget admission rule. No restart/source changes were made during this increment.
+
+## ADR017 Step12 Frontend Consistency/Twin (2026-09-10)
+
+- Implemented ACK-authoritative websocket readiness, bounded/coalesced scoped REST
+  reconciliation, timestamp ordering, removal tombstones with complete snapshot/epoch
+  guards, per-simulation/intent local scene identity and last-seen presentation.
+- Twin congestion expires after 60s on a 5s presentation heartbeat; stale observations
+  remain visible but do not drive current severity or intent handoff metrics.
+- Group save is non-destructive. Explicit Restore rereads asset and complete graph,
+  validates bounded bytes/SHA256/MIME/supported self-contained glTF/scoped mapping,
+  confirms replacement and cleans Blob URLs on replacement, scope switch and unmount.
+  Partial graph warnings disable restore and group save.
+- Validation: full frontend unit suite 356 passed; lint/typecheck pass.
+  Twin E2E 5/5 plus mobile keyboard restore
+  pass. Full E2E 31/34: telemetry selectors (2) and plugin-login timeout (1) remain
+  outside this workstream; plugin tests pass 2/2 on isolated rerun. Build passes;
+  observed total gzip 416.89KiB exceeds 410.16KiB budget
+  (other bundle limits pass). Budget not relaxed; combined closure remains open.
+- No backend/AI/emulation changes, new wire fields/events, measured-flow claims,
+  or simulation/telemetry/intent-page edits in this workstream.
+
+## Active Model Refinement (ADR-016)
+
+- ADR015 completed512 transitions with modest validation improvement, but missed
+  replacement thresholds; incumbent retained and final test left closed.
+- New balanced2048-transition refinement launched as
+  `nanfo-refinement-long-001.service`, bounded24h from2026-09-10 20:59:23 EAT.
+  First128 transitions/four updates checkpointed; next session and fifth actual
+  update verified. No promotion, no validation/test result yet.
+- Status: `ai-engine/artifacts/adr016-001/status.json`. Do not modify frozen
+  sources or start another lab during the campaign. Commands/limits:
+  `ModelRefinement-ADR015-ADR016.md`.
+
+## Expanded Training Result (ADR-014)
+
+- Selected PPO now demonstrates useful learned directional routing and passed the
+  locked12-seed matched held-out goodput/RTT criterion against nominal-cost OSPF.
+  384 fresh transitions/24updates, no final-test tuning, actual tensors replayed.
+- Mean goodput5.922 vs3.946Mbps; ICMP RTT25.155 vs104.090ms; paired confidence
+  intervals support the scoped improvement. Not general OSPF/SPF-speed superiority.
+- Checkpoint: `ai-engine/artifacts/adr014-001/train-06/checkpoint.ptz`.
+- AI305 tests/lint/format passed; independent raw evidence audit passed. No active
+  training/experiment remains. Detailed protocol, exceptions and limitations:
+  `ExpandedTraining-ADR014-Outcome.md`.
+- Prior rejected campaigns below remain historical. Autonomy deployment gates
+  (passive compatibility/calibrated bounds/authorized receiver) remain OPEN.
+
+## Coordinated Matched Routing Attempt (ADR-013)
+
+- Implemented matched FRR/Linux comparison, balanced stationary curriculum, compact
+  V3 PPO, seeded evidence validation and independent readiness/calibration tooling.
+- Live frozen campaign completed:220 windows/10sessions in1,010.5s of1,200s budget.
+  Both32-transition PPO pilots failed measured directional qualification. Heuristic
+  performed best; PPO superiority over OSPF not established. No model selected,
+  reserved tests untouched, safety/autonomy remain blocked.
+- Backend independently reconstructed real dossiers and rejected both; no fitted
+  peak measurement was promoted into guaranteed calibration.
+- Details: `MatchedRouting-ADR013-Outcome.md`. This supersedes any expectation that
+  implementing the pipeline automatically closes policy-quality/activation gates.
+
+## ADR-013 Actual Campaign Backend Gate
+
+- Backend now consumes completed qualification V3 fields without discarding extras,
+  verifies all 122 indexed campaign files and independently reconstructs raw metrics,
+  rewards, actions, matched comparisons and four-seed uncertainty.
+- Real pilot41/42 assessments both `useful_model_unqualified`: route0 on all 16
+  validation decisions each, path0 directionality fails, heuristic mean reward better.
+  No selected model; hash-verified ledger has zero test attempts. No activation.
+- Raw training calibration reports measured backlog bytes/counter rates only:
+  endpoint queues, attributed arrivals and predeclared fit/holdout are absent;
+  fit not performed, coverage null, TrustedCalibration null. No invented bounds.
+- Output: `/tmp/opencode/adr013-backend-assessment-41.json` and `-42.json`.
+  Full backend with real read-only campaign tests: 1,706 passed/14 infrastructure skips;
+  scoped lint passed. Commands/schema mismatches: Autonomy `TOOLING.md`.
+
+## ADR-013 Backend Operator Tooling
+
+- Added read-only qualification import/readiness and measured calibration diagnostics
+  in new backend Autonomy modules/scripts; existing installed providers remain unchanged.
+- Independently parses actual AI qualification V3 output, bounded hash-pinned dossiers,
+  matched heldout comparisons, and train-only fit/holdout queue diagnostics. Neither
+  producer self-claims nor fitted extrema create trusted calibration or enable dispatch.
+- OPEN: independent raw measurement derivation, qualified inference installation,
+  physical causal bounds, fresh passive observer and compatible runtime authority.
+  CLI records `runtime_control_incompatible` for Linux/FRR versus manual OVS.
+- No AI/emulation edits, artifact mutation or competing live lab run by this workstream.
+- Verification: 84 new tests; full backend 1,685 passed/14 skipped; scoped Ruff,
+  formatting and whitespace checks passed. Opt-in infrastructure tests not rerun.
+- Commands, schemas and quantitative no-service drift rejection:
+  `backend/app/modules/autonomy/TOOLING.md`. Step 9/10 closure remains OPEN.
+
+## Completion Plan Steps 9-10: Fail-Closed Foundation
+
+- Implemented scoped autonomy API/UI, persistent mode/decision history and emergency
+  stop, conditional one-step safety certificates and provider/authorization gates.
+- Full Step 9/10 acceptance remains OPEN: trained model unqualified, compatible
+  observer/inference and calibrated bounds absent, autonomous executor/recovery not
+  installed. Deployed autonomous mode rejects; no live intervention claim.
+- Training002 stopped cleanly after 144 transitions/3 rounds for insufficient benefit
+  over constant policy; best0.4915, constant0.4909, heuristic0.5376. Not auto-promoted.
+- Verification: backend1,601 tests, six live Postgres tests, real scoped HTTP worker
+  gate with zero jobs, frontend313 tests/browser31, lint/type/build/perf passed.
+- Details and remaining gates: `SafetyAutonomy-Step9-Step10.md`.
+
+## Active Background Training Campaign
+
+- Correction: run 001 failed during asynchronous Docker auto-removal verification
+  after its first calibration, before training. Fixed bounded exact-ID cleanup wait;
+  186 tests/lint/format passed. Replacement `nanfo-training-two-hour-002.service`
+  launched 21:32:38 EAT, cap about 23:32:39 EAT. Both calibrations/three baselines
+  passed and actual PPO update 1 at 16 measured transitions was verified. Current
+  state is `ai-engine/artifacts/training-two-hour-002/status.json`; run 001 below
+  is historical, not active.
+
+- User-authorized two-hour supervisor launched 2026-09-09 21:12:17 EAT as
+  `nanfo-training-two-hour-001.service`. Includes train-only calibration, fixed
+  validation baselines, fresh on-policy blocks and bounded quality/plateau stopping.
+- Live status: `ai-engine/artifacts/training-two-hour-001/status.json`.
+  Do not infer completion from this launch entry. Useful-policy acceptance remains
+  open until measured evaluation supports it. Test split is untouched.
+- Resources, status/stop commands and limitations: `BackgroundTraining-Supervisor.md`.
+
+## Completion Plan Steps 7-8: Measured Learning
+
+- Step 7 implemented/live-verified: measured reset/step environment, repeatable
+  workloads, real FRR/OSPF and load-aware heuristic, under ADR-011.
+- Step 8 implementation and measured training/checkpoint gates passed, but useful
+  learned adaptive policy quality remains OPEN. Do not mark the whole milestone
+  complete based on optimizer updates.
+- V2 campaign: 48 measured training transitions/3 updates in 430.8 seconds; 32
+  held-out decisions; exact fresh-process checkpoint/replay checks. Policy argmax
+  remained route 1 on all 64 audited PPO states, so beneficial adaptation is not
+  established. FRR comparison is explicitly not dataplane/background-matched.
+- AI tests 116 passed; lab image tests 64 passed; backend regression 1,359 passed
+  with 8 opt-in skips. Live SDN/FRR checks passed and owners cleaned up.
+- Evidence, commands and remaining acceptance work: `Learning-Step7-Step8.md`,
+  `ai-engine/README.md`, `emulation/EXPERIMENT.md`.
+- Next unfinished acceptance gate: train-only learnability/expanded training and
+  validation without tuning on observed test results; Step 9 safety remains separate.
+
 ## Completion Plan Steps 5-6: Durable Manual Lab Execution
 
 - Implemented and live-verified on 2026-09-09 under ADR-010 for the isolated lab:
@@ -603,6 +771,42 @@
 - [x] chapter-01 to chapter-12 conformance audit closure complete (matrix, remediation list, validation outcomes, residual-gap register, and certification statement recorded in `docs/project/ChapterConformanceAudit.md`).
 
 ## Post-VS20 Quality Governance
+
+### ADR018 Backend Configuration And Overrides
+- Updated operator image d91efe1717f2 all6 physical cases passed, including
+  expiry/STOP during actual capture and labrestart with retained oldcompletion ->
+  fresh currentrun exactcancel proof. Six jobs clean,4/8 capture windows, owned
+  resources removed. Evidence:`/tmp/opencode/operator-override-verification-1j3zdsiz/result.json`.
+  Aggregate backend1,858 passed/50 skips; only edited-file Ruff0.15.6 claimed.
+- Physical closure: isolated real API/Intent+Autonomy workers with migrations0016
+  and read-only journal mounts passed expiry/SIGKILL restart, actor revocation and
+  STOP restoration. All3 reroutes10 owned flows ->0 with ping3/3 and no replay.
+  Evidence:`/tmp/opencode/operator-override-verification-qtqweffq/result.json`;
+  owned resources cleaned; production autonomy remains gated.
+- Implemented Autonomy-owned immutable configuration and persistent timed overrides
+  in migration0015 after0014; model agent owns separate0016 after0015.
+- Current manual actor/network/journal ownership and fresh verified readback required
+  for enrollment; no execute replay. Exact-enrolled Intent public compensation
+  survives expiry/restart/revocation, retains uncertain exclusion and STOP dominance.
+- Worker reads persisted interval/age/hold/rate; training weights remain requested
+  only. Return requires revision/current approval/live readiness, never clears STOP.
+- Full backend1,845 passed/49 opt-in skips;20 disposable PostgreSQL migration/CAS/
+  recovery tests and live HTTP/worker verifier passed. Physical rollback and live
+  production autonomy are not claimed. Operator details in Autonomy README.
+
+### ADR015 Incumbent-Preserving Refinement
+- Status: **COMPLETED, NO QUALIFIED REPLACEMENT**; incumbent retained.
+- AI-only implementation/runbook: `ai-engine/ADR015-REFINEMENT.md`.
+- Preserve ADR014 default and source; new V5 transfer, minimum256/maximum512 fresh
+  transitions, fixed validation/final groups and six-policy final only after qualification.
+- `ai-engine/artifacts/adr015-002/status.json` is the terminal recovery status; failed
+  zero-update first attempt retained, original four-hour deadline not extended.
+- Full AI324 tests passed; independent V5 instrumentation48 windows passed.
+- Completed512 transitions/32updates; best validation reward gain0.01313 and20%
+  fewer route changes missed >0.02/25% gates. Nonregression groups passed; zero
+  final-test attempts. Service inactive, owned containers absent,1437 parent files
+  unchanged. Results: `ai-engine/ADR015-RESULTS-001.md`.
+- No production activation, backend/emulation/frontend edits or safety-gate relaxation.
 
 ### chapter-01 to chapter-12 Implementation Conformance Audit
 - Status: **COMPLETE**.
