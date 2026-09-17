@@ -1,0 +1,55 @@
+{
+  "date": "2026-09-17",
+  "pdf_pages": 58,
+  "preliminary_pages": 11,
+  "body_and_appendix_numbered_pages": 47,
+  "abstract_words": 183,
+  "references": 19,
+  "commercial_systems": 3,
+  "research_implementations": 4,
+  "original_reference_entries_preserved_in_audit": 31,
+  "automatic_indexes": 4,
+  "checked_index_page_destinations": 102,
+  "index_errors": [],
+  "numbered_figures": 11,
+  "numbered_tables": 3,
+  "numbered_equations": 5,
+  "paragraph_line_spacing": "150%",
+  "pdf_text_fonts_and_sizes": [
+    [
+      "TimesNewRomanPS-BoldMT",
+      12.0
+    ],
+    [
+      "TimesNewRomanPS-ItalicMT",
+      12.0
+    ],
+    [
+      "TimesNewRomanPSMT",
+      12.0
+    ]
+  ],
+  "text_outside_page_bounds": [],
+  "third_person_pronoun_scan": "passed",
+  "objective_question_order_and_uniqueness": "passed",
+  "citation_family_reference_mapping": "passed; 19 references, 18 author-group families",
+  "docx_text_parity": "passed against every revised main-body paragraph",
+  "conceptual_framework_image_byte_identical": true,
+  "root_original_odt_byte_unchanged": true,
+  "ispr2_original_paragraph_text_unchanged": true,
+  "ispr2_original_current_sha256": "2ee959780f31537cb78f255cc662831bf0ffeae48e74e632770c9c636a538037",
+  "similarity_report": "historical images labelled; a fresh institutional report is required",
+  "application_tests_run": false,
+  "files": {
+    "DhruvinBhudia_169646_NANFO_Proposal_Revised_Final.odt": "ed649f642cd8b755fa56239f353f0336c8f0bc54f3f724697514b47c640ad08b",
+    "DhruvinBhudia_169646_NANFO_Proposal_Revised_Final.docx": "b9c9ba9e786b1ae817d4a18494e236fb7cb24ffeb6b37bcb624416df39523169",
+    "DhruvinBhudia_169646_NANFO_Proposal_Revised_Final.pdf": "0e492ccb8d49e0a8da1c68eb2f740856ad82593e74400d47fd9a9cca95b52545"
+  },
+  "evidence_files": {
+    "Source_Metadata_Checks.json": "e081e895579056d51d1c2f33d644bf57bf12771c8c3298f68475627415c1fa94",
+    "OperatorCompletion-ADR018.md": "63825cb009de71e59da13bf20bec8ee8df884f200ad719ca8f67c0be391651a8",
+    "ModulesAcceptance-Step13-Step14.md": "f6838fd78aed45eeaf90159f7f7672fac8a1a81383fda7d1db147f5682841654",
+    "DevelopmentJournal.md": "fb08e765d2fadd2e00de28a6bdee6f1e7a3a98e791022e44051e93b3cbb97749",
+    "ExpandedTraining-ADR014-Outcome.md": "7576261e0e52e08699d7c6f5f95a982831d276611767c93783326ad227f46ec9"
+  }
+}
