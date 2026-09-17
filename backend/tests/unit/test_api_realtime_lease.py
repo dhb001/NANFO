@@ -29,6 +29,9 @@ class LeaseRedis:
             self.owner = None
         return 1
 
+    async def get(self, key):
+        return self.owner
+
 
 async def test_multi_instance_exclusion_renewal_release_and_restart():
     redis = LeaseRedis()
@@ -43,6 +46,26 @@ async def test_multi_instance_exclusion_renewal_release_and_restart():
     async with ApiRealtimeLease(redis, on_lost=lost) as second:
         assert second.token != first.token
     lost.assert_not_called()
+
+
+async def test_readiness_verifies_live_ownership_without_renew_or_delete():
+    redis = LeaseRedis()
+    async with ApiRealtimeLease(redis) as lease:
+        deadline = lease.deadline
+        assert await lease.verify()
+        redis.owner = "successor"
+        assert not await lease.verify()
+        assert lease.deadline == deadline
+        assert redis.owner == "successor"
+    assert redis.owner == "successor"
+
+
+async def test_readiness_rejects_dead_lease_task_even_before_deadline():
+    async with ApiRealtimeLease(LeaseRedis()) as lease:
+        lease.task.cancel()
+        await asyncio.gather(lease.task, return_exceptions=True)
+        assert lease.healthy
+        assert not await lease.verify()
 
 
 @pytest.mark.parametrize("failure", ["owner", "redis", "timeout"])

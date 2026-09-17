@@ -1,0 +1,4 @@
+FROM neo4j:5.26.12-community-bullseye@sha256:9f75e8df4325a24f00fdd7a8c0bcce650a58375049b1058e496e8b43d6c36b37
+RUN cp -a /var/lib/neo4j/conf /opt/neo4j-conf
+COPY deploy/neo4j-entrypoint.sh /startup/nanfo-entrypoint.sh
+ENTRYPOINT ["tini", "-g", "--", "sh", "/startup/nanfo-entrypoint.sh"]

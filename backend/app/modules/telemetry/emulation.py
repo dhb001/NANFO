@@ -177,7 +177,7 @@ class EmulationSnapshot(StrictSchema):
             [str(h.ipv4) for h in self.hosts],
             [(q.dpid, q.port_no) for q in self.queues],
             [(p.src_host, p.dst_host) for p in self.probes],
-            [(l.src_dpid, l.src_port, l.dst_dpid, l.dst_port) for l in self.links],
+            [(link.src_dpid, link.src_port, link.dst_dpid, link.dst_port) for link in self.links],
         ]
         if any(len(set(group)) != len(group) for group in groups):
             raise ValueError("duplicate snapshot identity")

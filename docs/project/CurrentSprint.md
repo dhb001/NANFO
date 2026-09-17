@@ -1,5 +1,15 @@
 # Current Sprint State
 
+## Step15 Operations Workstream (ADR020)
+
+- Cold encrypted all-volume backup/fresh restore and external binding/model archives,
+  owner-service safety/report checks, diagnostics and conservative report retention
+  implemented. CLI and integration limits: `deploy/OPERATIONS.md`.
+- 48 isolated operations tests pass; scoped lint/whitespace clean. No live recovery
+  acceptance claimed until the parent package/verifier campaign runs.
+- Telemetry deletion blocked without complete evidence pins; PostgreSQL/report disk
+  admission caps and explicit post-restore lifecycle integration remain limitations.
+
 ## Steps 13-14 Module and Acceptance Increment (ADR-019)
 
 - Real CSV/PDF artifacts/history/downloads and measured durable alerts delivered;

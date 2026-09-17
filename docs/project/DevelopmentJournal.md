@@ -1,5 +1,35 @@
 # Development Journal
 
+## [2026-09-17] - Presentation Evidence Pack
+
+- Added `docs/presentation/PRESENTATION_GUIDE.md` and operator-only
+  `scripts/presentation.py`: offline14-slide deck/PDF, measured comparison CSVs,
+  validation progression, evidence copies/hashes and detailed rehearsal/Q&A guide.
+- Reconstructed the archived ADR014 five-method report with the existing raw parser
+  and checkpoint replay; all reconstructed fields matched the saved report. Current
+  lab-release source compatibility is explicitly outside this archive check.
+- Actual selected-model inference on first recorded reset in each direction passed
+  twice in fresh processes: path0 impairment→route1, path1 impairment→route0, exact
+  action/probability/value equality. Commands remain inference-only, not actuation.
+- Pinned model/report/plan/selection/validation/raw-evidence hashes checked; CSV
+  counts and generated file manifest verified. PDF parsed as14 pages. Script lint
+  and whitespace checks passed. No new network measurements or model training.
+- Historical failed/refinement campaigns, scoped OSPF criterion, incomplete autonomy
+  and dated application test counts are retained explicitly in the presentation.
+
+## [2026-09-12] - ADR020 Operations Tools
+
+- Delivered scoped cold backup/fresh restore, streaming authenticated encryption,
+  safe archive validation, report-owner receipt verification/orphan cleanup,
+  owner-service physical safety checkpoints and bounded session invalidation.
+- Includes every owned named volume and encrypted external binding/model directory
+  archives; exact image/OS/architecture restore only, no automatic writer/lab resume.
+- Telemetry remains bounded assessment-only without complete evidence pin contracts;
+  PostgreSQL/report disk admission caps remain an explicit gap, not silent deletion.
+- Operations unit gate: 48 passed; scoped Ruff and whitespace checks passed. No live
+  Docker resources touched by this workstream. Full-stack acceptance belongs to the
+  parent verifier after Compose/build integration. Interface: deploy/OPERATIONS.md.
+
 ## [2026-09-12] - Reports, Measured Alerts, Registry and Acceptance
 
 - Implemented actual CSV/PDF/source snapshots/artifact verification/download/history,

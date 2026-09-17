@@ -62,7 +62,17 @@ def test_strict_supported_request(overrides):
         request(**overrides)
 
 
-async def test_acceptance_commits_snapshot_and_requested_outbox_together(mock_db):
+async def test_acceptance_commits_snapshot_and_requested_outbox_together(
+    mock_db, monkeypatch, tmp_path
+):
+    monkeypatch.setattr(
+        "app.modules.report.service.get_settings",
+        lambda: SimpleNamespace(
+            REPORTS_STORAGE_PATH=str(tmp_path),
+            REPORTS_MAX_BYTES=100000,
+            REPORTS_MIN_FREE_BYTES=67108864,
+        ),
+    )
     req = request()
     svc = ReportService(db=mock_db, redis=None)
     svc.authorize_generation = AsyncMock()

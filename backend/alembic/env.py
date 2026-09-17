@@ -47,7 +47,7 @@ config = context.config
 settings = get_settings()
 
 # Override sqlalchemy.url with the synchronous DSN from settings
-config.set_main_option("sqlalchemy.url", settings.POSTGRES_SYNC_DSN)
+config.set_main_option("sqlalchemy.url", settings.POSTGRES_SYNC_DSN.replace("%", "%%"))
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)

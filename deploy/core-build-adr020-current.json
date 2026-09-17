@@ -1,0 +1,49 @@
+{
+  "image": "nanfo-deploy-step15-rebuild-backend:adr020",
+  "image_id": "sha256:55a65205a6ba81c1ce489e9fab1abfba1dd9dd57c24ee2676de76ee5deaddec7",
+  "docker_root": "/home/.system-data/docker",
+  "state": "/tmp/opencode/nanfo-deploy-step15-rebuild",
+  "target": "runtime",
+  "host_site_packages_used": false,
+  "dependency_install": "poetry check --lock && poetry install --only main --no-root --no-interaction",
+  "python": "3.12.14",
+  "poetry": "2.4.1",
+  "runtime_source_parity_files": 215,
+  "poetry_lock_sha256": "b4916dd424e3540d491762bcf416a2a5107135bd39336acb72914e5b5fe093d7",
+  "source_sha256": {
+    "deploy/maintenance.py": "1857359da1eb176ccfa82ee78f8e2f9f4453fd0481780c6eb0cf9f8d71a250b8",
+    "backend/app/api/readiness.py": "785ca236ec0e16823d41ea8859e876e4cb184bce0be03901a6da6956153853b9",
+    "backend/app/core/config.py": "ffed87931beded3b411e2dc46c8a02e7e57a3b530021a292a2c33fc685796ba5",
+    "backend/app/modules/network/operations.py": "ffcb6ccc69e2c54b443d672bc9e47d4fc4df515354ca8b96dd872f00066b545e"
+  },
+  "images": {
+    "frontend": "sha256:7ec667ab18129019d5587610b62ad4b896cb395208ffef2a53003ec1df3931c2",
+    "neo4j": "sha256:feda142d85d1cae43b6a3835b9c9820f4cce2249a288b77b1597e2827e87155a",
+    "ai": "sha256:68eb136293a728c83ee2126904f7bc7c1f86e8b483ab229eb649925bfc14460d",
+    "lab": "sha256:aafbad31e766488bbfd0709a5b12798677505c8bae3cc7b957405b0b16ecee03"
+  },
+  "gates": {
+    "backend": "Clean Docker Poetry lock/main install and pip check passed",
+    "frontend": "Clean Docker npm ci, lint, typecheck and production build passed",
+    "neo4j": "Pinned Docker wrapper build passed; no application start",
+    "lab": "Pinned source Docker build; 95 tests passed, 2 live tests skipped; source parity32 files",
+    "ai": "uv sync --locked --no-dev --no-editable and uv pip check passed; see ai-build-adr020-current.json",
+    "lifecycle_tests": "7 passed",
+    "application_started": false,
+    "migration_performed": false,
+    "volumes_created": false
+  },
+  "build_records": {
+    "build-backend-adr020.json": "66caf01f464b7dbd031e93900b987500985c5aea0d67af9eaaecb1f16fc65328",
+    "build-backend-adr020-ai.json": "8b69ef11dbcb96a12acb4e0f5259caa7da4c6533274eb4a71dc0c10fa6019f5d",
+    "build-frontend-adr020.json": "f6be2e2af2e4dc30f44d522b17bd40bf3d0816ff46e77491ba18ac10ccce0868",
+    "build-neo4j-5.26.12.json": "11af2b706f163d24610ab111ea14956aa3606c5f54b519704e9e5c6cb7ef336b",
+    "build-lab-operator-paths-adr020.json": "9266891dc338e2ee62d8e6112524d52ce65c684192e0bb909a4ded7976c1e045"
+  },
+  "limitations": [
+    "Old image IDs from the former Docker root are historical, not aliases of these rebuilds",
+    "Host deploy/verify.py excluded from application image; use current host verifier",
+    "Core image packages manage.py before the later lab compose-source allowlist addition; application and maintenance sources are identical",
+    "No live lab, database migration, restore or frozen artifact inference performed in this build-only scope"
+  ]
+}

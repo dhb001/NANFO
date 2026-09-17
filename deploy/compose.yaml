@@ -1,0 +1,302 @@
+name: ${NANFO_PROJECT:?Use deploy/manage.py init first}
+
+x-logging: &logging
+  driver: json-file
+  options: {max-size: 5m, max-file: "3"}
+
+x-environment: &environment
+  APP_ENV: production
+  EXECUTION_MODE: ${EXECUTION_MODE:-demo}
+  LOG_LEVEL: INFO
+  POSTGRES_HOST: postgres
+  POSTGRES_PORT: "5432"
+  POSTGRES_DB: nanfo
+  POSTGRES_USER: nanfo_runtime
+  REDIS_HOST: redis
+  NEO4J_URI: bolt://neo4j:7687
+  NEO4J_USER: neo4j
+  CORS_ALLOW_ORIGINS: http://127.0.0.1:${NANFO_HTTP_PORT:-8787}
+  REPORTS_STORAGE_PATH: /var/lib/nanfo/reports
+  REPORTS_MIN_FREE_BYTES: ${REPORTS_MIN_FREE_BYTES:-67108864}
+  TELEMETRY_RUNTIME_ADAPTER_MODE: ${TELEMETRY_RUNTIME_ADAPTER_MODE:-stub}
+  EMULATION_CONTROL_ENABLED: ${EMULATION_CONTROL_ENABLED:-false}
+  EMULATION_SNAPSHOT_PATH: /var/lib/nanfo/lab/output/snapshot.json
+  EMULATION_BINDING_PATH: /var/lib/nanfo/binding/binding.json
+  EMULATION_COMMANDS_PATH: /var/lib/nanfo/lab/commands
+  EMULATION_RESULTS_PATH: /var/lib/nanfo/lab/results
+  NANFO_WORKER_HEARTBEAT_PATH: /run/nanfo/heartbeat.json
+  WORKER_HEARTBEAT_PATH: /run/nanfo/heartbeat.json
+
+x-application: &application
+  image: ${NANFO_BACKEND_IMAGE:?Initialize configuration}
+  build:
+    context: ..
+    dockerfile: deploy/Dockerfile.backend
+    target: runtime
+  user: "10001:10001"
+  init: true
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  tmpfs:
+    - /tmp:rw,noexec,nosuid,nodev,size=256m,mode=1777
+    - /run/nanfo:rw,noexec,nosuid,nodev,size=1m,uid=10001,gid=10001,mode=0700
+  environment: *environment
+  networks: [private]
+  restart: unless-stopped
+  pids_limit: 128
+  mem_limit: 768m
+  cpus: 1.0
+  stop_grace_period: 45s
+  logging: *logging
+  depends_on:
+    postgres: {condition: service_healthy}
+    redis: {condition: service_healthy}
+    neo4j: {condition: service_healthy}
+  volumes:
+    - runtime_secrets:/run/secrets:ro
+
+services:
+  volume-init:
+    image: ${NANFO_BACKEND_IMAGE:?Initialize configuration}
+    profiles: [init]
+    user: "0:0"
+    network_mode: none
+    read_only: true
+    cap_drop: [ALL]
+    cap_add: [CHOWN, FOWNER, DAC_OVERRIDE]
+    security_opt: [no-new-privileges:true]
+    entrypoint: [python, /opt/nanfo/deploy/volume_init.py]
+    volumes:
+      - ${NANFO_STATE_DIR:?Initialize configuration}/secrets:/source-secrets:ro
+      - reports:/volumes/reports
+      - lab_output:/volumes/lab_output
+      - lab_commands:/volumes/lab_commands
+      - lab_results:/volumes/lab_results
+      - runtime_secrets:/volumes/runtime_secrets
+      - init_secrets:/volumes/init_secrets
+    logging: *logging
+    pids_limit: 32
+    mem_limit: 128m
+  initialize:
+    <<: *application
+    profiles: [init]
+    restart: "no"
+    command: [python, /opt/nanfo/deploy/initialize.py]
+    environment:
+      <<: *environment
+      NANFO_BOOTSTRAP_EMAIL: ${NANFO_BOOTSTRAP_EMAIL:?Initialize configuration}
+    volumes:
+      - init_secrets:/run/secrets:ro
+
+  postgres:
+    image: postgres:17.6-bookworm@sha256:f3bd19c606e442c3d7bdfa8002e03fe260a1023351e0ea4598032022b68dd6e3
+    environment:
+      POSTGRES_DB: nanfo
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_admin_password
+      POSTGRES_INITDB_ARGS: --auth-host=scram-sha-256
+    secrets: [postgres_admin_password]
+    volumes: [postgres_data:/var/lib/postgresql/data]
+    networks: [private]
+    read_only: true
+    tmpfs: ["/tmp:rw,noexec,nosuid,nodev,size=64m", "/var/run/postgresql:rw,noexec,nosuid,nodev,size=8m"]
+    cap_drop: [ALL]
+    cap_add: [CHOWN, FOWNER, DAC_OVERRIDE, SETUID, SETGID]
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+    mem_limit: 1g
+    cpus: 1.0
+    pids_limit: 128
+    shm_size: 128m
+    stop_grace_period: 60s
+    logging: *logging
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U postgres -d nanfo"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+  redis:
+    image: redis:7.4.5-bookworm@sha256:90e7a336d044f1abc9e9dbc05d65566850896d11453bbd1dd0fb7e5059f0e8fb
+    entrypoint: [sh, /deploy/redis-entrypoint.sh]
+    secrets: [redis_password]
+    volumes:
+      - redis_data:/data
+      - ./redis-entrypoint.sh:/deploy/redis-entrypoint.sh:ro
+    networks: [private]
+    read_only: true
+    tmpfs: ["/run/redis:rw,noexec,nosuid,nodev,size=1m", "/tmp:rw,noexec,nosuid,nodev,size=8m"]
+    cap_drop: [ALL]
+    cap_add: [CHOWN, DAC_OVERRIDE, SETUID, SETGID]
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+    mem_limit: 384m
+    cpus: 0.5
+    pids_limit: 64
+    stop_grace_period: 60s
+    logging: *logging
+    healthcheck:
+      test: [CMD-SHELL, 'REDISCLI_AUTH=$$(cat /run/secrets/redis_password) redis-cli ping | test "$$(cat)" = PONG']
+      interval: 5s
+      timeout: 3s
+      retries: 30
+  neo4j:
+    image: ${NANFO_NEO4J_IMAGE:?Initialize configuration}
+    build: {context: .., dockerfile: deploy/Dockerfile.neo4j}
+    secrets: [neo4j_password]
+    environment:
+      NEO4J_server_memory_heap_initial__size: 256m
+      NEO4J_server_memory_heap_max__size: 384m
+      NEO4J_server_memory_pagecache_size: 128m
+      NEO4J_server_directories_run: /tmp/run
+      NEO4J_server_bolt_tls__level: DISABLED
+      NEO4J_db_tx__log_rotation_retention__policy: 2 days 256M
+    volumes: [neo4j_data:/data]
+    networks: [private]
+    read_only: true
+    tmpfs:
+      # Neo4j's bundled JNA extracts a native library here. API/workers stay noexec.
+      - /tmp:rw,exec,nosuid,nodev,size=128m,mode=1777
+      - /logs:rw,noexec,nosuid,nodev,size=64m,uid=7474,gid=7474
+      - /var/lib/neo4j/conf:rw,noexec,nosuid,nodev,size=8m,uid=7474,gid=7474
+    cap_drop: [ALL]
+    cap_add: [CHOWN, DAC_OVERRIDE, SETUID, SETGID]
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+    mem_limit: 1g
+    cpus: 1.0
+    pids_limit: 256
+    stop_grace_period: 90s
+    logging: *logging
+    healthcheck:
+      test: [CMD, wget, --quiet, --spider, http://127.0.0.1:7474/]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+  api:
+    <<: *application
+    volumes:
+      - runtime_secrets:/run/secrets:ro
+      - reports:/var/lib/nanfo/reports:ro
+      - lab_output:/var/lib/nanfo/lab/output:ro
+      - lab_commands:/var/lib/nanfo/lab/commands:ro
+      - lab_results:/var/lib/nanfo/lab/results:ro
+      - type: bind
+        source: ${NANFO_STATE_DIR}/binding
+        target: /var/lib/nanfo/binding
+        read_only: true
+        bind: {create_host_path: false}
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/ready', timeout=4).read()"]
+      interval: 10s
+      timeout: 6s
+      retries: 6
+      start_period: 30s
+  simulation-worker:
+    <<: *application
+    command: [python, scripts/run_simulation_worker.py]
+    healthcheck:
+      test: [CMD, python, /opt/nanfo/deploy/entrypoint.py, python, scripts/check_worker_health.py, --worker, simulation]
+      interval: 15s
+      timeout: 8s
+      retries: 4
+      start_period: 30s
+  report-worker:
+    <<: *application
+    command: [python, scripts/run_report_worker.py]
+    volumes:
+      - runtime_secrets:/run/secrets:ro
+      - reports:/var/lib/nanfo/reports
+    healthcheck:
+      test: [CMD, python, /opt/nanfo/deploy/entrypoint.py, python, scripts/check_worker_health.py, --worker, report]
+      interval: 15s
+      timeout: 8s
+      retries: 4
+      start_period: 30s
+  alert-worker:
+    <<: *application
+    command: [python, scripts/run_alert_worker.py]
+    healthcheck:
+      test: [CMD, python, /opt/nanfo/deploy/entrypoint.py, python, scripts/check_worker_health.py, --worker, alert]
+      interval: 15s
+      timeout: 8s
+      retries: 4
+      start_period: 30s
+  execution-worker:
+    <<: *application
+    command: [python, scripts/run_execution_worker.py]
+    volumes:
+      - runtime_secrets:/run/secrets:ro
+      - lab_output:/var/lib/nanfo/lab/output:ro
+      - lab_commands:/var/lib/nanfo/lab/commands
+      - lab_results:/var/lib/nanfo/lab/results:ro
+      - type: bind
+        source: ${NANFO_STATE_DIR}/binding
+        target: /var/lib/nanfo/binding
+        read_only: true
+        bind: {create_host_path: false}
+    healthcheck:
+      test: [CMD, python, /opt/nanfo/deploy/entrypoint.py, python, scripts/check_worker_health.py, --worker, execution]
+      interval: 15s
+      timeout: 8s
+      retries: 4
+      start_period: 30s
+  autonomy-worker:
+    <<: *application
+    command: [python, scripts/run_autonomy_worker.py]
+    volumes:
+      - runtime_secrets:/run/secrets:ro
+      - lab_output:/var/lib/nanfo/lab/output:ro
+      - lab_commands:/var/lib/nanfo/lab/commands:ro
+      - lab_results:/var/lib/nanfo/lab/results:ro
+      - type: bind
+        source: ${NANFO_STATE_DIR}/binding
+        target: /var/lib/nanfo/binding
+        read_only: true
+        bind: {create_host_path: false}
+    healthcheck:
+      test: [CMD, python, /opt/nanfo/deploy/entrypoint.py, python, scripts/check_worker_health.py, --worker, autonomy]
+      interval: 15s
+      timeout: 8s
+      retries: 4
+      start_period: 30s
+  gateway:
+    image: ${NANFO_FRONTEND_IMAGE:?Initialize configuration}
+    build: {context: .., dockerfile: deploy/Dockerfile.frontend}
+    user: "10001:10001"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs: ["/tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777"]
+    ports: ["127.0.0.1:${NANFO_HTTP_PORT:-8787}:8080"]
+    networks: [private, gateway]
+    depends_on: {api: {condition: service_healthy}}
+    restart: unless-stopped
+    mem_limit: 128m
+    cpus: 0.5
+    pids_limit: 64
+    logging: *logging
+    healthcheck:
+      test: [CMD, wget, -q, --spider, http://127.0.0.1:8080/health]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+
+networks:
+  private: {internal: true}
+  gateway: {}
+volumes:
+  postgres_data: {}
+  redis_data: {}
+  neo4j_data: {}
+  reports: {}
+  lab_output: {}
+  lab_commands: {}
+  lab_results: {}
+  runtime_secrets: {}
+  init_secrets: {}
+secrets:
+  postgres_admin_password: {file: "${NANFO_STATE_DIR}/secrets/postgres_admin_password"}
+  redis_password: {file: "${NANFO_STATE_DIR}/secrets/redis_password"}
+  neo4j_password: {file: "${NANFO_STATE_DIR}/secrets/neo4j_password"}

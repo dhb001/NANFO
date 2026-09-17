@@ -5,7 +5,12 @@ import asyncio
 from fastapi import HTTPException
 
 from app.core.config import get_settings
-from app.modules.report.artifacts import ArtifactStore, digest, render
+from app.modules.report.artifacts import (
+    ArtifactStore,
+    ReportCapacityError,
+    digest,
+    render,
+)
 from app.modules.report.repository import ReportRepository
 from app.modules.report.schemas import GenerateReportRequest
 from app.modules.report.service import ReportService
@@ -41,6 +46,9 @@ class ReportWorker:
             store = ArtifactStore(
                 self.settings.REPORTS_STORAGE_PATH, self.settings.REPORTS_MAX_BYTES
             )
+            await asyncio.to_thread(
+                store.require_capacity, self.settings.REPORTS_MIN_FREE_BYTES
+            )
             data = await asyncio.to_thread(
                 render,
                 claimed.snapshot,
@@ -53,6 +61,7 @@ class ReportWorker:
                 claimed.lease_token,
                 claimed.output_format,
                 data,
+                min_free_bytes=self.settings.REPORTS_MIN_FREE_BYTES,
             )
             await asyncio.to_thread(
                 store.read, claimed.report_id, claimed.output_format, receipt
@@ -65,6 +74,11 @@ class ReportWorker:
                 )
                 await ReportRepository(db).finish(claimed, receipt=receipt)
             return True
+        except ReportCapacityError:
+            error = {
+                "code": "REPORT_STORAGE_UNAVAILABLE",
+                "message": "Report storage reserve exhausted; free capacity before requesting another report.",
+            }
         except HTTPException:
             error = {
                 "code": "REPORT_AUTHORITY_REVOKED",

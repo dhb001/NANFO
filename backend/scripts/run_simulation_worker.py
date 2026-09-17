@@ -7,6 +7,7 @@ from redis.asyncio import Redis
 
 from app.core.config import get_settings
 from app.core.logging import get_logger
+from app.core.runtime_health import worker_iteration
 from app.db.postgres import AsyncSessionLocal
 from app.modules.simulation.worker import SimulationWorker
 
@@ -23,11 +24,13 @@ async def main():
     )
     try:
         while True:
-            busy = await worker.run_one()
+            async with worker_iteration("simulation"):
+                busy = await worker.run_one()
             try:
-                for _ in range(16):
-                    if not await worker.publish_one():
-                        break
+                async with worker_iteration("outbox"):
+                    for _ in range(16):
+                        if not await worker.publish_one():
+                            break
             except Exception:  # noqa: BLE001 - durable outbox retries without stopping evaluation
                 get_logger(__name__).warning("simulation_outbox_deferred")
             if args.once:

@@ -31,7 +31,7 @@ async def init_neo4j() -> None:
         auth=(settings.NEO4J_USER, settings.NEO4J_PASSWORD),
     )
     await _driver.verify_connectivity()
-    logger.info("neo4j_connected", uri=settings.NEO4J_URI)
+    logger.info("neo4j_connected")
 
 
 async def close_neo4j() -> None:

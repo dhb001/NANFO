@@ -27,6 +27,7 @@ from neo4j.exceptions import Neo4jError
 from sqlalchemy.exc import SQLAlchemyError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from app.api.readiness import router as readiness_router
 from app.api.v1.alerts import router as alerts_router
 from app.api.v1.audit import router as audit_router
 from app.api.v1.auth import router as auth_router
@@ -165,6 +166,8 @@ async def _runtime_lifespan(app: FastAPI, stack: AsyncExitStack):
     settings = get_settings()
     startup_correlation_id = "startup-topology-workspace-backfill"
     consumer_tasks: list[asyncio.Task] = []
+    app.state.consumer_tasks = consumer_tasks
+    app.state.telemetry_collector = None
     telemetry_collector: TelemetryCollectorRunner | None = None
 
     async def stop_runtime():
@@ -239,14 +242,16 @@ async def _runtime_lifespan(app: FastAPI, stack: AsyncExitStack):
                 logger.warning(
                     "telemetry_collector_shutdown_after_startup_failure_failed",
                     correlation_id=startup_correlation_id,
-                    error=str(stop_exc),
+                    error_type=type(stop_exc).__name__,
                 )
         telemetry_collector = None
         logger.warning(
             "telemetry_collector_startup_failed",
             correlation_id=startup_correlation_id,
-            error=str(exc),
+            error_type=type(exc).__name__,
         )
+
+    app.state.telemetry_collector = telemetry_collector
 
     try:
         updated_nodes = await _run_topology_workspace_backfill(correlation_id=startup_correlation_id)
@@ -259,7 +264,7 @@ async def _runtime_lifespan(app: FastAPI, stack: AsyncExitStack):
         logger.warning(
             "topology_workspace_backfill_startup_failed",
             correlation_id=startup_correlation_id,
-            error=str(exc),
+            error_type=type(exc).__name__,
         )
 
     # Merge all handlers — network events go to audit + topology + ws_push consumers
@@ -413,7 +418,7 @@ async def request_validation_exception_handler(request: Request, exc: RequestVal
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception):
     """Return 500 without leaking internal trace details (security.md: 'never leak raw internal traces')."""
-    logger.error("unhandled_exception", path=request.url.path, error=str(exc))
+    logger.error("unhandled_exception", path=request.url.path, error_type=type(exc).__name__)
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         headers=_error_response_headers(request),
@@ -428,6 +433,7 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
 
 # ── Mount routers ─────────────────────────────────────────────────────────────
 
+app.include_router(readiness_router)
 app.include_router(auth_router)
 app.include_router(autonomy_router)
 app.include_router(autonomy_controls_router)

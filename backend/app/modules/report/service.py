@@ -133,6 +133,22 @@ class ReportService:
             )
             if existing:
                 return replay(existing)
+        settings = get_settings()
+        try:
+            await asyncio.to_thread(
+                ArtifactStore(
+                    settings.REPORTS_STORAGE_PATH, settings.REPORTS_MAX_BYTES
+                ).require_capacity,
+                settings.REPORTS_MIN_FREE_BYTES,
+            )
+        except (OSError, ValueError):
+            raise HTTPException(
+                503,
+                detail={
+                    "code": "REPORT_STORAGE_UNAVAILABLE",
+                    "message": "Report storage capacity is unavailable; no new report was accepted.",
+                },
+            ) from None
         try:
             async with asyncio.timeout(20):
                 snapshot = await ReportSources(self._db, self._redis).snapshot(

@@ -7,6 +7,7 @@ from redis.asyncio import Redis
 
 from app.core.config import get_settings
 from app.core.logging import get_logger
+from app.core.runtime_health import worker_iteration
 from app.db.postgres import AsyncSessionLocal
 from app.modules.alert.repository import AlertRepository
 
@@ -19,10 +20,11 @@ async def main():
     try:
         while True:
             try:
-                for _ in range(32):
-                    async with AsyncSessionLocal() as db:
-                        if not await AlertRepository(db).publish_one(redis):
-                            break
+                async with worker_iteration("outbox"):
+                    for _ in range(32):
+                        async with AsyncSessionLocal() as db:
+                            if not await AlertRepository(db).publish_one(redis):
+                                break
             except Exception:  # noqa: BLE001 - uncommitted outbox rows remain retryable
                 get_logger(__name__).warning("alert_outbox_deferred")
                 if args.once:

@@ -9,10 +9,7 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
-CURRENT_DIR = Path(__file__).resolve().parent
-BACKEND_DIR = CURRENT_DIR.parent
-if str(BACKEND_DIR) not in sys.path:
-    sys.path.insert(0, str(BACKEND_DIR))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.db.redis import close_redis, get_redis_client, init_redis
 from app.modules.telemetry.counters import TelemetryHealthCounterService

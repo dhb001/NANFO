@@ -10,6 +10,7 @@ from fastapi import HTTPException
 
 from app.core.config import get_settings
 from app.core.logging import get_logger
+from app.core.runtime_health import worker_iteration
 from app.modules.autonomy.providers import installed_providers
 from app.modules.autonomy.repository import AutonomyRepository
 from app.modules.autonomy.safety import SafetyShield
@@ -363,7 +364,8 @@ class AutonomyWorker:
     async def _cycles(self):
         while True:
             try:
-                await self.run_one()
+                async with worker_iteration("cycles"):
+                    await self.run_one()
             except Exception:  # noqa: BLE001 - DB outages must not spin or kill the independent worker
                 logger.warning("autonomy_cycle_failed")
             await asyncio.sleep(1)

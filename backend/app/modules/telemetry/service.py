@@ -596,6 +596,15 @@ class TelemetryCollectorRunner(TelemetryCollector):
         return self._running
 
     @property
+    def runtime_healthy(self) -> bool:
+        return (
+            self._running
+            and self._runtime_loop_task is not None
+            and not self._runtime_loop_task.done()
+            and self._runtime_exhausted_streak == 0
+        )
+
+    @property
     def counter_service(self) -> TelemetryHealthCounterService:
         return self._counter_service
 

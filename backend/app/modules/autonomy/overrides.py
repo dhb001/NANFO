@@ -10,6 +10,7 @@ from sqlalchemy.exc import IntegrityError
 
 from app.core.config import get_settings
 from app.core.logging import get_logger
+from app.core.runtime_health import worker_iteration
 from app.modules.autonomy.models import TimedOverride
 from app.modules.autonomy.repository import AutonomyRepository
 from app.modules.autonomy.schemas import Observation, OverrideListResponse, OverrideResponse
@@ -297,7 +298,8 @@ class OverrideWorker:
     async def run(self):
         while True:
             try:
-                await self.run_one()
+                async with worker_iteration("overrides"):
+                    await self.run_one()
             except Exception:  # noqa: BLE001 - independent of full autonomy/provider failures
                 logger.warning("override_worker_retry")
             await asyncio.sleep(1)

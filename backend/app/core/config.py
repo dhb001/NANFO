@@ -6,9 +6,11 @@ No secrets or operational values are hardcoded (security.md guardrail).
 
 from functools import lru_cache
 from typing import Literal
+from urllib.parse import quote
 
-from pydantic import Field, computed_field
+from pydantic import Field, computed_field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from sqlalchemy.engine import URL
 
 
 class Settings(BaseSettings):
@@ -16,6 +18,7 @@ class Settings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
         case_sensitive=False,
+        hide_input_in_errors=True,
     )
 
     # Application
@@ -28,18 +31,18 @@ class Settings(BaseSettings):
     POSTGRES_HOST: str
     POSTGRES_PORT: int = 5432
     POSTGRES_USER: str
-    POSTGRES_PASSWORD: str
+    POSTGRES_PASSWORD: str = Field(repr=False)
     POSTGRES_DB: str
 
     # Neo4j
     NEO4J_URI: str
     NEO4J_USER: str
-    NEO4J_PASSWORD: str
+    NEO4J_PASSWORD: str = Field(repr=False)
 
     # Redis
     REDIS_HOST: str
     REDIS_PORT: int = 6379
-    REDIS_PASSWORD: str
+    REDIS_PASSWORD: str = Field(repr=False)
     REDIS_DB: int = 0
 
     # ADR-010: always-on single API process guard and bounded stream recovery.
@@ -49,8 +52,13 @@ class Settings(BaseSettings):
     EVENT_COMPLETION_TTL_SECONDS: int = Field(default=86400, ge=60, le=604800)
     EVENT_HANDLER_TIMEOUT_SECONDS: int = Field(default=30, ge=1, le=300)
 
+    # Disabled for local commands; deployment supplies a private writable path.
+    WORKER_HEARTBEAT_PATH: str = ""
+    WORKER_ITERATION_TIMEOUT_SECONDS: float = Field(default=330, gt=0, le=600, allow_inf_nan=False)
+    WORKER_HEARTBEAT_MAX_AGE_SECONDS: float = Field(default=360, gt=0, le=900, allow_inf_nan=False)
+
     # JWT — per Authentication.md §5 and §8
-    JWT_SECRET_KEY: str
+    JWT_SECRET_KEY: str = Field(repr=False)
     JWT_ALGORITHM: str = "HS256"
     JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
     JWT_REFRESH_TOKEN_EXPIRE_DAYS: int = 30
@@ -106,30 +114,54 @@ class Settings(BaseSettings):
     REPORTS_ARTIFACT_BUCKET: str = "nanfo-reports"
     REPORTS_STORAGE_PATH: str = "/var/lib/nanfo/reports"
     REPORTS_MAX_BYTES: int = Field(default=8388608, ge=1024, le=16777216)
+    REPORTS_MIN_FREE_BYTES: int = Field(default=67108864, ge=1048576, le=1099511627776)
     REPORTS_LEASE_SECONDS: int = Field(default=120, ge=30, le=300)
 
-    @computed_field  # type: ignore[misc]
+    @field_validator("POSTGRES_HOST", "REDIS_HOST")
+    @classmethod
+    def validate_dsn_host(cls, value: str) -> str:
+        if not value or any(c in value for c in "@/#?\\\r\n\t "):
+            raise ValueError("Invalid database host")
+        return value
+
+    @field_validator("POSTGRES_DB")
+    @classmethod
+    def validate_postgres_database(cls, value: str) -> str:
+        """Allow literal names, including spaces/slashes/percent, but no URL query or controls."""
+        if not value or "?" in value or any(ord(c) < 32 or ord(c) == 127 for c in value):
+            raise ValueError("Database name must be nonempty and contain no question mark or control characters")
+        return value
+
+    @computed_field(repr=False)  # type: ignore[misc]
     @property
     def POSTGRES_DSN(self) -> str:
         """Async SQLAlchemy DSN using asyncpg driver."""
-        return (
-            f"postgresql+asyncpg://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}"
-            f"@{self.POSTGRES_HOST}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
-        )
+        return URL.create(
+            "postgresql+asyncpg",
+            username=self.POSTGRES_USER,
+            password=self.POSTGRES_PASSWORD,
+            host=self.POSTGRES_HOST,
+            port=self.POSTGRES_PORT,
+            database=self.POSTGRES_DB,
+        ).render_as_string(hide_password=False)
 
-    @computed_field  # type: ignore[misc]
+    @computed_field(repr=False)  # type: ignore[misc]
     @property
     def POSTGRES_SYNC_DSN(self) -> str:
         """Synchronous DSN for Alembic migrations."""
-        return (
-            f"postgresql+psycopg2://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}"
-            f"@{self.POSTGRES_HOST}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
-        )
+        return URL.create(
+            "postgresql+psycopg2",
+            username=self.POSTGRES_USER,
+            password=self.POSTGRES_PASSWORD,
+            host=self.POSTGRES_HOST,
+            port=self.POSTGRES_PORT,
+            database=self.POSTGRES_DB,
+        ).render_as_string(hide_password=False)
 
-    @computed_field  # type: ignore[misc]
+    @computed_field(repr=False)  # type: ignore[misc]
     @property
     def REDIS_URL(self) -> str:
-        return f"redis://:{self.REDIS_PASSWORD}@{self.REDIS_HOST}:{self.REDIS_PORT}/{self.REDIS_DB}"
+        return f"redis://:{quote(self.REDIS_PASSWORD, safe='')}@{self.REDIS_HOST}:{self.REDIS_PORT}/{self.REDIS_DB}"
 
     @computed_field  # type: ignore[misc]
     @property

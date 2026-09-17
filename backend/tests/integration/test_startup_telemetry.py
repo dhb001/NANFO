@@ -23,6 +23,8 @@ def test_startup_starts_and_stops_telemetry_collector():
         TestClient(app, raise_server_exceptions=False) as client,
     ):
         response = client.get("/health")
+        assert app.state.telemetry_collector is collector
+        assert len(app.state.consumer_tasks) == len(main_module.STREAM_GROUPS)
 
     assert response.status_code == 200
     collector.start_with_retry.assert_awaited_once()
@@ -71,6 +73,7 @@ def test_startup_continues_if_telemetry_collector_start_fails():
         TestClient(app, raise_server_exceptions=False) as client,
     ):
         response = client.get("/health")
+        assert app.state.telemetry_collector is None
 
     assert response.status_code == 200
     collector.start_with_retry.assert_awaited_once()

@@ -10,6 +10,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 
 from app.core.logging import get_logger
+from app.core.runtime_health import worker_iteration
 from app.modules.intent.execution import project_execution
 from app.modules.intent.lab import (
     LabCommand,
@@ -284,9 +285,10 @@ class ExecutionWorker:
     async def _publish_loop(self):
         while True:
             try:
-                await self.publish_one()
+                async with worker_iteration("outbox"):
+                    await self.publish_one()
             except Exception:
-                logger.exception("intent_outbox_publication_failed", worker_id=self.owner)
+                logger.warning("intent_outbox_publication_failed", worker_id=self.owner)
             await asyncio.sleep(self.settings.EMULATION_EXECUTION_POLL_SECONDS)
 
     async def run(self):
@@ -297,7 +299,8 @@ class ExecutionWorker:
     async def _execution_loop(self):
         while True:
             try:
-                await self.run_one()
+                async with worker_iteration("execution"):
+                    await self.run_one()
             except Exception:
-                logger.exception("intent_execution_worker_iteration_failed", worker_id=self.owner)
+                logger.warning("intent_execution_worker_iteration_failed", worker_id=self.owner)
             await asyncio.sleep(self.settings.EMULATION_EXECUTION_POLL_SECONDS)

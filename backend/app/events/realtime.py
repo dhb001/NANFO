@@ -51,6 +51,16 @@ class ApiRealtimeLease:
     def healthy(self) -> bool:
         return time.monotonic() < self.deadline
 
+    async def verify(self) -> bool:
+        """Read-only ownership check; readiness must not renew a stale lease."""
+        if not self.healthy or self.task is None or self.task.done():
+            return False
+        async with asyncio.timeout(2):
+            owner = await self.redis.get(self.key)
+        if isinstance(owner, bytes):
+            owner = owner.decode("ascii", errors="replace")
+        return owner == self.token and self.healthy and not self.task.done()
+
     async def __aenter__(self):
         started = time.monotonic()
         async with asyncio.timeout(self.ttl_seconds / 6):

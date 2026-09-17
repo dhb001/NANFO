@@ -203,7 +203,7 @@ async def prepare_plan(*, settings, db, redis, workspace_id, network_id, actor_i
         if a in switches and b in switches:
             trusted_links.add((switches[a]["dpid"], ap, switches[b]["dpid"], bp))
             trusted_links.add((switches[b]["dpid"], bp, switches[a]["dpid"], ap))
-    observed = {(l.src_dpid, l.src_port, l.dst_dpid, l.dst_port) for l in snapshot.links}
+    observed = {(link.src_dpid, link.src_port, link.dst_dpid, link.dst_port) for link in snapshot.links}
     if not observed.issubset(trusted_links):
         raise ValueError("untrusted observed link")
     source, destination = hosts[plan.source_host], hosts[plan.destination_host]
@@ -215,8 +215,8 @@ async def prepare_plan(*, settings, db, redis, workspace_id, network_id, actor_i
                 or any(switches[node]["role"] not in {"distribution", "core"} for node in path[1:-1])):
             raise ValueError("path endpoints or roles invalid")
         for a, b in pairwise(path):
-            links = [l for l in observed if l[0] == switches[a]["dpid"] and l[2] == switches[b]["dpid"]
-                     and (l[2], l[3], l[0], l[1]) in observed]
+            links = [link for link in observed if link[0] == switches[a]["dpid"] and link[2] == switches[b]["dpid"]
+                     and (link[2], link[3], link[0], link[1]) in observed]
             if len(links) != 1:
                 raise ValueError("path requires unambiguous bidirectional observed links")
             src, port, dst, peer_port = links[0]

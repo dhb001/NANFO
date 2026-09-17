@@ -1,0 +1,37 @@
+FROM python:3.12.14-slim-bookworm@sha256:782412e85d0f0984994c290652577d4018aff08145c85b262bb63dc0c7522254 AS dependencies
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1 POETRY_VIRTUALENVS_IN_PROJECT=true
+RUN pip install --no-cache-dir poetry==2.4.1
+WORKDIR /opt/nanfo/backend
+COPY backend/pyproject.toml backend/poetry.lock backend/README.md ./
+RUN poetry check --lock && poetry install --only main --no-root --no-interaction && .venv/bin/python -m pip check
+
+FROM python:3.12.14-slim-bookworm@sha256:782412e85d0f0984994c290652577d4018aff08145c85b262bb63dc0c7522254 AS runtime
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/opt/nanfo/backend:/opt/nanfo \
+    PATH=/opt/nanfo/backend/.venv/bin:$PATH HOME=/tmp
+RUN groupadd --gid 10001 nanfo && useradd --uid 10001 --gid 10001 --no-create-home nanfo
+WORKDIR /opt/nanfo/backend
+COPY --from=dependencies /opt/nanfo/backend/.venv ./.venv
+COPY backend/app ./app
+COPY backend/scripts ./scripts
+COPY backend/alembic ./alembic
+COPY backend/alembic/alembic.ini ./
+COPY emulation/*.py /opt/nanfo/emulation/
+COPY deploy/*.py /opt/nanfo/deploy/
+USER 10001:10001
+ENTRYPOINT ["python", "/opt/nanfo/deploy/entrypoint.py"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1", "--no-access-log"]
+
+FROM python:3.12.14-slim-bookworm@sha256:782412e85d0f0984994c290652577d4018aff08145c85b262bb63dc0c7522254 AS ai-dependencies
+RUN pip install --no-cache-dir uv==0.8.22
+WORKDIR /opt/nanfo/ai-engine
+COPY ai-engine/pyproject.toml ai-engine/uv.lock ./
+COPY ai-engine/src ./src
+ENV UV_PROJECT_ENVIRONMENT=/opt/nanfo/ai-runtime UV_PYTHON_DOWNLOADS=never
+RUN uv sync --locked --no-dev --no-editable --python /usr/local/bin/python3.12 \
+    && uv pip check --python /opt/nanfo/ai-runtime/bin/python && uv cache clean
+
+FROM runtime AS with-ai
+COPY --from=ai-dependencies /opt/nanfo/ai-runtime /opt/nanfo/ai-runtime
+COPY ai-engine/src /opt/nanfo/ai-engine/src
+USER 10001:10001

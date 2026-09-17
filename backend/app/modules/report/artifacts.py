@@ -13,6 +13,10 @@ from pathlib import Path
 from reportlab.pdfgen import canvas
 
 
+class ReportCapacityError(OSError):
+    """Protected report storage cannot accommodate another bounded artifact."""
+
+
 def canonical(value):
     return json.dumps(
         value, sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False
@@ -122,6 +126,25 @@ class ArtifactStore:
     def __init__(self, root, max_bytes):
         self.root, self.max_bytes = Path(root), max_bytes
 
+    def capacity(self, min_free_bytes):
+        directory = self._directory()
+        try:
+            info = os.fstatvfs(directory)
+            available = info.f_bavail * info.f_frsize
+            return {
+                "available_bytes": available,
+                "min_free_bytes": min_free_bytes,
+                "required_bytes": min_free_bytes + self.max_bytes,
+                "ready": available >= min_free_bytes + self.max_bytes
+                and info.f_favail > 0,
+            }
+        finally:
+            os.close(directory)
+
+    def require_capacity(self, min_free_bytes):
+        if not self.capacity(min_free_bytes)["ready"]:
+            raise ReportCapacityError("Report storage reserve exhausted")
+
     def _directory(self):
         source = Path(__file__).resolve().parents[4]
         if (
@@ -154,9 +177,12 @@ class ArtifactStore:
             f"{uuid.UUID(str(report_id))}-{uuid.UUID(str(artifact_id))}.{output_format}"
         )
 
-    def write(self, report_id, artifact_id, output_format, data):
+    def write(
+        self, report_id, artifact_id, output_format, data, *, min_free_bytes=67108864
+    ):
         if not 0 < len(data) <= self.max_bytes:
             raise ValueError("Artifact size invalid")
+        self.require_capacity(min_free_bytes)
         name = self.filename(report_id, artifact_id, output_format)
         directory = self._directory()
         temp = "." + uuid.uuid4().hex + ".tmp"

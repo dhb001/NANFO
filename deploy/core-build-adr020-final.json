@@ -1,0 +1,41 @@
+{
+  "image": "nanfo-deploy-step15-package-backend:adr020-final",
+  "image_id": "sha256:b69f37bb8f5404b6ef81beef965f11ba90aba7e3ddf0ceec7f66a1ee7e8be108",
+  "target": "runtime",
+  "python": "3.12.14",
+  "python_base": "python:3.12.14-slim-bookworm@sha256:782412e85d0f0984994c290652577d4018aff08145c85b262bb63dc0c7522254",
+  "poetry": "2.4.1",
+  "dependency_install": "poetry check --lock && poetry install --only main --no-root --no-interaction",
+  "dependency_stage": "Docker cache from previously verified clean locked installation",
+  "pip_check": "passed in final runtime image",
+  "uid": 10001,
+  "host_site_packages_used": false,
+  "ai_built": false,
+  "initialized_stack_modified": false,
+  "staged_runtime_source_parity": {"passed": true, "files": 216},
+  "current_source_parity_exception": {
+    "path": "deploy/verify.py",
+    "reason": "Independent host verifier changed during build; automatic current-source release record refused. Runtime maintenance and application source checks passed separately.",
+    "packaged_sha256": "fd089e6b634ca89501a3d61bd858f177a199c5c054c26878c688ae80539ecf17",
+    "usage": "Run current host deploy/verify.py, not the packaged copy. Do not claim full current-worktree parity."
+  },
+  "source_sha256": {
+    "backend/pyproject.toml": "c11f38aeb553397dce3b1315a96e4d32430a391bc251c3674759964daa059635",
+    "backend/poetry.lock": "b4916dd424e3540d491762bcf416a2a5107135bd39336acb72914e5b5fe093d7",
+    "deploy/Dockerfile.backend": "6746520d09b858e8c41c53de02ffa0b85ce73dc12b3361a7bb2e7db7a47df6d7",
+    "deploy/maintenance.py": "1857359da1eb176ccfa82ee78f8e2f9f4453fd0481780c6eb0cf9f8d71a250b8",
+    "deploy/backup_restore.py": "9543ddebd41880c363e6e30ee346155fad70b5793f6b60bf64a7ba70444121f5",
+    "backend/app/core/config.py": "ffed87931beded3b411e2dc46c8a02e7e57a3b530021a292a2c33fc685796ba5",
+    "backend/app/api/readiness.py": "785ca236ec0e16823d41ea8859e876e4cb184bce0be03901a6da6956153853b9",
+    "backend/app/modules/network/operations.py": "ffcb6ccc69e2c54b443d672bc9e47d4fc4df515354ca8b96dd872f00066b545e",
+    "backend/app/modules/report/artifacts.py": "c95f4ab3de3c264b6a49173dffec2882010a4c40e801a6992652cdfdd6bd0115",
+    "backend/app/modules/report/service.py": "044a2f408ccd17e496e65c1231bdf96444e842b1a7dd648f41dfbe03b5c901d9",
+    "backend/app/modules/report/worker.py": "fbd723d33b4b5d9e4109daace9c071a92605fabef7275734f477760cc7dbce9e"
+  },
+  "verification": {
+    "core_imports": "passed without network or secrets",
+    "main_only": "asyncpg0.30.0/reportlab4.4.10 present; Ruff and AI runtime absent",
+    "targeted_tests": "56 passed",
+    "live_fresh_stack": "delegated to independent verifier; existing packaging stack not restarted"
+  }
+}
