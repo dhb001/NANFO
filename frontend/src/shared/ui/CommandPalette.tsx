@@ -108,46 +108,21 @@ export function CommandPalette() {
               setOpen(false);
             }
           }}
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(6, 16, 28, 0.3)",
-            zIndex: 1300,
-            display: "grid",
-            placeItems: "start center",
-            paddingTop: "14vh",
-          }}
         >
           <div
             className="command-palette-surface"
-            style={{
-              width: "min(720px, calc(100vw - 1.4rem))",
-              borderRadius: 16,
-              border: "1px solid var(--line-strong)",
-              boxShadow: "var(--shadow-mid)",
-              background:
-                "linear-gradient(170deg, color-mix(in srgb, var(--surface-card) 95%, white), color-mix(in srgb, var(--surface-1) 92%, white))",
-              overflow: "hidden",
-            }}
           >
-            <div style={{ padding: "0.7rem 0.8rem", borderBottom: "1px solid var(--line-soft)" }}>
+            <div className="command-search">
               <input
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
                 autoFocus
                 aria-label="Search commands"
                 placeholder="Jump to route (example: twin, telemetry, G D)"
-                style={{
-                  width: "100%",
-                  border: "1px solid var(--line-soft)",
-                  borderRadius: 10,
-                  padding: "0.55rem 0.62rem",
-                  background: "rgba(255, 255, 255, 0.9)",
-                }}
               />
             </div>
 
-            <div style={{ maxHeight: 380, overflow: "auto", display: "grid" }}>
+            <div className="command-results">
               {filtered.length === 0 ? (
                 <div style={{ padding: "0.8rem", color: "var(--ink-3)" }}>No commands match this filter.</div>
               ) : (
@@ -161,23 +136,16 @@ export function CommandPalette() {
                         setOpen(false);
                         navigate(entry.path);
                       }}
-                      style={{
-                        display: "flex",
-                        justifyContent: "space-between",
-                        alignItems: "center",
-                        padding: "0.64rem 0.76rem",
-                        borderBottom: "1px solid var(--line-soft)",
-                        background: active ? "color-mix(in srgb, var(--brand) 16%, white)" : "transparent",
-                        textAlign: "left",
-                      }}
+                      className="command-result"
+                      data-active={active}
                     >
                       <span>
                         <strong>{entry.label}</strong>
-                        <span style={{ marginLeft: "0.45rem", color: "var(--ink-3)", fontSize: "0.82rem" }}>
+                        <span className="command-group">
                           {entry.group}
                         </span>
                       </span>
-                      <span className="mono" style={{ color: "var(--ink-3)", fontSize: "0.75rem" }}>
+                      <span className="command-hint">
                         {entry.hint}
                       </span>
                     </button>

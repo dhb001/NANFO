@@ -1,28 +1,34 @@
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useAuthStore } from "@/shared/state/auth-store";
 import { Button } from "@/shared/ui/Button";
+import { BrandMark } from "@/shared/ui/BrandMark";
 import { useUiStore } from "@/shared/state/ui-store";
 import { RealtimeBridge } from "@/features/realtime/RealtimesBridge";
-import { useIsNarrowViewport } from "@/shared/lib/viewport";
 import { logoutSession } from "@/features/auth/session";
 import { canAccessRoute } from "@/features/auth/permissions";
 import { useWorkspaceStore } from "@/shared/state/workspace-store";
 import { AsyncState } from "@/shared/ui/AsyncState";
 import { ExecutionModeBanner } from "@/shared/ui/ExecutionModeBanner";
 
-const navItems = [
-  { to: "/ops/overview", label: "Overview", keyHint: "G O" },
-  { to: "/ops/tenancy", label: "Tenancy", keyHint: "G W" },
-  { to: "/ops/topology-analysis", label: "Topology", keyHint: "G P" },
-  { to: "/ops/telemetry", label: "Telemetry", keyHint: "G T" },
-  { to: "/ops/reliability", label: "Reliability", keyHint: "G R / G L" },
-  { to: "/ops/plugins", label: "Plugins", keyHint: "G U" },
-  { to: "/ops/reports", label: "Reports", keyHint: "G Y" },
-  { to: "/ops/digital-twin", label: "Digital Twin", keyHint: "G D" },
-  { to: "/ops/simulation", label: "Simulation", keyHint: "G S" },
-  { to: "/ops/intent", label: "Intent", keyHint: "G I" },
-  { to: "/ops/autonomy", label: "Autonomy", keyHint: "G N" },
-  { to: "/ops/audit", label: "Audit", keyHint: "G A" },
+const navGroups = [
+  { label: "Observe", items: [
+    { to: "/ops/overview", label: "Overview", key: "O" },
+    { to: "/ops/topology-analysis", label: "Topology", key: "P" },
+    { to: "/ops/telemetry", label: "Telemetry", key: "T" },
+    { to: "/ops/reliability", label: "Reliability", key: "R" },
+  ] },
+  { label: "Orchestrate", items: [
+    { to: "/ops/digital-twin", label: "Digital Twin", key: "D" },
+    { to: "/ops/simulation", label: "Simulation", key: "S" },
+    { to: "/ops/intent", label: "Intent", key: "I" },
+    { to: "/ops/autonomy", label: "Autonomy", key: "N" },
+  ] },
+  { label: "Manage", items: [
+    { to: "/ops/tenancy", label: "Tenancy", key: "W" },
+    { to: "/ops/plugins", label: "Plugins", key: "U" },
+    { to: "/ops/reports", label: "Reports", key: "Y" },
+    { to: "/ops/audit", label: "Audit", key: "A" },
+  ] },
 ];
 
 export function AppShell() {
@@ -38,127 +44,52 @@ export function AppShell() {
   const activeUser = useAuthStore((state) => state.userId);
   const commandPaletteOpen = useUiStore((state) => state.commandPaletteOpen);
   const setCommandPaletteOpen = useUiStore((state) => state.setCommandPaletteOpen);
-  const isNarrowViewport = useIsNarrowViewport();
-
-  const appGridColumns = isNarrowViewport ? "minmax(0, 1fr)" : "260px minmax(0, 1fr)";
+  const currentPage = navGroups.flatMap((group) => group.items).find((item) => item.to === location.pathname);
 
   return (
-    <div
-      style={{
-        minHeight: "100vh",
-        display: "grid",
-        gridTemplateColumns: appGridColumns,
-      }}
-    >
+    <div className="app-shell">
       <RealtimeBridge />
-      <aside
-        style={{
-          borderRight: isNarrowViewport ? "none" : "1px solid var(--line-soft)",
-          borderBottom: isNarrowViewport ? "1px solid var(--line-soft)" : "none",
-          background: "color-mix(in srgb, var(--surface-card) 92%, #ffffff)",
-          padding: "1.1rem 0.9rem",
-          position: isNarrowViewport ? "relative" : "sticky",
-          top: 0,
-          height: isNarrowViewport ? "auto" : "100vh",
-        }}
-      >
-        <div style={{ marginBottom: "1rem" }}>
-          <div className="mono" style={{ color: "var(--ink-3)", fontSize: "0.82rem" }}>
-            NANFO
-          </div>
-          <div style={{ fontWeight: 700, fontSize: "1.35rem" }}>Network Operations</div>
-        </div>
-        <nav
-          style={{
-            display: "grid",
-            gap: "0.4rem",
-            gridTemplateColumns: isNarrowViewport ? "repeat(2, minmax(0, 1fr))" : undefined,
-          }}
-        >
-          {navItems.filter((item) => canAccessRoute(profile, item.to)).map((item) => (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              style={({ isActive }) => ({
-                padding: "0.6rem 0.65rem",
-                borderRadius: "10px",
-                border: "1px solid",
-                borderColor: isActive ? "var(--brand)" : "transparent",
-                background: isActive ? "color-mix(in srgb, var(--brand) 14%, white)" : "transparent",
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                color: isActive ? "var(--ink-1)" : "var(--ink-2)",
-              })}
-            >
-              <span>{item.label}</span>
-              <span className="mono" style={{ fontSize: "0.72rem", color: "var(--ink-3)" }}>
-                {item.keyHint}
-              </span>
-            </NavLink>
-          ))}
+      <a className="skip-link" href="#workspace-content">Skip to workspace</a>
+      <aside className="app-rail">
+        <div className="rail-brand"><BrandMark /></div>
+        <nav className="rail-navigation" aria-label="Main navigation">
+          {navGroups.map((group) => {
+            const items = group.items.filter((item) => canAccessRoute(profile, item.to));
+            return items.length ? <div className="nav-group" key={group.label}>
+              <div className="nav-group-label">{group.label}</div>
+              {items.map((item) => (
+                <NavLink key={item.to} to={item.to} className={({ isActive }) => `nav-item${isActive ? " is-active" : ""}`}>
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" aria-hidden="true"><use href={`/navigation.svg#${item.key}`} /></svg>
+                  <span>{item.label}</span>
+                  <span className="nav-key" aria-hidden="true">{item.key}</span>
+                </NavLink>
+              ))}
+            </div> : null;
+          })}
         </nav>
+        <div className="rail-footer"><span className="rail-index">N / 01</span><span>Network operations<br /><strong>A clearer perspective.</strong></span></div>
       </aside>
-
-      <main style={{ minWidth: 0 }}>
-        <header
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            padding: "0.9rem 1rem",
-            borderBottom: "1px solid var(--line-soft)",
-            position: isNarrowViewport ? "relative" : "sticky",
-            top: 0,
-            backdropFilter: isNarrowViewport ? "none" : "blur(8px)",
-            background: "color-mix(in srgb, var(--surface-0) 88%, transparent)",
-            zIndex: 20,
-            gap: "0.6rem",
-            flexWrap: "wrap",
-          }}
-        >
-          <button
-            className="mono"
-            style={{
-              border: "1px solid var(--line-soft)",
-              borderRadius: "10px",
-              padding: "0.45rem 0.6rem",
-              color: "var(--ink-3)",
-              minWidth: "240px",
-              textAlign: "left",
-            }}
-            aria-label="Toggle command palette"
-            onClick={() => setCommandPaletteOpen(!commandPaletteOpen)}
-          >
-            {commandPaletteOpen ? "Close Command Palette" : "Open Command Palette"}  Ctrl/Cmd+K
-          </button>
-
-          <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-              <div className="mono" style={{ fontSize: "0.8rem", color: "var(--ink-3)" }}>
-              {activeUser ?? "operator"}
-              </div>
-            <Button
-              tone="ghost"
-              disabled={endingSession}
-              onClick={async () => {
-                try {
-                  await logoutSession();
-                } catch {
-                  useUiStore.getState().pushToast({ title: "Signed out locally", tone: "warn",
-                    description: "Backend revocation could not be confirmed. Sign in again to continue." });
-                }
-                navigate("/login", { replace: true });
-              }}
-            >
-              {endingSession ? "Signing Out..." : "Logout"}
-            </Button>
+      <main className="app-main">
+        <header className="app-topbar">
+          <div className="breadcrumb"><span>Operations</span><span aria-hidden="true">/</span><strong>{currentPage?.label ?? "Workspace"}</strong></div>
+          <div className="topbar-actions">
+            <button className="command-trigger" aria-label="Toggle command palette" aria-expanded={commandPaletteOpen} onClick={() => setCommandPaletteOpen(!commandPaletteOpen)}>
+              <span aria-hidden="true">⌕</span><span>Jump to…</span><kbd>⌘ / Ctrl K</kbd>
+            </button>
+            <div className="operator-id" title={activeUser ?? "operator"}><span className="operator-avatar" aria-hidden="true">OP</span><span>Operator</span></div>
+            <Button tone="ghost" disabled={endingSession} onClick={async () => {
+              try {
+                await logoutSession();
+              } catch {
+                useUiStore.getState().pushToast({ title: "Signed out locally", tone: "warn", description: "Backend revocation could not be confirmed. Sign in again to continue." });
+              }
+              navigate("/login", { replace: true });
+            }}>{endingSession ? "Signing Out..." : "Logout"}</Button>
           </div>
         </header>
-
         <ExecutionModeBanner />
-        <div key={contextKey} style={{ padding: "1rem", display: "grid", gap: "1rem" }}>
-          {canAccessRoute(profile, location.pathname) ? <Outlet /> :
-            <AsyncState title="Permission denied" description="Your current backend profile does not permit this route." />}
+        <div key={contextKey} id="workspace-content" tabIndex={-1} className="workspace-content">
+          {canAccessRoute(profile, location.pathname) ? <Outlet /> : <AsyncState title="Permission denied" description="Your current backend profile does not permit this route." />}
         </div>
       </main>
     </div>

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { Panel } from "@/shared/ui/Panel";
 import { StatTile } from "@/shared/ui/StatTile";
 import { useAuthStore } from "@/shared/state/auth-store";
@@ -17,7 +18,8 @@ import { useUiStore } from "@/shared/state/ui-store";
 import { Badge } from "@/shared/ui/Badge";
 import { useLiveStore } from "@/features/realtime/store";
 import { AsyncState } from "@/shared/ui/AsyncState";
-import { useIsNarrowViewport } from "@/shared/lib/viewport";
+import { NetworkArtwork } from "@/shared/ui/NetworkArtwork";
+import { canAccessRoute } from "@/features/auth/permissions";
 
 export function OverviewPage() {
   const token = useAuthStore((state) => state.accessToken);
@@ -28,7 +30,7 @@ export function OverviewPage() {
   const setWorkspaceId = useWorkspaceStore((state) => state.setWorkspaceId);
   const setNetworkId = useWorkspaceStore((state) => state.setNetworkId);
   const pushToast = useUiStore((state) => state.pushToast);
-  const isNarrowViewport = useIsNarrowViewport();
+  const profile = useAuthStore((state) => state.profile);
 
   const orgsQuery = useOrganizations(token);
   const workspacesQuery = useWorkspaces(token, orgId);
@@ -46,6 +48,7 @@ export function OverviewPage() {
   const telemetryStatus = useLiveStore((state) => state.telemetryStatus);
   const digitalTwinStatus = useLiveStore((state) => state.digitalTwinStatus);
   const alertsStatus = useLiveStore((state) => state.alertsStatus);
+  const activeNetwork = networksQuery.data?.items.find((network) => network.network_id === networkId);
 
   useEffect(() => {
     if (!orgId && orgsQuery.data?.items?.[0]) {
@@ -101,15 +104,25 @@ export function OverviewPage() {
 
   return (
     <>
-      <section style={{ display: "grid", gridTemplateColumns: isNarrowViewport ? "repeat(2, minmax(0, 1fr))" : "repeat(4, minmax(0, 1fr))", gap: "0.65rem" }}>
-        <StatTile label="Topology WS" value={topologyStatus.toUpperCase()} tone={topologyStatus === "open" ? "ok" : "warn"} />
-        <StatTile label="Telemetry WS" value={telemetryStatus.toUpperCase()} tone={telemetryStatus === "open" ? "ok" : "warn"} />
-        <StatTile label="Alerts WS" value={alertsStatus.toUpperCase()} tone={alertsStatus === "open" ? "ok" : "warn"} />
-        <StatTile
-          label="Digital Twin WS"
-          value={digitalTwinStatus.toUpperCase()}
-          tone={digitalTwinStatus === "open" ? "ok" : "warn"}
-        />
+      <header className="page-heading">
+        <div><div className="eyebrow">Your network, in perspective</div><h1>Operations overview</h1><p>The context, connections and infrastructure behind every decision.</p></div>
+        <span className="page-index">WORKSPACE / 01</span>
+      </header>
+
+      <section className="network-hero" aria-label="Selected network">
+        <div className="network-hero-copy">
+          <div className="eyebrow">Active network</div>
+          <h2>{activeNetwork?.name ?? "Set your perspective."}</h2>
+          <p>{activeNetwork ? "Explore your infrastructure, inspect its signals and test what comes next." : "Select a workspace and network below to begin exploring your infrastructure."}</p>
+          {canAccessRoute(profile, "/ops/digital-twin") && networkId ? <Link className="hero-link" to="/ops/digital-twin">Explore infrastructure <span aria-hidden="true">↗</span></Link> : <Link className="hero-link" to="/ops/tenancy">Open workspace settings <span aria-hidden="true">↗</span></Link>}
+        </div>
+        <div className="hero-art"><NetworkArtwork /><span className="art-caption">Routing study / illustrative</span></div>
+      </section>
+
+      <section className="connection-strip" aria-label="Realtime connections">
+        {[["Topology WS", topologyStatus], ["Telemetry WS", telemetryStatus], ["Alerts WS", alertsStatus], ["Digital Twin WS", digitalTwinStatus]].map(([label, status]) => (
+          <div key={label} className="connection-item" data-connected={status === "open"}><i className="connection-dot" aria-hidden="true" /><span>{label}</span><strong>{status}</strong></div>
+        ))}
       </section>
 
       {!workspaceId ? (
@@ -119,28 +132,23 @@ export function OverviewPage() {
         />
       ) : null}
 
-      <div style={{ display: "grid", gridTemplateColumns: isNarrowViewport ? "1fr" : "1.2fr 1fr", gap: "1rem", alignItems: "start" }}>
-        <Panel title="Organization and Workspace" subtitle="VS1 tenancy flows with keyboard-accessible selectors">
+      <div className="overview-grid">
+        <Panel title="Organization and Workspace" subtitle="Set the scope for your operations">
           <div style={{ display: "grid", gap: "0.8rem" }}>
             <QueryState
               query={orgsQuery}
               hasData={(data) => data.items.length > 0}
               emptyTitle="No organizations"
-              emptyDescription="Create an organization in backend fixtures or live API first."
+              emptyDescription="Open Tenancy to create your first organization."
             >
               {(orgs) => (
-                <label style={{ display: "grid", gap: "0.3rem" }}>
-                  <span className="mono" style={{ fontSize: "0.8rem", color: "var(--ink-3)" }}>
+                <label className="context-field">
+                  <span>
                     Organization
                   </span>
                   <select
                     value={orgId ?? ""}
                     onChange={(event) => setOrganizationId(event.target.value)}
-                    style={{
-                      border: "1px solid var(--line-soft)",
-                      borderRadius: "10px",
-                      padding: "0.48rem 0.5rem",
-                    }}
                   >
                     {orgs.items.map((org) => (
                       <option key={org.org_id} value={org.org_id}>
@@ -159,18 +167,13 @@ export function OverviewPage() {
               emptyDescription="No workspace found for the current organization."
             >
               {(workspaces) => (
-                <label style={{ display: "grid", gap: "0.3rem" }}>
-                  <span className="mono" style={{ fontSize: "0.8rem", color: "var(--ink-3)" }}>
+                <label className="context-field">
+                  <span>
                     Workspace
                   </span>
                   <select
                     value={workspaceId ?? ""}
                     onChange={(event) => setWorkspaceId(event.target.value)}
-                    style={{
-                      border: "1px solid var(--line-soft)",
-                      borderRadius: "10px",
-                      padding: "0.48rem 0.5rem",
-                    }}
                   >
                     {workspaces.items.map((workspace) => (
                       <option key={workspace.workspace_id} value={workspace.workspace_id}>
@@ -196,7 +199,7 @@ export function OverviewPage() {
 
         <Panel
           title="Workspace Capacity"
-          subtitle="Density snapshot for selected tenancy"
+          subtitle="Inventory in your current workspace and network"
           action={
             <Button
               permission="write:config"
@@ -212,7 +215,7 @@ export function OverviewPage() {
                 await createNetworkMutation.mutateAsync(`Network-${Date.now().toString().slice(-4)}`);
                 pushToast({
                   title: "Network created",
-                  description: "VS1 create network flow succeeded.",
+                  description: "Your new network is ready to select.",
                   tone: "ok",
                 });
               }}
@@ -223,13 +226,13 @@ export function OverviewPage() {
           }
         >
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.6rem" }}>
-            <StatTile label="Networks" value={String(networksQuery.data?.items.length ?? 0)} />
-            <StatTile label="Devices" value={String(devicesQuery.data?.items.length ?? 0)} />
+            <StatTile label="Networks" value={networksQuery.isSuccess ? String(networksQuery.data.items.length) : "—"} caption="In this workspace" />
+            <StatTile label="Devices" value={devicesQuery.isSuccess ? String(devicesQuery.data.items.length) : "—"} caption="In the selected network" />
           </div>
         </Panel>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: isNarrowViewport ? "1fr" : "1fr 1fr", gap: "1rem", alignItems: "start" }}>
+      <div className="inventory-grid">
         <Panel title="Networks" subtitle="Select active network context for all views">
           <QueryState
             query={networksQuery}
@@ -239,25 +242,16 @@ export function OverviewPage() {
           >
             {(networks) => (
               <div style={{ display: "grid", gap: "0.45rem" }}>
-                {networks.items.map((network) => (
+                {networks.items.map((network, index) => (
                   <button
                     key={network.network_id}
                     onClick={() => setNetworkId(network.network_id)}
-                    style={{
-                      textAlign: "left",
-                      border: "1px solid var(--line-soft)",
-                      borderRadius: "10px",
-                      padding: "0.58rem 0.62rem",
-                      background:
-                        networkId === network.network_id
-                          ? "color-mix(in srgb, var(--brand) 14%, white)"
-                          : "transparent",
-                    }}
+                    className="network-choice"
+                    aria-pressed={networkId === network.network_id}
                   >
-                    <div style={{ fontWeight: 600 }}>{network.name}</div>
-                    <div className="mono" style={{ color: "var(--ink-3)", fontSize: "0.75rem" }}>
-                      {network.network_id}
-                    </div>
+                    <span className="network-choice-index" aria-hidden="true">{String(index + 1).padStart(2, "0")}</span>
+                    <span><strong>{network.name}</strong><small>{network.network_id}</small></span>
+                    <span aria-hidden="true">{networkId === network.network_id ? "●" : "↗"}</span>
                   </button>
                 ))}
               </div>
@@ -267,7 +261,7 @@ export function OverviewPage() {
 
         <Panel
           title="Devices"
-          subtitle="Create devices and seed digital twin topology"
+          subtitle="Device inventory and spatial references"
           action={
             <Button
               permission="write:config"
@@ -301,29 +295,23 @@ export function OverviewPage() {
             query={devicesQuery}
             hasData={(data) => data.items.length > 0}
             emptyTitle="No devices"
-            emptyDescription="Create a first device to populate topology and telemetry joins."
+            emptyDescription="Add your first device to start building the network inventory."
           >
             {(devices) => (
               <div style={{ display: "grid", gap: "0.4rem" }}>
                 {devices.items.map((device) => (
                   <div
                     key={device.device_id}
-                    style={{
-                      border: "1px solid var(--line-soft)",
-                      borderRadius: "10px",
-                      padding: "0.55rem 0.58rem",
-                      display: "grid",
-                      gap: "0.2rem",
-                    }}
+                    className="device-entry"
                   >
                     <div style={{ display: "flex", justifyContent: "space-between" }}>
                       <strong>{device.hostname}</strong>
                       <Badge text={device.status} tone={device.status === "active" ? "ok" : "warn"} />
                     </div>
-                    <div className="mono" style={{ color: "var(--ink-3)", fontSize: "0.74rem" }}>
+                    <div className="device-reference">
                       {device.device_id}
                     </div>
-                    <div className="mono" style={{ color: "var(--ink-3)", fontSize: "0.74rem" }}>
+                    <div className="device-reference">
                       {device.spatial_ref_id ?? "spatial_ref_id: none"}
                     </div>
                     <div style={{ display: "flex", gap: "0.4rem" }}>
@@ -337,14 +325,7 @@ export function OverviewPage() {
                         }
                         aria-label={`Spatial reference for ${device.hostname}`}
                         placeholder="campus-a/building-1/floor-2/rack-4"
-                        style={{
-                          border: "1px solid var(--line-soft)",
-                          borderRadius: "8px",
-                          padding: "0.28rem 0.38rem",
-                          flex: 1,
-                          fontFamily: "var(--font-mono)",
-                          fontSize: "0.74rem",
-                        }}
+                        className="spatial-input"
                       />
                       <Button
                         permission="write:config"

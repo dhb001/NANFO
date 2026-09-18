@@ -1,0 +1,148 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<mxfile host="app.diagrams.net" agent="NANFO diagram source" type="device">
+  <diagram id="fig4-6" name="4.6 Command execution classes and responsibilities">
+    <mxGraphModel dx="600" dy="572" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="900" pageHeight="511" math="0" shadow="0" background="#ffffff">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+        <mxCell id="f6-plan" value="LabPlan" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=#ffffff;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;shape=swimlane;startSize=36;fontStyle=1;swimlaneFillColor=#ffffff;" vertex="1" parent="1">
+          <mxGeometry x="18" y="20" width="255" height="152" as="geometry"/>
+        </mxCell>
+        <mxCell id="f6-planattributes" value="+ operation; paths; weights&#10;+ source_host; destination_host&#10;+ rate_mbps; dscp" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=#ffffff;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacing=0;" vertex="1" parent="f6-plan">
+          <mxGeometry x="8" y="41" width="239" height="73" as="geometry"/>
+        </mxCell>
+        <mxCell id="f6-planoperations" value="+ consistent(): Self" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=#ffffff;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacing=0;" vertex="1" parent="f6-plan">
+          <mxGeometry x="8" y="122" width="239" height="27" as="geometry"/>
+        </mxCell>
+        <mxCell id="f6-planseparator" value="" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=#ffffff;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;fillColor=none;edgeStyle=none;rounded=0;endArrow=none;endFill=0;endSize=8;startArrow=none;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="18" y="137" as="sourcePoint"/>
+            <mxPoint x="273" y="137" as="targetPoint"/>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="f6-pending" value="PendingLabCommand" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=#ffffff;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;shape=swimlane;startSize=36;fontStyle=1;swimlaneFillColor=#ffffff;" vertex="1" parent="1">
+          <mxGeometry x="334" y="20" width="264" height="152" as="geometry"/>
+        </mxCell>
+        <mxCell id="f6-pendingattributes" value="+ execution_id; run_id; fence&#10;+ binding_digest; plan_hash&#10;+ deadline; plan: LabPlan" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=#ffffff;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacing=0;" vertex="1" parent="f6-pending">
+          <mxGeometry x="8" y="41" width="248" height="73" as="geometry"/>
+        </mxCell>
+        <mxCell id="f6-pendingoperations" value="+ hash_matches(): Self" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=#ffffff;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacing=0;" vertex="1" parent="f6-pending">
+          <mxGeometry x="8" y="122" width="248" height="27" as="geometry"/>
+        </mxCell>
+        <mxCell id="f6-pendingseparator" value="" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=#ffffff;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;fillColor=none;edgeStyle=none;rounded=0;endArrow=none;endFill=0;endSize=8;startArrow=none;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="334" y="137" as="sourcePoint"/>
+            <mxPoint x="598" y="137" as="targetPoint"/>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="f6-command" value="LabCommand" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=#ffffff;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;shape=swimlane;startSize=36;fontStyle=1;swimlaneFillColor=#ffffff;" vertex="1" parent="1">
+          <mxGeometry x="334" y="235.0" width="264" height="129" as="geometry"/>
+        </mxCell>
+        <mxCell id="f6-commandattributes" value="+ dispatch_expires_at" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=#ffffff;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacing=0;" vertex="1" parent="f6-command">
+          <mxGeometry x="8" y="41" width="248" height="27" as="geometry"/>
+        </mxCell>
+        <mxCell id="f6-commandoperations" value="+ bounded_dispatch(): Self&#10;+ assert_new_dispatch(now)" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=#ffffff;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacing=0;" vertex="1" parent="f6-command">
+          <mxGeometry x="8" y="76" width="248" height="50" as="geometry"/>
+        </mxCell>
+        <mxCell id="f6-commandseparator" value="" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=#ffffff;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;fillColor=none;edgeStyle=none;rounded=0;endArrow=none;endFill=0;endSize=8;startArrow=none;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="334" y="306.0" as="sourcePoint"/>
+            <mxPoint x="598" y="306.0" as="targetPoint"/>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="f6-result" value="LabResult" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=#ffffff;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;shape=swimlane;startSize=36;fontStyle=1;swimlaneFillColor=#ffffff;" vertex="1" parent="1">
+          <mxGeometry x="18" y="295.0" width="255" height="129" as="geometry"/>
+        </mxCell>
+        <mxCell id="f6-resultattributes" value="+ execution_id; run_id; fence&#10;+ status; verification; rollback" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=#ffffff;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacing=0;" vertex="1" parent="f6-result">
+          <mxGeometry x="8" y="41" width="239" height="50" as="geometry"/>
+        </mxCell>
+        <mxCell id="f6-resultoperations" value="+ matches(command): bool" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=#ffffff;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacing=0;" vertex="1" parent="f6-result">
+          <mxGeometry x="8" y="99" width="239" height="27" as="geometry"/>
+        </mxCell>
+        <mxCell id="f6-resultseparator" value="" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=#ffffff;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;fillColor=none;edgeStyle=none;rounded=0;endArrow=none;endFill=0;endSize=8;startArrow=none;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="18" y="389.0" as="sourcePoint"/>
+            <mxPoint x="273" y="389.0" as="targetPoint"/>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="f6-mailbox" value="Mailbox" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=#ffffff;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;shape=swimlane;startSize=36;fontStyle=1;swimlaneFillColor=#ffffff;" vertex="1" parent="1">
+          <mxGeometry x="636" y="285.0" width="247" height="129" as="geometry"/>
+        </mxCell>
+        <mxCell id="f6-mailboxattributes" value="+ commands; results" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=#ffffff;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacing=0;" vertex="1" parent="f6-mailbox">
+          <mxGeometry x="8" y="41" width="231" height="27" as="geometry"/>
+        </mxCell>
+        <mxCell id="f6-mailboxoperations" value="+ write(command)&#10;+ read(execution_id)" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=#ffffff;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacing=0;" vertex="1" parent="f6-mailbox">
+          <mxGeometry x="8" y="76" width="231" height="50" as="geometry"/>
+        </mxCell>
+        <mxCell id="f6-mailboxseparator" value="" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=#ffffff;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;fillColor=none;edgeStyle=none;rounded=0;endArrow=none;endFill=0;endSize=8;startArrow=none;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="636" y="356.0" as="sourcePoint"/>
+            <mxPoint x="883" y="356.0" as="targetPoint"/>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="f6-worker" value="ExecutionWorker" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=#ffffff;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;shape=swimlane;startSize=36;fontStyle=1;swimlaneFillColor=#ffffff;" vertex="1" parent="1">
+          <mxGeometry x="636" y="20" width="247" height="152" as="geometry"/>
+        </mxCell>
+        <mxCell id="f6-workerattributes" value="+ owner; mailbox: Mailbox" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=#ffffff;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacing=0;" vertex="1" parent="f6-worker">
+          <mxGeometry x="8" y="41" width="231" height="27" as="geometry"/>
+        </mxCell>
+        <mxCell id="f6-workeroperations" value="+ run_one(): bool&#10;+ publish_one(): bool&#10;+ run()" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=#ffffff;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacing=0;" vertex="1" parent="f6-worker">
+          <mxGeometry x="8" y="76" width="231" height="73" as="geometry"/>
+        </mxCell>
+        <mxCell id="f6-workerseparator" value="" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=#ffffff;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;fillColor=none;edgeStyle=none;rounded=0;endArrow=none;endFill=0;endSize=8;startArrow=none;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="636" y="91" as="sourcePoint"/>
+            <mxPoint x="883" y="91" as="targetPoint"/>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="f6-pendingplan" value="" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=#ffffff;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;fillColor=none;edgeStyle=none;rounded=0;endArrow=none;endFill=0;endSize=8;startArrow=none;exitX=0;exitY=0.5;exitDx=0;exitDy=0;exitPerimeter=0;entryX=1;entryY=0.5;entryDx=0;entryDy=0;entryPerimeter=0;" edge="1" parent="1" source="f6-pending" target="f6-plan">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="f6-planmany" value="0..*" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=#ffffff;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;strokeColor=none;fillColor=none;spacing=0;" vertex="1" parent="1">
+          <mxGeometry x="291" y="63" width="39" height="25" as="geometry"/>
+        </mxCell>
+        <mxCell id="f6-planone" value="1" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=#ffffff;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;strokeColor=none;fillColor=none;spacing=0;" vertex="1" parent="1">
+          <mxGeometry x="275" y="107" width="23" height="25" as="geometry"/>
+        </mxCell>
+        <mxCell id="f6-generalization" value="" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=#ffffff;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;fillColor=none;edgeStyle=none;rounded=0;endArrow=block;endFill=0;endSize=8;startArrow=none;exitX=0.5;exitY=0;exitDx=0;exitDy=0;exitPerimeter=0;entryX=0.5;entryY=1;entryDx=0;entryDy=0;entryPerimeter=0;" edge="1" parent="1" source="f6-command" target="f6-pending">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="f6-heldmailbox" value="" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=#ffffff;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;fillColor=none;edgeStyle=none;rounded=0;endArrow=none;endFill=0;endSize=8;startArrow=none;exitX=0.5;exitY=1;exitDx=0;exitDy=0;exitPerimeter=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;entryPerimeter=0;" edge="1" parent="1" source="f6-worker" target="f6-mailbox">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="f6-mailboxone" value="1" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=#ffffff;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;strokeColor=none;fillColor=none;spacing=0;" vertex="1" parent="1">
+          <mxGeometry x="772" y="250" width="24" height="25" as="geometry"/>
+        </mxCell>
+        <mxCell id="f6-workerone" value="0..1" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=#ffffff;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;strokeColor=none;fillColor=none;spacing=0;" vertex="1" parent="1">
+          <mxGeometry x="772" y="207" width="49" height="25" as="geometry"/>
+        </mxCell>
+        <mxCell id="f6-mailboxcommand" value="" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=#ffffff;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;fillColor=none;edgeStyle=none;rounded=0;endArrow=open;endFill=0;endSize=8;startArrow=none;dashed=1;dashPattern=6 4;exitX=0;exitY=0.27;exitDx=0;exitDy=0;exitPerimeter=0;entryX=1;entryY=0.65;entryDx=0;entryDy=0;entryPerimeter=0;" edge="1" parent="1" source="f6-mailbox" target="f6-command">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="f6-write" value="uses" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=#ffffff;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;strokeColor=none;fillColor=none;spacing=0;" vertex="1" parent="1">
+          <mxGeometry x="597" y="276" width="38" height="25" as="geometry"/>
+        </mxCell>
+        <mxCell id="f6-resultmatches" value="" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=#ffffff;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;fillColor=none;edgeStyle=none;rounded=0;endArrow=open;endFill=0;endSize=8;startArrow=none;dashed=1;dashPattern=6 4;exitX=1;exitY=0.33;exitDx=0;exitDy=0;exitPerimeter=0;entryX=0;entryY=0.68;entryDx=0;entryDy=0;entryPerimeter=0;" edge="1" parent="1" source="f6-result" target="f6-command">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="f6-matches" value="checks" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=#ffffff;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;strokeColor=none;fillColor=none;spacing=0;" vertex="1" parent="1">
+          <mxGeometry x="274" y="274" width="58" height="25" as="geometry"/>
+        </mxCell>
+        <mxCell id="f6-mailboxresult" value="" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=#ffffff;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;fillColor=none;edgeStyle=none;rounded=0;endArrow=open;endFill=0;endSize=8;startArrow=none;dashed=1;dashPattern=6 4;exitX=0.5;exitY=1;exitDx=0;exitDy=0;exitPerimeter=0;entryX=0.5;entryY=1;entryDx=0;entryDy=0;entryPerimeter=0;" edge="1" parent="1" source="f6-mailbox" target="f6-result">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="760" y="459"/>
+              <mxPoint x="145" y="459"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="f6-read" value="returns optional result" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=#ffffff;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;strokeColor=none;fillColor=none;spacing=0;" vertex="1" parent="1">
+          <mxGeometry x="349" y="461" width="244" height="27" as="geometry"/>
+        </mxCell>
+        <mxCell id="f6-legend" value="+ public member; signatures abbreviated. Inheritance and relationships are code-derived; selected members are shown." style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=#ffffff;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;strokeColor=none;fillColor=none;" vertex="1" parent="1">
+          <mxGeometry x="15" y="486" width="870" height="22" as="geometry"/>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

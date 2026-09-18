@@ -28,15 +28,16 @@ describe("CSS animation presence", () => {
   it("preserves toast entry/exit while making dismissed content noninteractive", () => {
     useUiStore.setState({ toasts: [{ id: "one", title: "Request accepted", tone: "info" }] });
     const { unmount } = render(<ToastCenter />);
-    const toast = screen.getByRole("button", { name: "Request accepted" });
+    const dismiss = screen.getByRole("button", { name: "Dismiss Request accepted" });
+    const toast = dismiss.parentElement!;
     expect(toast).toHaveClass("toast-presence");
     expect(toast).toHaveAttribute("data-open", "true");
-    fireEvent.click(toast);
+    fireEvent.click(dismiss);
     expect(toast).toHaveAttribute("data-open", "false");
     expect(toast).toHaveAttribute("aria-hidden", "true");
-    expect(toast).toBeDisabled();
+    expect(dismiss).toBeDisabled();
     act(() => useUiStore.getState().pushToast({ title: "Another request", tone: "info" }));
-    expect(screen.getByRole("button", { name: "Another request" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Dismiss Another request" })).toBeEnabled();
     act(() => vi.advanceTimersByTime(200));
     expect(screen.queryByText("Request accepted")).not.toBeInTheDocument();
     unmount();

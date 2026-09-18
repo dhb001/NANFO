@@ -9,19 +9,12 @@ interface AsyncStateProps {
 export function AsyncState({ title, description, action }: AsyncStateProps) {
   return (
     <div
-      className="async-state-enter"
-      style={{
-        border: "1px solid var(--line-soft)",
-        borderRadius: "var(--radius-m)",
-        background: "var(--surface-card)",
-        padding: "1rem",
-        boxShadow: "var(--shadow-low)",
-      }}
+      className="async-state-enter async-state"
       role="status"
       aria-live="polite"
     >
-      <div style={{ fontWeight: 700, marginBottom: "0.35rem" }}>{title}</div>
-      {description ? <div style={{ color: "var(--ink-3)", marginBottom: action ? "0.75rem" : 0 }}>{description}</div> : null}
+      <div className="async-title">{title}</div>
+      {description ? <div className="async-description">{description}</div> : null}
       {action}
     </div>
   );

@@ -1,0 +1,58 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<mxfile host="app.diagrams.net" agent="NANFO diagram source" type="device">
+  <diagram id="fig4-11" name="4.11 Operator evidence-view wireframe"><mxGraphModel dx="600" dy="585" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="600" pageHeight="690" math="0" shadow="0" background="#ffffff">
+      <root>
+        <mxCell id="0" style=""/>
+        <mxCell id="1" parent="0" style=""/>
+        <mxCell id="f11-frame" value="" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=#ffffff;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;" vertex="1" parent="1">
+          <mxGeometry x="8" y="10" width="584" height="646" as="geometry"/>
+        </mxCell>
+        <mxCell id="f11-header" value="NANFO   |   Workspace [select]   |   Network [select]" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=#ffffff;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;fontStyle=1;align=left;spacingLeft=12;" vertex="1" parent="1">
+          <mxGeometry x="8" y="10" width="584" height="48" as="geometry"/>
+        </mxCell>
+        <mxCell id="f11-nav" value="Topology  |  Telemetry  |  Scenarios  |  Intents  |  Alerts  |  Reports" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=#ffffff;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;" vertex="1" parent="1">
+          <mxGeometry x="8" y="58" width="584" height="44" as="geometry"/>
+        </mxCell>
+        <mxCell id="f11-context" value="Mode: [state]  |  Freshness: [state]  |  Access: [permissions]" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=#ffffff;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;align=left;" vertex="1" parent="1">
+          <mxGeometry x="23" y="119" width="554" height="41" as="geometry"/>
+        </mxCell>
+        <mxCell id="f11-topology" value="Topology / spatial inspection" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=#ffffff;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;verticalAlign=top;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="23" y="182" width="320" height="210" as="geometry"/>
+        </mxCell>
+        <mxCell id="f11-n1" value="Device" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=#ffffff;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;rounded=1;" vertex="1" parent="1">
+          <mxGeometry x="58" y="261" width="76" height="34" as="geometry"/>
+        </mxCell>
+        <mxCell id="f11-n2" value="Device" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=#ffffff;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;rounded=1;" vertex="1" parent="1">
+          <mxGeometry x="238" y="261" width="76" height="34" as="geometry"/>
+        </mxCell>
+        <mxCell id="f11-n3" value="Device" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=#ffffff;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;rounded=1;" vertex="1" parent="1">
+          <mxGeometry x="148" y="341" width="76" height="34" as="geometry"/>
+        </mxCell>
+        <mxCell id="f11-link1" value="" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=#ffffff;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;fillColor=none;edgeStyle=none;rounded=0;endArrow=none;endFill=0;endSize=8;startArrow=none;" edge="1" parent="1" source="f11-n1" target="f11-n2">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="f11-link2" value="" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=#ffffff;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;fillColor=none;edgeStyle=none;rounded=0;endArrow=none;endFill=0;endSize=8;startArrow=none;" edge="1" parent="1" source="f11-n1" target="f11-n3">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="f11-link3" value="" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=#ffffff;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;fillColor=none;edgeStyle=none;rounded=0;endArrow=none;endFill=0;endSize=8;startArrow=none;" edge="1" parent="1" source="f11-n2" target="f11-n3">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="f11-measure" value="Measurement details" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=#ffffff;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;verticalAlign=top;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="359" y="182" width="218" height="210" as="geometry"/>
+        </mxCell>
+        <mxCell id="f11-measuredetails" value="Metric: [name]&#10;Value / unit: [available data]&#10;Observed at: [time]&#10;Source: [provenance]&#10;Stale / unavailable: [state]" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=none;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;strokeColor=none;fillColor=none;align=left;" vertex="1" parent="1">
+          <mxGeometry x="368" y="230" width="200" height="145" as="geometry"/>
+        </mxCell>
+        <mxCell id="f11-evidence" value="Proposal and execution evidence" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=#ffffff;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;verticalAlign=top;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="23" y="411" width="554" height="220" as="geometry"/>
+        </mxCell>
+        <mxCell id="f11-evdetails" value="Plan / validation: [reference]  |  Approval: [state]&#10;Execution: [identity / phase]  |  Readback: [evidence]&#10;Restoration: [verified or unresolved]" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=none;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;strokeColor=none;fillColor=none;align=left;" vertex="1" parent="1">
+          <mxGeometry x="35" y="456" width="528" height="75" as="geometry"/>
+        </mxCell>
+        <mxCell id="f11-note" value="Schematic navigation and information hierarchy; no sample result is asserted." style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=none;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;strokeColor=none;fillColor=none;" vertex="1" parent="1">
+          <mxGeometry x="8" y="658" width="584" height="23" as="geometry"/>
+        </mxCell>
+      <mxCell id="f11-controls" value="Open intent details    |    Inspect readback    |    Review restoration" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=#ffffff;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;" vertex="1" parent="1"><mxGeometry x="36" y="542" width="527" height="36" as="geometry"/></mxCell><mxCell id="f11-scopedcontrols" value="Action controls follow current permission and lifecycle state.&#10;Loading / empty / error / stale states remain explicit." style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=#ffffff;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;strokeColor=none;fillColor=none;align=left;" vertex="1" parent="1"><mxGeometry x="36" y="585" width="527" height="44" as="geometry"/></mxCell></root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

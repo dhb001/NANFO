@@ -2,6 +2,18 @@
 
 Lightweight chronological notes for decisions that do not require a full ADR.
 
+## 2026-09-18: Network Instrument Visual Direction
+
+User-requested visual redesign: ink navigation, warm neutral work surfaces, copper
+brand accents, editorial headings and schematic linework. Presentation scope is
+the shared shell/primitives, login and overview. Existing feature routes inherit
+the shared visual system. API, database, permissions and realtime semantics remain
+owned by their existing modules; no new contracts or dependencies are required.
+Overview prioritizes selected network context; connection states retain their exact
+values and decorative linework is not presented as measured topology. Risks are
+responsive overflow, contrast, keyboard regressions and the tight existing bundle
+budget; verify with frontend gates and desktop/mobile browser checks.
+
 ## ADR-019: Real Artifacts and Explicit Acceptance Gaps
 
 Report generation must produce verified bytes, not metadata. Alert detection owns

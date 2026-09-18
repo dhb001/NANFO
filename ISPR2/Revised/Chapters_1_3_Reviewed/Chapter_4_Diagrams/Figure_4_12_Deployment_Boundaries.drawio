@@ -1,0 +1,59 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<mxfile host="app.diagrams.net" agent="NANFO diagram source" type="device">
+  <diagram id="fig4-12" name="4.12 Deployment and laboratory file-handoff boundaries"><mxGraphModel dx="600" dy="681" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="600" pageHeight="681" math="0" shadow="0" background="#ffffff">
+      <root>
+        <mxCell id="0" style=""/>
+        <mxCell id="1" parent="0" style=""/>
+        <mxCell id="f12-browser" value="Operator browser" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=#ffffff;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;" vertex="1" parent="1">
+          <mxGeometry x="166" y="8" width="268" height="54" as="geometry"/>
+        </mxCell>
+        <mxCell id="f12-host" value="Local deployment host" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=#ffffff;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;verticalAlign=top;fontStyle=1;spacingTop=8;" vertex="1" parent="1">
+          <mxGeometry x="8" y="102" width="584" height="570" as="geometry"/>
+        </mxCell>
+        <mxCell id="f12-gateway" value="Frontend gateway" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=#ffffff;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;" vertex="1" parent="1">
+          <mxGeometry x="172" y="147" width="258" height="55" as="geometry"/>
+        </mxCell>
+        <mxCell id="f12-private" value="Private application network" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=#ffffff;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;verticalAlign=top;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="23" y="241" width="554" height="208" as="geometry"/>
+        </mxCell>
+        <mxCell id="f12-api" value="One API process" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=#ffffff;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;" vertex="1" parent="1">
+          <mxGeometry x="42" y="282" width="211" height="59" as="geometry"/>
+        </mxCell>
+        <mxCell id="f12-workers" value="Independent workers&#10;Execution, autonomy, simulation,&#10;override, report and alert" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=#ffffff;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;" vertex="1" parent="1">
+          <mxGeometry x="337" y="282" width="221" height="76" as="geometry"/>
+        </mxCell>
+        <mxCell id="f12-stores" value="Private stores: PostgreSQL / Neo4j / Redis&#10;Owned records / topology / sessions and streams" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=#ffffff;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;" vertex="1" parent="1">
+          <mxGeometry x="135" y="383" width="347" height="57" as="geometry"/>
+        </mxCell>
+        <mxCell id="f12-files" value="Shared handoff volumes&#10;Commands · snapshots · results" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=#ffffff;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;" vertex="1" parent="1">
+          <mxGeometry x="23" y="497" width="270" height="83" as="geometry"/>
+        </mxCell>
+        <mxCell id="f12-lab" value="Optional privileged lab&#10;network_mode: none" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=#ffffff;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;" vertex="1" parent="1">
+          <mxGeometry x="343" y="497" width="230" height="83" as="geometry"/>
+        </mxCell>
+        <mxCell id="f12-entrytext" value="Loopback&#10;:8787&#10;HTTP / WS" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=none;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;strokeColor=none;fillColor=none;spacing=1;" vertex="1" parent="1">
+          <mxGeometry x="8" y="36" width="128" height="61" as="geometry"/>
+        </mxCell>
+        <mxCell id="f12-proxy" value="" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=#ffffff;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;fillColor=none;edgeStyle=none;rounded=0;endArrow=none;endFill=0;endSize=8;startArrow=none;exitX=0.2;exitY=1;exitDx=0;exitDy=0;exitPerimeter=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;entryPerimeter=0;" edge="1" parent="1" source="f12-gateway" target="f12-api">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="148" y="224"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="f12-proxytext" value="HTTP / WS" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=none;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;strokeColor=none;fillColor=none;spacing=1;" vertex="1" parent="1">
+          <mxGeometry x="183" y="210" width="140" height="27" as="geometry"/>
+        </mxCell>
+        <mxCell id="f12-filepermissions" value="Execution worker: command writer; snapshot/result reader" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=none;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;strokeColor=none;fillColor=none;spacing=1;" vertex="1" parent="1">
+          <mxGeometry x="24" y="452" width="537" height="25" as="geometry"/>
+        </mxCell>
+        <mxCell id="f12-labpermissions" value="Lab: read commands; write snapshots/results" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=none;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;strokeColor=none;fillColor=none;" vertex="1" parent="1">
+          <mxGeometry x="96" y="584" width="472" height="29" as="geometry"/>
+        </mxCell>
+        <mxCell id="f12-persistent" value="Persistent volumes: relational, graph, Redis and report data.&#10;Trusted bindings and approved model files are separate read-only mounts.&#10;API and workers have no Docker socket or direct host-switch access." style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=none;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;strokeColor=none;fillColor=none;" vertex="1" parent="1">
+          <mxGeometry x="21" y="606" width="558" height="61" as="geometry"/>
+        </mxCell>
+      <mxCell id="f12-entry" value="" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=#ffffff;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;fillColor=none;edgeStyle=none;rounded=0;endArrow=none;endFill=0;endSize=8;startArrow=none;exitX=0;exitY=0.5;exitDx=0;exitDy=0;exitPerimeter=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;entryPerimeter=0;" edge="1" parent="1" source="f12-browser" target="f12-gateway"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="146" y="35"/><mxPoint x="146" y="172"/></Array></mxGeometry></mxCell><mxCell id="f12-apidb" value="" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=#ffffff;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;fillColor=none;edgeStyle=none;rounded=0;endArrow=none;endFill=0;endSize=8;startArrow=none;exitX=0.5;exitY=1;exitDx=0;exitDy=0;exitPerimeter=0;entryX=0.15;entryY=0;entryDx=0;entryDy=0;entryPerimeter=0;" edge="1" parent="1" source="f12-api" target="f12-stores"><mxGeometry relative="1" as="geometry"/></mxCell><mxCell id="f12-workdb" value="" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=#ffffff;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;fillColor=none;edgeStyle=none;rounded=0;endArrow=none;endFill=0;endSize=8;startArrow=none;exitX=0.5;exitY=1;exitDx=0;exitDy=0;exitPerimeter=0;entryX=0.85;entryY=0;entryDx=0;entryDy=0;entryPerimeter=0;" edge="1" parent="1" source="f12-workers" target="f12-stores"><mxGeometry relative="1" as="geometry"/></mxCell><mxCell id="f12-workerfiles" value="" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=#ffffff;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;fillColor=none;edgeStyle=none;rounded=0;endArrow=none;endFill=0;endSize=8;startArrow=none;exitX=1;exitY=0.5;exitDx=0;exitDy=0;exitPerimeter=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;entryPerimeter=0;" edge="1" parent="1" source="f12-workers" target="f12-files"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="581" y="320"/><mxPoint x="581" y="487"/><mxPoint x="158" y="487"/></Array></mxGeometry></mxCell><mxCell id="f12-filelab" value="" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=#ffffff;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;fillColor=none;edgeStyle=none;rounded=0;endArrow=none;endFill=0;endSize=8;startArrow=none;exitX=1;exitY=0.5;exitDx=0;exitDy=0;exitPerimeter=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;entryPerimeter=0;" edge="1" parent="1" source="f12-files" target="f12-lab"><mxGeometry relative="1" as="geometry"/></mxCell></root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

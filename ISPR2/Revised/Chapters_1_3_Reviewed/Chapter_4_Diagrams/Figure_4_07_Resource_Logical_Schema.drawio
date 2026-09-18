@@ -1,0 +1,105 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<mxfile host="app.diagrams.net" agent="NANFO diagram source" type="device">
+  <diagram id="fig4-7" name="4.7 Logical identity, scope and observation schema"><mxGraphModel dx="600" dy="750" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="600" pageHeight="750" math="0" shadow="0" background="#ffffff">
+      <root>
+        <mxCell id="0" style=""/>
+        <mxCell id="1" parent="0" style=""/>
+        <mxCell id="f7-org" value="Organization" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=#ffffff;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;shape=swimlane;startSize=36;fontStyle=1;horizontal=1;swimlaneFillColor=#ffffff;" vertex="1" parent="1">
+          <mxGeometry x="18" y="15" width="230" height="90" as="geometry"/>
+        </mxCell>
+        <mxCell id="f7-orgattrs" value="org_id {PK}&#10;name; slug" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=none;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacing=0;" vertex="1" parent="f7-org">
+          <mxGeometry x="8" y="39" width="214" height="48" as="geometry"/>
+        </mxCell>
+        <mxCell id="f7-user" value="User" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=#ffffff;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;shape=swimlane;startSize=36;fontStyle=1;horizontal=1;swimlaneFillColor=#ffffff;" vertex="1" parent="1">
+          <mxGeometry x="352" y="15" width="230" height="90" as="geometry"/>
+        </mxCell>
+        <mxCell id="f7-userattrs" value="user_id {PK}&#10;email; is_active" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=none;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacing=0;" vertex="1" parent="f7-user">
+          <mxGeometry x="8" y="39" width="214" height="48" as="geometry"/>
+        </mxCell>
+        <mxCell id="f7-member" value="OrgMember" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=#ffffff;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;shape=swimlane;startSize=36;fontStyle=1;horizontal=1;swimlaneFillColor=#ffffff;" vertex="1" parent="1">
+          <mxGeometry x="352" y="198" width="230" height="113" as="geometry"/>
+        </mxCell>
+        <mxCell id="f7-memberattrs" value="org_id {PK, FK}&#10;user_id {PK, REF}&#10;org_role" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=none;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacing=0;" vertex="1" parent="f7-member">
+          <mxGeometry x="8" y="39" width="214" height="71" as="geometry"/>
+        </mxCell>
+        <mxCell id="f7-workspace" value="Workspace" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=#ffffff;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;shape=swimlane;startSize=36;fontStyle=1;horizontal=1;swimlaneFillColor=#ffffff;" vertex="1" parent="1">
+          <mxGeometry x="18" y="198" width="230" height="113" as="geometry"/>
+        </mxCell>
+        <mxCell id="f7-workspaceattrs" value="workspace_id {PK}&#10;org_id {FK}&#10;name" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=none;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacing=0;" vertex="1" parent="f7-workspace">
+          <mxGeometry x="8" y="39" width="214" height="71" as="geometry"/>
+        </mxCell>
+        <mxCell id="f7-network" value="Network" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=#ffffff;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;shape=swimlane;startSize=36;fontStyle=1;horizontal=1;swimlaneFillColor=#ffffff;" vertex="1" parent="1">
+          <mxGeometry x="18" y="397" width="230" height="113" as="geometry"/>
+        </mxCell>
+        <mxCell id="f7-networkattrs" value="network_id {PK}&#10;workspace_id {REF}&#10;name; cidr" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=none;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacing=0;" vertex="1" parent="f7-network">
+          <mxGeometry x="8" y="39" width="214" height="71" as="geometry"/>
+        </mxCell>
+        <mxCell id="f7-device" value="Device" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=#ffffff;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;shape=swimlane;startSize=36;fontStyle=1;horizontal=1;swimlaneFillColor=#ffffff;" vertex="1" parent="1">
+          <mxGeometry x="352" y="397" width="230" height="113" as="geometry"/>
+        </mxCell>
+        <mxCell id="f7-deviceattrs" value="device_id {PK}&#10;network_id {FK}&#10;hostname; device_type" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=none;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacing=0;" vertex="1" parent="f7-device">
+          <mxGeometry x="8" y="39" width="214" height="71" as="geometry"/>
+        </mxCell>
+        <mxCell id="f7-telemetry" value="TelemetryRecord" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=#ffffff;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;shape=swimlane;startSize=36;fontStyle=1;horizontal=1;swimlaneFillColor=#ffffff;" vertex="1" parent="1">
+          <mxGeometry x="110" y="583" width="380" height="113" as="geometry"/>
+        </mxCell>
+        <mxCell id="f7-telemetryattrs" value="record_id {PK}; event_id {UQ}&#10;device_id; network_id; workspace_id {REF}&#10;metric; value; unit; observed_at; source; tags" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=none;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacing=0;" vertex="1" parent="f7-telemetry">
+          <mxGeometry x="8" y="39" width="364" height="71" as="geometry"/>
+        </mxCell>
+        <mxCell id="f7-om" value="" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=#ffffff;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;fillColor=none;edgeStyle=none;rounded=0;endArrow=none;endFill=0;endSize=8;startArrow=none;exitX=1;exitY=0.5;exitDx=0;exitDy=0;exitPerimeter=0;entryX=0;entryY=0.2;entryDx=0;entryDy=0;entryPerimeter=0;" edge="1" parent="1" source="f7-org" target="f7-member">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="298" y="61"/>
+              <mxPoint x="298" y="220"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="f7-om1" value="1" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=none;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;strokeColor=none;fillColor=none;spacing=1;" vertex="1" parent="1">
+          <mxGeometry x="254" y="22" width="28" height="25" as="geometry"/>
+        </mxCell>
+        <mxCell id="f7-omm" value="0..*" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=none;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;strokeColor=none;fillColor=none;spacing=1;" vertex="1" parent="1">
+          <mxGeometry x="301" y="184" width="48" height="25" as="geometry"/>
+        </mxCell>
+        <mxCell id="f7-ow" value="" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=#ffffff;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;fillColor=none;edgeStyle=none;rounded=0;endArrow=none;endFill=0;endSize=8;startArrow=none;exitX=0.5;exitY=1;exitDx=0;exitDy=0;exitPerimeter=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;entryPerimeter=0;" edge="1" parent="1" source="f7-org" target="f7-workspace">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="f7-ow1" value="1" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=none;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;strokeColor=none;fillColor=none;spacing=1;" vertex="1" parent="1">
+          <mxGeometry x="139" y="112" width="28" height="26" as="geometry"/>
+        </mxCell>
+        <mxCell id="f7-owm" value="0..*" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=none;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;strokeColor=none;fillColor=none;spacing=1;" vertex="1" parent="1">
+          <mxGeometry x="137" y="164" width="51" height="26" as="geometry"/>
+        </mxCell>
+        <mxCell id="f7-mu" value="" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=#ffffff;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;fillColor=none;edgeStyle=none;rounded=0;endArrow=open;endFill=0;endSize=8;startArrow=none;dashed=1;dashPattern=6 4;exitX=0.5;exitY=0;exitDx=0;exitDy=0;exitPerimeter=0;entryX=0.5;entryY=1;entryDx=0;entryDy=0;entryPerimeter=0;" edge="1" parent="1" source="f7-member" target="f7-user">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="f7-mult" value="references" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=none;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;strokeColor=none;fillColor=none;spacing=1;" vertex="1" parent="1">
+          <mxGeometry x="468" y="135" width="116" height="26" as="geometry"/>
+        </mxCell>
+        <mxCell id="f7-nw" value="" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=#ffffff;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;fillColor=none;edgeStyle=none;rounded=0;endArrow=open;endFill=0;endSize=8;startArrow=none;dashed=1;dashPattern=6 4;exitX=0.5;exitY=0;exitDx=0;exitDy=0;exitPerimeter=0;entryX=0.5;entryY=1;entryDx=0;entryDy=0;entryPerimeter=0;" edge="1" parent="1" source="f7-network" target="f7-workspace">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="f7-nwlab" value="references" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=none;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;strokeColor=none;fillColor=none;spacing=1;" vertex="1" parent="1">
+          <mxGeometry x="135" y="344" width="110" height="26" as="geometry"/>
+        </mxCell>
+        <mxCell id="f7-nd" value="" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=#ffffff;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;fillColor=none;edgeStyle=none;rounded=0;endArrow=none;endFill=0;endSize=8;startArrow=none;exitX=1;exitY=0.5;exitDx=0;exitDy=0;exitPerimeter=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;entryPerimeter=0;" edge="1" parent="1" source="f7-network" target="f7-device">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="f7-nd1" value="1" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=none;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;strokeColor=none;fillColor=none;spacing=1;" vertex="1" parent="1">
+          <mxGeometry x="249" y="424" width="27" height="26" as="geometry"/>
+        </mxCell>
+        <mxCell id="f7-ndm" value="0..*" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=none;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;strokeColor=none;fillColor=none;spacing=1;" vertex="1" parent="1">
+          <mxGeometry x="298" y="424" width="51" height="26" as="geometry"/>
+        </mxCell>
+        <mxCell id="f7-td" value="" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=#ffffff;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;fillColor=none;edgeStyle=none;rounded=0;endArrow=open;endFill=0;endSize=8;startArrow=none;dashed=1;dashPattern=6 4;exitX=0.86;exitY=0;exitDx=0;exitDy=0;exitPerimeter=0;entryX=0.5;entryY=1;entryDx=0;entryDy=0;entryPerimeter=0;" edge="1" parent="1" source="f7-telemetry" target="f7-device">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="f7-tdlabel" value="device reference" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=none;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;strokeColor=none;fillColor=none;spacing=1;" vertex="1" parent="1">
+          <mxGeometry x="462" y="530" width="130" height="28" as="geometry"/>
+        </mxCell>
+        <mxCell id="f7-key" value="PK = primary key; FK = within-module foreign key; REF = logical reference.&#10;UQ = unique. 1 = exactly one; 0..* = zero or more. Selected attributes shown." style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=none;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;strokeColor=none;fillColor=none;" vertex="1" parent="1">
+          <mxGeometry x="8" y="700" width="584" height="38" as="geometry"/>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

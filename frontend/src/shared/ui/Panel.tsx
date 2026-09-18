@@ -10,34 +10,19 @@ export function Panel({ title, subtitle, action, children }: PanelProps) {
   const titleId = useId();
   return (
     <section
+      className="panel"
       aria-labelledby={title ? titleId : undefined}
-      style={{
-        border: "1px solid var(--line-soft)",
-        borderRadius: "var(--radius-m)",
-        background: "var(--surface-card)",
-        boxShadow: "var(--shadow-low)",
-        overflow: "hidden",
-      }}
     >
       {title ? (
-        <header
-          style={{
-            padding: "0.8rem 0.9rem",
-            borderBottom: "1px solid var(--line-soft)",
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            gap: "0.8rem",
-          }}
-        >
+        <header className="panel-heading">
           <div>
-            <h3 id={titleId} style={{ fontSize: "0.98rem", fontWeight: 700 }}>{title}</h3>
-            {subtitle ? <p style={{ color: "var(--ink-3)", fontSize: "0.84rem" }}>{subtitle}</p> : null}
+            <h3 id={titleId}>{title}</h3>
+            {subtitle ? <p>{subtitle}</p> : null}
           </div>
           {action}
         </header>
       ) : null}
-      <div style={{ padding: "0.9rem" }}>{children}</div>
+      <div className="panel-body">{children}</div>
     </section>
   );
 }

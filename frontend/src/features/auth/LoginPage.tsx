@@ -7,6 +7,8 @@ import { AsyncState } from "@/shared/ui/AsyncState";
 import { toErrorMessage } from "@/shared/lib/errors";
 import { getProfile } from "@/features/auth/api";
 import { useUiStore } from "@/shared/state/ui-store";
+import { BrandMark } from "@/shared/ui/BrandMark";
+import { NetworkArtwork } from "@/shared/ui/NetworkArtwork";
 import "@/features/auth/session";
 
 export function LoginPage() {
@@ -52,27 +54,22 @@ export function LoginPage() {
   }
 
   return (
-    <div style={{ minHeight: "100vh", display: "grid", placeItems: "center", padding: "1rem" }}>
-      <div
-        style={{
-          width: "min(460px, 100%)",
-          border: "1px solid var(--line-soft)",
-          borderRadius: "var(--radius-l)",
-          background: "var(--surface-card)",
-          boxShadow: "var(--shadow-mid)",
-          padding: "1.1rem",
-        }}
-      >
-        <h1 style={{ fontSize: "1.4rem", marginBottom: "0.3rem" }}>NANFO Access</h1>
-        <p style={{ color: "var(--ink-3)", marginBottom: "0.9rem" }}>
-          Authenticate with your operator account to continue. Sessions are local to this tab; sign in separately in other tabs.
-        </p>
+    <main className="login-layout">
+      <section className="login-story" aria-label="NANFO network intelligence">
+        <BrandMark />
+        <div className="login-story-copy"><div className="eyebrow">Observe. Understand. Orchestrate.</div><h2>Complex networks.<br /><em>Clear perspective.</em></h2></div>
+        <NetworkArtwork />
+        <div className="login-story-footer"><span>Network operations, considered.</span><span>N / 01</span></div>
+      </section>
+      <div className="login-form-side">
+      <div className="login-form">
+        <div className="eyebrow">Operator workspace</div>
+        <h1>NANFO Access</h1>
+        <p className="login-intro">Welcome back. Sign in to your network workspace.</p>
 
-        <form onSubmit={onSubmit} style={{ display: "grid", gap: "0.75rem" }}>
-          <label style={{ display: "grid", gap: "0.35rem" }}>
-            <span className="mono" style={{ fontSize: "0.8rem", color: "var(--ink-3)" }}>
-              Email
-            </span>
+        <form onSubmit={onSubmit}>
+          <label>
+            <span>Email</span>
             <input
               value={email}
               onChange={(event) => setEmail(event.target.value)}
@@ -80,39 +77,25 @@ export function LoginPage() {
               autoComplete="username"
               required
               autoFocus
-              style={{
-                border: "1px solid var(--line-soft)",
-                borderRadius: "10px",
-                padding: "0.5rem 0.56rem",
-                background: "white",
-              }}
+              placeholder="you@organization.com"
             />
           </label>
 
-          <label style={{ display: "grid", gap: "0.35rem" }}>
-            <span className="mono" style={{ fontSize: "0.8rem", color: "var(--ink-3)" }}>
-              Password
-            </span>
+          <label>
+            <span>Password</span>
             <input
               value={password}
               onChange={(event) => setPassword(event.target.value)}
               type="password"
               autoComplete="current-password"
               required
-              style={{
-                border: "1px solid var(--line-soft)",
-                borderRadius: "10px",
-                padding: "0.5rem 0.56rem",
-                background: "white",
-              }}
+              placeholder="Enter your password"
             />
           </label>
 
-          <div style={{ display: "flex", justifyContent: "flex-end" }}>
             <Button type="submit" disabled={isSubmitting}>
               {isSubmitting ? "Signing In..." : "Sign In"}
             </Button>
-          </div>
         </form>
 
         {loginMutation.isError ? (
@@ -123,7 +106,9 @@ export function LoginPage() {
             />
           </div>
         ) : null}
+        <p className="login-note">Sessions stay in this tab. Sign in separately in other tabs to access your workspace.</p>
       </div>
-    </div>
+      </div>
+    </main>
   );
 }

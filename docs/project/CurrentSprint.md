@@ -1,5 +1,19 @@
 # Current Sprint State
 
+## UI Visual Redesign (2026-09-18)
+
+- Delivered user-requested network-instrument visual direction: ink navigation,
+  warm neutral surfaces, copper actions, custom brand/icon assets, revised login
+  and overview, shared form/panel/status/command-palette styling across routes.
+- Responsive navigation and keyboard skip link verified at 1440/768/390px.
+  Fixed toast overlays intercepting underlying alert controls; explicit accessible
+  dismiss buttons remain interactive. Existing permissions and contracts retained.
+- Frontend typecheck/lint, 487 unit tests, 44 Chromium tests (no retries), production
+  build and unchanged bundle gates pass. Total JS gzip 409.99KiB / 410.16KiB limit.
+- Screenshots inspected for login, overview and shared report forms. Regenerate with
+  `UI_SCREENSHOT_DIR=/tmp/opencode npx playwright test tests/e2e/visual-workspace.spec.ts --retries=0 --workers=1`
+  from `frontend/`. Screenshots use contract fixtures, not live network evidence.
+
 ## Step15 Operations Workstream (ADR020)
 
 - Cold encrypted all-volume backup/fresh restore and external binding/model archives,

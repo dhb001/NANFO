@@ -1,0 +1,99 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<mxfile host="app.diagrams.net" agent="NANFO diagram source" type="device">
+  <diagram id="fig4-5" name="4.5 System architecture and module integration">
+    <mxGraphModel dx="600" dy="595" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="900" pageHeight="545" math="0" shadow="0" background="#ffffff">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+        <mxCell id="f5-backend" value="FastAPI modular monolith" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=#ffffff;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;verticalAlign=top;fontStyle=1;spacingTop=5;" vertex="1" parent="1">
+          <mxGeometry x="292" y="10" width="595" height="384" as="geometry"/>
+        </mxCell>
+        <mxCell id="f5-ui" value="«component»&#10;Operator web client&#10;Topology · telemetry · workflows" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=#ffffff;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;" vertex="1" parent="1">
+          <mxGeometry x="22" y="53" width="232" height="76" as="geometry"/>
+        </mxCell>
+        <mxCell id="f5-api" value="«component» REST / WebSocket interface&#10;Session, scope and request validation" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=#ffffff;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;" vertex="1" parent="1">
+          <mxGeometry x="333" y="53" width="510" height="64" as="geometry"/>
+        </mxCell>
+        <mxCell id="f5-owners" value="Module-owned services" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=#ffffff;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;verticalAlign=top;fontStyle=1;spacingTop=3;" vertex="1" parent="1">
+          <mxGeometry x="316" y="151" width="540" height="130" as="geometry"/>
+        </mxCell>
+        <mxCell id="f5-access" value="Identity / Organization&#10;Users, membership, audit&#10;Network&#10;Inventory and topology" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=#ffffff;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;strokeColor=none;fillColor=none;" vertex="1" parent="1">
+          <mxGeometry x="328" y="185" width="160" height="82" as="geometry"/>
+        </mxCell>
+        <mxCell id="f5-evidence" value="Telemetry / Alert&#10;Metrics and incidents&#10;Report / Plugin&#10;Reports, registry metadata" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=#ffffff;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;strokeColor=none;fillColor=none;" vertex="1" parent="1">
+          <mxGeometry x="507" y="185" width="162" height="82" as="geometry"/>
+        </mxCell>
+        <mxCell id="f5-control" value="Intent / Simulation&#10;Plans and scenarios&#10;Autonomy&#10;Modes and overrides" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=#ffffff;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;strokeColor=none;fillColor=none;" vertex="1" parent="1">
+          <mxGeometry x="687" y="185" width="158" height="82" as="geometry"/>
+        </mxCell>
+        <mxCell id="f5-repos" value="«component»&#10;Module-owned repositories" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=#ffffff;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;" vertex="1" parent="1">
+          <mxGeometry x="326" y="326" width="232" height="57" as="geometry"/>
+        </mxCell>
+        <mxCell id="f5-bus" value="«component»&#10;Domain-event transport" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=#ffffff;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;" vertex="1" parent="1">
+          <mxGeometry x="619" y="326" width="226" height="57" as="geometry"/>
+        </mxCell>
+        <mxCell id="f5-workers" value="«component» Lifecycle workers&#10;Execution · override · simulation&#10;Autonomy · alert · report" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=#ffffff;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;" vertex="1" parent="1">
+          <mxGeometry x="22" y="307" width="232" height="81" as="geometry"/>
+        </mxCell>
+        <mxCell id="f5-lab" value="Laboratory integration boundary&#10;Validated snapshots and bindings&#10;Bounded command / result handoff" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=#ffffff;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;" vertex="1" parent="1">
+          <mxGeometry x="22" y="437.0" width="236" height="83" as="geometry"/>
+        </mxCell>
+        <mxCell id="f5-stores" value="Persistence and coordination&#10;PostgreSQL: owned records&#10;Neo4j: topology relationships&#10;Redis: streams, sessions, leases" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=#ffffff;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;" vertex="1" parent="1">
+          <mxGeometry x="619" y="424.0" width="226" height="96" as="geometry"/>
+        </mxCell>
+        <mxCell id="f5-web" value="" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=#ffffff;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;fillColor=none;edgeStyle=none;rounded=0;endArrow=open;endFill=0;endSize=8;startArrow=none;dashed=1;dashPattern=6 4;exitX=1;exitY=0.5;exitDx=0;exitDy=0;exitPerimeter=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;entryPerimeter=0;" edge="1" parent="1" source="f5-ui" target="f5-api">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="f5-interface" value="" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=#ffffff;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;fillColor=none;edgeStyle=none;rounded=0;endArrow=open;endFill=0;endSize=8;startArrow=none;dashed=1;dashPattern=6 4;exitX=0.5;exitY=1;exitDx=0;exitDy=0;exitPerimeter=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;entryPerimeter=0;" edge="1" parent="1" source="f5-api" target="f5-owners">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="f5-ownersrepos" value="" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=#ffffff;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;fillColor=none;edgeStyle=none;rounded=0;endArrow=open;endFill=0;endSize=8;startArrow=none;dashed=1;dashPattern=6 4;exitX=0.23;exitY=1;exitDx=0;exitDy=0;exitPerimeter=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;entryPerimeter=0;" edge="1" parent="1" source="f5-owners" target="f5-repos">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="f5-ownersbus" value="" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=#ffffff;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;fillColor=none;edgeStyle=none;rounded=0;endArrow=open;endFill=0;endSize=8;startArrow=none;dashed=1;dashPattern=6 4;exitX=0.77;exitY=1;exitDx=0;exitDy=0;exitPerimeter=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;entryPerimeter=0;" edge="1" parent="1" source="f5-owners" target="f5-bus">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="f5-workercontract" value="" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=#ffffff;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;fillColor=none;edgeStyle=none;rounded=0;endArrow=open;endFill=0;endSize=8;startArrow=none;dashed=1;dashPattern=6 4;exitX=1;exitY=0.5;exitDx=0;exitDy=0;exitPerimeter=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;entryPerimeter=0;" edge="1" parent="1" source="f5-workers" target="f5-owners">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="267" y="347"/>
+              <mxPoint x="267" y="215"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="f5-workercontractlabel" value="service contracts" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=#ffffff;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;strokeColor=none;fillColor=none;spacing=0;" vertex="1" parent="1">
+          <mxGeometry x="73" y="261" width="187" height="28" as="geometry"/>
+        </mxCell>
+        <mxCell id="f5-eventlabel" value="Workers use owning services&#10;and durable event contracts." style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=#ffffff;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;strokeColor=none;fillColor=none;" vertex="1" parent="1">
+          <mxGeometry x="17" y="397" width="254" height="36" as="geometry"/>
+        </mxCell>
+        <mxCell id="f5-repostore" value="" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=#ffffff;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;fillColor=none;edgeStyle=none;rounded=0;endArrow=open;endFill=0;endSize=8;startArrow=none;dashed=1;dashPattern=6 4;exitX=1;exitY=0.5;exitDx=0;exitDy=0;exitPerimeter=0;entryX=0.15;entryY=0;entryDx=0;entryDy=0;entryPerimeter=0;" edge="1" parent="1" source="f5-repos" target="f5-stores">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="575" y="354"/>
+              <mxPoint x="575" y="413.0"/>
+              <mxPoint x="652" y="413.0"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="f5-busstore" value="" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=#ffffff;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;fillColor=none;edgeStyle=none;rounded=0;endArrow=open;endFill=0;endSize=8;startArrow=none;dashed=1;dashPattern=6 4;exitX=0.95;exitY=1;exitDx=0;exitDy=0;exitPerimeter=0;entryX=0.95;entryY=0;entryDx=0;entryDy=0;entryPerimeter=0;" edge="1" parent="1" source="f5-bus" target="f5-stores">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="f5-labcontract" value="" style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=#ffffff;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;fillColor=none;edgeStyle=none;rounded=0;endArrow=open;endFill=0;endSize=8;startArrow=none;dashed=1;dashPattern=6 4;exitX=0;exitY=0.8;exitDx=0;exitDy=0;exitPerimeter=0;entryX=1;entryY=0.5;entryDx=0;entryDy=0;entryPerimeter=0;" edge="1" parent="1" source="f5-owners" target="f5-lab">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="279" y="255"/>
+              <mxPoint x="279" y="478.5"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="f5-labdetail" value="Emulated lab owns switch control.&#10;Snapshot / command / result contract.&#10;Frozen-model view: Figure 4.10." style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=#ffffff;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;strokeColor=none;fillColor=none;" vertex="1" parent="1">
+          <mxGeometry x="319" y="449.0" width="284" height="68" as="geometry"/>
+        </mxCell>
+        <mxCell id="f5-ownership" value="Cross-module integration uses public contracts; repositories retain module ownership." style="fontFamily=Times New Roman;fontSize=16;fontColor=#000000;strokeColor=#000000;fillColor=#ffffff;strokeWidth=1.6;shadow=0;html=0;whiteSpace=wrap;spacing=4;strokeColor=none;fillColor=none;" vertex="1" parent="1">
+          <mxGeometry x="164" y="522.0" width="706" height="22" as="geometry"/>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

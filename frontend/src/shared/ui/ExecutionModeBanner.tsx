@@ -7,8 +7,7 @@ export function ExecutionModeBanner() {
     emulation: "Emulation mode: not production. Real control capability is not implied.",
     production: "Production mode: backend authorization and validation still apply. Synthetic records remain labeled.",
   };
-  return <div role="status" style={{ padding: "0.8rem 1rem", borderBottom: "2px solid var(--warn)",
-    background: "var(--surface-card)", fontWeight: 700 }}>
+  return <div role="status" className="execution-banner">
     {mode ? labels[mode] : "Execution mode: Unknown. Awaiting authoritative backend response; no live-control assurance."}
   </div>;
 }

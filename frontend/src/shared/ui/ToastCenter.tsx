@@ -13,29 +13,18 @@ export function ToastCenter() {
   const visible = [...toasts, ...retained.filter((item) => !toasts.some((toast) => toast.id === item.id))];
 
   return (
-    <div style={{ position: "fixed", right: 16, bottom: 16, display: "grid", gap: "0.6rem", zIndex: 1100 }}>
+    <div className="toast-center" aria-live="polite">
         {visible.map((toast) => (
-          <button
+          <div
             key={toast.id}
             className="toast-presence"
             data-open={toasts.some((item) => item.id === toast.id)}
-            disabled={!toasts.some((item) => item.id === toast.id)}
             aria-hidden={!toasts.some((item) => item.id === toast.id) || undefined}
-            onClick={() => dismissToast(toast.id)}
-            style={{
-              width: "min(320px, calc(100vw - 32px))",
-              textAlign: "left",
-              border: "1px solid var(--line-soft)",
-              background: "var(--surface-card)",
-              borderRadius: "12px",
-              boxShadow: "var(--shadow-mid)",
-              padding: "0.65rem 0.7rem",
-              cursor: "pointer",
-            }}
           >
-            <div style={{ fontWeight: 700 }}>{toast.title}</div>
-            {toast.description ? <div style={{ color: "var(--ink-3)", fontSize: "0.82rem" }}>{toast.description}</div> : null}
-          </button>
+            <button className="toast-dismiss" aria-label={`Dismiss ${toast.title}`} disabled={!toasts.some((item) => item.id === toast.id)} onClick={() => dismissToast(toast.id)}>×</button>
+            <div className="async-title">{toast.title}</div>
+            {toast.description ? <div className="stat-caption">{toast.description}</div> : null}
+          </div>
         ))}
     </div>
   );

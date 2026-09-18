@@ -1,5 +1,26 @@
 # Development Journal
 
+## [2026-09-18] - Network Instrument UI Redesign
+
+- Replaced pastel gradients and uniform rounded cards with an ink/copper/paper
+  visual system, custom schematic brand/navigation assets, grouped navigation,
+  editorial login and network-first overview. Shared fields, buttons, badges,
+  panels and command palette carry the direction through the existing routes.
+- Kept exact connection states, permission filters, session/context reset and
+  inventory actions; unknown inventory counts display a dash. Decorative routing
+  study is labeled illustrative rather than live topology.
+- Browser review at desktop/tablet/mobile caught raw report fields and toast
+  interception of alert filters. Unified field styling; toast bodies now pass
+  pointer events through while named close buttons preserve keyboard dismissal.
+- Initial browser failures also exposed an ambiguous Twin link substring and an
+  incorrect new test region name; corrected copy/selector and reran all44 tests.
+- Final typecheck/lint, all487 unit tests and all44 Chromium tests pass without
+  retries. Production build and original bundle limits pass at409.99KiB JS gzip;
+  moved artwork/icons to static SVG and presentation styles to CSS, no dependencies.
+- Visual checks cover login/overview/report screenshots and keyboard navigation,
+  command search, selected network state and document overflow at1440/768/390px.
+  Screenshots: `/tmp/opencode/nanfo-ui-{login,overview,reports}-{width}.png`.
+
 ## [2026-09-17] - Presentation Evidence Pack
 
 - Added `docs/presentation/PRESENTATION_GUIDE.md` and operator-only

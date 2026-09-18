@@ -1,0 +1,255 @@
+{
+  "pages": 125,
+  "index_destinations_verified": 157,
+  "figures": [
+    {
+      "number": 1,
+      "pdf_page": 58,
+      "printed_page": "45",
+      "landscape": false,
+      "caption_same_page": true,
+      "lead_same_page": true,
+      "dpi": 736.8420614295611,
+      "label_pt": 10.944,
+      "bbox": [
+        110.5,
+        179.7503662109375,
+        520.9000244140625,
+        709.850341796875
+      ]
+    },
+    {
+      "number": 2,
+      "pdf_page": 60,
+      "printed_page": "47",
+      "landscape": false,
+      "caption_same_page": true,
+      "lead_same_page": true,
+      "dpi": 736.8420614295611,
+      "label_pt": 10.944,
+      "bbox": [
+        110.5,
+        179.75033569335938,
+        520.9000244140625,
+        685.9003295898438
+      ]
+    },
+    {
+      "number": 3,
+      "pdf_page": 62,
+      "printed_page": "49",
+      "landscape": false,
+      "caption_same_page": true,
+      "lead_same_page": true,
+      "dpi": 736.8420614295611,
+      "label_pt": 10.944,
+      "bbox": [
+        110.5,
+        179.7503662109375,
+        520.9000244140625,
+        699.5503540039062
+      ]
+    },
+    {
+      "number": 4,
+      "pdf_page": 64,
+      "printed_page": "51",
+      "landscape": false,
+      "caption_same_page": true,
+      "lead_same_page": true,
+      "dpi": 736.8420614295611,
+      "label_pt": 10.944,
+      "bbox": [
+        110.5,
+        159.05035400390625,
+        520.9000244140625,
+        668.600341796875
+      ]
+    },
+    {
+      "number": 5,
+      "pdf_page": 67,
+      "printed_page": "54",
+      "landscape": true,
+      "caption_same_page": true,
+      "lead_same_page": true,
+      "dpi": 749.9999962155781,
+      "label_pt": 10.752,
+      "bbox": [
+        118.44999694824219,
+        88.85064697265625,
+        723.25,
+        455.0506591796875
+      ]
+    },
+    {
+      "number": 6,
+      "pdf_page": 68,
+      "printed_page": "55",
+      "landscape": true,
+      "caption_same_page": true,
+      "lead_same_page": true,
+      "dpi": 749.9999962155781,
+      "label_pt": 10.752,
+      "bbox": [
+        118.44999694824219,
+        109.55068969726562,
+        723.25,
+        452.90069580078125
+      ]
+    },
+    {
+      "number": 7,
+      "pdf_page": 71,
+      "printed_page": "58",
+      "landscape": false,
+      "caption_same_page": true,
+      "lead_same_page": true,
+      "dpi": 736.8420614295611,
+      "label_pt": 10.944,
+      "bbox": [
+        110.5,
+        179.75030517578125,
+        520.9000244140625,
+        692.7003173828125
+      ]
+    },
+    {
+      "number": 8,
+      "pdf_page": 73,
+      "printed_page": "60",
+      "landscape": false,
+      "caption_same_page": true,
+      "lead_same_page": true,
+      "dpi": 736.8420614295611,
+      "label_pt": 10.944,
+      "bbox": [
+        110.5,
+        159.05035400390625,
+        520.9000244140625,
+        661.0503540039062
+      ]
+    },
+    {
+      "number": 9,
+      "pdf_page": 75,
+      "printed_page": "62",
+      "landscape": false,
+      "caption_same_page": true,
+      "lead_same_page": true,
+      "dpi": 736.8420614295611,
+      "label_pt": 10.944,
+      "bbox": [
+        110.5,
+        179.75030517578125,
+        520.9000244140625,
+        677.7003173828125
+      ]
+    },
+    {
+      "number": 10,
+      "pdf_page": 77,
+      "printed_page": "64",
+      "landscape": false,
+      "caption_same_page": true,
+      "lead_same_page": true,
+      "dpi": 736.8420614295611,
+      "label_pt": 10.944,
+      "bbox": [
+        110.5,
+        179.7503662109375,
+        520.9000244140625,
+        699.5503540039062
+      ]
+    },
+    {
+      "number": 11,
+      "pdf_page": 79,
+      "printed_page": "66",
+      "landscape": false,
+      "caption_same_page": true,
+      "lead_same_page": true,
+      "dpi": 736.8420614295611,
+      "label_pt": 10.944,
+      "bbox": [
+        110.5,
+        159.05035400390625,
+        520.9000244140625,
+        631.0003662109375
+      ]
+    },
+    {
+      "number": 12,
+      "pdf_page": 81,
+      "printed_page": "68",
+      "landscape": false,
+      "caption_same_page": true,
+      "lead_same_page": true,
+      "dpi": 736.8420614295611,
+      "label_pt": 10.944,
+      "bbox": [
+        110.5,
+        179.7503662109375,
+        520.9000244140625,
+        645.5503540039062
+      ]
+    }
+  ],
+  "chapters_1_2_3_5_preserved": true,
+  "original_images_preserved": true,
+  "text_bounds_errors": [],
+  "native_drawio_pages": 12,
+  "combined_and_individual_models_match": true,
+  "geometry_review": {
+    "figures_checked": 12,
+    "label_connector_conflicts": 0,
+    "shape_text_conflicts": 0,
+    "unintended_connector_crossings": 0,
+    "all_source_images_reviewed_before_integration": true,
+    "all_figure_pages_reviewed": true,
+    "free_standing_label_backgrounds": "transparent"
+  },
+  "file_sha256": {
+    "Figure_4_01_Use_Cases.drawio": "1e2065032f566acf7399c7d67f16bc93d1b445134ee03cd0bf2be46dc1185892",
+    "Figure_4_01_Use_Cases.png": "88be56568bcd71398105c43ae544199fc5bafe4fffa4508839408ce9f2bb6067",
+    "Figure_4_01_Use_Cases.svg": "60989bb42260a31d573b06e9f2eef8beba11e3b9bb3cf124b8e7bb3249003dfb",
+    "Figure_4_02_Telemetry_Activity.drawio": "49e92178669ca64bab03daa9d185a33ca87e42ad351c45f6b08d779fc8d733c2",
+    "Figure_4_02_Telemetry_Activity.png": "b6eef9d49c954c49771349aaef46d4ceb5d901c3d4d5285d6b97016332ea62f1",
+    "Figure_4_02_Telemetry_Activity.svg": "1673df745b105dce44a913809483f5e3a71e64c55f47a1fbf6bd65d7ae74364b",
+    "Figure_4_03_Manual_Execution_Activity.drawio": "4feedcc062e6a5cf9190c90ae203528f2bcdb793ed8b1453493b00e78160fa23",
+    "Figure_4_03_Manual_Execution_Activity.png": "f5c02e6bdb8c611c31449424d972b791b98cf3c9c9876b0bda77a7ec105b70e3",
+    "Figure_4_03_Manual_Execution_Activity.svg": "d057f13e7307a59158e4ceb97d3bc6f8b7e07d4e175fdf5b4c44a2dc0d066b27",
+    "Figure_4_04_Override_State_Machine.drawio": "8e6688701f9ce3654385dc3771e189a599d3f562004c19a43a396da66d43d72c",
+    "Figure_4_04_Override_State_Machine.png": "02d90203d996e6650e8f670dcfdf337a6ccfa9efc8cae38e1432c33fe54393d2",
+    "Figure_4_04_Override_State_Machine.svg": "51f8c0370a95ab4dcc0195aac881b23c548a67dd35a7dd0cbe64694747c90133",
+    "Figure_4_05_Component_Architecture.drawio": "2e7e680e35893557b2a9af9abc5eb63a2f9096f1871d2a03ebd301436a91f035",
+    "Figure_4_05_Component_Architecture.png": "606d21075346e893c85c9eb0036eef87985b91d20ccb3ddcbe7b709cc947fd32",
+    "Figure_4_05_Component_Architecture.svg": "7322d9de82b0a9b1d6e949a822717261c905a20dc8a61ae2edc8628e1b2401f5",
+    "Figure_4_06_Execution_Class_Design.drawio": "ea54db420c1c4f989e1095d147558cda8fb7dc9d526061f6c6a8b54573e054aa",
+    "Figure_4_06_Execution_Class_Design.png": "c1d5693a147ff0d036928284edf154a0f28d5456915fe861e7678091de5c1a18",
+    "Figure_4_06_Execution_Class_Design.svg": "e59bfee1e84e75766f793f0b4ec314696fceb705b3348a8031e975f065d10a4d",
+    "Figure_4_07_Resource_Logical_Schema.drawio": "42a2453a17b91c147d38b75296ac6c223b7643ab2e3834e60b65b4861e9519f4",
+    "Figure_4_07_Resource_Logical_Schema.png": "1082c8dfdd080d1916af8722ccb50c5d60386d6bbd619c4c648f9cff55a601fa",
+    "Figure_4_07_Resource_Logical_Schema.svg": "af2ac73988bcdf35f5a1f5e12439d20b648b9b6fef0638124d3cb69647645961",
+    "Figure_4_08_Execution_Logical_Schema.drawio": "2db643f815518ebcbcf26e0c5dda946e2fbb9f53917baf1e43301947a75f8d19",
+    "Figure_4_08_Execution_Logical_Schema.png": "1acddc943bda200b23b606642bc71e70f081047842f5039a938e1e039eaff12d",
+    "Figure_4_08_Execution_Logical_Schema.svg": "3579c0cd50650e566aed69d7a82fc7fa59fc9db450f70b4b88076d2c272bfe97",
+    "Figure_4_09_Reconnect_Sequence.drawio": "e65fb63219741606d7e6dc42a2674eb3af4c25b66ed7a3bfa564ae4cad4e16c6",
+    "Figure_4_09_Reconnect_Sequence.png": "d7622649d04c273389ed62e379c333513a76fcf691ff16e528a008bd5cef4c75",
+    "Figure_4_09_Reconnect_Sequence.svg": "052b75a9849c9a9f721dda6fec12ca871f2c3db95d6c7bcd5f8053a9b8fe27c3",
+    "Figure_4_10_Model_and_Safeguards.drawio": "36a24731dfebb4a7925c79c769403d8254209191778fc409d2049ebe1de6b5cb",
+    "Figure_4_10_Model_and_Safeguards.png": "f2b54f67199b7f66353d1fd9d122b90d65753cd5aef647c06782e286cafa4017",
+    "Figure_4_10_Model_and_Safeguards.svg": "f0b622abcf162aa06a05e0792a9134a380861aaea9663de39bf2c75948cafb6b",
+    "Figure_4_11_Operator_Wireframe.drawio": "8fb3aac6ac725401b2d5a744a635893b8abd5a41a1859e68442df1d52da328f3",
+    "Figure_4_11_Operator_Wireframe.png": "fa1689d145560d8eb0acc167d8929be5c6195c3e4e1944e52265f0df89e1e3ec",
+    "Figure_4_11_Operator_Wireframe.svg": "64cc3e246be5e7e9b5c3211c90104aafb12c1fdd57ed8e1b3e931eca4739b115",
+    "Figure_4_12_Deployment_Boundaries.drawio": "8592fdc6e45253922df95439f50cc1869a27839203541e043feff8b839768979",
+    "Figure_4_12_Deployment_Boundaries.png": "84801590ee447f66078099dc32b7dcc80ca03b7afd250cb153cfc7a8a5aa2a91",
+    "Figure_4_12_Deployment_Boundaries.svg": "6417a0cf5e9f72874bece44080593a8e5d2bb1acf1ab3e3ee73b3e0d94871251",
+    "NANFO_Chapter_4_All_Diagrams.drawio": "865a79277c54acb4a9b5b1cfaebfbeba23d87b5d78dbbeb0e518065ae4d0bd00"
+  },
+  "document_sha256": {
+    ".odt": "5bbb2c0ab0b026ea05d10ab56bb076701a18ca4797c0f6e4e7a5a90dde422207",
+    ".pdf": "52da21c4ceca56eefebaeefa7bd24d5e374d55d3c30d913c233afa54779cccf6"
+  }
+}
