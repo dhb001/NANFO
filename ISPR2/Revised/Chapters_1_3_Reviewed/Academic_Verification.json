@@ -1,0 +1,1006 @@
+{
+  "pdf_pages": 133,
+  "index_entries_checked": 168,
+  "index_entries": [
+    {
+      "entry": "Declaration and Approvalii",
+      "pdf_page": 2,
+      "printed_page": "ii"
+    },
+    {
+      "entry": "Acknowledgmentiii",
+      "pdf_page": 3,
+      "printed_page": "iii"
+    },
+    {
+      "entry": "Abstractiv",
+      "pdf_page": 4,
+      "printed_page": "iv"
+    },
+    {
+      "entry": "Table of Contentsv",
+      "pdf_page": 5,
+      "printed_page": "v"
+    },
+    {
+      "entry": "List of Figuresix",
+      "pdf_page": 9,
+      "printed_page": "ix"
+    },
+    {
+      "entry": "List of Tablesx",
+      "pdf_page": 10,
+      "printed_page": "x"
+    },
+    {
+      "entry": "List of Abbreviationsxi",
+      "pdf_page": 11,
+      "printed_page": "xi"
+    },
+    {
+      "entry": "List of Equationsxiii",
+      "pdf_page": 13,
+      "printed_page": "xiii"
+    },
+    {
+      "entry": "Chapter 1: Introduction1",
+      "pdf_page": 14,
+      "printed_page": "1"
+    },
+    {
+      "entry": "1.1 Background Information1",
+      "pdf_page": 14,
+      "printed_page": "1"
+    },
+    {
+      "entry": "1.2 Problem Statement2",
+      "pdf_page": 15,
+      "printed_page": "2"
+    },
+    {
+      "entry": "1.3 Research Objectives3",
+      "pdf_page": 16,
+      "printed_page": "3"
+    },
+    {
+      "entry": "1.3.1 General Objective3",
+      "pdf_page": 16,
+      "printed_page": "3"
+    },
+    {
+      "entry": "1.3.2 Specific Objectives3",
+      "pdf_page": 16,
+      "printed_page": "3"
+    },
+    {
+      "entry": "1.4 Research Questions4",
+      "pdf_page": 17,
+      "printed_page": "4"
+    },
+    {
+      "entry": "1.5 Justification4",
+      "pdf_page": 17,
+      "printed_page": "4"
+    },
+    {
+      "entry": "1.6 Scope5",
+      "pdf_page": 18,
+      "printed_page": "5"
+    },
+    {
+      "entry": "1.7 Limitations and Delimitations5",
+      "pdf_page": 18,
+      "printed_page": "5"
+    },
+    {
+      "entry": "1.7.1 Limitations5",
+      "pdf_page": 18,
+      "printed_page": "5"
+    },
+    {
+      "entry": "1.7.2 Delimitations6",
+      "pdf_page": 19,
+      "printed_page": "6"
+    },
+    {
+      "entry": "Chapter 2: Literature Review7",
+      "pdf_page": 20,
+      "printed_page": "7"
+    },
+    {
+      "entry": "2.1 Introduction7",
+      "pdf_page": 20,
+      "printed_page": "7"
+    },
+    {
+      "entry": "2.2 Current State of Campus-Network Congestion Management7",
+      "pdf_page": 20,
+      "printed_page": "7"
+    },
+    {
+      "entry": "2.2.1 Routing and Traffic-Engineering Approaches7",
+      "pdf_page": 20,
+      "printed_page": "7"
+    },
+    {
+      "entry": "2.2.2 Congestion Indicators8",
+      "pdf_page": 21,
+      "printed_page": "8"
+    },
+    {
+      "entry": "2.2.3 Measurement and Operational Challenges9",
+      "pdf_page": 22,
+      "printed_page": "9"
+    },
+    {
+      "entry": "2.3 Related Applications and Research Implementations9",
+      "pdf_page": 22,
+      "printed_page": "9"
+    },
+    {
+      "entry": "2.3.1 Cisco Catalyst Center9",
+      "pdf_page": 22,
+      "printed_page": "9"
+    },
+    {
+      "entry": "2.3.2 Juniper Mist and Marvis AI Assistant11",
+      "pdf_page": 24,
+      "printed_page": "11"
+    },
+    {
+      "entry": "2.3.3 Arista CloudVision12",
+      "pdf_page": 25,
+      "printed_page": "12"
+    },
+    {
+      "entry": "2.3.4 DRL\u2013GNN Routing Optimization13",
+      "pdf_page": 26,
+      "printed_page": "13"
+    },
+    {
+      "entry": "2.3.5 ENERO14",
+      "pdf_page": 27,
+      "printed_page": "14"
+    },
+    {
+      "entry": "2.3.6 RouteNet-Fermi14",
+      "pdf_page": 27,
+      "printed_page": "14"
+    },
+    {
+      "entry": "2.3.7 Graph Transformer Star Routing15",
+      "pdf_page": 28,
+      "printed_page": "15"
+    },
+    {
+      "entry": "2.3.8 Comparative Analysis16",
+      "pdf_page": 29,
+      "printed_page": "16"
+    },
+    {
+      "entry": "2.4 Gaps in Related Works17",
+      "pdf_page": 30,
+      "printed_page": "17"
+    },
+    {
+      "entry": "2.5 Conceptual Framework18",
+      "pdf_page": 31,
+      "printed_page": "18"
+    },
+    {
+      "entry": "Chapter 3: Development Methodology22",
+      "pdf_page": 35,
+      "printed_page": "22"
+    },
+    {
+      "entry": "3.1 Introduction22",
+      "pdf_page": 35,
+      "printed_page": "22"
+    },
+    {
+      "entry": "3.2 Research Paradigm22",
+      "pdf_page": 35,
+      "printed_page": "22"
+    },
+    {
+      "entry": "3.2.1 Data Acquisition22",
+      "pdf_page": 35,
+      "printed_page": "22"
+    },
+    {
+      "entry": "3.2.2 Data Processing23",
+      "pdf_page": 36,
+      "printed_page": "23"
+    },
+    {
+      "entry": "3.2.3 Model Training24",
+      "pdf_page": 37,
+      "printed_page": "24"
+    },
+    {
+      "entry": "3.2.4 Model Validation and Testing25",
+      "pdf_page": 38,
+      "printed_page": "25"
+    },
+    {
+      "entry": "3.3 Software Development Methodology26",
+      "pdf_page": 39,
+      "printed_page": "26"
+    },
+    {
+      "entry": "3.3.1 Justification of the Methodology27",
+      "pdf_page": 40,
+      "printed_page": "27"
+    },
+    {
+      "entry": "3.4 Methodology Diagram27",
+      "pdf_page": 40,
+      "printed_page": "27"
+    },
+    {
+      "entry": "3.4.1 Prototype Planning29",
+      "pdf_page": 42,
+      "printed_page": "29"
+    },
+    {
+      "entry": "3.4.2 Initial Prototype Development29",
+      "pdf_page": 42,
+      "printed_page": "29"
+    },
+    {
+      "entry": "3.4.3 Iterative Refinement29",
+      "pdf_page": 42,
+      "printed_page": "29"
+    },
+    {
+      "entry": "3.4.4 Testing29",
+      "pdf_page": 42,
+      "printed_page": "29"
+    },
+    {
+      "entry": "3.4.5 Final Prototype Evaluation30",
+      "pdf_page": 43,
+      "printed_page": "30"
+    },
+    {
+      "entry": "3.5 System Development Tools and Techniques30",
+      "pdf_page": 43,
+      "printed_page": "30"
+    },
+    {
+      "entry": "3.5.1 Network Emulation and Control31",
+      "pdf_page": 44,
+      "printed_page": "31"
+    },
+    {
+      "entry": "3.5.2 Learning and Decision Inspection31",
+      "pdf_page": 44,
+      "printed_page": "31"
+    },
+    {
+      "entry": "3.5.3 Operational Safeguards32",
+      "pdf_page": 45,
+      "printed_page": "32"
+    },
+    {
+      "entry": "3.6 System Deliverables32",
+      "pdf_page": 45,
+      "printed_page": "32"
+    },
+    {
+      "entry": "3.6.1 System Documentation32",
+      "pdf_page": 45,
+      "printed_page": "32"
+    },
+    {
+      "entry": "3.6.2 Authentication Module33",
+      "pdf_page": 46,
+      "printed_page": "33"
+    },
+    {
+      "entry": "3.6.3 Telemetry Module33",
+      "pdf_page": 46,
+      "printed_page": "33"
+    },
+    {
+      "entry": "3.6.4 Cognitive Routing and Safeguard Module33",
+      "pdf_page": 46,
+      "printed_page": "33"
+    },
+    {
+      "entry": "3.6.5 Administrator Dashboard and Reports33",
+      "pdf_page": 46,
+      "printed_page": "33"
+    },
+    {
+      "entry": "Chapter 4: System Analysis and Design34",
+      "pdf_page": 47,
+      "printed_page": "34"
+    },
+    {
+      "entry": "4.1 Introduction34",
+      "pdf_page": 47,
+      "printed_page": "34"
+    },
+    {
+      "entry": "4.2 System Requirements34",
+      "pdf_page": 47,
+      "printed_page": "34"
+    },
+    {
+      "entry": "4.2.1 Functional Requirements35",
+      "pdf_page": 48,
+      "printed_page": "35"
+    },
+    {
+      "entry": "4.2.2 Non-Functional Requirements38",
+      "pdf_page": 51,
+      "printed_page": "38"
+    },
+    {
+      "entry": "4.2.3 Data Requirements40",
+      "pdf_page": 53,
+      "printed_page": "40"
+    },
+    {
+      "entry": "4.2.4 Interface and Integration Requirements42",
+      "pdf_page": 55,
+      "printed_page": "42"
+    },
+    {
+      "entry": "4.2.5 Requirements Traceability43",
+      "pdf_page": 56,
+      "printed_page": "43"
+    },
+    {
+      "entry": "4.3 System Analysis Diagrams44",
+      "pdf_page": 57,
+      "printed_page": "44"
+    },
+    {
+      "entry": "4.3.1 System Boundary and Actors44",
+      "pdf_page": 57,
+      "printed_page": "44"
+    },
+    {
+      "entry": "4.3.2 Observation-to-Assessment Workflow47",
+      "pdf_page": 60,
+      "printed_page": "47"
+    },
+    {
+      "entry": "4.3.3 Proposal, Approval and Execution Workflow49",
+      "pdf_page": 62,
+      "printed_page": "49"
+    },
+    {
+      "entry": "4.3.4 Cancellation, Override and Failure Behaviour51",
+      "pdf_page": 64,
+      "printed_page": "51"
+    },
+    {
+      "entry": "4.3.5 Information and State Analysis53",
+      "pdf_page": 66,
+      "printed_page": "53"
+    },
+    {
+      "entry": "4.4 System Design Diagrams53",
+      "pdf_page": 66,
+      "printed_page": "53"
+    },
+    {
+      "entry": "4.4.1 System Architecture and Class Design53",
+      "pdf_page": 66,
+      "printed_page": "53"
+    },
+    {
+      "entry": "4.4.2 Logical Data Design57",
+      "pdf_page": 70,
+      "printed_page": "57"
+    },
+    {
+      "entry": "4.4.3 Interface and Event Design62",
+      "pdf_page": 75,
+      "printed_page": "62"
+    },
+    {
+      "entry": "4.4.4 Learning Model and Safeguard Design64",
+      "pdf_page": 77,
+      "printed_page": "64"
+    },
+    {
+      "entry": "4.4.5 Operator Interaction Design66",
+      "pdf_page": 79,
+      "printed_page": "66"
+    },
+    {
+      "entry": "4.4.6 Deployment and Recovery Design68",
+      "pdf_page": 81,
+      "printed_page": "68"
+    },
+    {
+      "entry": "Chapter 5: System Implementation, Testing and Evaluation71",
+      "pdf_page": 84,
+      "printed_page": "71"
+    },
+    {
+      "entry": "5.1 Introduction71",
+      "pdf_page": 84,
+      "printed_page": "71"
+    },
+    {
+      "entry": "5.2 Implementation Environment71",
+      "pdf_page": 84,
+      "printed_page": "71"
+    },
+    {
+      "entry": "5.2.1 Hardware and Deployment Environment71",
+      "pdf_page": 84,
+      "printed_page": "71"
+    },
+    {
+      "entry": "5.2.2 Software, Services and Configuration74",
+      "pdf_page": 87,
+      "printed_page": "74"
+    },
+    {
+      "entry": "5.2.3 Deployment and Reproducibility76",
+      "pdf_page": 89,
+      "printed_page": "76"
+    },
+    {
+      "entry": "5.3 System Implementation78",
+      "pdf_page": 91,
+      "printed_page": "78"
+    },
+    {
+      "entry": "5.3.1 Identity, Resource Scope and Application Data78",
+      "pdf_page": 91,
+      "printed_page": "78"
+    },
+    {
+      "entry": "5.3.2 Emulated Devices and Measurement Acquisition78",
+      "pdf_page": 91,
+      "printed_page": "78"
+    },
+    {
+      "entry": "5.3.3 Communication, Storage and Display79",
+      "pdf_page": 92,
+      "printed_page": "79"
+    },
+    {
+      "entry": "5.3.3.1 Snapshot and Message Format79",
+      "pdf_page": 92,
+      "printed_page": "79"
+    },
+    {
+      "entry": "5.3.3.2 Identity and Trust at the Device Boundary80",
+      "pdf_page": 93,
+      "printed_page": "80"
+    },
+    {
+      "entry": "5.3.3.3 Rate Derivation and Persistence80",
+      "pdf_page": 93,
+      "printed_page": "80"
+    },
+    {
+      "entry": "5.3.3.4 Buffering, Retry and Reconnection81",
+      "pdf_page": 94,
+      "printed_page": "81"
+    },
+    {
+      "entry": "5.3.3.5 Disconnection and Power-Recovery Boundaries81",
+      "pdf_page": 94,
+      "printed_page": "81"
+    },
+    {
+      "entry": "5.3.4 Numerical Simulation and Controlled Network Actions82",
+      "pdf_page": 95,
+      "printed_page": "82"
+    },
+    {
+      "entry": "5.3.5 Dataset, Model Training and Diagnostic Inference83",
+      "pdf_page": 96,
+      "printed_page": "83"
+    },
+    {
+      "entry": "5.3.5.1 Dataset Description and Preparation83",
+      "pdf_page": 96,
+      "printed_page": "83"
+    },
+    {
+      "entry": "5.3.5.2 Training and Selection Chronology85",
+      "pdf_page": 98,
+      "printed_page": "85"
+    },
+    {
+      "entry": "5.3.5.3 Frozen Inference and Operational Integration86",
+      "pdf_page": 99,
+      "printed_page": "86"
+    },
+    {
+      "entry": "5.3.6 Alerts, Reports and Operator Evidence86",
+      "pdf_page": 99,
+      "printed_page": "86"
+    },
+    {
+      "entry": "5.4 Testing and Evaluation87",
+      "pdf_page": 100,
+      "printed_page": "87"
+    },
+    {
+      "entry": "5.4.1 Test Strategy and Acceptance Criteria87",
+      "pdf_page": 100,
+      "printed_page": "87"
+    },
+    {
+      "entry": "5.4.2 Test Cases, Defects and Retesting88",
+      "pdf_page": 101,
+      "printed_page": "88"
+    },
+    {
+      "entry": "5.4.3 Project-Specific Evaluation98",
+      "pdf_page": 111,
+      "printed_page": "98"
+    },
+    {
+      "entry": "5.4.3.1 Held-Out Routing Performance98",
+      "pdf_page": 111,
+      "printed_page": "98"
+    },
+    {
+      "entry": "5.4.3.2 Training Behaviour and Stability103",
+      "pdf_page": 116,
+      "printed_page": "103"
+    },
+    {
+      "entry": "5.4.3.3 Inference, Control and Observation Timing104",
+      "pdf_page": 117,
+      "printed_page": "104"
+    },
+    {
+      "entry": "5.4.3.4 Application and Recovery Evaluation105",
+      "pdf_page": 118,
+      "printed_page": "105"
+    },
+    {
+      "entry": "5.4.4 Results Presentation and Interpretation106",
+      "pdf_page": 119,
+      "printed_page": "106"
+    },
+    {
+      "entry": "5.5 Version Control and Implementation Evidence106",
+      "pdf_page": 119,
+      "printed_page": "106"
+    },
+    {
+      "entry": "5.6 Evaluation Results, Discussion and Limitations109",
+      "pdf_page": 122,
+      "printed_page": "109"
+    },
+    {
+      "entry": "5.6.1 Objective i: Congestion Indicators and Traffic-Management Challenges109",
+      "pdf_page": 122,
+      "printed_page": "109"
+    },
+    {
+      "entry": "5.6.2 Objective ii: Existing Intelligent Network-Management Solutions109",
+      "pdf_page": 122,
+      "printed_page": "109"
+    },
+    {
+      "entry": "5.6.3 Objective iii: Limitations in Timing, Stability and Reproducibility110",
+      "pdf_page": 123,
+      "printed_page": "110"
+    },
+    {
+      "entry": "5.6.4 Objective iv: Design and Development of the Integrated Prototype110",
+      "pdf_page": 123,
+      "printed_page": "110"
+    },
+    {
+      "entry": "5.6.5 Objective v: Comparative Performance Validation111",
+      "pdf_page": 124,
+      "printed_page": "111"
+    },
+    {
+      "entry": "5.6.6 Validity and Generalization Limits111",
+      "pdf_page": 124,
+      "printed_page": "111"
+    },
+    {
+      "entry": "Chapter 6: Conclusions, Recommendations and Future Work113",
+      "pdf_page": 126,
+      "printed_page": "113"
+    },
+    {
+      "entry": "6.1 Introduction113",
+      "pdf_page": 126,
+      "printed_page": "113"
+    },
+    {
+      "entry": "6.2 Conclusions113",
+      "pdf_page": 126,
+      "printed_page": "113"
+    },
+    {
+      "entry": "6.3 Recommendations114",
+      "pdf_page": 127,
+      "printed_page": "114"
+    },
+    {
+      "entry": "6.4 Future Work115",
+      "pdf_page": 128,
+      "printed_page": "115"
+    },
+    {
+      "entry": "References117",
+      "pdf_page": 130,
+      "printed_page": "117"
+    },
+    {
+      "entry": "Appendix 1: Gantt Chart120",
+      "pdf_page": 133,
+      "printed_page": "120"
+    },
+    {
+      "entry": "Figure 2.1: Cisco Catalyst Center network-health dashboard10",
+      "pdf_page": 23,
+      "printed_page": "10"
+    },
+    {
+      "entry": "Figure 2.2: Marvis AI Assistant port-flap analysis12",
+      "pdf_page": 25,
+      "printed_page": "12"
+    },
+    {
+      "entry": "Figure 2.3: Arista CloudVision network operating model13",
+      "pdf_page": 26,
+      "printed_page": "13"
+    },
+    {
+      "entry": "Figure 2.4: Conceptual framework diagram20",
+      "pdf_page": 33,
+      "printed_page": "20"
+    },
+    {
+      "entry": "Figure 3.1: Agile prototyping lifecycle28",
+      "pdf_page": 41,
+      "printed_page": "28"
+    },
+    {
+      "entry": "Figure 4.1: Application actors and use cases46",
+      "pdf_page": 59,
+      "printed_page": "46"
+    },
+    {
+      "entry": "Figure 4.2: Observation validation and assessment activity48",
+      "pdf_page": 61,
+      "printed_page": "48"
+    },
+    {
+      "entry": "Figure 4.3: Approval and verified manual execution50",
+      "pdf_page": 63,
+      "printed_page": "50"
+    },
+    {
+      "entry": "Figure 4.4: Timed-override restoration and guarded return52",
+      "pdf_page": 65,
+      "printed_page": "52"
+    },
+    {
+      "entry": "Figure 4.5: System architecture and module integration55",
+      "pdf_page": 68,
+      "printed_page": "55"
+    },
+    {
+      "entry": "Figure 4.6: Command execution classes and responsibilities56",
+      "pdf_page": 69,
+      "printed_page": "56"
+    },
+    {
+      "entry": "Figure 4.7: Logical identity, scope and observation schema59",
+      "pdf_page": 72,
+      "printed_page": "59"
+    },
+    {
+      "entry": "Figure 4.8: Logical execution, publication and control schema61",
+      "pdf_page": 74,
+      "printed_page": "61"
+    },
+    {
+      "entry": "Figure 4.9: Authorized realtime reconnection and reconciliation63",
+      "pdf_page": 76,
+      "printed_page": "63"
+    },
+    {
+      "entry": "Figure 4.10: Frozen-model inference and autonomous admission design65",
+      "pdf_page": 78,
+      "printed_page": "65"
+    },
+    {
+      "entry": "Figure 4.11: Operator evidence-view wireframe67",
+      "pdf_page": 80,
+      "printed_page": "67"
+    },
+    {
+      "entry": "Figure 4.12: Deployment and laboratory file-handoff boundaries69",
+      "pdf_page": 82,
+      "printed_page": "69"
+    },
+    {
+      "entry": "Figure 5.1: PPO\u2013OSPF differences by impairment direction103",
+      "pdf_page": 116,
+      "printed_page": "103"
+    },
+    {
+      "entry": "Figure A1. Original project time schedule120",
+      "pdf_page": 133,
+      "printed_page": "120"
+    },
+    {
+      "entry": "Table 2.1: Comparative analysis of reviewed systems16",
+      "pdf_page": 29,
+      "printed_page": "16"
+    },
+    {
+      "entry": "Table 3.1: Development tools and their roles30",
+      "pdf_page": 43,
+      "printed_page": "30"
+    },
+    {
+      "entry": "Table 4.1: Functional requirements35",
+      "pdf_page": 48,
+      "printed_page": "35"
+    },
+    {
+      "entry": "Table 4.2: Non-functional requirements38",
+      "pdf_page": 51,
+      "printed_page": "38"
+    },
+    {
+      "entry": "Table 4.3: Objective-to-requirement traceability44",
+      "pdf_page": 57,
+      "printed_page": "44"
+    },
+    {
+      "entry": "Table 4.4: Logical data entities and relationships57",
+      "pdf_page": 70,
+      "printed_page": "57"
+    },
+    {
+      "entry": "Table 5.1: Hardware, runtime and deployment conditions72",
+      "pdf_page": 85,
+      "printed_page": "72"
+    },
+    {
+      "entry": "Table 5.2: Software versions and implementation roles74",
+      "pdf_page": 87,
+      "printed_page": "74"
+    },
+    {
+      "entry": "Table 5.3: Archived input sample before and after preparation84",
+      "pdf_page": 97,
+      "printed_page": "84"
+    },
+    {
+      "entry": "Table 5.4: Test cases and recorded results89",
+      "pdf_page": 102,
+      "printed_page": "89"
+    },
+    {
+      "entry": "Table 5.5: Defects, corrections and retest evidence96",
+      "pdf_page": 109,
+      "printed_page": "96"
+    },
+    {
+      "entry": "Table 5.6: Recorded ADR-014 held-out routing results99",
+      "pdf_page": 112,
+      "printed_page": "99"
+    },
+    {
+      "entry": "Table 5.7: PPO-minus-baseline paired differences and 95% confidence intervals100",
+      "pdf_page": 113,
+      "printed_page": "100"
+    },
+    {
+      "entry": "Table 5.8: Direction-specific PPO-minus-OSPF results101",
+      "pdf_page": 114,
+      "printed_page": "101"
+    },
+    {
+      "entry": "Table 5.9: Recorded inference and control timing104",
+      "pdf_page": 117,
+      "printed_page": "104"
+    },
+    {
+      "entry": "Table 5.10: Implementation and evaluation evidence register107",
+      "pdf_page": 120,
+      "printed_page": "107"
+    },
+    {
+      "entry": "Equation 3.1: Feature transformation23",
+      "pdf_page": 36,
+      "printed_page": "23"
+    },
+    {
+      "entry": "Equation 3.2: Routing reward24",
+      "pdf_page": 37,
+      "printed_page": "24"
+    },
+    {
+      "entry": "Equation 3.3: PPO clipped policy objective24",
+      "pdf_page": 37,
+      "printed_page": "24"
+    },
+    {
+      "entry": "Equation 3.4: Conditional queue envelope32",
+      "pdf_page": 45,
+      "printed_page": "32"
+    },
+    {
+      "entry": "Equation 3.5: Queue-function drift condition32",
+      "pdf_page": 45,
+      "printed_page": "32"
+    }
+  ],
+  "original_images_unchanged": 18,
+  "references": 22,
+  "abstract_words": 179,
+  "abstract_with_keywords_words": 192,
+  "out_of_bounds_text": [],
+  "captions": [
+    "Figure 2.1: Cisco Catalyst Center network-health dashboard",
+    "Figure 2.2: Marvis AI Assistant port-flap analysis",
+    "Figure 2.3: Arista CloudVision network operating model",
+    "Table 2.1: Comparative analysis of reviewed systems",
+    "Figure 2.4: Conceptual framework diagram",
+    "Equation 3.1: Feature transformation",
+    "Equation 3.2: Routing reward",
+    "Equation 3.3: PPO clipped policy objective",
+    "Figure 3.1: Agile prototyping lifecycle",
+    "Table 3.1: Development tools and their roles",
+    "Equation 3.4: Conditional queue envelope",
+    "Equation 3.5: Queue-function drift condition",
+    "Table 4.1: Functional requirements",
+    "Table 4.2: Non-functional requirements",
+    "Table 4.3: Objective-to-requirement traceability",
+    "Figure 4.1: Application actors and use cases",
+    "Figure 4.2: Observation validation and assessment activity",
+    "Figure 4.3: Approval and verified manual execution",
+    "Figure 4.4: Timed-override restoration and guarded return",
+    "Figure 4.5: System architecture and module integration",
+    "Figure 4.6: Command execution classes and responsibilities",
+    "Table 4.4: Logical data entities and relationships",
+    "Figure 4.7: Logical identity, scope and observation schema",
+    "Figure 4.8: Logical execution, publication and control schema",
+    "Figure 4.9: Authorized realtime reconnection and reconciliation",
+    "Figure 4.10: Frozen-model inference and autonomous admission design",
+    "Figure 4.11: Operator evidence-view wireframe",
+    "Figure 4.12: Deployment and laboratory file-handoff boundaries",
+    "Table 5.1: Hardware, runtime and deployment conditions",
+    "Table 5.2: Software versions and implementation roles",
+    "Table 5.3: Archived input sample before and after preparation",
+    "Table 5.4: Test cases and recorded results",
+    "Table 5.5: Defects, corrections and retest evidence",
+    "Table 5.6: Recorded ADR-014 held-out routing results",
+    "Table 5.7: PPO-minus-baseline paired differences and 95% confidence intervals",
+    "Table 5.8: Direction-specific PPO-minus-OSPF results",
+    "Figure 5.1: PPO\u2013OSPF differences by impairment direction",
+    "Table 5.9: Recorded inference and control timing",
+    "Table 5.10: Implementation and evaluation evidence register",
+    "Figure A1. Original project time schedule"
+  ],
+  "date": "2026-09-18",
+  "files": {
+    "NANFO_Chapters_1_3_Reviewed.odt": "d022962e9af13c1dab971fc882cab6b68b6e2c224194a658421c4fea5c5b4881",
+    "NANFO_Chapters_1_3_Reviewed.pdf": "65ea5d07b6336bc7b8c096364ba83aa49ec0ac8781c8022020a00c8d9939d34a",
+    "Figure_5_1_Routing_Results.svg": "7470cc33607e6e84bfedc46edbb19eef293c2302703989c560d9bdb49ac9d684"
+  },
+  "raw_evidence_checks": [
+    {
+      "file": "ai-engine/artifacts/adr014-holdout-001/test-ppo/evidence.jsonl",
+      "sha256": "107077a6f206895acb5c26017167f86ce6985a102834f783ad7b7d472d72a8ed",
+      "expected": "107077a6f206895acb5c26017167f86ce6985a102834f783ad7b7d472d72a8ed",
+      "matches": true
+    },
+    {
+      "file": "ai-engine/artifacts/adr014-holdout-001/test-constant1/evidence.jsonl",
+      "sha256": "ae5e0c10bf1603b1217315061e6f9368b13698f3a7159b6348f6b745819886f0",
+      "expected": "ae5e0c10bf1603b1217315061e6f9368b13698f3a7159b6348f6b745819886f0",
+      "matches": true
+    },
+    {
+      "file": "ai-engine/artifacts/adr014-holdout-001/test-constant0/evidence.jsonl",
+      "sha256": "5d9fd8757c966b7204190c6679b38780cc30373520c81ab496b4810a4567b739",
+      "expected": "5d9fd8757c966b7204190c6679b38780cc30373520c81ab496b4810a4567b739",
+      "matches": true
+    },
+    {
+      "file": "ai-engine/artifacts/adr014-holdout-001/test-heuristic/evidence.jsonl",
+      "sha256": "b81c1aa8b1faa8c3ee1cda9db26592b43b7f9db047b8f4d40aa9cd0ebd439ef4",
+      "expected": "b81c1aa8b1faa8c3ee1cda9db26592b43b7f9db047b8f4d40aa9cd0ebd439ef4",
+      "matches": true
+    },
+    {
+      "file": "ai-engine/artifacts/adr014-holdout-001/test-ospf/evidence.jsonl",
+      "sha256": "e3a380871d8a5be697bec6864981867bdf2438ecdb32462bd8e3c9fd5b157683",
+      "expected": "e3a380871d8a5be697bec6864981867bdf2438ecdb32462bd8e3c9fd5b157683",
+      "matches": true
+    }
+  ],
+  "paired_arithmetic_checks": [
+    {
+      "baseline": "constant1",
+      "metric": "goodput_mbps",
+      "mean": 1.758034786678791,
+      "ci": [
+        0.5889208172454521,
+        2.92714875611213
+      ]
+    },
+    {
+      "baseline": "constant1",
+      "metric": "icmp_rtt_ms",
+      "mean": -143.299875,
+      "ci": [
+        -237.08062067085578,
+        -49.51912932914419
+      ]
+    },
+    {
+      "baseline": "constant0",
+      "metric": "goodput_mbps",
+      "mean": 1.9879480469063213,
+      "ci": [
+        0.6680603766529734,
+        3.3078357171596693
+      ]
+    },
+    {
+      "baseline": "constant0",
+      "metric": "icmp_rtt_ms",
+      "mean": -133.21677083333333,
+      "ci": [
+        -226.62409457186925,
+        -39.809447094797406
+      ]
+    },
+    {
+      "baseline": "heuristic",
+      "metric": "goodput_mbps",
+      "mean": 0.7693774685238995,
+      "ci": [
+        0.25729026645123976,
+        1.2814646705965593
+      ]
+    },
+    {
+      "baseline": "heuristic",
+      "metric": "icmp_rtt_ms",
+      "mean": -52.07545833333334,
+      "ci": [
+        -86.46816316901021,
+        -17.682753497656464
+      ]
+    },
+    {
+      "baseline": "ospf",
+      "metric": "goodput_mbps",
+      "mean": 1.9757889509264681,
+      "ci": [
+        0.6639664156188563,
+        3.2876114862340797
+      ]
+    },
+    {
+      "baseline": "ospf",
+      "metric": "icmp_rtt_ms",
+      "mean": -78.9355625,
+      "ci": [
+        -139.99107136651884,
+        -17.880053633481175
+      ]
+    }
+  ],
+  "pagination_note": "LibreOffice layout includes one empty parity page before Chapter 1; delivered PDF omits it. All listed destinations checked against PDF footers."
+}

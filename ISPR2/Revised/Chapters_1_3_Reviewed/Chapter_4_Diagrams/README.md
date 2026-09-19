@@ -2,8 +2,10 @@
 
 Open **[NANFO_Chapter_4_All_Diagrams.drawio](NANFO_Chapter_4_All_Diagrams.drawio)** in draw.io/diagrams.net. Its twelve named pages contain the complete editable set. Each figure is also available separately as native `.drawio`, vector `.svg` and high-resolution `.png` files.
 
-**Architecture:** Figure 4.5, printed page **54** / PDF page **67**.  
-**Software classes:** Figure 4.6, printed page **55** / PDF page **68**.  
+**Architecture:** Figure 4.5, printed page **55** / PDF page **68**.
+
+**Software classes:** Figure 4.6, printed page **56** / PDF page **69**.
+
 Both appear under **4.4.1 System Architecture and Class Design**, on landscape pages. The separate logical schemas are Figures 4.7–4.8.
 
 The figures are inserted in the existing [working ODT](../NANFO_Chapters_1_3_Reviewed.odt) and [matching PDF](../NANFO_Chapters_1_3_Reviewed.pdf). Captions and narrative belong to the report; the exported images contain the diagrams and necessary notation keys.
@@ -56,7 +58,7 @@ Native models were decoded and rendered locally with mxGraph 4.2.2. SVGs were ra
 
 The critical-review revision identified oversized white label rectangles as the cause of cut connector stems. Free-standing labels now have transparent backgrounds and are placed clear of strokes. Checks cover text–connector clearance, text touching unrelated boxes, text outside shapes, diamond-label containment and page boundaries. All twelve source images were visually inspected before integration, followed by inspection of the rendered document pages.
 
-Validation confirmed twelve Chapter 4 figures, captions and leads on their respective figure pages, sequential page numbering, **157 correct index destinations**, preserved text in Chapters 1–3 and 5, and byte-identical original images. `Verification.json` records final dimensions, pages and checks. The architecture and software-class figure interpretations also fit on their respective landscape pages.
+Diagram-stage validation confirmed twelve Chapter 4 figures, captions and leads on their respective figure pages, sequential page numbering, **157 correct index destinations**, preserved text in Chapters 1–3 and 5, and byte-identical original images. `Verification.json` records that stage's dimensions, pages and checks. The subsequent full-report academic revision changed pagination and added Chapter 6; current report checks and **168 correct index destinations** are recorded in [Academic_Review.md](../Academic_Review.md). The page pointers above refer to that revision. The architecture and software-class figure interpretations also fit on their respective landscape pages.
 
 ### Critical-review changes
 
