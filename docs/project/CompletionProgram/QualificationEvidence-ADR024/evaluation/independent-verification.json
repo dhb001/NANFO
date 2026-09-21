@@ -1,0 +1,235 @@
+{
+  "confined_results": {
+    "qualify": {
+      "action": null,
+      "action_path": null,
+      "checkpoint_sha256": "77dae44acab722a5a6a2e87d952a6cca65e1c4eea102a089830a8401b521d614",
+      "contract_sha256": "bbcbbadec55792fa3f01bef511c1e38b0e433e125f896cdc3e64f823325e0fe6",
+      "execution": "not_applied",
+      "history_sha256": null,
+      "inference_seconds": null,
+      "input_sha256": null,
+      "operation": "qualify",
+      "parent_checkpoint_sha256": "5b8818af655ec8efce5d3bc3def27db599f3e0df379a0ae263dcefb5f72a80a5",
+      "probabilities": null,
+      "qualification_protocol": "adr024-rebuilt-evaluation-v1",
+      "registry_sha256": "fab4ca64ac70562167383aa96a100ea34da019f10768e0449767830a5ed8b610",
+      "report_sha256": "e6ee9c1bd99e3f6961db497db664335684fa277bd1a1c86a8034570ac116056d",
+      "safety_authorized": false,
+      "scope": "stationary-campus-small-v4-scoped-benchmark",
+      "snapshot_sha256": null,
+      "source_sha256": "04f797f8be02329adf15b44686d938c8898c21eca3fdb0d090afd5fe19153463",
+      "spec_sha256": "bb15142a19ed3ee87a6aec2c6f9109d789d9736a5e6afda826ad898ef5fe7200",
+      "value": null,
+      "weights_sha256": "3e7e38ab4297ffd4b32b9c32d64af4b45e5f5ed1b2a74f9926f23379b0b0f967"
+    },
+    "replay-path0": {
+      "action": 1,
+      "action_path": [
+        "access1",
+        "dist2",
+        "access2"
+      ],
+      "checkpoint_sha256": "77dae44acab722a5a6a2e87d952a6cca65e1c4eea102a089830a8401b521d614",
+      "contract_sha256": "bbcbbadec55792fa3f01bef511c1e38b0e433e125f896cdc3e64f823325e0fe6",
+      "execution": "not_applied",
+      "history_sha256": "93eaba2dc8aa39672ff178972afac01cc873a84cbaf77a5dbcaa80d1c621d8e3",
+      "inference_seconds": 0.001202933,
+      "input_sha256": "4e0b7645c4d2f1e0940acb78ff465f567fe24d8ed9155310442f1ba7699aacee",
+      "operation": "replay",
+      "parent_checkpoint_sha256": "5b8818af655ec8efce5d3bc3def27db599f3e0df379a0ae263dcefb5f72a80a5",
+      "probabilities": [
+        0.012521963566541672,
+        0.9874780178070068
+      ],
+      "qualification_protocol": "adr024-rebuilt-evaluation-v1",
+      "registry_sha256": "fab4ca64ac70562167383aa96a100ea34da019f10768e0449767830a5ed8b610",
+      "report_sha256": "e6ee9c1bd99e3f6961db497db664335684fa277bd1a1c86a8034570ac116056d",
+      "safety_authorized": false,
+      "scope": "stationary-campus-small-v4-scoped-benchmark",
+      "snapshot_sha256": null,
+      "source_sha256": "04f797f8be02329adf15b44686d938c8898c21eca3fdb0d090afd5fe19153463",
+      "spec_sha256": "bb15142a19ed3ee87a6aec2c6f9109d789d9736a5e6afda826ad898ef5fe7200",
+      "value": 2.609820604324341,
+      "weights_sha256": "3e7e38ab4297ffd4b32b9c32d64af4b45e5f5ed1b2a74f9926f23379b0b0f967"
+    },
+    "replay-path1": {
+      "action": 0,
+      "action_path": [
+        "access1",
+        "dist1",
+        "access2"
+      ],
+      "checkpoint_sha256": "77dae44acab722a5a6a2e87d952a6cca65e1c4eea102a089830a8401b521d614",
+      "contract_sha256": "bbcbbadec55792fa3f01bef511c1e38b0e433e125f896cdc3e64f823325e0fe6",
+      "execution": "not_applied",
+      "history_sha256": "7e50346fd26b4245234670d709060132a67dad20e276fc3b12b1c8dbc0257c75",
+      "inference_seconds": 0.001316416,
+      "input_sha256": "f50e42b635868c14e56d942706febd41d6e4be4017578ef9adeff7024dffacfc",
+      "operation": "replay",
+      "parent_checkpoint_sha256": "5b8818af655ec8efce5d3bc3def27db599f3e0df379a0ae263dcefb5f72a80a5",
+      "probabilities": [
+        0.9661532044410706,
+        0.03384681046009064
+      ],
+      "qualification_protocol": "adr024-rebuilt-evaluation-v1",
+      "registry_sha256": "fab4ca64ac70562167383aa96a100ea34da019f10768e0449767830a5ed8b610",
+      "report_sha256": "e6ee9c1bd99e3f6961db497db664335684fa277bd1a1c86a8034570ac116056d",
+      "safety_authorized": false,
+      "scope": "stationary-campus-small-v4-scoped-benchmark",
+      "snapshot_sha256": null,
+      "source_sha256": "04f797f8be02329adf15b44686d938c8898c21eca3fdb0d090afd5fe19153463",
+      "spec_sha256": "bb15142a19ed3ee87a6aec2c6f9109d789d9736a5e6afda826ad898ef5fe7200",
+      "value": 3.0927767753601074,
+      "weights_sha256": "3e7e38ab4297ffd4b32b9c32d64af4b45e5f5ed1b2a74f9926f23379b0b0f967"
+    }
+  },
+  "derived_checkpoint_sha256": "77dae44acab722a5a6a2e87d952a6cca65e1c4eea102a089830a8401b521d614",
+  "independent_raw_metrics": {
+    "constant0": {
+      "goodput_mbps": {
+        "ci95": [
+          0.6699719031011271,
+          3.3163121076979127
+        ],
+        "mean_delta": 1.99314200539952,
+        "paired_seed_count": 12
+      },
+      "icmp_rtt_ms": {
+        "ci95": [
+          -198.4709124584084,
+          -36.473045874924935
+        ],
+        "mean_delta": -117.47197916666667,
+        "paired_seed_count": 12
+      },
+      "loss_fraction": {
+        "ci95": [
+          -0.5505625015320171,
+          -0.111305739204516
+        ],
+        "mean_delta": -0.3309341203682666,
+        "paired_seed_count": 12
+      },
+      "reward": {
+        "ci95": [
+          0.38308211063282205,
+          1.922861566047775
+        ],
+        "mean_delta": 1.1529718383402985,
+        "paired_seed_count": 12
+      }
+    },
+    "constant1": {
+      "goodput_mbps": {
+        "ci95": [
+          0.5729651481418685,
+          2.90193382675568
+        ],
+        "mean_delta": 1.7374494874487743,
+        "paired_seed_count": 12
+      },
+      "icmp_rtt_ms": {
+        "ci95": [
+          -220.50000755826335,
+          -42.526992441736624
+        ],
+        "mean_delta": -131.5135,
+        "paired_seed_count": 12
+      },
+      "loss_fraction": {
+        "ci95": [
+          -0.48629956174543054,
+          -0.09620099778442426
+        ],
+        "mean_delta": -0.2912502797649274,
+        "paired_seed_count": 12
+      },
+      "reward": {
+        "ci95": [
+          0.39140770250895607,
+          1.9770511445528718
+        ],
+        "mean_delta": 1.1842294235309139,
+        "paired_seed_count": 12
+      }
+    },
+    "heuristic": {
+      "goodput_mbps": {
+        "ci95": [
+          0.24529604146267314,
+          1.2684011614526485
+        ],
+        "mean_delta": 0.7568486014576608,
+        "paired_seed_count": 12
+      },
+      "icmp_rtt_ms": {
+        "ci95": [
+          -80.38499869090273,
+          -9.49254297576394
+        ],
+        "mean_delta": -44.938770833333336,
+        "paired_seed_count": 12
+      },
+      "loss_fraction": {
+        "ci95": [
+          -0.21256366128759438,
+          -0.04118801766947641
+        ],
+        "mean_delta": -0.1268758394785354,
+        "paired_seed_count": 12
+      },
+      "reward": {
+        "ci95": [
+          0.14425672649585136,
+          0.8360829964187793
+        ],
+        "mean_delta": 0.49016986145731534,
+        "paired_seed_count": 12
+      }
+    },
+    "ospf": {
+      "goodput_mbps": {
+        "ci95": [
+          0.6645044226483432,
+          3.2889672007802915
+        ],
+        "mean_delta": 1.9767358117143172,
+        "paired_seed_count": 12
+      },
+      "icmp_rtt_ms": {
+        "ci95": [
+          -217.20496077211538,
+          -41.427580894551284
+        ],
+        "mean_delta": -129.31627083333333,
+        "paired_seed_count": 12
+      },
+      "loss_fraction": {
+        "ci95": [
+          -0.5460088824384115,
+          -0.11037403750571215
+        ],
+        "mean_delta": -0.32819145997206184,
+        "paired_seed_count": 12
+      },
+      "reward": {
+        "ci95": [
+          0.397132975068056,
+          1.989935782765969
+        ],
+        "mean_delta": 1.1935343789170125,
+        "paired_seed_count": 12
+      }
+    }
+  },
+  "installation_check_directory": "/tmp/opencode/nanfo-adr024-installation-check-3y1h6uhj",
+  "installation_scope": "disposable offline qualification/replay only; no current live snapshot",
+  "original_checkpoint_unchanged": true,
+  "plan_sha256": "b9e084a2c69241d3d5d3e2f60ab3f9052ee77e713befc1f43403fd21de8e4a30",
+  "raw_report_exact": true,
+  "report_sha256": "e6ee9c1bd99e3f6961db497db664335684fa277bd1a1c86a8034570ac116056d",
+  "reviewer_script_sha256": "fbc1c51c9b0960e13c3ec630fc1e4274aacef7bdd048b778d9212ec520e2df71",
+  "source_runner_sha256": "0c57a16c1e8cb252083436cceffa16fdfaea0f826d2c4081216b4d8ad8282234",
+  "version": "adr024-rebuilt-evaluation-v1"
+}

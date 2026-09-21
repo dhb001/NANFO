@@ -1,0 +1,322 @@
+{
+  "baseline": {
+    "paths": {
+      "h1->h3": {
+        "action": 0,
+        "kernel_routes": [
+          {
+            "node": "h1",
+            "route": {
+              "cache": [],
+              "dev": "h1-eth0",
+              "dst": "10.78.10.2",
+              "flags": [],
+              "from": "10.78.8.2",
+              "gateway": "10.78.8.1",
+              "uid": 0
+            }
+          },
+          {
+            "node": "access1",
+            "route": {
+              "cache": [],
+              "dev": "access1-eth1",
+              "dst": "10.78.10.2",
+              "flags": [],
+              "from": "10.78.8.2",
+              "gateway": "10.78.4.1",
+              "iif": "access1-eth3"
+            }
+          },
+          {
+            "node": "dist1",
+            "route": {
+              "cache": [],
+              "dev": "dist1-eth4",
+              "dst": "10.78.10.2",
+              "flags": [],
+              "from": "10.78.8.2",
+              "gateway": "10.78.6.2",
+              "iif": "dist1-eth3"
+            }
+          },
+          {
+            "node": "access2",
+            "route": {
+              "cache": [],
+              "dev": "access2-eth3",
+              "dst": "10.78.10.2",
+              "flags": [],
+              "from": "10.78.8.2",
+              "iif": "access2-eth1"
+            }
+          }
+        ],
+        "nodes": [
+          "h1",
+          "access1",
+          "dist1",
+          "access2",
+          "h3"
+        ]
+      },
+      "h2->h4": {
+        "action": 0,
+        "kernel_routes": [
+          {
+            "node": "h2",
+            "route": {
+              "cache": [],
+              "dev": "h2-eth0",
+              "dst": "10.78.11.2",
+              "flags": [],
+              "from": "10.78.9.2",
+              "gateway": "10.78.9.1",
+              "uid": 0
+            }
+          },
+          {
+            "node": "access1",
+            "route": {
+              "cache": [],
+              "dev": "access1-eth1",
+              "dst": "10.78.11.2",
+              "flags": [],
+              "from": "10.78.9.2",
+              "gateway": "10.78.4.1",
+              "iif": "access1-eth4"
+            }
+          },
+          {
+            "node": "dist1",
+            "route": {
+              "cache": [],
+              "dev": "dist1-eth4",
+              "dst": "10.78.11.2",
+              "flags": [],
+              "from": "10.78.9.2",
+              "gateway": "10.78.6.2",
+              "iif": "dist1-eth3"
+            }
+          },
+          {
+            "node": "access2",
+            "route": {
+              "cache": [],
+              "dev": "access2-eth4",
+              "dst": "10.78.11.2",
+              "flags": [],
+              "from": "10.78.9.2",
+              "iif": "access2-eth1"
+            }
+          }
+        ],
+        "nodes": [
+          "h2",
+          "access1",
+          "dist1",
+          "access2",
+          "h4"
+        ]
+      },
+      "h3->h1": {
+        "action": 0,
+        "kernel_routes": [
+          {
+            "node": "h3",
+            "route": {
+              "cache": [],
+              "dev": "h3-eth0",
+              "dst": "10.78.8.2",
+              "flags": [],
+              "from": "10.78.10.2",
+              "gateway": "10.78.10.1",
+              "uid": 0
+            }
+          },
+          {
+            "node": "access2",
+            "route": {
+              "cache": [],
+              "dev": "access2-eth1",
+              "dst": "10.78.8.2",
+              "flags": [],
+              "from": "10.78.10.2",
+              "gateway": "10.78.6.1",
+              "iif": "access2-eth3"
+            }
+          },
+          {
+            "node": "dist1",
+            "route": {
+              "cache": [],
+              "dev": "dist1-eth3",
+              "dst": "10.78.8.2",
+              "flags": [],
+              "from": "10.78.10.2",
+              "gateway": "10.78.4.2",
+              "iif": "dist1-eth4"
+            }
+          },
+          {
+            "node": "access1",
+            "route": {
+              "cache": [],
+              "dev": "access1-eth3",
+              "dst": "10.78.8.2",
+              "flags": [],
+              "from": "10.78.10.2",
+              "iif": "access1-eth1"
+            }
+          }
+        ],
+        "nodes": [
+          "h3",
+          "access2",
+          "dist1",
+          "access1",
+          "h1"
+        ]
+      },
+      "h4->h2": {
+        "action": 0,
+        "kernel_routes": [
+          {
+            "node": "h4",
+            "route": {
+              "cache": [],
+              "dev": "h4-eth0",
+              "dst": "10.78.9.2",
+              "flags": [],
+              "from": "10.78.11.2",
+              "gateway": "10.78.11.1",
+              "uid": 0
+            }
+          },
+          {
+            "node": "access2",
+            "route": {
+              "cache": [],
+              "dev": "access2-eth1",
+              "dst": "10.78.9.2",
+              "flags": [],
+              "from": "10.78.11.2",
+              "gateway": "10.78.6.1",
+              "iif": "access2-eth4"
+            }
+          },
+          {
+            "node": "dist1",
+            "route": {
+              "cache": [],
+              "dev": "dist1-eth3",
+              "dst": "10.78.9.2",
+              "flags": [],
+              "from": "10.78.11.2",
+              "gateway": "10.78.4.2",
+              "iif": "dist1-eth4"
+            }
+          },
+          {
+            "node": "access1",
+            "route": {
+              "cache": [],
+              "dev": "access1-eth4",
+              "dst": "10.78.9.2",
+              "flags": [],
+              "from": "10.78.11.2",
+              "iif": "access1-eth1"
+            }
+          }
+        ],
+        "nodes": [
+          "h4",
+          "access2",
+          "dist1",
+          "access1",
+          "h2"
+        ]
+      }
+    },
+    "tables": {
+      "access1:19110": {
+        "routes": [],
+        "rules": []
+      },
+      "access1:19111": {
+        "routes": [],
+        "rules": []
+      },
+      "access2:19110": {
+        "routes": [],
+        "rules": []
+      },
+      "access2:19111": {
+        "routes": [],
+        "rules": []
+      },
+      "core:19110": {
+        "routes": [],
+        "rules": []
+      },
+      "core:19111": {
+        "routes": [],
+        "rules": []
+      },
+      "dist1:19110": {
+        "routes": [],
+        "rules": []
+      },
+      "dist1:19111": {
+        "routes": [],
+        "rules": []
+      },
+      "dist2:19110": {
+        "routes": [],
+        "rules": []
+      },
+      "dist2:19111": {
+        "routes": [],
+        "rules": []
+      }
+    }
+  },
+  "baseline_sha256": "785de4b95b205d582edd43b3240a67461b2fab2e504948fc557a09179d5826bf",
+  "command": {
+    "created_at": "2026-09-21T04:03:31.989098Z",
+    "expires_at": "2026-09-21T04:04:01.989098Z",
+    "fence": 1,
+    "frame_sha256": "de6d017140932227ac3afc0fb3a0ad7390f4f67b944e8cf87b77546d128e5ac9",
+    "inference_sha256": "beb2010bfc9383091293717cf1c62c2fa014b855aa3995e435ab7422b131f5bf",
+    "network_id": "1f836897-8556-4a61-9ab1-3e77d4eb0e39",
+    "policy_sha256": "aa82cb25d4467b36a4bc197ca374c66febc4ec0d23e42d3759b456018452b7f8",
+    "request_id": "713b1583-b3c3-4698-ae22-9f77cf6dda3f",
+    "resource_id": "44596003fa0e17ae75be58ccdae78250b9440c50337e03efbf3f501058799d53",
+    "route": {
+      "action_id": "route1",
+      "device_ids": [
+        "access1",
+        "dist2",
+        "access2"
+      ],
+      "path": [
+        "access1",
+        "dist2",
+        "access2"
+      ]
+    },
+    "run_id": "022dc6d4-b15e-4b75-b521-ba60305add97",
+    "runtime": {
+      "container_id": "44596003fa0e17ae75be58ccdae78250b9440c50337e03efbf3f501058799d53",
+      "disposable": true,
+      "image_sha256": "954462c0f00d5bbaa72ea144f6064936b399c430e6ab94bffcf1c00d134ea0d7",
+      "network_disconnected": true,
+      "resource_id": "44596003fa0e17ae75be58ccdae78250b9440c50337e03efbf3f501058799d53",
+      "source_sha256": "08c312c64154c9aedcd3b22eeb3573783590e0eb7183bc999cb8ef39b958dbbd",
+      "wrapper_sha256": "e7a3c0256264e69a1975e68b97b8c2d70c1e4f098f91cb8046f90151cb260add"
+    },
+    "simulation_sha256": "e055414e221b14ebd5b193d2c2d4b0fd04232ee86bc44ba25ebdf6c4e896227e",
+    "workspace_id": "25024b37-77c2-40f4-a40b-83f4fbdd24b5"
+  },
+  "ownership_sha256": "ae79671d08616d53a6c9566242656e00d165f634843d2cefc06d4c5c9dfe35b5"
+}

@@ -215,4 +215,46 @@ describe("session lifecycle", () => {
     expect(useAuthStore.getState().accessToken).toBeNull();
     expect(fetchMock.mock.calls.filter(([url]) => String(url).endsWith("/auth/refresh"))).toHaveLength(1);
   });
+  it("retries a confirmed 401 with the exact mutation body only after refreshed authority is verified", async () => {
+    const body = { intent_id: "immutable-intent", idempotency_key: "immutable-key", manual_approval: true };
+    fetchMock.mockImplementation(async (url, options) => {
+      if (String(url).endsWith("/auth/refresh")) return envelope(pair);
+      if (String(url).endsWith("/auth/me")) return envelope(operatorProfile);
+      if (new Headers(options?.headers).get("Authorization") === "Bearer access-old") return new Response(null, { status: 401 });
+      return envelope({ status: "execution_started" });
+    });
+    await apiRequest("/api/v1/intents/execute", { method: "POST", token: "access-old", body });
+    const writes = fetchMock.mock.calls.filter(([url]) => String(url).endsWith("/intents/execute"));
+    expect(writes).toHaveLength(2);
+    expect(writes[0][1]?.body).toEqual(writes[1][1]?.body);
+    expect(new Headers(writes[1][1]?.headers).get("Authorization")).toBe("Bearer access-new");
+  });
+  it("does not replay a rejected approved mutation when refresh changes authority", async () => {
+    fetchMock.mockImplementation(async (url) => {
+      if (String(url).endsWith("/auth/refresh")) return envelope(pair);
+      if (String(url).endsWith("/auth/me")) return envelope({ ...operatorProfile, roles: ["Read-Only"], permissions: ["read:topology"] });
+      return new Response(null, { status: 401 });
+    });
+    await expect(apiRequest("/api/v1/intents/execute", { method: "POST", token: "access-old", body: { manual_approval: true } })).rejects.toMatchObject({ code: "API_AUTHORITY_CHANGED" });
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).endsWith("/intents/execute"))).toHaveLength(1);
+    expect(useAuthStore.getState().profile?.permissions).toEqual(["read:topology"]);
+  });
+  it.each(["offline", "server", "invalid-success"])("never refreshes or replays ambiguous %s mutations", async (kind) => {
+    if (kind === "offline") fetchMock.mockRejectedValue(new TypeError("Lost response"));
+    else fetchMock.mockImplementation(async () => new Response("proxy response", { status: kind === "server" ? 503 : 200 }));
+    await expect(apiRequest("/api/v1/simulations/start", { method: "POST", token: "access-old", body: { scenario_name: "draft" } })).rejects.toThrow();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(useAuthStore.getState().accessToken).toBe("access-old");
+  });
+  it("discards an old tenant response even after its access token rotated in flight", async () => {
+    let finish!: (response: Response) => void;
+    fetchMock.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+    const pending = apiRequest("/api/v1/simulations/start", { method: "POST", token: "access-old", body: {} });
+    const rejected = expect(pending).rejects.toMatchObject({ code: "API_STALE_CONTEXT" });
+    useAuthStore.getState().replaceTokens({ accessToken: "access-new", refreshToken: "refresh-new" });
+    useWorkspaceStore.getState().setNetworkId("other-network");
+    finish(envelope({ simulation_id: "old-run" }));
+    await rejected;
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
 });

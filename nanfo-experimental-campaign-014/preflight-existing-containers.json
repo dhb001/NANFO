@@ -1,0 +1,32 @@
+[
+  {
+    "id": "d08bc0f5b118f00e623a8e4bff8d972c5a14c30af16ecc0c6c44f62defa02294",
+    "image": "sha256:ca5da0c4cb596a9e9097aad8c79c10156f0c6261faa2ddcc74183a1e552554ed",
+    "name": "/nanfo_neo4j",
+    "privileged": false
+  },
+  {
+    "id": "ccc986c3e4a89fd988d5044286e52665fb78b60f4a0c8b5b2551be024bb90bd5",
+    "image": "sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777",
+    "name": "/nanfo_postgres",
+    "privileged": false
+  },
+  {
+    "id": "593d290c8141423727508ce5f08f80717d50d0bf3f3d2e0a9bf99bc078211d9d",
+    "image": "sha256:e7723ff73d963f5cc6d9c4643ea3d989527a402a319239054e9472a7fb9219a2",
+    "name": "/nanfo_redis",
+    "privileged": false
+  },
+  {
+    "id": "c6c76dad12a3a519b899594f4386927e906c2720a799c284e2d806e1aa58d2e1",
+    "image": "sha256:4bc6bc963e6d8443453676cae56536f4b8156d78bae03c0145cbe47c2aad73bb",
+    "name": "/bahmni-lite-craterdb-1",
+    "privileged": false
+  },
+  {
+    "id": "764bf92239d736c7160bdcffb319b781b41e4480ebb5ea45993e212e31550a4f",
+    "image": "sha256:27d39ccecb3c73744181aaaada9494cb8f33443e1511f1514e77480753931b64",
+    "name": "/bahmni-lite-openmrsdb-1",
+    "privileged": false
+  }
+]

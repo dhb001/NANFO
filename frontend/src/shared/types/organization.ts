@@ -8,6 +8,8 @@ export interface Organization {
 export interface OrganizationList {
   items: Organization[];
   total: number;
+  page?: number;
+  page_size?: number;
 }
 
 export interface Workspace {
@@ -21,6 +23,8 @@ export interface Workspace {
 export interface WorkspaceList {
   items: Workspace[];
   total: number;
+  page?: number;
+  page_size?: number;
 }
 
 export interface OrgMember {
@@ -33,4 +37,6 @@ export interface OrgMember {
 export interface OrgMemberList {
   items: OrgMember[];
   total: number;
+  page?: number;
+  page_size?: number;
 }

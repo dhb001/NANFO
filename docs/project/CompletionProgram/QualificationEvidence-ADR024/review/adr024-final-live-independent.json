@@ -1,0 +1,110 @@
+{
+  "actual_autonomous_dispatch": false,
+  "claim": "continuous-qualified-recommendation-software-lab",
+  "durable_export_rows": 12,
+  "exact_original_frozen_inference": true,
+  "frames": [
+    {
+      "index": 0,
+      "observed_at": "2026-09-20T12:33:32.467543Z",
+      "original_loader_inference": "passed",
+      "raw_line_sha256": "19ef663731ccd75538bea6ad02380a2d96f4e7d95b6c06a5fb28bde1056f4031",
+      "scenario": "path0"
+    },
+    {
+      "index": 1,
+      "observed_at": "2026-09-20T12:33:41.739147Z",
+      "original_loader_inference": "passed",
+      "raw_line_sha256": "85de5f5c72bbff8aa6287f1071cccec11cbf9101b5fd235ba4f6ef36ca666d85",
+      "scenario": "path0"
+    },
+    {
+      "index": 2,
+      "observed_at": "2026-09-20T12:33:59.140562Z",
+      "original_loader_inference": "passed",
+      "raw_line_sha256": "f26f28f4664e364311c50d05f74bc9131426b48a0b02e6f8ac1fd8413e88d63e",
+      "scenario": "path0"
+    },
+    {
+      "index": 0,
+      "observed_at": "2026-09-20T12:34:55.401441Z",
+      "original_loader_inference": "passed",
+      "raw_line_sha256": "a6d13cd6c1d3d71484255b6146a3c68ebd089831a48814e50c3eb7d20f3bb8de",
+      "scenario": "path1"
+    },
+    {
+      "index": 1,
+      "observed_at": "2026-09-20T12:35:03.984025Z",
+      "original_loader_inference": "passed",
+      "raw_line_sha256": "4fba63580953bbf0bf83bd4e7e3f0ad19a7e49734c1c1e861f15ecdf8be61079",
+      "scenario": "path1"
+    },
+    {
+      "index": 2,
+      "observed_at": "2026-09-20T12:35:20.508820Z",
+      "original_loader_inference": "passed",
+      "raw_line_sha256": "5294748745d3f4bc61ba839d736d8295070f72f0c05c6cce62c7952660833ebc",
+      "scenario": "path1"
+    }
+  ],
+  "full_tensor_payload_identity": true,
+  "limits": [
+    "DB durability independently checked against retained separate-session export, not a live DB query",
+    "API permission and final cleanup gates rely on pinned executed harness and owner receipts; raw HTTP/DB audit transcript not retained",
+    "freshness reconstructed at capture/persistence times; no old artifact retimestamped or installed now"
+  ],
+  "recommendations": [
+    {
+      "age_seconds": 14.155144,
+      "id": "8ebfeec2-9277-4c02-8610-c1f6d7ac45c3",
+      "input_sha256": "d1daea2eba4b3194e3153e3eb04d637ee9ebcd8ab8a17bb1274a9956c05d184f",
+      "probabilities": [
+        0.015177391469478607,
+        0.9848226308822632
+      ],
+      "route": "route1",
+      "scenario": "path0",
+      "value": 2.731673002243042
+    },
+    {
+      "age_seconds": 10.187584,
+      "id": "4cb79b97-815c-484c-b243-c80cf766d825",
+      "input_sha256": "b5c29e291b1b7233bd017fc9da7aba7311c22f8ba437b3414a44ecc961160c5a",
+      "probabilities": [
+        0.0202395748347044,
+        0.979760468006134
+      ],
+      "route": "route1",
+      "scenario": "path0",
+      "value": 2.8266584873199463
+    },
+    {
+      "age_seconds": 13.369515,
+      "id": "44c4c681-ef91-47d4-8b08-2e8b4344cba5",
+      "input_sha256": "362fd7989d8a13303ce771f707e738b42ba7515a2448bd6e028ab540f8f911ee",
+      "probabilities": [
+        0.9700261950492859,
+        0.02997383289039135
+      ],
+      "route": "route0",
+      "scenario": "path1",
+      "value": 3.1732661724090576
+    },
+    {
+      "age_seconds": 9.737084,
+      "id": "6dce961d-2793-4e66-91ea-a5e9b701a6c8",
+      "input_sha256": "03645e515f3bd1b1b44dca279246afdc6c054301e44ba581d84abeb1eefe3bd8",
+      "probabilities": [
+        0.9738398790359497,
+        0.02616012468934059
+      ],
+      "route": "route0",
+      "scenario": "path1",
+      "value": 3.2124040126800537
+    }
+  ],
+  "safety_calibrated": false,
+  "source_drift": {},
+  "source_hashes_matched": 48,
+  "status": "passed"
+}

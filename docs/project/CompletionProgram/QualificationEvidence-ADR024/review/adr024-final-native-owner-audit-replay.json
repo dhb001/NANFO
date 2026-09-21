@@ -1,0 +1,333 @@
+{
+  "actual_probes": [
+    {
+      "action": 0,
+      "probe": {
+        "received": 6,
+        "sent": 6
+      },
+      "readback_sha256": "595f204c046bcae63de655c58eff2d0835db3f0bcee7f26aed2949fdf9032185",
+      "readback_verified": true,
+      "traffic_effects_verified": false
+    },
+    {
+      "action": 1,
+      "probe": {
+        "received": 6,
+        "sent": 6
+      },
+      "readback_sha256": "8ef56c42c6727830d75f166991b22b722fa2d5de6d5b320db7d3a6958335e143",
+      "readback_verified": true,
+      "traffic_effects_verified": false
+    }
+  ],
+  "autonomy_qualified": false,
+  "calibration_installed": false,
+  "cases": [
+    {
+      "action": 0,
+      "case": "exclusive-lock",
+      "evidence": "owner_exception_case"
+    },
+    {
+      "action": 0,
+      "apply_elapsed_seconds": 0,
+      "case": "STOP-0",
+      "native_adds": 0,
+      "native_deletes": 0
+    },
+    {
+      "action": 0,
+      "apply_elapsed_seconds": 0.003927362,
+      "case": "STOP-1",
+      "native_adds": 1,
+      "native_deletes": 1
+    },
+    {
+      "action": 0,
+      "apply_elapsed_seconds": 0.316874814,
+      "case": "STOP-2",
+      "native_adds": 2,
+      "native_deletes": 2
+    },
+    {
+      "action": 0,
+      "apply_elapsed_seconds": 0.703025598,
+      "case": "STOP-3",
+      "native_adds": 3,
+      "native_deletes": 3
+    },
+    {
+      "action": 0,
+      "apply_elapsed_seconds": 0.932036671,
+      "case": "STOP-4",
+      "native_adds": 4,
+      "native_deletes": 4
+    },
+    {
+      "action": 0,
+      "apply_elapsed_seconds": 1.268993142,
+      "case": "STOP-5",
+      "native_adds": 5,
+      "native_deletes": 5
+    },
+    {
+      "action": 0,
+      "apply_elapsed_seconds": 1.483887531,
+      "case": "STOP-6",
+      "native_adds": 6,
+      "native_deletes": 6
+    },
+    {
+      "action": 0,
+      "apply_elapsed_seconds": 1.785552695,
+      "case": "STOP-7",
+      "native_adds": 7,
+      "native_deletes": 7
+    },
+    {
+      "action": 0,
+      "apply_elapsed_seconds": 2.195786076,
+      "case": "STOP-8",
+      "native_adds": 8,
+      "native_deletes": 8
+    },
+    {
+      "action": 0,
+      "apply_elapsed_seconds": 2.398707121,
+      "case": "STOP-9",
+      "native_adds": 9,
+      "native_deletes": 9
+    },
+    {
+      "action": 0,
+      "apply_elapsed_seconds": 2.724789618,
+      "case": "STOP-10",
+      "native_adds": 10,
+      "native_deletes": 10
+    },
+    {
+      "action": 0,
+      "apply_elapsed_seconds": 3.026797741,
+      "case": "STOP-11",
+      "native_adds": 11,
+      "native_deletes": 11
+    },
+    {
+      "action": 0,
+      "apply_elapsed_seconds": 3.333282425,
+      "case": "STOP-12",
+      "native_adds": 12,
+      "native_deletes": 12
+    },
+    {
+      "action": 0,
+      "apply_elapsed_seconds": 0,
+      "case": "expired-0",
+      "native_adds": 0,
+      "native_deletes": 0
+    },
+    {
+      "action": 0,
+      "case": "binding-refusal-0",
+      "evidence": "owner_exception_case"
+    },
+    {
+      "action": 0,
+      "apply_elapsed_seconds": 3.431499892,
+      "case": "foreign-12",
+      "native_adds": 12,
+      "native_deletes": 12
+    },
+    {
+      "action": 0,
+      "apply_elapsed_seconds": 0.627888526,
+      "case": "restart-3",
+      "native_adds": 3,
+      "native_deletes": 3
+    },
+    {
+      "action": 0,
+      "apply_elapsed_seconds": 0.643750185,
+      "case": "lost-receipt-3",
+      "native_adds": 3,
+      "native_deletes": 3
+    },
+    {
+      "action": 0,
+      "apply_elapsed_seconds": 3.361229097,
+      "case": "recovery-interrupted-3",
+      "native_adds": 12,
+      "native_deletes": 12
+    },
+    {
+      "action": 0,
+      "apply_elapsed_seconds": 3.279366722,
+      "case": "normal-12",
+      "native_adds": 12,
+      "native_deletes": 12
+    },
+    {
+      "action": 1,
+      "case": "exclusive-lock",
+      "evidence": "owner_exception_case"
+    },
+    {
+      "action": 1,
+      "apply_elapsed_seconds": 0,
+      "case": "STOP-0",
+      "native_adds": 0,
+      "native_deletes": 0
+    },
+    {
+      "action": 1,
+      "apply_elapsed_seconds": 0.004039953,
+      "case": "STOP-1",
+      "native_adds": 1,
+      "native_deletes": 1
+    },
+    {
+      "action": 1,
+      "apply_elapsed_seconds": 0.308117825,
+      "case": "STOP-2",
+      "native_adds": 2,
+      "native_deletes": 2
+    },
+    {
+      "action": 1,
+      "apply_elapsed_seconds": 0.634883073,
+      "case": "STOP-3",
+      "native_adds": 3,
+      "native_deletes": 3
+    },
+    {
+      "action": 1,
+      "apply_elapsed_seconds": 0.978028254,
+      "case": "STOP-4",
+      "native_adds": 4,
+      "native_deletes": 4
+    },
+    {
+      "action": 1,
+      "apply_elapsed_seconds": 1.249270424,
+      "case": "STOP-5",
+      "native_adds": 5,
+      "native_deletes": 5
+    },
+    {
+      "action": 1,
+      "apply_elapsed_seconds": 1.541863824,
+      "case": "STOP-6",
+      "native_adds": 6,
+      "native_deletes": 6
+    },
+    {
+      "action": 1,
+      "apply_elapsed_seconds": 1.893765107,
+      "case": "STOP-7",
+      "native_adds": 7,
+      "native_deletes": 7
+    },
+    {
+      "action": 1,
+      "apply_elapsed_seconds": 2.159995025,
+      "case": "STOP-8",
+      "native_adds": 8,
+      "native_deletes": 8
+    },
+    {
+      "action": 1,
+      "apply_elapsed_seconds": 2.458297692,
+      "case": "STOP-9",
+      "native_adds": 9,
+      "native_deletes": 9
+    },
+    {
+      "action": 1,
+      "apply_elapsed_seconds": 2.845298511,
+      "case": "STOP-10",
+      "native_adds": 10,
+      "native_deletes": 10
+    },
+    {
+      "action": 1,
+      "apply_elapsed_seconds": 3.302832816,
+      "case": "STOP-11",
+      "native_adds": 11,
+      "native_deletes": 11
+    },
+    {
+      "action": 1,
+      "apply_elapsed_seconds": 3.574150626,
+      "case": "STOP-12",
+      "native_adds": 12,
+      "native_deletes": 12
+    },
+    {
+      "action": 1,
+      "apply_elapsed_seconds": 0,
+      "case": "expired-0",
+      "native_adds": 0,
+      "native_deletes": 0
+    },
+    {
+      "action": 1,
+      "case": "binding-refusal-0",
+      "evidence": "owner_exception_case"
+    },
+    {
+      "action": 1,
+      "apply_elapsed_seconds": 3.278848189,
+      "case": "foreign-12",
+      "native_adds": 12,
+      "native_deletes": 12
+    },
+    {
+      "action": 1,
+      "apply_elapsed_seconds": 0.65728983,
+      "case": "restart-3",
+      "native_adds": 3,
+      "native_deletes": 3
+    },
+    {
+      "action": 1,
+      "apply_elapsed_seconds": 0.596786465,
+      "case": "lost-receipt-3",
+      "native_adds": 3,
+      "native_deletes": 3
+    },
+    {
+      "action": 1,
+      "apply_elapsed_seconds": 3.405175478,
+      "case": "recovery-interrupted-3",
+      "native_adds": 12,
+      "native_deletes": 12
+    },
+    {
+      "action": 1,
+      "apply_elapsed_seconds": 3.426162899,
+      "case": "normal-12",
+      "native_adds": 12,
+      "native_deletes": 12
+    }
+  ],
+  "caveats": [
+    "Static-FIB manual fixture, not OSPF convergence or model qualification.",
+    "Seal theorem remains conditional on reviewed kernel/enforcement premises.",
+    "Lock/binding exception cases use owner exception receipts; not native syscalls."
+  ],
+  "claim": "native-driver-verified",
+  "hard_transition_deadline_proved": false,
+  "image_id": "sha256:fe807af24ed485669c18476dd69cac161366583f33356136db7081eef98325c7",
+  "independent_signoff": false,
+  "max_command_seconds": 0.229714005,
+  "measured_campaign_seconds": 282.612150746,
+  "median_command_seconds": 0.003486321,
+  "native_command_count": 54646,
+  "native_policy_mutations": 480,
+  "protocol_sha256": "777edceccf45133aa2e0670db39d8800723882b118e332ae0342c3eb241b328e",
+  "sealed_endpoint_readbacks": 10120,
+  "sealed_snapshots": 460,
+  "status": "passed",
+  "total_cases": 42
+}

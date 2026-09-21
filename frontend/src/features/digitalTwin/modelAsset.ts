@@ -1,4 +1,5 @@
 import type { CampusModelAssetRecord } from "@/shared/types/network";
+import { disposeModelResources } from "./modelResources";
 
 export const MAX_MODEL_BYTES = 8 * 1024 * 1024;
 
@@ -51,30 +52,22 @@ export async function validateModelBytes(buffer: ArrayBuffer, name: string, mime
   if (Array.isArray(document.extensionsRequired) && document.extensionsRequired.length) throw new Error("Models requiring glTF extensions are not supported for restore.");
   const { GLTFLoader } = await import("three/examples/jsm/loaders/GLTFLoader.js");
   const gltf = await new GLTFLoader().parseAsync(binary ? buffer : new TextDecoder().decode(jsonBytes), "");
-  for (const scene of gltf.scenes) scene.traverse((object) => {
-    const mesh = object as import("three").Mesh;
-    mesh.geometry?.dispose();
-    const materials = Array.isArray(mesh.material) ? mesh.material : mesh.material ? [mesh.material] : [];
-    for (const material of materials) {
-      for (const value of Object.values(material)) if (value && typeof value === "object" && "isTexture" in value) {
-        const texture = value as import("three").Texture;
-        texture.dispose();
-        const image = texture.image as { close?: () => void } | undefined;
-        image?.close?.();
-      }
-      material.dispose();
-    }
-  });
+  disposeModelResources([...new Set([gltf.scene, ...gltf.scenes].filter(Boolean))]);
 }
 
-export async function decodePersistedModel(asset: CampusModelAssetRecord, networkId: string, deviceIds: ReadonlySet<string>) {
+export async function decodePersistedModel(asset: CampusModelAssetRecord, networkId: string, deviceIds: ReadonlySet<string>, binaryBytes?: Uint8Array<ArrayBuffer>) {
   if (asset.network_id !== networkId) throw new Error("Persisted model belongs to another network.");
   const size = asset.model_size_bytes;
   const encoded = asset.model_data_base64;
-  if (!Number.isInteger(size) || size < 1 || size > MAX_MODEL_BYTES || typeof encoded !== "string" || encoded.length !== 4 * Math.ceil(size / 3) || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(encoded)) throw new Error("Persisted model size or base64 encoding is invalid.");
-  const raw = atob(encoded);
-  if (raw.length !== size || btoa(raw) !== encoded) throw new Error("Persisted model size or base64 encoding is invalid.");
-  const bytes = Uint8Array.from(raw, (character) => character.charCodeAt(0));
+  if (!Number.isInteger(size) || size < 1 || size > MAX_MODEL_BYTES) throw new Error("Persisted model size or base64 encoding is invalid.");
+  let bytes = binaryBytes;
+  if (!bytes) {
+    if (typeof encoded !== "string" || encoded.length !== 4 * Math.ceil(size / 3) || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(encoded)) throw new Error("Persisted model size or base64 encoding is invalid.");
+    const raw = atob(encoded);
+    if (raw.length !== size || btoa(raw) !== encoded) throw new Error("Persisted model size or base64 encoding is invalid.");
+    bytes = Uint8Array.from(raw, (character) => character.charCodeAt(0));
+  }
+  if (bytes.byteLength !== size) throw new Error("Persisted model size mismatch.");
   const digest = await crypto.subtle.digest("SHA-256", bytes);
   const hash = Array.from(new Uint8Array(digest), (value) => value.toString(16).padStart(2, "0")).join("");
   if (!/^[a-f0-9]{64}$/.test(asset.model_sha256) || hash !== asset.model_sha256) throw new Error("Persisted model SHA-256 verification failed.");

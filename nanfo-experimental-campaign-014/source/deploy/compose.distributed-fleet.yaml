@@ -1,0 +1,6 @@
+# Required last when both optional overlays are selected: api2 has identical mode.
+services:
+  api2:
+    environment:
+      TELEMETRY_FLEET_ENABLED: "true"
+      TELEMETRY_RUNTIME_ADAPTER_MODE: stub

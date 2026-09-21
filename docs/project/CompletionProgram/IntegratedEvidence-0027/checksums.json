@@ -1,0 +1,71 @@
+{
+  "inventory-result.json": {
+    "bytes": 55777,
+    "sha256": "b3961157e57a8d28aad7118c3bc9d4448c46422c4dfcea5b1ec15cf552652011",
+    "source_drift_paths": [],
+    "status": "passed"
+  },
+  "inventory-source-drift-1.json": {
+    "bytes": 55407,
+    "sha256": "1e6cf2980afac76d9d6d527cecc1d597d23c8d9fa1f9191fbd4979c43323205c",
+    "source_drift_paths": [
+      "app/modules/autonomy/execution_contract.py",
+      "app/modules/autonomy/frr_contract.py",
+      "app/modules/autonomy/safety_provider.py"
+    ],
+    "status": "partial"
+  },
+  "inventory-source-drift-2.json": {
+    "bytes": 55635,
+    "sha256": "7e4567e0d81dca90591b83e2ac97bf11acb25a0e5e3f99d0f2eb50a8bba3ff4f",
+    "source_drift_paths": [
+      "app/modules/autonomy/frr_installation.py",
+      "app/modules/autonomy/safety_installation.py"
+    ],
+    "status": "partial"
+  },
+  "measured-result.json": {
+    "bytes": 58525,
+    "sha256": "5932961885a980b380170e4b33bad52a672cb945d8e3b9ab57acbb77d96250eb",
+    "source_drift_paths": [],
+    "status": "passed"
+  },
+  "measured-source-drift-1.json": {
+    "bytes": 57931,
+    "sha256": "f355debddc6d939f87d291ded5fdc8f9d426f55c742a02663cc21c650856588b",
+    "source_drift_paths": [
+      "app/modules/autonomy/execution_contract.py",
+      "app/modules/autonomy/frr_contract.py",
+      "app/modules/autonomy/safety_provider.py"
+    ],
+    "status": "partial"
+  },
+  "measured-source-drift-2.json": {
+    "bytes": 58159,
+    "sha256": "a6b3f553d05efce798aef3857794dc1f9f191acf7fbcafc49af18d1d1b6ff3ed",
+    "source_drift_paths": [
+      "app/modules/autonomy/frr_installation.py",
+      "app/modules/autonomy/safety_installation.py"
+    ],
+    "status": "partial"
+  },
+  "measured-source-drift-3.json": {
+    "bytes": 58504,
+    "sha256": "9843ef91dd0e7e463873a576f308eb12ac144e40000b425e079164edead06bc3",
+    "source_drift_paths": [
+      "app/modules/autonomy/causal_frames.py"
+    ],
+    "status": "partial"
+  },
+  "measured-source-drift-4.json": {
+    "bytes": 58707,
+    "sha256": "92548e17f778441d3f81a46b2ca185029b89df88ab339fb9e5bbbcd92e83376f",
+    "source_drift_paths": [
+      "app/api/readiness.py",
+      "app/events/distributed_realtime.py",
+      "app/main.py",
+      "app/modules/autonomy/causal_frames.py"
+    ],
+    "status": "partial"
+  }
+}

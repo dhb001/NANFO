@@ -1,0 +1,10 @@
+{
+  "authorization": "explicit user parent instruction",
+  "frozen_runtime_sha256": "c2edcba14d8fec1efa5b2f8bf957b5f8922b10f86d8364bc34db82ed0069a030",
+  "gate_sha256": "b0a5c44cfb05ae381d4bb4a3f7a010a7d6ec0ada17bc3b9e7c510d3d389478d1",
+  "independent_signoff": false,
+  "plan_sha256": "f619eea796ba2d62d3c85c275707ffb7d13bc13ce5958ba4abf8fe66b6116c8b",
+  "scope": "parent accepted frozen013 receipt immutability foreign-state fixes and retention0029; four smoke then full68",
+  "source_origin_execution": "/home/DHB/Documents/NANFO/ai-engine/artifacts/adr025-runtime-preparation-013",
+  "version": "nanfo.experimental-prelaunch-review/v1"
+}

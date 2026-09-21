@@ -1,0 +1,114 @@
+{
+  "archived_source_pins_passed": true,
+  "current_emulation_files_differing_from_parent": [
+    "actions.py",
+    "compose.yaml",
+    "experiment.py",
+    "ospf.py",
+    "runner.py",
+    "workloads.py"
+  ],
+  "derived_sha256": "77dae44acab722a5a6a2e87d952a6cca65e1c4eea102a089830a8401b521d614",
+  "fresh_report_status": "exact_reconstruction_passed",
+  "independent_comparisons": {
+    "constant0:goodput_mbps": {
+      "ci95": [
+        0.6699719031011271,
+        3.3163121076979127
+      ],
+      "mean": 1.99314200539952
+    },
+    "constant0:icmp_rtt_ms": {
+      "ci95": [
+        -198.4709124584084,
+        -36.47304587492492
+      ],
+      "mean": -117.47197916666666
+    },
+    "constant0:reward": {
+      "ci95": [
+        0.38308211063282205,
+        1.922861566047775
+      ],
+      "mean": 1.1529718383402985
+    },
+    "constant1:goodput_mbps": {
+      "ci95": [
+        0.5729651481418685,
+        2.90193382675568
+      ],
+      "mean": 1.7374494874487743
+    },
+    "constant1:icmp_rtt_ms": {
+      "ci95": [
+        -220.50000755826335,
+        -42.526992441736624
+      ],
+      "mean": -131.5135
+    },
+    "constant1:reward": {
+      "ci95": [
+        0.39140770250895607,
+        1.9770511445528718
+      ],
+      "mean": 1.1842294235309139
+    },
+    "ospf:goodput_mbps": {
+      "ci95": [
+        0.664504422648343,
+        3.288967200780291
+      ],
+      "mean": 1.976735811714317
+    },
+    "ospf:icmp_rtt_ms": {
+      "ci95": [
+        -217.20496077211538,
+        -41.42758089455127
+      ],
+      "mean": -129.31627083333333
+    },
+    "ospf:reward": {
+      "ci95": [
+        0.3971329750680558,
+        1.989935782765969
+      ],
+      "mean": 1.1935343789170123
+    }
+  },
+  "native_safety_approved": false,
+  "original_loader_passed": true,
+  "original_thresholds_preserved": true,
+  "original_writer_exact_reproduction": true,
+  "parent_sha256": "5b8818af655ec8efce5d3bc3def27db599f3e0df379a0ae263dcefb5f72a80a5",
+  "plan_sha256": "b9e084a2c69241d3d5d3e2f60ab3f9052ee77e713befc1f43403fd21de8e4a30",
+  "qualification_checks": {
+    "constant0": true,
+    "constant1": true,
+    "matched_schedules": true,
+    "ospf_goodput": true,
+    "ospf_rtt": true,
+    "path0": true,
+    "path1": true
+  },
+  "qualified": true,
+  "reservation_documents_checked": 5090,
+  "reserved_seed_count": 1342,
+  "seeds": [
+    3003,
+    3004,
+    3005,
+    3006,
+    3007,
+    3008,
+    3009,
+    3010,
+    3011,
+    3012,
+    3013,
+    3014
+  ],
+  "seeds_unused_within_audited_roots": true,
+  "software_review_only": true,
+  "tensor_bytes_identical": true,
+  "weights_sha256": "3e7e38ab4297ffd4b32b9c32d64af4b45e5f5ed1b2a74f9926f23379b0b0f967"
+}

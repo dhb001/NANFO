@@ -1,431 +1,152 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
-import {
-  useAddOrgMember,
-  useCreateOrganization,
-  useCreateWorkspace,
-  useOrgMembers,
-  useOrganizations,
-  useRemoveOrgMember,
-  useWorkspaces,
-} from "@/features/organizations/hooks";
+import { useEffect, useState } from "react";
+import { useAddOrgMember, useCreateOrganization, useCreateWorkspace, useDeleteOrganization, useDeleteWorkspace, useOrgMembers, useOrganizations, useRemoveOrgMember, useUpdateOrganization, useUpdateWorkspace, useWorkspaces } from "./hooks";
+import { normalizeOrgSlug } from "./tenancy-logic";
+import { DeleteResource, ResourceForm } from "./ResourceForm";
+import { useOrgAuthority } from "./useOrgAuthority";
+import { OrgAuthorityStatus } from "./OrgAuthorityStatus";
+import { useScopeState } from "./useScopeState";
 import { useAuthStore } from "@/shared/state/auth-store";
 import { useWorkspaceStore } from "@/shared/state/workspace-store";
-import { useUiStore } from "@/shared/state/ui-store";
 import { Panel } from "@/shared/ui/Panel";
 import { QueryState } from "@/shared/ui/QueryState";
 import { Button } from "@/shared/ui/Button";
-import { Badge } from "@/shared/ui/Badge";
-import { toErrorMessage } from "@/shared/lib/errors";
-import { AsyncState } from "@/shared/ui/AsyncState";
-import { normalizeOrgSlug, shouldClearWorkspace } from "@/features/organizations/tenancy-logic";
-import { useIsNarrowViewport } from "@/shared/lib/viewport";
-
-const roleOptions = ["Admin", "Operator", "Read-Only"];
+import { Pagination } from "@/shared/ui/Pagination";
+import type { Organization, Workspace } from "@/shared/types/organization";
 
 export function TenancyPage() {
-  const token = useAuthStore((state) => state.accessToken);
-  const userId = useAuthStore((state) => state.userId);
-  const orgId = useWorkspaceStore((state) => state.organizationId);
-  const workspaceId = useWorkspaceStore((state) => state.workspaceId);
-  const setOrganizationId = useWorkspaceStore((state) => state.setOrganizationId);
-  const setWorkspaceId = useWorkspaceStore((state) => state.setWorkspaceId);
-  const pushToast = useUiStore((state) => state.pushToast);
-  const isNarrowViewport = useIsNarrowViewport();
+  const generation = useAuthStore((s) => s.generation);
+  return <TenancyContent key={generation} />;
+}
 
-  const orgsQuery = useOrganizations(token);
-  const workspacesQuery = useWorkspaces(token, orgId);
-  const membersQuery = useOrgMembers(token, orgId);
-
-  const createOrgMutation = useCreateOrganization(token);
-  const createWorkspaceMutation = useCreateWorkspace(token, orgId);
-  const addMemberMutation = useAddOrgMember(token, orgId);
-  const removeMemberMutation = useRemoveOrgMember(token, orgId);
-
-  const [orgName, setOrgName] = useState("");
-  const [orgSlug, setOrgSlug] = useState("");
-  const [workspaceName, setWorkspaceName] = useState("");
-  const [workspaceDescription, setWorkspaceDescription] = useState("");
-  const [memberUserId, setMemberUserId] = useState("");
-  const [memberRole, setMemberRole] = useState("Operator");
-
+function TenancyContent() {
+  const token = useAuthStore((s) => s.accessToken);
+  const orgId = useWorkspaceStore((s) => s.organizationId);
+  const select = useWorkspaceStore((s) => s.setOrganizationId);
+  const [page, setPage] = useScopeState("tenancy-org-page", null, 1);
+  const [autoSelect, setAutoSelect] = useScopeState("tenancy-org-initial", null, true);
+  const [selected, setSelected] = useScopeState<Organization | null>("tenancy-org-selected", null, null);
+  const [name, setName] = useState("");
+  const [slug, setSlug] = useState("");
+  const [slugEdited, setSlugEdited] = useState(false);
+  const orgs = useOrganizations(token, page);
+  const create = useCreateOrganization(token);
   useEffect(() => {
-    if (!orgId && orgsQuery.data?.items?.[0]) {
-      setOrganizationId(orgsQuery.data.items[0].org_id);
-    }
-  }, [orgId, orgsQuery.data, setOrganizationId]);
-
+    if (autoSelect && !orgId && orgs.data?.items[0]) select(orgs.data.items[0].org_id);
+  }, [autoSelect, orgId, orgs.data, select]);
   useEffect(() => {
-    if (!workspaceId && workspacesQuery.data?.items?.[0]) {
-      setWorkspaceId(workspacesQuery.data.items[0].workspace_id);
-    }
-  }, [workspaceId, workspacesQuery.data, setWorkspaceId]);
-
+    if (orgs.data && page > Math.max(1, Math.ceil(orgs.data.total / 20))) setPage(Math.max(1, Math.ceil(orgs.data.total / 20)));
+  }, [orgs.data, page, setPage]);
+  const active = orgs.data?.items.find((org) => org.org_id === orgId) ?? (selected?.org_id === orgId ? selected : null);
   useEffect(() => {
-    if (orgId) {
-      return;
-    }
-    if (shouldClearWorkspace(orgId, workspaceId)) {
-      setWorkspaceId(null);
-    }
-  }, [orgId, workspaceId, setWorkspaceId]);
+    const current = orgs.data?.items.find((org) => org.org_id === orgId);
+    if (current) setSelected(current);
+  }, [orgs.data, orgId, setSelected]);
+  return <div style={{ display: "grid", gap: "1rem" }}>
+    <Panel title="Organization Scope" subtitle="Choose the organization that owns your workspaces and network inventory">
+      <ResourceForm label="Create organization" submitLabel="Create Organization" disabled={!token} onRefresh={() => orgs.refetch()} onSubmit={async () => {
+        const created = await create.mutateAsync({ name: name.trim(), slug });
+        setName(""); setSlug(""); setSlugEdited(false); setSelected(created); select(created.org_id);
+      }}>
+        <label className="context-field">Organization Name<input required pattern=".*\S.*" maxLength={255} value={name} onChange={(e) => { setName(e.target.value); if (!slugEdited) setSlug(normalizeOrgSlug(e.target.value, "")); }} /></label>
+        <label className="context-field">Slug<input required minLength={3} maxLength={63} pattern="[a-z0-9][a-z0-9\-]{1,61}[a-z0-9]" value={slug} onChange={(e) => { setSlugEdited(true); setSlug(e.target.value); }} /></label>
+        <small>3–63 lowercase letters, digits or hyphens; begin and end with a letter or digit.</small>
+      </ResourceForm>
+      <QueryState query={orgs} hasData={(d) => d.items.length > 0} emptyTitle="No organizations" emptyDescription="Create an organization to establish tenant scope.">{(data) => <label className="context-field">Active Organization
+        <select value={orgId ?? ""} onChange={(e) => { setSelected(data.items.find((org) => org.org_id === e.target.value) ?? null); select(e.target.value); }}>
+          <option value="" disabled>Select an organization</option>
+          {orgId && !data.items.some((org) => org.org_id === orgId) ? <option value={orgId}>{active?.name ?? orgId} (selected, off-page)</option> : null}
+          {data.items.map((org) => <option key={org.org_id} value={org.org_id}>{org.name} ({org.slug})</option>)}
+        </select>
+      </label>}</QueryState>
+      <Pagination label="Organizations" page={page} pageSize={20} total={orgs.data?.total ?? 0} pending={orgs.isFetching} onPageChange={setPage} />
+    </Panel>
+    {orgId ? <OrganizationDetails key={orgId} organization={active} onDeleted={() => { setAutoSelect(false); setSelected(null); select(null); }} onSaved={setSelected} /> : null}
+  </div>;
+}
 
-  const selectedOrg = useMemo(
-    () => orgsQuery.data?.items.find((org) => org.org_id === orgId) ?? null,
-    [orgId, orgsQuery.data],
-  );
+function OrganizationDetails({ organization, onDeleted, onSaved }: {
+  organization: Organization | null; onDeleted: () => void; onSaved: (org: Organization) => void;
+}) {
+  const token = useAuthStore((s) => s.accessToken);
+  const userId = useAuthStore((s) => s.userId);
+  const orgId = useWorkspaceStore((s) => s.organizationId);
+  const [page, setPage] = useScopeState("tenancy-member-page", orgId, 1);
+  const [name, setName] = useState<string | null>(null);
+  const [memberId, setMemberId] = useState("");
+  const [role, setRole] = useState("Operator");
+  const members = useOrgMembers(token, orgId, page);
+  const authority = useOrgAuthority(token, orgId, members.data);
+  const update = useUpdateOrganization(token, orgId);
+  const remove = useDeleteOrganization(token, orgId);
+  const addMember = useAddOrgMember(token, orgId);
+  const removeMember = useRemoveOrgMember(token, orgId);
+  const organizations = useOrganizations(token);
+  useEffect(() => {
+    if (members.data && page > Math.max(1, Math.ceil(members.data.total / 20))) setPage(Math.max(1, Math.ceil(members.data.total / 20)));
+  }, [members.data, page, setPage]);
+  return <>
+    <Panel title="Organization administration" subtitle={`Current organization: ${organization?.name ?? orgId}`}>
+      <OrgAuthorityStatus authority={authority} administration />
+      <ResourceForm label="Edit organization" submitLabel="Save organization" disabled={!authority.canAdmin} onRefresh={() => organizations.refetch()} onSubmit={async () => { onSaved(await update.mutateAsync({ name: (name ?? organization?.name ?? "").trim() })); setName(null); }}>
+        <label className="context-field">Organization name to edit<input required pattern=".*\S.*" maxLength={255} value={name ?? organization?.name ?? ""} onChange={(e) => setName(e.target.value)} /></label>
+      </ResourceForm>
+      <DeleteResource name="organization" disabled={!authority.canAdmin} detail="Its workspaces and network inventory will no longer be accessible through this scope. The slug remains reserved." onRefresh={() => organizations.refetch()} onDelete={async () => { await remove.mutateAsync(); onDeleted(); }} />
+    </Panel>
+    <WorkspaceAdministration canAdmin={authority.canAdmin} />
+    <Panel title="Organization Members" subtitle="Add and remove members with explicit organization roles">
+      <ResourceForm label="Add member" submitLabel="Add Member" disabled={!authority.canAdmin} onRefresh={() => members.refetch()} onSubmit={async () => { await addMember.mutateAsync({ userId: memberId.trim(), orgRole: role }); setMemberId(""); }}>
+        <label className="context-field">User ID (UUID)<input required pattern="[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}" value={memberId} onChange={(e) => setMemberId(e.target.value)} /></label>
+        <label className="context-field">Role<select aria-label="Role" value={role} onChange={(e) => setRole(e.target.value)}>{["Admin", "Operator", "Read-Only"].map((r) => <option key={r}>{r}</option>)}</select></label>
+      </ResourceForm>
+      <QueryState query={members} hasData={(d) => d.items.length > 0} emptyTitle="No members" emptyDescription="No membership records on this page.">{(data) => <div style={{ display: "grid", gap: "0.5rem" }}>{data.items.map((member) => <div className="device-entry" key={member.user_id}>
+        <strong>{member.org_role}</strong><div className="device-reference">{member.user_id}</div>
+        {member.user_id === userId ? <small>current session user</small> : <DeleteResource name={`member ${member.user_id}`} disabled={!authority.canAdmin} onRefresh={() => members.refetch()} onDelete={async () => { await removeMember.mutateAsync(member.user_id); }} detail="This user will lose access to this organization." />}
+      </div>)}</div>}</QueryState>
+      <Pagination label="Members" page={page} pageSize={20} total={members.data?.total ?? 0} pending={members.isFetching} onPageChange={setPage} />
+    </Panel>
+  </>;
+}
 
-  async function onCreateOrganization(event: FormEvent) {
-    event.preventDefault();
-    const slug = normalizeOrgSlug(orgName, orgSlug);
-    if (!orgName.trim() || !slug) {
-      return;
-    }
-    try {
-      const created = await createOrgMutation.mutateAsync({ name: orgName.trim(), slug });
-      setOrgName("");
-      setOrgSlug("");
-      setOrganizationId(created.org_id);
-      pushToast({
-        title: "Organization created",
-        description: `${created.name} is now active.`,
-        tone: "ok",
-      });
-    } catch (error) {
-      pushToast({
-        title: "Create organization failed",
-        description: toErrorMessage(error),
-        tone: "danger",
-      });
-    }
-  }
+function WorkspaceAdministration({ canAdmin }: { canAdmin: boolean }) {
+  const token = useAuthStore((s) => s.accessToken);
+  const orgId = useWorkspaceStore((s) => s.organizationId);
+  const workspaceId = useWorkspaceStore((s) => s.workspaceId);
+  const select = useWorkspaceStore((s) => s.setWorkspaceId);
+  const [page, setPage] = useScopeState("tenancy-workspace-page", orgId, 1);
+  const [autoSelect, setAutoSelect] = useScopeState("tenancy-workspace-initial", orgId, true);
+  const [editing, setEditing] = useState<Workspace | null>(null);
+  const workspaces = useWorkspaces(token, orgId, page);
+  const create = useCreateWorkspace(token, orgId);
+  const update = useUpdateWorkspace(token, orgId);
+  const remove = useDeleteWorkspace(token, orgId);
+  useEffect(() => {
+    if (autoSelect && !workspaceId && workspaces.data?.items[0]) select(workspaces.data.items[0].workspace_id);
+  }, [autoSelect, workspaceId, workspaces.data, select]);
+  useEffect(() => {
+    if (workspaces.data && page > Math.max(1, Math.ceil(workspaces.data.total / 20))) setPage(Math.max(1, Math.ceil(workspaces.data.total / 20)));
+  }, [workspaces.data, page, setPage]);
+  return <Panel title="Workspaces" subtitle="Create and select an active workspace within the organization">
+    <p role="status">Selected workspace: {workspaceId ?? "None"}</p>
+    <WorkspaceForm disabled={!canAdmin} onRefresh={() => workspaces.refetch()} onSave={async (input) => { const created = await create.mutateAsync(input); select(created.workspace_id); }} />
+    <QueryState query={workspaces} hasData={(d) => d.items.length > 0} emptyTitle="No workspaces" emptyDescription="Create a workspace to unlock inventory.">{(data) => <div style={{ display: "grid", gap: "0.5rem" }}>{data.items.map((workspace) => <div key={workspace.workspace_id}>
+      <button className="network-choice" aria-pressed={workspace.workspace_id === workspaceId} onClick={() => select(workspace.workspace_id)}><strong>{workspace.name}</strong><small>{workspace.workspace_id}</small></button>
+      <Button permission="write:config" tone="ghost" disabled={!canAdmin} onClick={() => setEditing(workspace)}>Edit {workspace.name}</Button>
+      <DeleteResource name={workspace.name} disabled={!canAdmin} onRefresh={() => workspaces.refetch()} detail="Network inventory in this workspace will no longer be accessible through this scope." onDelete={async () => {
+        await remove.mutateAsync(workspace.workspace_id); setAutoSelect(false);
+        if (useWorkspaceStore.getState().workspaceId === workspace.workspace_id) select(null);
+        if (editing?.workspace_id === workspace.workspace_id) setEditing(null);
+      }} />
+    </div>)}</div>}</QueryState>
+    <Pagination label="Workspaces" page={page} pageSize={20} total={workspaces.data?.total ?? 0} pending={workspaces.isFetching} onPageChange={setPage} />
+    {editing ? <div><WorkspaceForm key={editing.workspace_id} workspace={editing} disabled={!canAdmin} onRefresh={() => workspaces.refetch()} onSave={async (input) => { await update.mutateAsync({ workspaceId: editing.workspace_id, changes: input }); setEditing(null); }} /><Button tone="ghost" onClick={() => setEditing(null)}>Close workspace editor</Button></div> : null}
+  </Panel>;
+}
 
-  async function onCreateWorkspace(event: FormEvent) {
-    event.preventDefault();
-    if (!orgId || !workspaceName.trim()) {
-      return;
-    }
-    try {
-      const created = await createWorkspaceMutation.mutateAsync({
-        name: workspaceName.trim(),
-        description: workspaceDescription.trim() || undefined,
-      });
-      setWorkspaceName("");
-      setWorkspaceDescription("");
-      setWorkspaceId(created.workspace_id);
-      pushToast({
-        title: "Workspace created",
-        description: `${created.name} is now selected for operations flows.`,
-        tone: "ok",
-      });
-    } catch (error) {
-      pushToast({
-        title: "Create workspace failed",
-        description: toErrorMessage(error),
-        tone: "danger",
-      });
-    }
-  }
-
-  async function onAddMember(event: FormEvent) {
-    event.preventDefault();
-    if (!orgId || !memberUserId.trim()) {
-      return;
-    }
-    try {
-      const member = await addMemberMutation.mutateAsync({
-        userId: memberUserId.trim(),
-        orgRole: memberRole,
-      });
-      setMemberUserId("");
-      pushToast({
-        title: "Member added",
-        description: `${member.user_id} added as ${member.org_role}.`,
-        tone: "ok",
-      });
-    } catch (error) {
-      pushToast({
-        title: "Add member failed",
-        description: toErrorMessage(error),
-        tone: "danger",
-      });
-    }
-  }
-
-  async function onRemoveMember(targetUserId: string) {
-    try {
-      await removeMemberMutation.mutateAsync(targetUserId);
-      pushToast({
-        title: "Member removed",
-        description: `${targetUserId} was removed from organization membership.`,
-        tone: "warn",
-      });
-    } catch (error) {
-      pushToast({
-        title: "Remove member failed",
-        description: toErrorMessage(error),
-        tone: "danger",
-      });
-    }
-  }
-
-  return (
-    <div style={{ display: "grid", gap: "1rem" }}>
-      <Panel title="Organization Scope" subtitle="VS1 tenancy foundations for organizations and workspaces">
-        <div style={{ display: "grid", gridTemplateColumns: isNarrowViewport ? "1fr" : "1fr 1fr", gap: "0.8rem", alignItems: "start" }}>
-          <form onSubmit={onCreateOrganization} style={{ display: "grid", gap: "0.55rem" }}>
-            <label style={{ display: "grid", gap: "0.3rem" }}>
-              <span className="mono" style={{ fontSize: "0.8rem", color: "var(--ink-3)" }}>
-                Organization Name
-              </span>
-              <input
-                value={orgName}
-                onChange={(event) => {
-                  const value = event.target.value;
-                  setOrgName(value);
-                  if (!orgSlug.trim()) {
-                    setOrgSlug(normalizeOrgSlug(value, ""));
-                  }
-                }}
-                required
-                placeholder="North America NOC"
-                style={{ border: "1px solid var(--line-soft)", borderRadius: "10px", padding: "0.48rem 0.5rem" }}
-              />
-            </label>
-
-            <label style={{ display: "grid", gap: "0.3rem" }}>
-              <span className="mono" style={{ fontSize: "0.8rem", color: "var(--ink-3)" }}>
-                Slug
-              </span>
-              <input
-                value={orgSlug}
-                onChange={(event) => setOrgSlug(normalizeOrgSlug("", event.target.value))}
-                required
-                placeholder="north-america-noc"
-                style={{ border: "1px solid var(--line-soft)", borderRadius: "10px", padding: "0.48rem 0.5rem" }}
-              />
-            </label>
-
-            <div style={{ display: "flex", justifyContent: "flex-end" }}>
-              <Button permission="write:config" type="submit" disabled={createOrgMutation.isPending || !token}>
-                {createOrgMutation.isPending ? "Creating..." : "Create Organization"}
-              </Button>
-            </div>
-          </form>
-
-          <QueryState
-            query={orgsQuery}
-            hasData={(data) => data.items.length > 0}
-            emptyTitle="No organizations"
-            emptyDescription="Create your first organization to establish tenant scope."
-          >
-            {(orgs) => (
-              <label style={{ display: "grid", gap: "0.3rem" }}>
-                <span className="mono" style={{ fontSize: "0.8rem", color: "var(--ink-3)" }}>
-                  Active Organization
-                </span>
-                <select
-                  value={orgId ?? ""}
-                  onChange={(event) => setOrganizationId(event.target.value)}
-                  style={{ border: "1px solid var(--line-soft)", borderRadius: "10px", padding: "0.48rem 0.5rem" }}
-                >
-                  {orgs.items.map((org) => (
-                    <option key={org.org_id} value={org.org_id}>
-                      {org.name} ({org.slug})
-                    </option>
-                  ))}
-                </select>
-                {selectedOrg ? (
-                  <div className="mono" style={{ color: "var(--ink-3)", fontSize: "0.75rem" }}>
-                    {selectedOrg.org_id}
-                  </div>
-                ) : null}
-              </label>
-            )}
-          </QueryState>
-        </div>
-        {createOrgMutation.isError ? (
-          <div style={{ marginTop: "0.7rem" }}>
-            <AsyncState title="Organization create failed" description={toErrorMessage(createOrgMutation.error)} />
-          </div>
-        ) : null}
-      </Panel>
-
-      <div style={{ display: "grid", gridTemplateColumns: isNarrowViewport ? "1fr" : "1fr 1fr", gap: "1rem", alignItems: "start" }}>
-        <Panel title="Workspaces" subtitle="Create and select an active workspace within organization">
-          <form onSubmit={onCreateWorkspace} style={{ display: "grid", gap: "0.55rem", marginBottom: "0.75rem" }}>
-            <label style={{ display: "grid", gap: "0.3rem" }}>
-              <span className="mono" style={{ fontSize: "0.8rem", color: "var(--ink-3)" }}>
-                Workspace Name
-              </span>
-              <input
-                value={workspaceName}
-                onChange={(event) => setWorkspaceName(event.target.value)}
-                required
-                placeholder="Production"
-                style={{ border: "1px solid var(--line-soft)", borderRadius: "10px", padding: "0.48rem 0.5rem" }}
-              />
-            </label>
-
-            <label style={{ display: "grid", gap: "0.3rem" }}>
-              <span className="mono" style={{ fontSize: "0.8rem", color: "var(--ink-3)" }}>
-                Description
-              </span>
-              <input
-                value={workspaceDescription}
-                onChange={(event) => setWorkspaceDescription(event.target.value)}
-                placeholder="Primary operations workspace"
-                style={{ border: "1px solid var(--line-soft)", borderRadius: "10px", padding: "0.48rem 0.5rem" }}
-              />
-            </label>
-
-            <div style={{ display: "flex", justifyContent: "flex-end" }}>
-              <Button permission="write:config" type="submit" disabled={!orgId || createWorkspaceMutation.isPending}>
-                {createWorkspaceMutation.isPending ? "Creating..." : "Create Workspace"}
-              </Button>
-            </div>
-          </form>
-
-          <QueryState
-            query={workspacesQuery}
-            hasData={(data) => data.items.length > 0}
-            emptyTitle="No workspaces"
-            emptyDescription="Create a workspace to unlock networks, telemetry, and simulations."
-          >
-            {(workspaces) => (
-              <div style={{ display: "grid", gap: "0.42rem" }}>
-                {workspaces.items.map((workspace) => (
-                  <button
-                    key={workspace.workspace_id}
-                    onClick={() => setWorkspaceId(workspace.workspace_id)}
-                    style={{
-                      textAlign: "left",
-                      border: "1px solid var(--line-soft)",
-                      borderRadius: "10px",
-                      padding: "0.5rem 0.55rem",
-                      background:
-                        workspaceId === workspace.workspace_id
-                          ? "color-mix(in srgb, var(--brand) 14%, white)"
-                          : "transparent",
-                    }}
-                  >
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "0.5rem" }}>
-                      <strong>{workspace.name}</strong>
-                      {workspaceId === workspace.workspace_id ? <Badge text="active" tone="ok" /> : null}
-                    </div>
-                    <div className="mono" style={{ color: "var(--ink-3)", fontSize: "0.74rem" }}>
-                      {workspace.workspace_id}
-                    </div>
-                  </button>
-                ))}
-              </div>
-            )}
-          </QueryState>
-          {createWorkspaceMutation.isError ? (
-            <div style={{ marginTop: "0.7rem" }}>
-              <AsyncState title="Workspace create failed" description={toErrorMessage(createWorkspaceMutation.error)} />
-            </div>
-          ) : null}
-        </Panel>
-
-        <Panel title="Organization Members" subtitle="Add and remove org members with explicit organizational role">
-          <form onSubmit={onAddMember} style={{ display: "grid", gap: "0.55rem", marginBottom: "0.75rem" }}>
-            <label style={{ display: "grid", gap: "0.3rem" }}>
-              <span className="mono" style={{ fontSize: "0.8rem", color: "var(--ink-3)" }}>
-                User ID (UUID)
-              </span>
-              <input
-                value={memberUserId}
-                onChange={(event) => setMemberUserId(event.target.value)}
-                required
-                placeholder="00000000-0000-0000-0000-000000000000"
-                style={{ border: "1px solid var(--line-soft)", borderRadius: "10px", padding: "0.48rem 0.5rem", fontFamily: "var(--font-mono)" }}
-              />
-            </label>
-
-            <label style={{ display: "grid", gap: "0.3rem" }}>
-              <span className="mono" style={{ fontSize: "0.8rem", color: "var(--ink-3)" }}>
-                Role
-              </span>
-              <select
-                value={memberRole}
-                onChange={(event) => setMemberRole(event.target.value)}
-                style={{ border: "1px solid var(--line-soft)", borderRadius: "10px", padding: "0.48rem 0.5rem" }}
-              >
-                {roleOptions.map((role) => (
-                  <option key={role} value={role}>
-                    {role}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <div style={{ display: "flex", justifyContent: "flex-end" }}>
-              <Button permission="write:config" type="submit" disabled={!orgId || addMemberMutation.isPending}>
-                {addMemberMutation.isPending ? "Adding..." : "Add Member"}
-              </Button>
-            </div>
-          </form>
-
-          <QueryState
-            query={membersQuery}
-            hasData={(data) => data.items.length > 0}
-            emptyTitle="No members"
-            emptyDescription="No membership records exist yet for this organization."
-          >
-            {(members) => (
-              <div style={{ display: "grid", gap: "0.42rem", maxHeight: 360, overflow: "auto" }}>
-                {members.items.map((member) => {
-                  const isCurrentUser = userId ? member.user_id === userId : false;
-                  return (
-                    <div
-                      key={member.user_id}
-                      style={{
-                        border: "1px solid var(--line-soft)",
-                        borderRadius: "10px",
-                        padding: "0.48rem 0.52rem",
-                        display: "grid",
-                        gap: "0.25rem",
-                      }}
-                    >
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                        <Badge text={member.org_role} tone="info" />
-                        <Button
-                          permission="write:config"
-                          tone="ghost"
-                          type="button"
-                          disabled={removeMemberMutation.isPending || isCurrentUser}
-                          onClick={() => onRemoveMember(member.user_id)}
-                          style={{ padding: "0.28rem 0.5rem", fontWeight: 500 }}
-                        >
-                          Remove
-                        </Button>
-                      </div>
-                      <div className="mono" style={{ color: "var(--ink-3)", fontSize: "0.74rem" }}>
-                        {member.user_id}
-                      </div>
-                      {isCurrentUser ? (
-                        <div className="mono" style={{ color: "var(--ink-3)", fontSize: "0.72rem" }}>
-                          current session user
-                        </div>
-                      ) : null}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </QueryState>
-          {addMemberMutation.isError ? (
-            <div style={{ marginTop: "0.7rem" }}>
-              <AsyncState title="Add member failed" description={toErrorMessage(addMemberMutation.error)} />
-            </div>
-          ) : null}
-          {removeMemberMutation.isError ? (
-            <div style={{ marginTop: "0.7rem" }}>
-              <AsyncState title="Remove member failed" description={toErrorMessage(removeMemberMutation.error)} />
-            </div>
-          ) : null}
-        </Panel>
-      </div>
-    </div>
-  );
+function WorkspaceForm({ workspace, disabled, onSave, onRefresh }: { workspace?: Workspace; disabled: boolean; onSave: (input: { name: string; description: string }) => Promise<void>; onRefresh: () => Promise<unknown> }) {
+  const [name, setName] = useState(workspace?.name ?? "");
+  const [description, setDescription] = useState(workspace?.description ?? "");
+  return <ResourceForm label={workspace ? "Edit workspace" : "Create workspace"} submitLabel={workspace ? "Save workspace" : "Create Workspace"} disabled={disabled} onRefresh={onRefresh} onSubmit={async () => { await onSave({ name: name.trim(), description: description.trim() }); if (!workspace) { setName(""); setDescription(""); } }}>
+    <label className="context-field">Workspace Name<input required pattern=".*\S.*" maxLength={255} value={name} onChange={(e) => setName(e.target.value)} /></label>
+    <label className="context-field">Description<textarea maxLength={4000} value={description} onChange={(e) => setDescription(e.target.value)} /></label>
+  </ResourceForm>;
 }

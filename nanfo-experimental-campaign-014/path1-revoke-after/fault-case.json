@@ -1,0 +1,11 @@
+{
+  "bootstrap_initial_action": 1,
+  "case_id": "path1-revoke-after",
+  "fault": "revoke-after",
+  "intervention": "real",
+  "phase": "afterwrite",
+  "policy": "qualified",
+  "scenario": "path1",
+  "seed": 1451,
+  "write_index": 1
+}

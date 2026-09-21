@@ -1,0 +1,8 @@
+{
+  "effect": "pause",
+  "operation": "execute",
+  "ordinal": 1,
+  "policy_sha256": "5ad943d80b27bd920eef2114ccfc68cdd11e21d0836fffd0e0881cc853f88550",
+  "timeout_seconds": 30,
+  "when": "after"
+}

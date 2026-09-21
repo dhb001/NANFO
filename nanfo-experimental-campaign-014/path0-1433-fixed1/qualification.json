@@ -1,0 +1,10 @@
+{
+  "checkpoint_sha256": "77dae44acab722a5a6a2e87d952a6cca65e1c4eea102a089830a8401b521d614",
+  "evidence": [],
+  "manifest_sha256": null,
+  "observation_contract": null,
+  "qualified": false,
+  "reasons": [
+    "live_installation_expired_or_future"
+  ]
+}

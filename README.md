@@ -39,13 +39,28 @@ Note: You must create a bootstrap user first (see "Create a Local Bootstrap User
 
 ## Current Status
 
-- Vertical Slices VS1 through VS20 are marked complete in `docs/project/CurrentSprint.md`.
-- VS21 is in progress with two explicitly open high-risk residuals:
-  - broad tenant/RBAC enforcement consistency across all route families
-  - simulation terminal-event producer parity for `simulation.completed` and `simulation.cancelled`
-- Recent full validation evidence (backend + frontend gates) is recorded in:
-  - `docs/project/CurrentSprint.md`
-  - `docs/project/DevelopmentJournal.md`
+- Current implementation is at schema **0027**, with six core workers and optional
+  fleet/retention profiles. Distributed API serving is explicitly configurable.
+- Canonical spatial editing/history, persisted model registration, protected binary
+  assets, real SNMPv3 collection, RF artifact overlays and operator AI memory/review
+  are delivered under ADR021/022. ADR023 adds dimensioned geometry, distributed
+  realtime, actual evidence-safe archival retention, packaged fleet collection,
+  conditional live providers and separate governed execution/receiver software.
+- Corrected isolated core deployment and encrypted backup/fresh restore passed:
+  **29 cases passed, 0 failed, 4 capability cases blocked** in the corrected
+  distributed release; packaged fleet passed6/6. Physical RF and autonomous safety
+  qualification require authentic external measurements and matching runtime evidence.
+- ADR024 recovered and freshly qualified the matchingv4 model runtime without
+  changing model tensors; actual live recommendations and42 scoped native manual
+  driver cases passed. Joined calibrated autonomy and physical RF remain unqualified.
+  Evidence: [`QualificationEvidence.md`](docs/project/CompletionProgram/QualificationEvidence.md).
+- Whole-vision completion remains open. Current capabilities, tests, deployment
+  prerequisites and remaining implementation are in
+  [`docs/project/CompletionProgram/README.md`](docs/project/CompletionProgram/README.md).
+- Use [`deploy/README.md`](deploy/README.md) for the supervised package. API-only
+  development does not start the simulation/report/alert/execution/autonomy/outbox
+  workers. Model uploads require the private persistent `NETWORK_ASSET_ROOT` described
+  in [`Assets.md`](docs/project/CompletionProgram/Assets.md).
 
 ## What Is Implemented
 
@@ -311,7 +326,9 @@ Yes, this repository is at least MVP-level (and functionally beyond a thin MVP) 
 - telemetry + alerts + digital twin realtime flows
 - simulation, intent execution, plugins, and reporting baselines
 
-However, it should be considered an active pre-GA MVP/beta rather than final production-finished state, because VS21 still tracks open high-risk hardening items.
+It remains an active pre-GA platform. Core recovery has bounded isolated acceptance;
+physical calibration, distributed scale and qualified autonomous control still have
+the explicit implementation and acceptance gaps in the completion-program register.
 
 ## Canonical Documentation Map
 

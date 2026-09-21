@@ -1,0 +1,6 @@
+# Required with distributed serving, after the autonomous-client overlay.
+services:
+  api2:
+    extends: {file: compose.autonomous-client.yaml, service: api}
+    environment:
+      API_REALTIME_DISTRIBUTED: "true"

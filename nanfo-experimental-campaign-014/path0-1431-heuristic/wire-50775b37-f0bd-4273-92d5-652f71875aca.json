@@ -1,0 +1,1893 @@
+{
+  "request": {
+    "action": null,
+    "duration_seconds": 0,
+    "expires_at": 1789941228.0752819,
+    "fence": 48,
+    "operation": "recover",
+    "policy_sha256": "10a081fc43eb39a824f8ee8ce2c677ab116f246ca82b130ec9603586a37f1ea3",
+    "request_id": "50775b37-f0bd-4273-92d5-652f71875aca",
+    "version": "nanfo.experimental-lab/v1"
+  },
+  "response": {
+    "evidence": {
+      "action_paths": {
+        "action": null,
+        "baseline": {
+          "paths": {
+            "h1->h3": {
+              "action": 0,
+              "kernel_routes": [
+                {
+                  "node": "h1",
+                  "route": {
+                    "cache": [],
+                    "dev": "h1-eth0",
+                    "dst": "10.78.10.2",
+                    "flags": [],
+                    "from": "10.78.8.2",
+                    "gateway": "10.78.8.1",
+                    "uid": 0
+                  }
+                },
+                {
+                  "node": "access1",
+                  "route": {
+                    "cache": [],
+                    "dev": "access1-eth1",
+                    "dst": "10.78.10.2",
+                    "flags": [],
+                    "from": "10.78.8.2",
+                    "gateway": "10.78.4.1",
+                    "iif": "access1-eth3"
+                  }
+                },
+                {
+                  "node": "dist1",
+                  "route": {
+                    "cache": [],
+                    "dev": "dist1-eth4",
+                    "dst": "10.78.10.2",
+                    "flags": [],
+                    "from": "10.78.8.2",
+                    "gateway": "10.78.6.2",
+                    "iif": "dist1-eth3"
+                  }
+                },
+                {
+                  "node": "access2",
+                  "route": {
+                    "cache": [],
+                    "dev": "access2-eth3",
+                    "dst": "10.78.10.2",
+                    "flags": [],
+                    "from": "10.78.8.2",
+                    "iif": "access2-eth1"
+                  }
+                }
+              ],
+              "nodes": [
+                "h1",
+                "access1",
+                "dist1",
+                "access2",
+                "h3"
+              ]
+            },
+            "h2->h4": {
+              "action": 0,
+              "kernel_routes": [
+                {
+                  "node": "h2",
+                  "route": {
+                    "cache": [],
+                    "dev": "h2-eth0",
+                    "dst": "10.78.11.2",
+                    "flags": [],
+                    "from": "10.78.9.2",
+                    "gateway": "10.78.9.1",
+                    "uid": 0
+                  }
+                },
+                {
+                  "node": "access1",
+                  "route": {
+                    "cache": [],
+                    "dev": "access1-eth1",
+                    "dst": "10.78.11.2",
+                    "flags": [],
+                    "from": "10.78.9.2",
+                    "gateway": "10.78.4.1",
+                    "iif": "access1-eth4"
+                  }
+                },
+                {
+                  "node": "dist1",
+                  "route": {
+                    "cache": [],
+                    "dev": "dist1-eth4",
+                    "dst": "10.78.11.2",
+                    "flags": [],
+                    "from": "10.78.9.2",
+                    "gateway": "10.78.6.2",
+                    "iif": "dist1-eth3"
+                  }
+                },
+                {
+                  "node": "access2",
+                  "route": {
+                    "cache": [],
+                    "dev": "access2-eth4",
+                    "dst": "10.78.11.2",
+                    "flags": [],
+                    "from": "10.78.9.2",
+                    "iif": "access2-eth1"
+                  }
+                }
+              ],
+              "nodes": [
+                "h2",
+                "access1",
+                "dist1",
+                "access2",
+                "h4"
+              ]
+            },
+            "h3->h1": {
+              "action": 0,
+              "kernel_routes": [
+                {
+                  "node": "h3",
+                  "route": {
+                    "cache": [],
+                    "dev": "h3-eth0",
+                    "dst": "10.78.8.2",
+                    "flags": [],
+                    "from": "10.78.10.2",
+                    "gateway": "10.78.10.1",
+                    "uid": 0
+                  }
+                },
+                {
+                  "node": "access2",
+                  "route": {
+                    "cache": [],
+                    "dev": "access2-eth1",
+                    "dst": "10.78.8.2",
+                    "flags": [],
+                    "from": "10.78.10.2",
+                    "gateway": "10.78.6.1",
+                    "iif": "access2-eth3"
+                  }
+                },
+                {
+                  "node": "dist1",
+                  "route": {
+                    "cache": [],
+                    "dev": "dist1-eth3",
+                    "dst": "10.78.8.2",
+                    "flags": [],
+                    "from": "10.78.10.2",
+                    "gateway": "10.78.4.2",
+                    "iif": "dist1-eth4"
+                  }
+                },
+                {
+                  "node": "access1",
+                  "route": {
+                    "cache": [],
+                    "dev": "access1-eth3",
+                    "dst": "10.78.8.2",
+                    "flags": [],
+                    "from": "10.78.10.2",
+                    "iif": "access1-eth1"
+                  }
+                }
+              ],
+              "nodes": [
+                "h3",
+                "access2",
+                "dist1",
+                "access1",
+                "h1"
+              ]
+            },
+            "h4->h2": {
+              "action": 0,
+              "kernel_routes": [
+                {
+                  "node": "h4",
+                  "route": {
+                    "cache": [],
+                    "dev": "h4-eth0",
+                    "dst": "10.78.9.2",
+                    "flags": [],
+                    "from": "10.78.11.2",
+                    "gateway": "10.78.11.1",
+                    "uid": 0
+                  }
+                },
+                {
+                  "node": "access2",
+                  "route": {
+                    "cache": [],
+                    "dev": "access2-eth1",
+                    "dst": "10.78.9.2",
+                    "flags": [],
+                    "from": "10.78.11.2",
+                    "gateway": "10.78.6.1",
+                    "iif": "access2-eth4"
+                  }
+                },
+                {
+                  "node": "dist1",
+                  "route": {
+                    "cache": [],
+                    "dev": "dist1-eth3",
+                    "dst": "10.78.9.2",
+                    "flags": [],
+                    "from": "10.78.11.2",
+                    "gateway": "10.78.4.2",
+                    "iif": "dist1-eth4"
+                  }
+                },
+                {
+                  "node": "access1",
+                  "route": {
+                    "cache": [],
+                    "dev": "access1-eth4",
+                    "dst": "10.78.9.2",
+                    "flags": [],
+                    "from": "10.78.11.2",
+                    "iif": "access1-eth1"
+                  }
+                }
+              ],
+              "nodes": [
+                "h4",
+                "access2",
+                "dist1",
+                "access1",
+                "h2"
+              ]
+            }
+          },
+          "tables": {
+            "access1:19110": {
+              "routes": [],
+              "rules": []
+            },
+            "access1:19111": {
+              "routes": [],
+              "rules": []
+            },
+            "access2:19110": {
+              "routes": [],
+              "rules": []
+            },
+            "access2:19111": {
+              "routes": [],
+              "rules": []
+            },
+            "core:19110": {
+              "routes": [],
+              "rules": []
+            },
+            "core:19111": {
+              "routes": [],
+              "rules": []
+            },
+            "dist1:19110": {
+              "routes": [],
+              "rules": []
+            },
+            "dist1:19111": {
+              "routes": [],
+              "rules": []
+            },
+            "dist2:19110": {
+              "routes": [],
+              "rules": []
+            },
+            "dist2:19111": {
+              "routes": [],
+              "rules": []
+            }
+          }
+        },
+        "calls": {
+          "authority_checks": 36,
+          "compensation_mutations": 12,
+          "mutation_attempted": 48,
+          "mutation_completed": 48,
+          "original_change_calls": 9
+        },
+        "frame_hashes": [
+          "54d3af22829de4b07cb8b2dffeec4677620024695546b55b3ba89c48fa3fe9dc",
+          "81798fca24c6319d5fedec7887348bf9f780e8943bca9de76f431b8664ea7239",
+          "64b63023b0cafc680a71baca5dc116c7a587524645ab3e8aeefb260f1c06b9c9",
+          "5ee2606111ca975f22903503ab400dd8e31766a0770163c08d088b43612d5e03"
+        ],
+        "namespace_identities": {
+          "access1": {
+            "netns": "net:[4026533297]",
+            "pid": 101,
+            "start_ticks": 13860223
+          },
+          "access2": {
+            "netns": "net:[4026533351]",
+            "pid": 103,
+            "start_ticks": 13860224
+          },
+          "core": {
+            "netns": "net:[4026533127]",
+            "pid": 95,
+            "start_ticks": 13860220
+          },
+          "dist1": {
+            "netns": "net:[4026533189]",
+            "pid": 97,
+            "start_ticks": 13860221
+          },
+          "dist2": {
+            "netns": "net:[4026533243]",
+            "pid": 99,
+            "start_ticks": 13860222
+          },
+          "h1": {
+            "netns": "net:[4026533405]",
+            "pid": 107,
+            "start_ticks": 13860226
+          },
+          "h2": {
+            "netns": "net:[4026533459]",
+            "pid": 109,
+            "start_ticks": 13860227
+          },
+          "h3": {
+            "netns": "net:[4026533513]",
+            "pid": 111,
+            "start_ticks": 13860229
+          },
+          "h4": {
+            "netns": "net:[4026533567]",
+            "pid": 113,
+            "start_ticks": 13860230
+          }
+        },
+        "original": null,
+        "owned": [],
+        "transcript": [
+          {
+            "argv": [
+              "ip",
+              "route",
+              "add",
+              "10.78.10.2/32",
+              "via",
+              "10.78.4.1",
+              "dev",
+              "access1-eth1",
+              "onlink",
+              "table",
+              "19110",
+              "proto",
+              "static"
+            ],
+            "began": 99472.572915201,
+            "completed": 99472.677222199,
+            "node": "access1",
+            "restoring": false
+          },
+          {
+            "argv": [
+              "ip",
+              "rule",
+              "add",
+              "priority",
+              "19110",
+              "from",
+              "10.78.8.2/32",
+              "to",
+              "10.78.10.2/32",
+              "table",
+              "19110"
+            ],
+            "began": 99472.684307412,
+            "completed": 99472.808701938,
+            "node": "access1",
+            "restoring": false
+          },
+          {
+            "argv": [
+              "ip",
+              "route",
+              "add",
+              "10.78.10.2/32",
+              "via",
+              "10.78.6.2",
+              "dev",
+              "dist1-eth4",
+              "onlink",
+              "table",
+              "19110",
+              "proto",
+              "static"
+            ],
+            "began": 99472.815228027,
+            "completed": 99472.895558323,
+            "node": "dist1",
+            "restoring": false
+          },
+          {
+            "argv": [
+              "ip",
+              "rule",
+              "add",
+              "priority",
+              "19110",
+              "from",
+              "10.78.8.2/32",
+              "to",
+              "10.78.10.2/32",
+              "table",
+              "19110"
+            ],
+            "began": 99472.90235935,
+            "completed": 99473.004544162,
+            "node": "dist1",
+            "restoring": false
+          },
+          {
+            "argv": [
+              "ip",
+              "route",
+              "add",
+              "10.78.10.2/32",
+              "via",
+              "10.78.10.2",
+              "dev",
+              "access2-eth3",
+              "onlink",
+              "table",
+              "19110",
+              "proto",
+              "static"
+            ],
+            "began": 99473.01248203,
+            "completed": 99473.092583104,
+            "node": "access2",
+            "restoring": false
+          },
+          {
+            "argv": [
+              "ip",
+              "rule",
+              "add",
+              "priority",
+              "19110",
+              "from",
+              "10.78.8.2/32",
+              "to",
+              "10.78.10.2/32",
+              "table",
+              "19110"
+            ],
+            "began": 99473.099283833,
+            "completed": 99473.200832005,
+            "node": "access2",
+            "restoring": false
+          },
+          {
+            "argv": [
+              "ip",
+              "route",
+              "add",
+              "10.78.8.2/32",
+              "via",
+              "10.78.6.1",
+              "dev",
+              "access2-eth1",
+              "onlink",
+              "table",
+              "19111",
+              "proto",
+              "static"
+            ],
+            "began": 99473.207899845,
+            "completed": 99473.372786785,
+            "node": "access2",
+            "restoring": false
+          },
+          {
+            "argv": [
+              "ip",
+              "rule",
+              "add",
+              "priority",
+              "19111",
+              "from",
+              "10.78.10.2/32",
+              "to",
+              "10.78.8.2/32",
+              "table",
+              "19111"
+            ],
+            "began": 99473.380335601,
+            "completed": 99473.481564351,
+            "node": "access2",
+            "restoring": false
+          },
+          {
+            "argv": [
+              "ip",
+              "route",
+              "add",
+              "10.78.8.2/32",
+              "via",
+              "10.78.4.2",
+              "dev",
+              "dist1-eth3",
+              "onlink",
+              "table",
+              "19111",
+              "proto",
+              "static"
+            ],
+            "began": 99473.488687445,
+            "completed": 99473.591042808,
+            "node": "dist1",
+            "restoring": false
+          },
+          {
+            "argv": [
+              "ip",
+              "rule",
+              "add",
+              "priority",
+              "19111",
+              "from",
+              "10.78.10.2/32",
+              "to",
+              "10.78.8.2/32",
+              "table",
+              "19111"
+            ],
+            "began": 99473.598042469,
+            "completed": 99473.700193797,
+            "node": "dist1",
+            "restoring": false
+          },
+          {
+            "argv": [
+              "ip",
+              "route",
+              "add",
+              "10.78.8.2/32",
+              "via",
+              "10.78.8.2",
+              "dev",
+              "access1-eth3",
+              "onlink",
+              "table",
+              "19111",
+              "proto",
+              "static"
+            ],
+            "began": 99473.707103389,
+            "completed": 99473.787560113,
+            "node": "access1",
+            "restoring": false
+          },
+          {
+            "argv": [
+              "ip",
+              "rule",
+              "add",
+              "priority",
+              "19111",
+              "from",
+              "10.78.10.2/32",
+              "to",
+              "10.78.8.2/32",
+              "table",
+              "19111"
+            ],
+            "began": 99473.794734884,
+            "completed": 99473.917577327,
+            "node": "access1",
+            "restoring": false
+          },
+          {
+            "argv": [
+              "ip",
+              "rule",
+              "del",
+              "priority",
+              "19111",
+              "from",
+              "10.78.10.2/32",
+              "to",
+              "10.78.8.2/32",
+              "table",
+              "19111"
+            ],
+            "began": 99484.848808223,
+            "completed": 99484.899288114,
+            "node": "access1",
+            "restoring": false
+          },
+          {
+            "argv": [
+              "ip",
+              "route",
+              "del",
+              "10.78.8.2/32",
+              "via",
+              "10.78.8.2",
+              "dev",
+              "access1-eth3",
+              "table",
+              "19111",
+              "proto",
+              "static"
+            ],
+            "began": 99484.920810374,
+            "completed": 99484.966090854,
+            "node": "access1",
+            "restoring": false
+          },
+          {
+            "argv": [
+              "ip",
+              "rule",
+              "del",
+              "priority",
+              "19111",
+              "from",
+              "10.78.10.2/32",
+              "to",
+              "10.78.8.2/32",
+              "table",
+              "19111"
+            ],
+            "began": 99485.023305116,
+            "completed": 99485.070386788,
+            "node": "dist1",
+            "restoring": false
+          },
+          {
+            "argv": [
+              "ip",
+              "route",
+              "del",
+              "10.78.8.2/32",
+              "via",
+              "10.78.4.2",
+              "dev",
+              "dist1-eth3",
+              "table",
+              "19111",
+              "proto",
+              "static"
+            ],
+            "began": 99485.092979013,
+            "completed": 99485.137504451,
+            "node": "dist1",
+            "restoring": false
+          },
+          {
+            "argv": [
+              "ip",
+              "rule",
+              "del",
+              "priority",
+              "19111",
+              "from",
+              "10.78.10.2/32",
+              "to",
+              "10.78.8.2/32",
+              "table",
+              "19111"
+            ],
+            "began": 99485.190897898,
+            "completed": 99485.242925224,
+            "node": "access2",
+            "restoring": false
+          },
+          {
+            "argv": [
+              "ip",
+              "route",
+              "del",
+              "10.78.8.2/32",
+              "via",
+              "10.78.6.1",
+              "dev",
+              "access2-eth1",
+              "table",
+              "19111",
+              "proto",
+              "static"
+            ],
+            "began": 99485.265469237,
+            "completed": 99485.309344261,
+            "node": "access2",
+            "restoring": false
+          },
+          {
+            "argv": [
+              "ip",
+              "rule",
+              "del",
+              "priority",
+              "19110",
+              "from",
+              "10.78.8.2/32",
+              "to",
+              "10.78.10.2/32",
+              "table",
+              "19110"
+            ],
+            "began": 99485.361216724,
+            "completed": 99485.403668908,
+            "node": "access2",
+            "restoring": false
+          },
+          {
+            "argv": [
+              "ip",
+              "route",
+              "del",
+              "10.78.10.2/32",
+              "via",
+              "10.78.10.2",
+              "dev",
+              "access2-eth3",
+              "table",
+              "19110",
+              "proto",
+              "static"
+            ],
+            "began": 99485.425695708,
+            "completed": 99485.471208435,
+            "node": "access2",
+            "restoring": false
+          },
+          {
+            "argv": [
+              "ip",
+              "rule",
+              "del",
+              "priority",
+              "19110",
+              "from",
+              "10.78.8.2/32",
+              "to",
+              "10.78.10.2/32",
+              "table",
+              "19110"
+            ],
+            "began": 99485.523268812,
+            "completed": 99485.568582895,
+            "node": "dist1",
+            "restoring": false
+          },
+          {
+            "argv": [
+              "ip",
+              "route",
+              "del",
+              "10.78.10.2/32",
+              "via",
+              "10.78.6.2",
+              "dev",
+              "dist1-eth4",
+              "table",
+              "19110",
+              "proto",
+              "static"
+            ],
+            "began": 99485.593223637,
+            "completed": 99485.636689881,
+            "node": "dist1",
+            "restoring": false
+          },
+          {
+            "argv": [
+              "ip",
+              "rule",
+              "del",
+              "priority",
+              "19110",
+              "from",
+              "10.78.8.2/32",
+              "to",
+              "10.78.10.2/32",
+              "table",
+              "19110"
+            ],
+            "began": 99485.688298868,
+            "completed": 99485.735229325,
+            "node": "access1",
+            "restoring": false
+          },
+          {
+            "argv": [
+              "ip",
+              "route",
+              "del",
+              "10.78.10.2/32",
+              "via",
+              "10.78.4.1",
+              "dev",
+              "access1-eth1",
+              "table",
+              "19110",
+              "proto",
+              "static"
+            ],
+            "began": 99485.760550629,
+            "completed": 99485.803149188,
+            "node": "access1",
+            "restoring": false
+          },
+          {
+            "argv": [
+              "ip",
+              "route",
+              "add",
+              "10.78.10.2/32",
+              "via",
+              "10.78.5.1",
+              "dev",
+              "access1-eth2",
+              "onlink",
+              "table",
+              "19110",
+              "proto",
+              "static"
+            ],
+            "began": 99486.249447714,
+            "completed": 99486.701823754,
+            "node": "access1",
+            "restoring": false
+          },
+          {
+            "argv": [
+              "ip",
+              "rule",
+              "add",
+              "priority",
+              "19110",
+              "from",
+              "10.78.8.2/32",
+              "to",
+              "10.78.10.2/32",
+              "table",
+              "19110"
+            ],
+            "began": 99486.723103877,
+            "completed": 99487.035387182,
+            "node": "access1",
+            "restoring": false
+          },
+          {
+            "argv": [
+              "ip",
+              "route",
+              "add",
+              "10.78.10.2/32",
+              "via",
+              "10.78.7.2",
+              "dev",
+              "dist2-eth4",
+              "onlink",
+              "table",
+              "19110",
+              "proto",
+              "static"
+            ],
+            "began": 99487.058029891,
+            "completed": 99487.517834009,
+            "node": "dist2",
+            "restoring": false
+          },
+          {
+            "argv": [
+              "ip",
+              "rule",
+              "add",
+              "priority",
+              "19110",
+              "from",
+              "10.78.8.2/32",
+              "to",
+              "10.78.10.2/32",
+              "table",
+              "19110"
+            ],
+            "began": 99487.550698428,
+            "completed": 99488.052845472,
+            "node": "dist2",
+            "restoring": false
+          },
+          {
+            "argv": [
+              "ip",
+              "route",
+              "add",
+              "10.78.10.2/32",
+              "via",
+              "10.78.10.2",
+              "dev",
+              "access2-eth3",
+              "onlink",
+              "table",
+              "19110",
+              "proto",
+              "static"
+            ],
+            "began": 99488.075994616,
+            "completed": 99488.63272561,
+            "node": "access2",
+            "restoring": false
+          },
+          {
+            "argv": [
+              "ip",
+              "rule",
+              "add",
+              "priority",
+              "19110",
+              "from",
+              "10.78.8.2/32",
+              "to",
+              "10.78.10.2/32",
+              "table",
+              "19110"
+            ],
+            "began": 99488.657112133,
+            "completed": 99488.983259645,
+            "node": "access2",
+            "restoring": false
+          },
+          {
+            "argv": [
+              "ip",
+              "route",
+              "add",
+              "10.78.8.2/32",
+              "via",
+              "10.78.7.1",
+              "dev",
+              "access2-eth2",
+              "onlink",
+              "table",
+              "19111",
+              "proto",
+              "static"
+            ],
+            "began": 99489.007538996,
+            "completed": 99489.353799584,
+            "node": "access2",
+            "restoring": false
+          },
+          {
+            "argv": [
+              "ip",
+              "rule",
+              "add",
+              "priority",
+              "19111",
+              "from",
+              "10.78.10.2/32",
+              "to",
+              "10.78.8.2/32",
+              "table",
+              "19111"
+            ],
+            "began": 99489.376987881,
+            "completed": 99489.80639773,
+            "node": "access2",
+            "restoring": false
+          },
+          {
+            "argv": [
+              "ip",
+              "route",
+              "add",
+              "10.78.8.2/32",
+              "via",
+              "10.78.5.2",
+              "dev",
+              "dist2-eth3",
+              "onlink",
+              "table",
+              "19111",
+              "proto",
+              "static"
+            ],
+            "began": 99489.829806642,
+            "completed": 99490.260360726,
+            "node": "dist2",
+            "restoring": false
+          },
+          {
+            "argv": [
+              "ip",
+              "rule",
+              "add",
+              "priority",
+              "19111",
+              "from",
+              "10.78.10.2/32",
+              "to",
+              "10.78.8.2/32",
+              "table",
+              "19111"
+            ],
+            "began": 99490.283641807,
+            "completed": 99490.587137101,
+            "node": "dist2",
+            "restoring": false
+          },
+          {
+            "argv": [
+              "ip",
+              "route",
+              "add",
+              "10.78.8.2/32",
+              "via",
+              "10.78.8.2",
+              "dev",
+              "access1-eth3",
+              "onlink",
+              "table",
+              "19111",
+              "proto",
+              "static"
+            ],
+            "began": 99490.609034447,
+            "completed": 99491.100826499,
+            "node": "access1",
+            "restoring": false
+          },
+          {
+            "argv": [
+              "ip",
+              "rule",
+              "add",
+              "priority",
+              "19111",
+              "from",
+              "10.78.10.2/32",
+              "to",
+              "10.78.8.2/32",
+              "table",
+              "19111"
+            ],
+            "began": 99491.12538688,
+            "completed": 99491.430134271,
+            "node": "access1",
+            "restoring": false
+          },
+          {
+            "argv": [
+              "ip",
+              "rule",
+              "del",
+              "priority",
+              "19111",
+              "from",
+              "10.78.10.2/32",
+              "to",
+              "10.78.8.2/32",
+              "table",
+              "19111"
+            ],
+            "began": 99512.180484822,
+            "completed": 99512.258644725,
+            "node": "access1",
+            "restoring": true
+          },
+          {
+            "argv": [
+              "ip",
+              "route",
+              "del",
+              "10.78.8.2/32",
+              "via",
+              "10.78.8.2",
+              "dev",
+              "access1-eth3",
+              "table",
+              "19111",
+              "proto",
+              "static"
+            ],
+            "began": 99512.314802977,
+            "completed": 99512.388387574,
+            "node": "access1",
+            "restoring": true
+          },
+          {
+            "argv": [
+              "ip",
+              "rule",
+              "del",
+              "priority",
+              "19111",
+              "from",
+              "10.78.10.2/32",
+              "to",
+              "10.78.8.2/32",
+              "table",
+              "19111"
+            ],
+            "began": 99512.47705316,
+            "completed": 99512.549928432,
+            "node": "dist2",
+            "restoring": true
+          },
+          {
+            "argv": [
+              "ip",
+              "route",
+              "del",
+              "10.78.8.2/32",
+              "via",
+              "10.78.5.2",
+              "dev",
+              "dist2-eth3",
+              "table",
+              "19111",
+              "proto",
+              "static"
+            ],
+            "began": 99512.604559588,
+            "completed": 99512.676709624,
+            "node": "dist2",
+            "restoring": true
+          },
+          {
+            "argv": [
+              "ip",
+              "rule",
+              "del",
+              "priority",
+              "19111",
+              "from",
+              "10.78.10.2/32",
+              "to",
+              "10.78.8.2/32",
+              "table",
+              "19111"
+            ],
+            "began": 99512.762085235,
+            "completed": 99512.836829175,
+            "node": "access2",
+            "restoring": true
+          },
+          {
+            "argv": [
+              "ip",
+              "route",
+              "del",
+              "10.78.8.2/32",
+              "via",
+              "10.78.7.1",
+              "dev",
+              "access2-eth2",
+              "table",
+              "19111",
+              "proto",
+              "static"
+            ],
+            "began": 99512.895768805,
+            "completed": 99512.965662782,
+            "node": "access2",
+            "restoring": true
+          },
+          {
+            "argv": [
+              "ip",
+              "rule",
+              "del",
+              "priority",
+              "19110",
+              "from",
+              "10.78.8.2/32",
+              "to",
+              "10.78.10.2/32",
+              "table",
+              "19110"
+            ],
+            "began": 99513.04921523,
+            "completed": 99513.125126058,
+            "node": "access2",
+            "restoring": true
+          },
+          {
+            "argv": [
+              "ip",
+              "route",
+              "del",
+              "10.78.10.2/32",
+              "via",
+              "10.78.10.2",
+              "dev",
+              "access2-eth3",
+              "table",
+              "19110",
+              "proto",
+              "static"
+            ],
+            "began": 99513.178803197,
+            "completed": 99513.251846866,
+            "node": "access2",
+            "restoring": true
+          },
+          {
+            "argv": [
+              "ip",
+              "rule",
+              "del",
+              "priority",
+              "19110",
+              "from",
+              "10.78.8.2/32",
+              "to",
+              "10.78.10.2/32",
+              "table",
+              "19110"
+            ],
+            "began": 99513.334546988,
+            "completed": 99513.410562363,
+            "node": "dist2",
+            "restoring": true
+          },
+          {
+            "argv": [
+              "ip",
+              "route",
+              "del",
+              "10.78.10.2/32",
+              "via",
+              "10.78.7.2",
+              "dev",
+              "dist2-eth4",
+              "table",
+              "19110",
+              "proto",
+              "static"
+            ],
+            "began": 99513.466489449,
+            "completed": 99513.534353655,
+            "node": "dist2",
+            "restoring": true
+          },
+          {
+            "argv": [
+              "ip",
+              "rule",
+              "del",
+              "priority",
+              "19110",
+              "from",
+              "10.78.8.2/32",
+              "to",
+              "10.78.10.2/32",
+              "table",
+              "19110"
+            ],
+            "began": 99513.618742337,
+            "completed": 99513.693289066,
+            "node": "access1",
+            "restoring": true
+          },
+          {
+            "argv": [
+              "ip",
+              "route",
+              "del",
+              "10.78.10.2/32",
+              "via",
+              "10.78.5.1",
+              "dev",
+              "access1-eth2",
+              "table",
+              "19110",
+              "proto",
+              "static"
+            ],
+            "began": 99513.75044149,
+            "completed": 99513.821488739,
+            "node": "access1",
+            "restoring": true
+          }
+        ]
+      },
+      "duration_seconds": 0.009604054997907951,
+      "phase": "restored",
+      "restoration": {
+        "baseline": {
+          "paths": {
+            "h1->h3": {
+              "action": 0,
+              "kernel_routes": [
+                {
+                  "node": "h1",
+                  "route": {
+                    "cache": [],
+                    "dev": "h1-eth0",
+                    "dst": "10.78.10.2",
+                    "flags": [],
+                    "from": "10.78.8.2",
+                    "gateway": "10.78.8.1",
+                    "uid": 0
+                  }
+                },
+                {
+                  "node": "access1",
+                  "route": {
+                    "cache": [],
+                    "dev": "access1-eth1",
+                    "dst": "10.78.10.2",
+                    "flags": [],
+                    "from": "10.78.8.2",
+                    "gateway": "10.78.4.1",
+                    "iif": "access1-eth3"
+                  }
+                },
+                {
+                  "node": "dist1",
+                  "route": {
+                    "cache": [],
+                    "dev": "dist1-eth4",
+                    "dst": "10.78.10.2",
+                    "flags": [],
+                    "from": "10.78.8.2",
+                    "gateway": "10.78.6.2",
+                    "iif": "dist1-eth3"
+                  }
+                },
+                {
+                  "node": "access2",
+                  "route": {
+                    "cache": [],
+                    "dev": "access2-eth3",
+                    "dst": "10.78.10.2",
+                    "flags": [],
+                    "from": "10.78.8.2",
+                    "iif": "access2-eth1"
+                  }
+                }
+              ],
+              "nodes": [
+                "h1",
+                "access1",
+                "dist1",
+                "access2",
+                "h3"
+              ]
+            },
+            "h2->h4": {
+              "action": 0,
+              "kernel_routes": [
+                {
+                  "node": "h2",
+                  "route": {
+                    "cache": [],
+                    "dev": "h2-eth0",
+                    "dst": "10.78.11.2",
+                    "flags": [],
+                    "from": "10.78.9.2",
+                    "gateway": "10.78.9.1",
+                    "uid": 0
+                  }
+                },
+                {
+                  "node": "access1",
+                  "route": {
+                    "cache": [],
+                    "dev": "access1-eth1",
+                    "dst": "10.78.11.2",
+                    "flags": [],
+                    "from": "10.78.9.2",
+                    "gateway": "10.78.4.1",
+                    "iif": "access1-eth4"
+                  }
+                },
+                {
+                  "node": "dist1",
+                  "route": {
+                    "cache": [],
+                    "dev": "dist1-eth4",
+                    "dst": "10.78.11.2",
+                    "flags": [],
+                    "from": "10.78.9.2",
+                    "gateway": "10.78.6.2",
+                    "iif": "dist1-eth3"
+                  }
+                },
+                {
+                  "node": "access2",
+                  "route": {
+                    "cache": [],
+                    "dev": "access2-eth4",
+                    "dst": "10.78.11.2",
+                    "flags": [],
+                    "from": "10.78.9.2",
+                    "iif": "access2-eth1"
+                  }
+                }
+              ],
+              "nodes": [
+                "h2",
+                "access1",
+                "dist1",
+                "access2",
+                "h4"
+              ]
+            },
+            "h3->h1": {
+              "action": 0,
+              "kernel_routes": [
+                {
+                  "node": "h3",
+                  "route": {
+                    "cache": [],
+                    "dev": "h3-eth0",
+                    "dst": "10.78.8.2",
+                    "flags": [],
+                    "from": "10.78.10.2",
+                    "gateway": "10.78.10.1",
+                    "uid": 0
+                  }
+                },
+                {
+                  "node": "access2",
+                  "route": {
+                    "cache": [],
+                    "dev": "access2-eth1",
+                    "dst": "10.78.8.2",
+                    "flags": [],
+                    "from": "10.78.10.2",
+                    "gateway": "10.78.6.1",
+                    "iif": "access2-eth3"
+                  }
+                },
+                {
+                  "node": "dist1",
+                  "route": {
+                    "cache": [],
+                    "dev": "dist1-eth3",
+                    "dst": "10.78.8.2",
+                    "flags": [],
+                    "from": "10.78.10.2",
+                    "gateway": "10.78.4.2",
+                    "iif": "dist1-eth4"
+                  }
+                },
+                {
+                  "node": "access1",
+                  "route": {
+                    "cache": [],
+                    "dev": "access1-eth3",
+                    "dst": "10.78.8.2",
+                    "flags": [],
+                    "from": "10.78.10.2",
+                    "iif": "access1-eth1"
+                  }
+                }
+              ],
+              "nodes": [
+                "h3",
+                "access2",
+                "dist1",
+                "access1",
+                "h1"
+              ]
+            },
+            "h4->h2": {
+              "action": 0,
+              "kernel_routes": [
+                {
+                  "node": "h4",
+                  "route": {
+                    "cache": [],
+                    "dev": "h4-eth0",
+                    "dst": "10.78.9.2",
+                    "flags": [],
+                    "from": "10.78.11.2",
+                    "gateway": "10.78.11.1",
+                    "uid": 0
+                  }
+                },
+                {
+                  "node": "access2",
+                  "route": {
+                    "cache": [],
+                    "dev": "access2-eth1",
+                    "dst": "10.78.9.2",
+                    "flags": [],
+                    "from": "10.78.11.2",
+                    "gateway": "10.78.6.1",
+                    "iif": "access2-eth4"
+                  }
+                },
+                {
+                  "node": "dist1",
+                  "route": {
+                    "cache": [],
+                    "dev": "dist1-eth3",
+                    "dst": "10.78.9.2",
+                    "flags": [],
+                    "from": "10.78.11.2",
+                    "gateway": "10.78.4.2",
+                    "iif": "dist1-eth4"
+                  }
+                },
+                {
+                  "node": "access1",
+                  "route": {
+                    "cache": [],
+                    "dev": "access1-eth4",
+                    "dst": "10.78.9.2",
+                    "flags": [],
+                    "from": "10.78.11.2",
+                    "iif": "access1-eth1"
+                  }
+                }
+              ],
+              "nodes": [
+                "h4",
+                "access2",
+                "dist1",
+                "access1",
+                "h2"
+              ]
+            }
+          },
+          "tables": {
+            "access1:19110": {
+              "routes": [],
+              "rules": []
+            },
+            "access1:19111": {
+              "routes": [],
+              "rules": []
+            },
+            "access2:19110": {
+              "routes": [],
+              "rules": []
+            },
+            "access2:19111": {
+              "routes": [],
+              "rules": []
+            },
+            "core:19110": {
+              "routes": [],
+              "rules": []
+            },
+            "core:19111": {
+              "routes": [],
+              "rules": []
+            },
+            "dist1:19110": {
+              "routes": [],
+              "rules": []
+            },
+            "dist1:19111": {
+              "routes": [],
+              "rules": []
+            },
+            "dist2:19110": {
+              "routes": [],
+              "rules": []
+            },
+            "dist2:19111": {
+              "routes": [],
+              "rules": []
+            }
+          }
+        },
+        "baseline_sha256": "785de4b95b205d582edd43b3240a67461b2fab2e504948fc557a09179d5826bf",
+        "duration_seconds": 2.279651845994522,
+        "original_forwarding_verified": true,
+        "owned_empty": true,
+        "readback": {
+          "paths": {
+            "h1->h3": {
+              "action": 0,
+              "kernel_routes": [
+                {
+                  "node": "h1",
+                  "route": {
+                    "cache": [],
+                    "dev": "h1-eth0",
+                    "dst": "10.78.10.2",
+                    "flags": [],
+                    "from": "10.78.8.2",
+                    "gateway": "10.78.8.1",
+                    "uid": 0
+                  }
+                },
+                {
+                  "node": "access1",
+                  "route": {
+                    "cache": [],
+                    "dev": "access1-eth1",
+                    "dst": "10.78.10.2",
+                    "flags": [],
+                    "from": "10.78.8.2",
+                    "gateway": "10.78.4.1",
+                    "iif": "access1-eth3"
+                  }
+                },
+                {
+                  "node": "dist1",
+                  "route": {
+                    "cache": [],
+                    "dev": "dist1-eth4",
+                    "dst": "10.78.10.2",
+                    "flags": [],
+                    "from": "10.78.8.2",
+                    "gateway": "10.78.6.2",
+                    "iif": "dist1-eth3"
+                  }
+                },
+                {
+                  "node": "access2",
+                  "route": {
+                    "cache": [],
+                    "dev": "access2-eth3",
+                    "dst": "10.78.10.2",
+                    "flags": [],
+                    "from": "10.78.8.2",
+                    "iif": "access2-eth1"
+                  }
+                }
+              ],
+              "nodes": [
+                "h1",
+                "access1",
+                "dist1",
+                "access2",
+                "h3"
+              ]
+            },
+            "h2->h4": {
+              "action": 0,
+              "kernel_routes": [
+                {
+                  "node": "h2",
+                  "route": {
+                    "cache": [],
+                    "dev": "h2-eth0",
+                    "dst": "10.78.11.2",
+                    "flags": [],
+                    "from": "10.78.9.2",
+                    "gateway": "10.78.9.1",
+                    "uid": 0
+                  }
+                },
+                {
+                  "node": "access1",
+                  "route": {
+                    "cache": [],
+                    "dev": "access1-eth1",
+                    "dst": "10.78.11.2",
+                    "flags": [],
+                    "from": "10.78.9.2",
+                    "gateway": "10.78.4.1",
+                    "iif": "access1-eth4"
+                  }
+                },
+                {
+                  "node": "dist1",
+                  "route": {
+                    "cache": [],
+                    "dev": "dist1-eth4",
+                    "dst": "10.78.11.2",
+                    "flags": [],
+                    "from": "10.78.9.2",
+                    "gateway": "10.78.6.2",
+                    "iif": "dist1-eth3"
+                  }
+                },
+                {
+                  "node": "access2",
+                  "route": {
+                    "cache": [],
+                    "dev": "access2-eth4",
+                    "dst": "10.78.11.2",
+                    "flags": [],
+                    "from": "10.78.9.2",
+                    "iif": "access2-eth1"
+                  }
+                }
+              ],
+              "nodes": [
+                "h2",
+                "access1",
+                "dist1",
+                "access2",
+                "h4"
+              ]
+            },
+            "h3->h1": {
+              "action": 0,
+              "kernel_routes": [
+                {
+                  "node": "h3",
+                  "route": {
+                    "cache": [],
+                    "dev": "h3-eth0",
+                    "dst": "10.78.8.2",
+                    "flags": [],
+                    "from": "10.78.10.2",
+                    "gateway": "10.78.10.1",
+                    "uid": 0
+                  }
+                },
+                {
+                  "node": "access2",
+                  "route": {
+                    "cache": [],
+                    "dev": "access2-eth1",
+                    "dst": "10.78.8.2",
+                    "flags": [],
+                    "from": "10.78.10.2",
+                    "gateway": "10.78.6.1",
+                    "iif": "access2-eth3"
+                  }
+                },
+                {
+                  "node": "dist1",
+                  "route": {
+                    "cache": [],
+                    "dev": "dist1-eth3",
+                    "dst": "10.78.8.2",
+                    "flags": [],
+                    "from": "10.78.10.2",
+                    "gateway": "10.78.4.2",
+                    "iif": "dist1-eth4"
+                  }
+                },
+                {
+                  "node": "access1",
+                  "route": {
+                    "cache": [],
+                    "dev": "access1-eth3",
+                    "dst": "10.78.8.2",
+                    "flags": [],
+                    "from": "10.78.10.2",
+                    "iif": "access1-eth1"
+                  }
+                }
+              ],
+              "nodes": [
+                "h3",
+                "access2",
+                "dist1",
+                "access1",
+                "h1"
+              ]
+            },
+            "h4->h2": {
+              "action": 0,
+              "kernel_routes": [
+                {
+                  "node": "h4",
+                  "route": {
+                    "cache": [],
+                    "dev": "h4-eth0",
+                    "dst": "10.78.9.2",
+                    "flags": [],
+                    "from": "10.78.11.2",
+                    "gateway": "10.78.11.1",
+                    "uid": 0
+                  }
+                },
+                {
+                  "node": "access2",
+                  "route": {
+                    "cache": [],
+                    "dev": "access2-eth1",
+                    "dst": "10.78.9.2",
+                    "flags": [],
+                    "from": "10.78.11.2",
+                    "gateway": "10.78.6.1",
+                    "iif": "access2-eth4"
+                  }
+                },
+                {
+                  "node": "dist1",
+                  "route": {
+                    "cache": [],
+                    "dev": "dist1-eth3",
+                    "dst": "10.78.9.2",
+                    "flags": [],
+                    "from": "10.78.11.2",
+                    "gateway": "10.78.4.2",
+                    "iif": "dist1-eth4"
+                  }
+                },
+                {
+                  "node": "access1",
+                  "route": {
+                    "cache": [],
+                    "dev": "access1-eth4",
+                    "dst": "10.78.9.2",
+                    "flags": [],
+                    "from": "10.78.11.2",
+                    "iif": "access1-eth1"
+                  }
+                }
+              ],
+              "nodes": [
+                "h4",
+                "access2",
+                "dist1",
+                "access1",
+                "h2"
+              ]
+            }
+          },
+          "tables": {
+            "access1:19110": {
+              "routes": [],
+              "rules": []
+            },
+            "access1:19111": {
+              "routes": [],
+              "rules": []
+            },
+            "access2:19110": {
+              "routes": [],
+              "rules": []
+            },
+            "access2:19111": {
+              "routes": [],
+              "rules": []
+            },
+            "core:19110": {
+              "routes": [],
+              "rules": []
+            },
+            "core:19111": {
+              "routes": [],
+              "rules": []
+            },
+            "dist1:19110": {
+              "routes": [],
+              "rules": []
+            },
+            "dist1:19111": {
+              "routes": [],
+              "rules": []
+            },
+            "dist2:19110": {
+              "routes": [],
+              "rules": []
+            },
+            "dist2:19111": {
+              "routes": [],
+              "rules": []
+            }
+          }
+        },
+        "reason": "watchdog_authority_or_expiry"
+      },
+      "stopped": true,
+      "wrapper_sha256": "e7a3c0256264e69a1975e68b97b8c2d70c1e4f098f91cb8046f90151cb260add"
+    },
+    "fence": 48,
+    "policy_sha256": "10a081fc43eb39a824f8ee8ce2c677ab116f246ca82b130ec9603586a37f1ea3",
+    "request_id": "50775b37-f0bd-4273-92d5-652f71875aca",
+    "status": "ok",
+    "version": "nanfo.experimental-lab/v1"
+  }
+}

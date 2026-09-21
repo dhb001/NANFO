@@ -42,6 +42,7 @@ test.describe("ADR019 metadata registry browser contracts", () => {
     const state = createDefaultSessionState();
     await installSessionMocks(page, state);
     await loginFromUi(page);
+    await page.getByRole("button", { name: "Toggle navigation" }).click();
     await page.getByRole("link", { name: "Plugins" }).click();
     await page.getByLabel("Plugin Key").fill("fixture-plugin");
     await page.getByLabel("Name", { exact: true }).fill("Fixture Plugin");

@@ -1,0 +1,11 @@
+{
+  "bootstrap_initial_action": 1,
+  "case_id": "path1-disconnect",
+  "fault": "disconnect",
+  "intervention": "real",
+  "phase": "afterwrite",
+  "policy": "qualified",
+  "scenario": "path1",
+  "seed": 1453,
+  "write_index": 1
+}

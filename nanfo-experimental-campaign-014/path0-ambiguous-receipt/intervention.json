@@ -1,0 +1,44 @@
+{
+  "applied_ns": 102084541889817,
+  "bootstrap_initial_action": 0,
+  "boundary": {
+    "entry": {
+      "argv": [
+        "ip",
+        "rule",
+        "del",
+        "priority",
+        "19111",
+        "from",
+        "10.78.10.2/32",
+        "to",
+        "10.78.8.2/32",
+        "table",
+        "19111"
+      ],
+      "began": 102084.316110368,
+      "completed": 102084.365625699,
+      "node": "access1",
+      "restoring": false
+    },
+    "id": "100f3caeaaf5549d418adf685b4c066ca5590d9059779468dd336d948ff8c460",
+    "point": {
+      "effect": "pause",
+      "operation": "execute",
+      "ordinal": 1,
+      "policy_sha256": "75de331a0c7443dcf811cc662226250fa278cfe53c52d45120296c330e6ca4b2",
+      "timeout_seconds": 30,
+      "when": "after"
+    },
+    "reached_monotonic": 102084.388712274,
+    "released_monotonic": null
+  },
+  "case_id": "path0-ambiguous-receipt",
+  "fault": "ambiguous-receipt",
+  "intervention": "injected_failpoint",
+  "phase": "afterwrite",
+  "policy": "qualified",
+  "scenario": "path0",
+  "seed": 1446,
+  "write_index": 1
+}

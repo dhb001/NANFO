@@ -17,7 +17,6 @@ import {
 import { useTwinSceneModel } from "@/features/digitalTwin/hooks";
 import { CONGESTION_POLICY_VERSION } from "@/features/digitalTwin/sceneAdapter";
 import type { ImportSummary } from "@/features/digitalTwin/twinImport";
-import { WIRELESS_COVERAGE_POLICY_VERSION } from "@/features/digitalTwin/wirelessCoverage";
 import { Panel } from "@/shared/ui/Panel";
 import { QueryState } from "@/shared/ui/QueryState";
 import { useTopologyGraph, useTopologyNode } from "@/features/topology/hooks";
@@ -41,6 +40,21 @@ import {
 } from "@/features/networks/hooks";
 import { useUiStore } from "@/shared/state/ui-store";
 import type { MeasuredPathSegment } from "./measuredPathMapping";
+import { hasPermission } from "@/features/auth/permissions";
+import { useSpatialScene } from "./spatialHooks";
+import { applySpatialScene } from "./spatialScene";
+import { SpatialScenePanel } from "./SpatialScenePanel";
+import { ModelRegistrationControls } from "./ModelRegistration";
+import type { AssetRegistration } from "@/shared/types/network";
+import { registrationTransform, validateRegistration } from "./modelRegistration";
+import { RFImportPanel, type RFImportState } from "./RFImportPanel";
+import { TwinScene } from "./TwinScene";
+import { MAX_MODEL_BYTES, validateModelBytes, decodePersistedModel } from "./modelAsset";
+import { buildIntentHandoffFromNode } from "./intentHandoff";
+import * as importModule from "./twinImport";
+import { downloadModelBytes } from "./assetDownload";
+import { CustomGroupEditor } from "./CustomGroupEditor";
+import { TwinLifecycleControls } from "./TwinLifecycleControls";
 
 const MeasuredPathPanel = lazy(() => import("./MeasuredPathPanel").then((module) => ({ default: module.MeasuredPathPanel })));
 
@@ -50,16 +64,10 @@ interface LayerState {
   showCongestion: boolean;
   showOverlays: boolean;
   showModel: boolean;
-  showWirelessCoverage: boolean;
   showImportedBuildings: boolean;
 }
 
 type ImportedModelStatus = "idle" | "loading" | "ready" | "error";
-
-const TwinScene = lazy(async () => {
-  const module = await import("@/features/digitalTwin/TwinScene");
-  return { default: module.TwinScene };
-});
 
 const DEFAULT_LAYERS: LayerState = {
   showLinks: true,
@@ -67,7 +75,6 @@ const DEFAULT_LAYERS: LayerState = {
   showCongestion: true,
   showOverlays: true,
   showModel: true,
-  showWirelessCoverage: true,
   showImportedBuildings: true,
 };
 
@@ -152,7 +159,14 @@ function toSafeGroupToken(value: string): string {
 export function TwinPageContent() {
   const navigate = useNavigate();
   const token = useAuthStore((state) => state.accessToken);
+  const profile = useAuthStore((state) => state.profile);
   const networkId = useWorkspaceStore((state) => state.networkId);
+  const workspaceId = useWorkspaceStore((state) => state.workspaceId);
+  const [rfImport, setRFImport] = useState<RFImportState | null>(null);
+  const [showRFImport, setShowRFImport] = useState(false);
+  const [showCustomGroups, setShowCustomGroups] = useState(false);
+  const [openedCustomGroups, setOpenedCustomGroups] = useState(false);
+  const [selectedAssetId, setSelectedAssetId] = useState("");
   const pushToast = useUiStore((state) => state.pushToast);
 
   const graphQuery = useTopologyGraph(token, networkId);
@@ -167,6 +181,7 @@ export function TwinPageContent() {
   const [isImporting, setIsImporting] = useState(false);
   const [modelFileName, setModelFileName] = useState<string | null>(null);
   const [importedModelUrl, setImportedModelUrl] = useState<string | null>(null);
+  const [registration, setRegistration] = useState<{ url: string; value: AssetRegistration; saved: boolean } | null>(null);
   const [importedModelStatus, setImportedModelStatus] = useState<ImportedModelStatus>("idle");
   const [importedModelStatusMessage, setImportedModelStatusMessage] = useState<string | null>(null);
   const [pendingPersistDeviceId, setPendingPersistDeviceId] = useState<string | null>(null);
@@ -183,6 +198,7 @@ export function TwinPageContent() {
   const [filterSelectedFloorOnly, setFilterSelectedFloorOnly] = useState(false);
   const [currentModelFile, setCurrentModelFile] = useState<File | null>(null);
   const modelOperation = useRef(0);
+  const restoredAsset = useRef<{ id: string; operation: number } | null>(null);
   const mounted = useRef(true);
   useEffect(() => {
     mounted.current = true;
@@ -211,7 +227,9 @@ export function TwinPageContent() {
   const upsertCampusModelAssetsMutation = useUpsertCampusModelAssets(token, networkId);
   const upsertDeviceGroupsMutation = useUpsertDeviceGroups(token, networkId);
 
-  const sceneModel = useTwinSceneModel(baseGraph?.nodes ?? [], baseGraph?.edges ?? [], importSummary?.mappingByDeviceId);
+  const schematicModel = useTwinSceneModel(baseGraph?.nodes ?? [], baseGraph?.edges ?? [], importSummary?.mappingByDeviceId);
+  const spatialQuery = useSpatialScene(token, networkId, hasPermission(profile, "read:topology"));
+  const sceneModel = useMemo(() => applySpatialScene(schematicModel, spatialQuery.data), [schematicModel, spatialQuery.data]);
 
   const persistedCampusBuildings = useMemo(() => {
     return mapPersistedCampusBuildingRecordsToCampusBuildings(campusBuildingsQuery.data?.items ?? []);
@@ -282,10 +300,7 @@ export function TwinPageContent() {
     return typeof raw === "string" && raw.trim() ? raw.trim() : null;
   }, [baseGraph?.nodes, selectedNodeId]);
 
-  const latestPersistedModelAsset = useMemo(() => {
-    const items = campusModelAssetsQuery.data?.items ?? [];
-    return items.length > 0 ? items[items.length - 1] : null;
-  }, [campusModelAssetsQuery.data?.items]);
+  const selectedPersistedModelAsset = campusModelAssetsQuery.data?.items.find((item) => item.campus_model_asset_id === selectedAssetId);
 
   const graphNodes = useMemo(() => {
     return (baseGraph?.nodes ?? []).map((node) => ({
@@ -428,26 +443,32 @@ export function TwinPageContent() {
     }
 
     setIsPersistingModelAsset(true);
+    const operation = modelOperation.current;
     const epoch = useLiveStore.getState().epoch;
     try {
-      const { MAX_MODEL_BYTES, validateModelBytes } = await import("@/features/digitalTwin/modelAsset");
       if (currentModelFile.size > MAX_MODEL_BYTES) throw new Error("Model must be no larger than 8 MiB.");
       const modelBuffer = await currentModelFile.arrayBuffer();
       await validateModelBytes(modelBuffer, currentModelFile.name, currentModelFile.type || "application/octet-stream");
       const modelDataBase64 = toBase64(modelBuffer);
       const modelSha256 = await sha256Hex(modelBuffer);
-      if (!mounted.current || useLiveStore.getState().epoch !== epoch || useAuthStore.getState().endingSession) return;
+      if (!mounted.current || modelOperation.current !== operation || useLiveStore.getState().epoch !== epoch || useAuthStore.getState().endingSession) return;
 
-      await upsertCampusModelAssetsMutation.mutateAsync({
+      const appliedRegistration = registration?.url === importedModelUrl ? registration.value : null;
+      const saved = await upsertCampusModelAssetsMutation.mutateAsync({
         model_file_name: currentModelFile.name,
         model_mime_type: currentModelFile.type || "application/octet-stream",
         model_data_base64: modelDataBase64,
         model_sha256: modelSha256,
         model_size_bytes: modelBuffer.byteLength,
         mapping_by_device_id: importSummary.mappingByDeviceId,
+        registration: appliedRegistration,
         source: "session_import",
-        replace_existing: true,
+        replace_existing: false,
       });
+      if (!mounted.current || modelOperation.current !== operation || useLiveStore.getState().epoch !== epoch) return;
+      const receipt = saved.items.find((item) => item.network_id === networkId && item.model_sha256 === modelSha256 && item.model_size_bytes === modelBuffer.byteLength && JSON.stringify(validateRegistration(item.registration)) === JSON.stringify(appliedRegistration));
+      if (!receipt) throw new Error("Saved asset receipt mismatch. Reload asset metadata.");
+      setRegistration((current) => current === registration && current ? { ...current, saved: true } : current);
 
       pushToast({
         tone: "ok",
@@ -465,6 +486,8 @@ export function TwinPageContent() {
     }
   }, [
     currentModelFile,
+    registration,
+    importedModelUrl,
     importSummary,
     networkId,
     pushToast,
@@ -588,7 +611,6 @@ export function TwinPageContent() {
       return;
     }
 
-    const { buildIntentHandoffFromNode } = await import("@/features/digitalTwin/intentHandoff");
     const handoff = buildIntentHandoffFromNode(selectedNode);
     const query = new URLSearchParams();
     query.set("source", handoff.source);
@@ -612,7 +634,6 @@ export function TwinPageContent() {
     }
 
     const operation = ++modelOperation.current;
-    const importModule = await import("@/features/digitalTwin/twinImport");
     if (!mounted.current || operation !== modelOperation.current) return;
 
     const modelValidation = importModule.validateModelFile(modelFile);
@@ -647,22 +668,23 @@ export function TwinPageContent() {
   }, [graphNodes]);
 
   const restorePersistedModel = async () => {
-    if (!latestPersistedModelAsset || !token || !networkId || graphQuery.isFetching || graphQuery.isError || !baseGraph || graphQuery.data?.nextCursor) return;
-    if (currentModelFile && !window.confirm("Replace the current local model and mapping with the persisted asset? Unsaved imports will be lost.")) return;
+    if (!selectedPersistedModelAsset || !token || !networkId || graphQuery.isFetching || graphQuery.isError || !baseGraph || graphQuery.data?.nextCursor) return;
+    if (!window.confirm(`Restore ${selectedPersistedModelAsset.model_file_name} (${selectedAssetId}) locally?${currentModelFile ? " Unsaved model imports and mapping will be replaced." : " Network data will not change."}`)) return;
     const operation = ++modelOperation.current;
     const epoch = useLiveStore.getState().epoch;
     const revision = useLiveStore.getState().topologyRevision;
     setIsImporting(true);
     setImportError(null);
     try {
-      const { decodePersistedModel } = await import("@/features/digitalTwin/modelAsset");
       const [assets, graph] = await Promise.all([campusModelAssetsQuery.refetch(), graphQuery.refetch()]);
       if (!mounted.current || operation !== modelOperation.current || useLiveStore.getState().epoch !== epoch) return;
       if (assets.isError || graph.isError || !graph.data || graph.data.nextCursor) throw new Error("Restore requires a fresh, complete topology and persisted asset read.");
-      const asset = assets.data?.items.find((item) => item.campus_model_asset_id === latestPersistedModelAsset.campus_model_asset_id);
+      const asset = assets.data?.items.find((item) => item.campus_model_asset_id === selectedPersistedModelAsset.campus_model_asset_id);
       if (!asset) throw new Error("Persisted model is no longer available. Refresh and try again.");
       const ids = new Set(graph.data.data.nodes.filter((node) => !Object.hasOwn(useLiveStore.getState().topologyTombstones, node.device_id)).map((node) => node.device_id));
-      const file = await decodePersistedModel(asset, networkId, ids);
+      const bytes = asset.storage_backend === "local_cas" ? await downloadModelBytes(asset) : undefined;
+      const file = await decodePersistedModel(asset, networkId, ids, bytes);
+      const restoredRegistration = validateRegistration(asset.registration);
       if (!mounted.current || operation !== modelOperation.current || useLiveStore.getState().epoch !== epoch) return;
       if (useLiveStore.getState().topologyRevision !== revision) throw new Error("Topology changed during restore. Reconcile and try again.");
       const mapping = { ...asset.mapping_by_device_id };
@@ -670,7 +692,10 @@ export function TwinPageContent() {
         totalRows: Object.keys(mapping).length, matched: Object.keys(mapping).length, unmatched: 0, duplicateKeys: [], mappingByDeviceId: mapping });
       setCurrentModelFile(file);
       setModelFileName(file.name);
-      setImportedModelUrl(createSessionModelUrl(file));
+      const url = createSessionModelUrl(file);
+      setImportedModelUrl(url);
+      restoredAsset.current = { id: asset.campus_model_asset_id, operation };
+      setRegistration(restoredRegistration ? { url, value: restoredRegistration, saved: true } : null);
       setImportedModelStatus("loading");
       setImportedModelStatusMessage(null);
     } catch (error) {
@@ -745,7 +770,7 @@ export function TwinPageContent() {
         {graphQuery.data?.nextCursor ? <div role="status">Partial topology: pagination cap reached. Mapping restore and group persistence require a complete graph.</div> : null}
         <QueryState
           query={graphQuery}
-          hasData={(data) => data.data.nodes.length > 0 || sceneModel.nodes.length > 0}
+          hasData={(data) => data.data.nodes.length > 0 || sceneModel.nodes.length > 0 || Boolean(spatialQuery.data?.objects.some((object) => object.geometry))}
           emptyTitle="Topology graph is empty"
           emptyDescription="Add devices and wait for topology websocket deltas."
         >
@@ -794,14 +819,6 @@ export function TwinPageContent() {
                 </Button>
                 <Button
                   type="button"
-                  tone={layers.showWirelessCoverage ? "primary" : "ghost"}
-                  aria-pressed={layers.showWirelessCoverage}
-                  onClick={() => toggleLayer("showWirelessCoverage")}
-                >
-                  Wireless coverage
-                </Button>
-                <Button
-                  type="button"
                   tone={importedModelUrl && layers.showModel ? "primary" : "ghost"}
                   aria-pressed={Boolean(importedModelUrl) && layers.showModel}
                   disabled={!importedModelUrl}
@@ -836,6 +853,30 @@ export function TwinPageContent() {
 
               <DeviceLegendPanel nodes={sceneModel.nodes} />
 
+              <Suspense fallback={<div style={{ color: "var(--ink-3)" }}>Loading 3D scene...</div>}>
+                <TwinScene
+                  spatialScene={spatialQuery.data}
+                  rfSamples={!spatialQuery.isError && rfImport?.scene === spatialQuery.data ? rfImport?.samples : undefined}
+                  nodes={sceneModel.nodes}
+                  links={sceneModel.links}
+                  measuredPath={measuredPath ?? undefined}
+                  overlays={sceneModel.overlays}
+                  selectedNodeId={selectedNodeId}
+                  onSelectNode={setSelectedNodeId}
+                  reducedMotion={prefersReducedMotion}
+                  layers={layers}
+                  alerts={liveAlerts}
+                  importedModelUrl={importedModelUrl}
+                  modelRegistration={registration?.url === importedModelUrl ? registrationTransform(registration.value) : null}
+                  importedCampusBuildings={effectiveCampusBuildings}
+                  onImportedModelStatusChange={handleImportedModelStatusChange}
+                  buildingViewState={buildingViewState}
+                  onSelectBuilding={handleSelectedBuildingChange}
+                />
+              </Suspense>
+
+              <div className="twin-context-grid">
+
               <div
                 style={{
                   border: "1px solid var(--line-soft)",
@@ -862,6 +903,7 @@ export function TwinPageContent() {
                 }}
               >
                 <strong style={{ fontSize: "0.9rem" }}>Spatial mapping state</strong>
+                <p>{sceneModel.nodes.filter((node) => node.placementSource === "canonical").length} canonical device placements. Remaining hash-based positions and live overlay positions are schematic fallback, not measured locations. Campus imports use their separate coordinate frame.</p>
                 <div style={{ display: "flex", gap: "0.35rem", flexWrap: "wrap" }}>
                   <Badge text="persisted spatial_ref_id" tone="ok" />
                   <Badge text="session sidecar mapping" tone="warn" />
@@ -897,9 +939,16 @@ export function TwinPageContent() {
                     tone={(campusModelAssetsQuery.data?.total ?? 0) > 0 ? "ok" : "neutral"}
                   />
                 </div>
-                {latestPersistedModelAsset ? (
+                {campusModelAssetsQuery.isFetching ? <p role="status">Loading model assets…</p> : null}
+                {campusModelAssetsQuery.isError ? <p role="alert">Model asset list unavailable. Reload to retry.</p> : null}
+                {campusModelAssetsQuery.data?.total === 0 ? <p>No persisted model assets.</p> : null}
+                <Button tone="ghost" disabled={campusModelAssetsQuery.isFetching || isImporting} onClick={() => void campusModelAssetsQuery.refetch()}>Reload model assets</Button>
+                <p>Available persisted assets; new saves retain earlier assets. Restore changes only the local view.</p>
+                {selectedPersistedModelAsset ? (
                   <div className="mono" style={{ color: "var(--ink-3)", fontSize: "0.74rem" }}>
-                    latest: {latestPersistedModelAsset.model_file_name} ({latestPersistedModelAsset.model_size_bytes} bytes)
+                    selected: {selectedPersistedModelAsset.model_file_name} ({selectedPersistedModelAsset.model_size_bytes} bytes)
+                    <div>SHA-256: {selectedPersistedModelAsset.model_sha256}</div>
+                    <div>Source: {selectedPersistedModelAsset.source ?? "unknown"} · updated {selectedPersistedModelAsset.updated_at}</div>
                   </div>
                 ) : null}
                 <div style={{ display: "flex", gap: "0.35rem", flexWrap: "wrap" }}>
@@ -913,7 +962,7 @@ export function TwinPageContent() {
                     {isPersistingModelAsset ? "Persisting model asset..." : "Persist Model Asset"}
                   </Button>
                   <Button type="button" tone="ghost" onClick={restorePersistedModel}
-                    disabled={!latestPersistedModelAsset || !baseGraph || Boolean(graphQuery.data?.nextCursor) || graphQuery.isFetching || graphQuery.isError || isImporting}>
+                    disabled={!selectedPersistedModelAsset || !baseGraph || Boolean(graphQuery.data?.nextCursor) || graphQuery.isFetching || graphQuery.isError || isImporting}>
                     {isImporting ? "Validating model..." : "Restore Persisted Model"}
                   </Button>
                 </div>
@@ -922,23 +971,9 @@ export function TwinPageContent() {
                     {importedModelStatusMessage}
                   </div>
                 ) : null}
+                {importedModelUrl ? <ModelRegistrationControls key={`${importedModelUrl}:${registration?.saved === true}`} initial={registration?.url === importedModelUrl ? registration.value : null} saved={registration?.url === importedModelUrl && registration.saved} disabled={isPersistingModelAsset} onApply={(value) => { restoredAsset.current = null; setRegistration({ url: importedModelUrl, value, saved: false }); }} /> : null}
               </div>
 
-              <div
-                style={{
-                  border: "1px solid var(--line-soft)",
-                  borderRadius: "10px",
-                  padding: "0.48rem 0.56rem",
-                  display: "grid",
-                  gap: "0.3rem",
-                }}
-              >
-                <strong style={{ fontSize: "0.9rem" }}>Wireless coverage layer</strong>
-                <div style={{ display: "flex", gap: "0.35rem", flexWrap: "wrap" }}>
-                  <Badge text={`policy ${WIRELESS_COVERAGE_POLICY_VERSION}`} tone="info" />
-                  <Badge text="synthetic estimate" tone="warn" />
-                </div>
-              </div>
 
               <div
                 style={{
@@ -1005,30 +1040,28 @@ export function TwinPageContent() {
                 </div>
               </div>
 
-              <Suspense fallback={<div style={{ color: "var(--ink-3)" }}>Loading 3D scene...</div>}>
-                <TwinScene
-                  nodes={sceneModel.nodes}
-                  links={sceneModel.links}
-                  measuredPath={measuredPath ?? undefined}
-                  overlays={sceneModel.overlays}
-                  selectedNodeId={selectedNodeId}
-                  onSelectNode={setSelectedNodeId}
-                  reducedMotion={prefersReducedMotion}
-                  layers={layers}
-                  alerts={liveAlerts}
-                  importedModelUrl={importedModelUrl}
-                  importedCampusBuildings={effectiveCampusBuildings}
-                  onImportedModelStatusChange={handleImportedModelStatusChange}
-                  buildingViewState={buildingViewState}
-                  onSelectBuilding={handleSelectedBuildingChange}
-                />
-              </Suspense>
+              </div>
             </div>
           )}
         </QueryState>
       </Panel>
 
+      <TwinLifecycleControls networkId={networkId} assets={campusModelAssetsQuery.data?.items ?? []} selectedId={selectedAssetId} onSelect={setSelectedAssetId}
+        disabled={isImporting || isPersistingModelAsset || isPersistingCampus || isPersistingDeviceGroups}
+        onReload={async () => {
+          const results = await Promise.all([campusModelAssetsQuery.refetch(), campusBuildingsQuery.refetch(), deviceGroupsQuery.refetch()]);
+          return results.every((result) => !result.isError);
+        }}
+        onRetired={(id) => {
+          setSelectedAssetId((current) => current === id ? "" : current);
+          if (restoredAsset.current?.id !== id || restoredAsset.current.operation !== modelOperation.current || registration?.saved === false) return;
+          restoredAsset.current = null; modelOperation.current += 1;
+          setImportedModelUrl(null); setCurrentModelFile(null); setModelFileName(null); setImportSummary(null); setRegistration(null);
+          setImportedModelStatus("idle"); setImportedModelStatusMessage(null);
+        }} />
       <Button tone="ghost" aria-expanded={showMeasuredPaths} aria-controls="twin-measured-paths" onClick={() => setShowMeasuredPaths(!showMeasuredPaths)}>{showMeasuredPaths ? "Hide measured probe paths" : "Show measured probe paths"}</Button>
+      <Button tone="ghost" aria-expanded={showCustomGroups} onClick={() => { setOpenedCustomGroups(true); setShowCustomGroups(!showCustomGroups); }}>Custom device groups</Button>
+      {openedCustomGroups ? <div hidden={!showCustomGroups}><CustomGroupEditor token={token} networkId={networkId} canWrite={hasPermission(profile, "write:config")} /></div> : null}
       {showMeasuredPaths && <div id="twin-measured-paths"><Suspense fallback={<p>Loading probe path panel...</p>}>
         <MeasuredPathPanel nodes={sceneModel.nodes} links={sceneModel.links} onHighlight={setMeasuredPath} />
       </Suspense></div>}
@@ -1069,6 +1102,7 @@ export function TwinPageContent() {
                 <div className="mono" style={{ color: "var(--ink-3)", fontSize: "0.74rem", marginTop: "0.2rem" }}>
                   spatial_ref_id: {selectedNode.spatialRefId ?? "none"}
                 </div>
+                <div>Position: {selectedNode.placementSource === "canonical" ? `canonical (${selectedNode.spatialObjectId})` : "schematic fallback"} · ({selectedNode.x.toFixed(2)}, {selectedNode.y.toFixed(2)}, {selectedNode.z.toFixed(2)}) m</div>
                 <div style={{ marginTop: "0.2rem", display: "flex", gap: "0.35rem", flexWrap: "wrap" }}>
                   <Badge text={hasPersistedSpatialRef ? "persisted" : "not persisted"} tone={hasPersistedSpatialRef ? "ok" : "warn"} />
                   {hasImportedSpatialRef ? <Badge text="session import" tone="warn" /> : null}
@@ -1172,6 +1206,10 @@ export function TwinPageContent() {
           )}
         </Panel>
       </div>
+
+      <SpatialScenePanel query={spatialQuery} token={token} networkId={networkId} canWrite={hasPermission(profile, "write:config")} onSelectDevice={setSelectedNodeId} />
+      <Button tone="ghost" aria-expanded={showRFImport} onClick={() => setShowRFImport(!showRFImport)}>Operator RF samples</Button>
+      {showRFImport ? <Suspense fallback={<p>Loading RF import…</p>}><RFImportPanel scene={spatialQuery.isError ? undefined : spatialQuery.data} workspaceId={workspaceId} networkId={networkId} value={rfImport} onChange={setRFImport} /></Suspense> : null}
 
       <Panel title="Easy Campus Import (Session Only)" subtitle="Upload GLB/GLTF with optional sidecar mapping JSON.">
         <div style={{ display: "grid", gap: "0.65rem" }}>

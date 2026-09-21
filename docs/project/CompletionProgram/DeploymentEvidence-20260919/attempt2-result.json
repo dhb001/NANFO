@@ -1,0 +1,259 @@
+{
+  "cases": {
+    "disk_capacity": {
+      "status": "passed",
+      "detail": {
+        "docker_root": "/home/.system-data/docker",
+        "capacity_filesystem": "/home",
+        "docker_available_bytes": 275765174272,
+        "staging_available_bytes": 7765778432,
+        "minimum_bytes": 1073741824
+      }
+    },
+    "installed_source_parity": {
+      "status": "passed",
+      "detail": "Built from fingerprinted current source"
+    },
+    "package_contract": {
+      "status": "passed",
+      "detail": {
+        "locked_stages_present": true,
+        "live_build": "pending"
+      }
+    },
+    "locked_container_build": {
+      "status": "passed",
+      "detail": {
+        "source_sha256": "25a26a7fa02d5156172d0cc53f4dbe8e8465449d229319f60a582d5ee2cf7408",
+        "images": {
+          "alert-worker": {
+            "id": "sha256:5adb886df4fa70f997bf3b5ada19d5707507d40236798e095fcc42a602dae955",
+            "os": "linux",
+            "architecture": "amd64"
+          },
+          "api": {
+            "id": "sha256:5adb886df4fa70f997bf3b5ada19d5707507d40236798e095fcc42a602dae955",
+            "os": "linux",
+            "architecture": "amd64"
+          },
+          "autonomy-worker": {
+            "id": "sha256:5adb886df4fa70f997bf3b5ada19d5707507d40236798e095fcc42a602dae955",
+            "os": "linux",
+            "architecture": "amd64"
+          },
+          "execution-worker": {
+            "id": "sha256:5adb886df4fa70f997bf3b5ada19d5707507d40236798e095fcc42a602dae955",
+            "os": "linux",
+            "architecture": "amd64"
+          },
+          "gateway": {
+            "id": "sha256:0b276d12f471b356fa62881f7eb8063a32f4558a6d7b47883216278bb52cb0f7",
+            "os": "linux",
+            "architecture": "amd64"
+          },
+          "neo4j": {
+            "id": "sha256:528085775326695ef4475242b924336b50da47ee23b229c6ec68ccdf166fdc27",
+            "os": "linux",
+            "architecture": "amd64"
+          },
+          "network-outbox-worker": {
+            "id": "sha256:5adb886df4fa70f997bf3b5ada19d5707507d40236798e095fcc42a602dae955",
+            "os": "linux",
+            "architecture": "amd64"
+          },
+          "postgres": {
+            "id": "sha256:f3bd19c606e442c3d7bdfa8002e03fe260a1023351e0ea4598032022b68dd6e3",
+            "os": "linux",
+            "architecture": "amd64"
+          },
+          "redis": {
+            "id": "sha256:90e7a336d044f1abc9e9dbc05d65566850896d11453bbd1dd0fb7e5059f0e8fb",
+            "os": "linux",
+            "architecture": "amd64"
+          },
+          "report-worker": {
+            "id": "sha256:5adb886df4fa70f997bf3b5ada19d5707507d40236798e095fcc42a602dae955",
+            "os": "linux",
+            "architecture": "amd64"
+          },
+          "simulation-worker": {
+            "id": "sha256:5adb886df4fa70f997bf3b5ada19d5707507d40236798e095fcc42a602dae955",
+            "os": "linux",
+            "architecture": "amd64"
+          }
+        },
+        "host_application_packages_used": false,
+        "build_cache": "allowed; locked install stages required by Dockerfiles"
+      }
+    },
+    "fresh_volumes": {
+      "status": "passed",
+      "detail": {
+        "empty_new_volumes": [
+          "nanfo-deploy-verify-6b88860caa26438a89ffa195271ee30f_lab_commands",
+          "nanfo-deploy-verify-6b88860caa26438a89ffa195271ee30f_lab_output",
+          "nanfo-deploy-verify-6b88860caa26438a89ffa195271ee30f_lab_results",
+          "nanfo-deploy-verify-6b88860caa26438a89ffa195271ee30f_neo4j_data",
+          "nanfo-deploy-verify-6b88860caa26438a89ffa195271ee30f_postgres_data",
+          "nanfo-deploy-verify-6b88860caa26438a89ffa195271ee30f_redis_data",
+          "nanfo-deploy-verify-6b88860caa26438a89ffa195271ee30f_reports",
+          "nanfo-deploy-verify-6b88860caa26438a89ffa195271ee30f_runtime_secrets"
+        ],
+        "existing_data": 0
+      }
+    },
+    "migration_0021": {
+      "status": "passed",
+      "detail": "0021"
+    },
+    "bootstrap_login": {
+      "status": "passed",
+      "detail": {
+        "generated_password": true,
+        "password_in_argv": false,
+        "authenticated_bootstrap_actor": true
+      }
+    },
+    "frontend_http": {
+      "status": "passed",
+      "detail": {
+        "html_bytes": 958,
+        "built_assets_fetched": 5,
+        "browser_execution": "not tested; HTTP smoke only"
+      }
+    },
+    "full_stack_readiness": {
+      "status": "passed",
+      "detail": "Gateway /ready and all six work-coupled worker healthchecks passed"
+    },
+    "simulation": {
+      "status": "passed",
+      "detail": {
+        "simulation_id": "03e694f8-4340-4d2c-abf8-eb9476393a9c",
+        "loss_pct": 45.0,
+        "configured_model_only": true
+      }
+    },
+    "report_csv": {
+      "status": "passed",
+      "detail": {
+        "report_id": "54e8a108-aee0-4977-8cc1-d7e252084dc1",
+        "sha256": "34d0b7c69babe064164cb5f0fbfe2e45af35e010de4296af2863d0aada46b2ca",
+        "size_bytes": 3788,
+        "snapshot_sha256": "56a1aeaa3ba116684a571b48fe8e44857e579448f6f9fd5e1c32275cbb991c6a",
+        "format": "csv"
+      }
+    },
+    "report_pdf": {
+      "status": "passed",
+      "detail": {
+        "report_id": "6bc507c8-746a-4500-bbf0-a6a46269daf0",
+        "sha256": "24998f899a225c732f8ac00bc5b77d66e7b65d7526695785c2641ed802e97fb4",
+        "size_bytes": 3400,
+        "snapshot_sha256": "b7bcd704641e84ddc4ae8355584aa46d1e5b9bc1c71f1748bcf414d1c2a01da2",
+        "format": "pdf"
+      }
+    },
+    "database_stop_readiness": {
+      "status": "passed",
+      "detail": "Actual PostgreSQL stop: /ready 503, /health 200; readiness and workers recovered"
+    },
+    "worker_stale_heartbeat": {
+      "status": "passed",
+      "detail": "Actual worker SIGSTOP produced stale-loop heartbeat with live stores; SIGCONT recovered"
+    },
+    "api_worker_restart": {
+      "status": "passed",
+      "detail": {
+        "report": {
+          "report_id": "b74a4b3f-832e-43f8-ad26-c3e5b41ce955",
+          "sha256": "66dd6e1891abc24547709d5a7975f6d639501a4a60562145e167e860ddfd9e1e",
+          "size_bytes": 3788,
+          "snapshot_sha256": "0372e70298188ca643ba4ccf438f9d85f8852196a0dc5aadd750cc6f2be0917d",
+          "format": "csv"
+        },
+        "simulation_id": "b3bdeadb-c43d-421b-b469-136c71fdb610",
+        "restarted_services": [
+          "api",
+          "network-outbox-worker",
+          "simulation-worker",
+          "report-worker",
+          "alert-worker",
+          "execution-worker",
+          "autonomy-worker"
+        ]
+      }
+    },
+    "lab_binding": {
+      "status": "blocked",
+      "detail": "Lab profile not requested"
+    },
+    "lab_congestion": {
+      "status": "blocked",
+      "detail": "Lab profile not requested"
+    },
+    "model_diagnostic": {
+      "status": "blocked",
+      "detail": "Frozen model diagnosis not requested"
+    },
+    "coordinated_encrypted_backup": {
+      "status": "failed",
+      "detail": "Command failed (/usr/bin/python3, exit 1); output withheld"
+    },
+    "distinct_fresh_restore": {
+      "status": "blocked",
+      "detail": "Prerequisite did not complete"
+    },
+    "restore_image_schema": {
+      "status": "blocked",
+      "detail": "Prerequisite did not complete"
+    },
+    "old_tokens_invalid": {
+      "status": "blocked",
+      "detail": "Prerequisite did not complete"
+    },
+    "restored_report_bytes": {
+      "status": "blocked",
+      "detail": "Prerequisite did not complete"
+    },
+    "restored_workflows": {
+      "status": "blocked",
+      "detail": "Prerequisite did not complete"
+    },
+    "restored_telemetry": {
+      "status": "blocked",
+      "detail": "Prerequisite did not complete"
+    },
+    "source_unchanged": {
+      "status": "blocked",
+      "detail": "Prerequisite did not complete"
+    },
+    "campaign": {
+      "status": "failed",
+      "detail": "Command failed (/usr/bin/python3, exit 1); output withheld"
+    },
+    "cleanup": {
+      "status": "passed",
+      "detail": {
+        "containers_removed": 11,
+        "volumes_removed": 9,
+        "networks_removed": 2
+      }
+    }
+  },
+  "core_passed": false,
+  "all_green": false,
+  "step15_complete": false,
+  "counts": {
+    "passed": 16,
+    "failed": 2,
+    "blocked": 10,
+    "pending": 0
+  },
+  "live_authorized": true,
+  "agents_idle_attested": true,
+  "failure": "Command failed (/usr/bin/python3, exit 1); output withheld",
+  "evidence_directory": "/tmp/opencode/nanfo-deploy-verify-oilgq65i/evidence",
+  "live_requested_lab": false,
+  "live_requested_model": false
+}

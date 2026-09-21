@@ -1,0 +1,11 @@
+{
+  "bootstrap_initial_action": 1,
+  "case_id": "path1-restart",
+  "fault": "restart",
+  "intervention": "real",
+  "phase": "afterwrite",
+  "policy": "qualified",
+  "scenario": "path1",
+  "seed": 1454,
+  "write_index": 1
+}

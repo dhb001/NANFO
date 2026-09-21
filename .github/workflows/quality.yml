@@ -1,0 +1,180 @@
+name: Quality gates
+
+on:
+  pull_request:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: quality-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      POETRY_VIRTUALENVS_IN_PROJECT: 'true'
+      PIP_DISABLE_PIP_VERSION_CHECK: '1'
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.12.14'
+      - name: Install locked backend environment
+        run: |
+          python -m pip install poetry==2.4.1
+          poetry check --lock
+          poetry sync --with dev --no-root --no-interaction
+          poetry run python -m pip check
+      - name: Backend lint
+        run: poetry run ruff check app tests scripts
+      - name: Disposable audit runner isolation and evidence regressions
+        run: poetry run pytest scripts/test_audit_isolated_suite.py --no-cov -q
+      - name: Unit and service-contract tests (no live lab)
+        # Exact historical-fixture tests require ignored ADR014 evidence/frozen AI.
+        # Keep artifact-independent tests in these modules. See DeliverySecurity.md.
+        run: >-
+          poetry run pytest tests/unit tests/integration -q --junitxml=quality-results.xml
+          --deselect=tests/unit/test_model_diagnostics.py::test_registry_scopes_and_permission_bits
+          --deselect=tests/unit/test_model_diagnostics.py::test_registry_hash_tampering
+          --deselect=tests/unit/test_model_diagnostics.py::test_real_frozen_replay
+          --deselect=tests/unit/test_model_diagnostics.py::test_real_runner_denies_tampered_artifacts
+          --deselect=tests/unit/test_model_diagnostics.py::test_child_is_reaped_on_bounded_failure
+          --deselect=tests/unit/test_model_diagnostics.py::test_child_environment_is_allowlisted
+          --deselect=tests/unit/test_model_diagnostics.py::test_authority_rechecked_after_inference
+          --deselect=tests/unit/test_model_diagnostics.py::test_current_network_scope_blocks_unregistered_history
+          --deselect=tests/unit/test_model_diagnostic_confinement.py::test_same_uid_filesystem_and_control_syscalls_are_confined
+          --deselect=tests/unit/test_live_providers.py::test_passive_snapshot_scope_digest_and_no_actuation
+          --deselect=tests/unit/test_live_providers.py::test_snapshot_rejects_invalid_input
+          --deselect=tests/unit/test_live_providers.py::test_registry_rejects_self_asserted_qualification_and_tampering
+          --deselect=tests/unit/test_live_providers.py::test_cannot_infer_with_self_asserted_qualification
+          --deselect=tests/unit/test_live_providers.py::test_real_readonly_benchmark_qualification
+          --deselect=tests/unit/test_live_providers.py::test_real_historical_replay_no_live_claim
+          --deselect=tests/unit/test_live_providers.py::test_expired_installation_is_not_qualified
+          --deselect=tests/unit/test_live_providers.py::test_concurrent_inference_rejected
+          --deselect=tests/unit/test_live_providers.py::test_qualification_pending_then_receipt_and_frozen_inference
+          --deselect=tests/unit/test_live_providers.py::test_runtime_result_and_postoffload_fences
+          --deselect=tests/unit/test_live_providers.py::test_confined_child_failure_is_killed_and_reaped
+          --deselect=tests/unit/test_passive_observer.py::test_original_frame_preserved_and_clock_derived
+          --deselect=tests/unit/test_passive_observer.py::test_rejects_old_incompatible_or_unavailable_measurement
+          --deselect=tests/unit/test_passive_observer.py::test_clock_and_process_authority
+          --deselect=tests/unit/test_passive_observer.py::test_admission_protected_hash_and_atomic_permissions
+          --deselect=tests/unit/test_passive_observer.py::test_confined_candidate_validates_original_nonterminal_frame
+          --deselect=tests/unit/test_passive_observer.py::test_idle_bridge_never_publishes_existing_history_or_dispatches
+          --deselect=tests/unit/test_passive_observer.py::test_bridge_validates_before_atomic_publish_and_invalidates_on_disconnect
+      - name: ADR021 offline release-manifest unit tests
+        env:
+          PYTHONPATH: ..
+        run: poetry run python -m unittest discover -s ../deploy/tests -p test_release_manifest.py -v
+      - name: Install local gateway test binary
+        run: sudo apt-get update && sudo apt-get install --no-install-recommends -y nginx
+      - name: Gateway response headers
+        env:
+          NANFO_TEST_NGINX: '1'
+        run: poetry run pytest tests/integration/test_gateway_headers.py --no-cov -q
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: backend-quality-results
+          path: backend/quality-results.xml
+          retention-days: 7
+
+  ai:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: ai-engine
+    env:
+      UV_PYTHON_DOWNLOADS: never
+      UV_PROJECT_ENVIRONMENT: .venv-ci
+      PYTHONNOUSERSITE: '1'
+      OMP_NUM_THREADS: '1'
+      MKL_NUM_THREADS: '1'
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.12.14'
+      - name: Install separate locked CPU AI environment
+        run: |
+          python -m pip install uv==0.8.22
+          uv sync --locked --group dev --python "$(command -v python)"
+          uv pip check --python .venv-ci/bin/python
+      - name: Verify backend export schemas need only AI dependencies
+        run: |
+          uv run --no-sync python -I - <<'PY'
+          import importlib.util
+          import sys
+          from pathlib import Path
+
+          backend_only = ("sqlalchemy", "fastapi", "pydantic_settings", "redis", "asyncpg")
+          assert all(importlib.util.find_spec(name) is None for name in backend_only)
+          sys.path.insert(0, str(Path.cwd().parent / "backend"))
+          from app.modules.autonomy.model_diagnostic_schemas import (
+              ModelDiagnosticRecord,
+              ModelDiagnosticsResponse,
+          )
+
+          assert ModelDiagnosticRecord.model_fields and ModelDiagnosticsResponse.model_fields
+          PY
+      - name: AI lint
+        run: uv run --no-sync ruff check src tests scripts/shadow scripts/shadow_evaluate.py scripts/agent_runtime
+      - name: Artifact-independent AI unit tests (no live training or lab launcher)
+        # Other suites consume ignored historical release/checkpoint artifacts.
+        # Keep this boundary explicit until portable fixtures are delivered.
+        run: >-
+          uv run --no-sync pytest -q --junitxml=quality-results.xml
+          tests/test_transport.py tests/test_ppo.py tests/test_holdout.py tests/test_shadow.py
+          tests/test_agent_runtime.py
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: ai-quality-results
+          path: ai-engine/quality-results.xml
+          retention-days: 7
+
+  frontend:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22.22.0'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install frontend lock
+        run: npm ci --no-audit --no-fund
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - name: Production build and existing bundle budgets
+        run: npm run perf:bundle
+      - name: Install lock-matched browser
+        run: npx --no-install playwright install --with-deps chromium
+      - name: Chromium contract and CSP regressions
+        run: npm run test:e2e -- --project=chromium --retries=0 --workers=2
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: failure()
+        with:
+          name: frontend-browser-failure-results
+          path: frontend/test-results
+          retention-days: 7

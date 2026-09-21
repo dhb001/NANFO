@@ -4,7 +4,7 @@ import { ApiClientError } from "@/shared/lib/errors";
 import { useLiveStore } from "./store";
 
 // These are bounded reads of known objects, not a discovery endpoint or full history.
-export async function reconcileKnownScenes(token: string, workspaceId: string, networkId: string, isCurrent: () => boolean, signal: AbortSignal) {
+export async function reconcileKnownScenes(token: string, workspaceId: string, networkId: string, isCurrent: () => boolean, signal: AbortSignal, currentToken = () => token) {
   const initial = useLiveStore.getState();
   const epoch = initial.epoch;
   const current = () => !signal.aborted && isCurrent() && useLiveStore.getState().epoch === epoch;
@@ -31,8 +31,8 @@ export async function reconcileKnownScenes(token: string, workspaceId: string, n
       try {
         const simulation = expected.object_type === "simulation_state";
         const detail = simulation
-          ? (await getSimulationDetail(token, expected.simulation_id!, request.signal)).data
-          : (await getIntentDetail(token, expected.intent_id!, workspaceId, request.signal)).data;
+          ? (await getSimulationDetail(currentToken(), expected.simulation_id!, request.signal)).data
+          : (await getIntentDetail(currentToken(), expected.intent_id!, workspaceId, request.signal)).data;
         if (!current()) return;
         if (request.signal.aborted) throw new Error("Lifecycle detail timed out");
         const matches = detail.workspace_id === workspaceId && detail.network_id === networkId &&

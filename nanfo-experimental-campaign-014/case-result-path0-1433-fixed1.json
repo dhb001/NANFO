@@ -1,0 +1,14 @@
+{
+  "case_id": "path0-1433-fixed1",
+  "chain": {},
+  "cleanup": {
+    "path": "path0-1433-fixed1/cleanup.json",
+    "sha256": "4a9dbce64970b963e2863b5b68b95895ef31bf8a2a8294cd4f9ec59550c6bdb7"
+  },
+  "outcome": "unproven",
+  "outcome_error": "KeyError:'operator_policy'",
+  "policy": "fixed1",
+  "scenario": "path0",
+  "seed": 1433,
+  "status": "failed"
+}

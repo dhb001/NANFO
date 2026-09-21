@@ -1,0 +1,18 @@
+{
+  "case_id": "path0-revoke-before",
+  "cleanup": {
+    "evidence_errors": [],
+    "removed": true,
+    "removed_resources": [
+      "69912eca7b71ee7578cd550c33acb5600b8ebe37b88e21d65d74ccdd29cf439a",
+      "nanfo-experimental-c45f6498ec224c108917a422bec35a8d"
+    ],
+    "unresolved_resources": []
+  },
+  "controller_returncode": 1,
+  "controller_status": "failed",
+  "policy": "qualified",
+  "scenario": "path0",
+  "seed": 1440,
+  "status": "acquired"
+}

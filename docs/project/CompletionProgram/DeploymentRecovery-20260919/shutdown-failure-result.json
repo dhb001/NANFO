@@ -1,0 +1,233 @@
+{
+  "cases": {
+    "disk_capacity": {
+      "status": "passed",
+      "detail": {
+        "docker_root": "/home/.system-data/docker",
+        "capacity_filesystem": "/home",
+        "docker_available_bytes": 275778768896,
+        "staging_available_bytes": 7718395904,
+        "minimum_bytes": 1073741824
+      }
+    },
+    "installed_source_parity": {
+      "status": "passed",
+      "detail": "Installed maintenance/readiness bytes match current source"
+    },
+    "package_contract": {
+      "status": "passed",
+      "detail": {
+        "locked_stages_present": true,
+        "live_build": "pending"
+      }
+    },
+    "locked_container_build": {
+      "status": "passed",
+      "detail": {
+        "mode": "referenced_prior_locked_build_not_new_build",
+        "evidence_path": "/tmp/opencode/recovery-build-1.md",
+        "evidence_sha256": "fa4ebb0b4b4153752f6f25cc4784c8317f5b1b2319bc4303676fc2c2232f4850",
+        "images": {
+          "backend": {
+            "id": "sha256:3b56739212e19a16f38608078e2fa6253827762055ba102e4ae5a9c98a849720",
+            "os": "linux",
+            "architecture": "amd64"
+          },
+          "frontend": {
+            "id": "sha256:0b276d12f471b356fa62881f7eb8063a32f4558a6d7b47883216278bb52cb0f7",
+            "os": "linux",
+            "architecture": "amd64"
+          },
+          "neo4j": {
+            "id": "sha256:528085775326695ef4475242b924336b50da47ee23b229c6ec68ccdf166fdc27",
+            "os": "linux",
+            "architecture": "amd64"
+          }
+        },
+        "installed_source_sha256": {
+          "deploy/maintenance.py": "c7476372a0eec695b15e16750551a78fe0f492cec1d572c98f31e4366642ab1e",
+          "backend/app/api/readiness.py": "785ca236ec0e16823d41ea8859e876e4cb184bce0be03901a6da6956153853b9",
+          "backend/app/core/runtime_health.py": "a1da9a3008cecc49365629eff927275fe8efce0a3fc5c7f1c3a4bbbe0ec7e6c9",
+          "backend/app/core/config.py": "3025a44ffe72bdf827a1a909a340e797bd70b99910eca2acee40da7e241b4705",
+          "backend/app/modules/network/operations.py": "ffcb6ccc69e2c54b443d672bc9e47d4fc4df515354ca8b96dd872f00066b545e",
+          "backend/app/modules/report/artifacts.py": "c95f4ab3de3c264b6a49173dffec2882010a4c40e801a6992652cdfdd6bd0115",
+          "backend/app/modules/report/service.py": "044a2f408ccd17e496e65c1231bdf96444e842b1a7dd648f41dfbe03b5c901d9",
+          "backend/app/modules/report/worker.py": "fbd723d33b4b5d9e4109daace9c071a92605fabef7275734f477760cc7dbce9e"
+        },
+        "source_mismatches": [],
+        "builds_performed": 0,
+        "pulls_performed": 0
+      }
+    },
+    "fresh_volumes": {
+      "status": "passed",
+      "detail": {
+        "empty_new_volumes": [
+          "nanfo-deploy-verify-eb3860d31c11476caf9682b48b0bb641_init_secrets",
+          "nanfo-deploy-verify-eb3860d31c11476caf9682b48b0bb641_lab_commands",
+          "nanfo-deploy-verify-eb3860d31c11476caf9682b48b0bb641_lab_output",
+          "nanfo-deploy-verify-eb3860d31c11476caf9682b48b0bb641_lab_results",
+          "nanfo-deploy-verify-eb3860d31c11476caf9682b48b0bb641_neo4j_data",
+          "nanfo-deploy-verify-eb3860d31c11476caf9682b48b0bb641_postgres_data",
+          "nanfo-deploy-verify-eb3860d31c11476caf9682b48b0bb641_redis_data",
+          "nanfo-deploy-verify-eb3860d31c11476caf9682b48b0bb641_reports",
+          "nanfo-deploy-verify-eb3860d31c11476caf9682b48b0bb641_runtime_secrets"
+        ],
+        "existing_data": 0
+      }
+    },
+    "migration_0021": {
+      "status": "passed",
+      "detail": "0021"
+    },
+    "bootstrap_login": {
+      "status": "passed",
+      "detail": {
+        "generated_password": true,
+        "password_in_argv": false,
+        "authenticated_bootstrap_actor": true
+      }
+    },
+    "frontend_http": {
+      "status": "passed",
+      "detail": {
+        "html_bytes": 958,
+        "built_assets_fetched": 5,
+        "browser_execution": "not tested; HTTP smoke only"
+      }
+    },
+    "full_stack_readiness": {
+      "status": "passed",
+      "detail": "Gateway /ready and all six work-coupled worker healthchecks passed"
+    },
+    "simulation": {
+      "status": "passed",
+      "detail": {
+        "simulation_id": "79946736-24a4-4a98-8efb-1d89ec524a07",
+        "loss_pct": 45.0,
+        "configured_model_only": true
+      }
+    },
+    "report_csv": {
+      "status": "passed",
+      "detail": {
+        "report_id": "85e3ca54-ef16-4795-b891-83dc32a1bafe",
+        "sha256": "fe48fff09df8b605ffc33ec5a9e503863251da907213a104d3be7f64c765208d",
+        "size_bytes": 3788,
+        "snapshot_sha256": "cb451242b75965576b754cae156c7f0658907497f68407064e12f583923c73a2",
+        "format": "csv"
+      }
+    },
+    "report_pdf": {
+      "status": "passed",
+      "detail": {
+        "report_id": "42e80fcd-4cd6-4156-afbf-f631a8383d52",
+        "sha256": "fa9877409c03a4bbf29cac281e90da3f85013c87d8ed7e9ea912f530bb2392ab",
+        "size_bytes": 3403,
+        "snapshot_sha256": "57439777925be878d189084810983349ab8f9a3c244714453f5b3c211997a3f2",
+        "format": "pdf"
+      }
+    },
+    "database_stop_readiness": {
+      "status": "passed",
+      "detail": "Actual PostgreSQL stop: /ready 503, /health 200; readiness and workers recovered"
+    },
+    "worker_stale_heartbeat": {
+      "status": "passed",
+      "detail": "Actual worker SIGSTOP produced stale-loop heartbeat with live stores; SIGCONT recovered"
+    },
+    "api_worker_restart": {
+      "status": "passed",
+      "detail": {
+        "report": {
+          "report_id": "81a78bc8-ce72-4a08-8a84-728f7adc8026",
+          "sha256": "20c33c74871c5ad501c5f20b80f8d7f141f8c054f3f3975cdfcc84a5687b0827",
+          "size_bytes": 3788,
+          "snapshot_sha256": "bc01ff444f018623fa50d263d8ed2fe05592daa15c6bb08af680ec7514f3e2c1",
+          "format": "csv"
+        },
+        "simulation_id": "405a7f34-3902-4bea-ad89-0098ffa912a9",
+        "restarted_services": [
+          "api",
+          "network-outbox-worker",
+          "simulation-worker",
+          "report-worker",
+          "alert-worker",
+          "execution-worker",
+          "autonomy-worker"
+        ]
+      }
+    },
+    "lab_binding": {
+      "status": "blocked",
+      "detail": "Lab profile not requested"
+    },
+    "lab_congestion": {
+      "status": "blocked",
+      "detail": "Lab profile not requested"
+    },
+    "model_diagnostic": {
+      "status": "blocked",
+      "detail": "Frozen model diagnosis not requested"
+    },
+    "coordinated_encrypted_backup": {
+      "status": "failed",
+      "detail": "Operator refused at backup_stop_stores (OperationError); private diagnostic retained"
+    },
+    "distinct_fresh_restore": {
+      "status": "blocked",
+      "detail": "Prerequisite did not complete"
+    },
+    "restore_image_schema": {
+      "status": "blocked",
+      "detail": "Prerequisite did not complete"
+    },
+    "old_tokens_invalid": {
+      "status": "blocked",
+      "detail": "Prerequisite did not complete"
+    },
+    "restored_report_bytes": {
+      "status": "blocked",
+      "detail": "Prerequisite did not complete"
+    },
+    "restored_workflows": {
+      "status": "blocked",
+      "detail": "Prerequisite did not complete"
+    },
+    "restored_telemetry": {
+      "status": "blocked",
+      "detail": "Prerequisite did not complete"
+    },
+    "source_unchanged": {
+      "status": "blocked",
+      "detail": "Prerequisite did not complete"
+    },
+    "campaign": {
+      "status": "failed",
+      "detail": "Operator refused at backup_stop_stores (OperationError); private diagnostic retained"
+    },
+    "cleanup": {
+      "status": "passed",
+      "detail": {
+        "containers_removed": 11,
+        "volumes_removed": 9,
+        "networks_removed": 2
+      }
+    }
+  },
+  "core_passed": false,
+  "all_green": false,
+  "step15_complete": false,
+  "counts": {
+    "passed": 16,
+    "failed": 2,
+    "blocked": 10,
+    "pending": 0
+  },
+  "live_authorized": true,
+  "agents_idle_attested": true,
+  "failure": "Operator refused at backup_stop_stores (OperationError); private diagnostic retained",
+  "evidence_directory": "/tmp/opencode/nanfo-deploy-verify-s1fkwjdv/evidence",
+  "live_requested_lab": false,
+  "live_requested_model": false
+}

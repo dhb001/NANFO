@@ -1,16 +1,7 @@
 import { apiRequest } from "@/shared/lib/api";
-import { AlertActionResult, AlertListResult, AlertRecord, AlertHistoryResult } from "@/shared/types/alerts";
+import { AlertActionResult, AlertListParams, AlertListResult, AlertRecord, AlertHistoryResult } from "@/shared/types/alerts";
 
-interface ListAlertsParams {
-  status?: "active" | "acknowledged" | "resolved";
-  severity?: string;
-  source?: string;
-  correlationId?: string;
-  search?: string;
-  limit?: number;
-}
-
-function buildListAlertsQuery(params: ListAlertsParams): string {
+function buildListAlertsQuery(params: AlertListParams): string {
   const query = new URLSearchParams();
   for (const key of ["status", "severity", "source", "search"] as const) {
     if (params[key]) query.set(key, params[key]);
@@ -19,10 +10,12 @@ function buildListAlertsQuery(params: ListAlertsParams): string {
     query.set("correlation_id", params.correlationId);
   }
   query.set("limit", String(params.limit ?? 200));
+  if (params.workspaceId) query.set("workspace_id", params.workspaceId);
+  if (params.networkId) query.set("network_id", params.networkId);
   return query.toString();
 }
 
-export function listAlerts(token: string, params: ListAlertsParams = {}) {
+export function listAlerts(token: string, params: AlertListParams = {}) {
   const query = buildListAlertsQuery(params);
   const path = query ? `/api/v1/alerts?${query}` : "/api/v1/alerts";
   return apiRequest<AlertListResult>(path, { token });

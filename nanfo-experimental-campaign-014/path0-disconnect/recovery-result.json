@@ -1,0 +1,26 @@
+{
+  "operation": "recover",
+  "records": {
+    "bootstrap_recovery": {
+      "path": "bootstrap_recovery-3887859-0.json",
+      "sha256": "e8aa982634b545ff06490ca5efa84ea7732812132c29b5535bdfcde0f23c2aa4"
+    },
+    "recovery": {
+      "path": "recovery-3887859-0.json",
+      "sha256": "b413d85d1f40461597d292b36191ff97f9339fb5f02a4e05f5d5408479061684"
+    }
+  },
+  "status": "completed",
+  "timings": [
+    {
+      "finished_ns": 101801503363524,
+      "operation": "recovery",
+      "started_ns": 101800841169731
+    },
+    {
+      "finished_ns": 101802284948916,
+      "operation": "bootstrap_recovery",
+      "started_ns": 101801602040672
+    }
+  ]
+}

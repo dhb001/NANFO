@@ -33,11 +33,13 @@ describe("ADR018 operator session", () => {
     session.reconcile();
     expect(invalidate).not.toHaveBeenCalled();
   });
-  it("blocks logout and token rotation, while readers may explicitly fetch", () => {
+  it("preserves callbacks and query identity on rotation, while blocking logout and revoked writes", () => {
     const { result } = renderHook(useOperatorSession, { wrapper });
     const session = result.current;
     act(() => useAuthStore.setState({ accessToken: "new-token" }));
-    expect(() => session.assertCurrent()).toThrow();
+    expect(() => session.assertCurrent()).not.toThrow();
+    expect(session.token).toBe("new-token");
+    expect(session.identity).toEqual(result.current.identity);
     act(() => useAuthStore.setState({ profile: { ...operatorProfile, permissions: ["read:telemetry"] } }));
     expect(() => result.current.assertCurrent()).not.toThrow();
     expect(() => result.current.assertCurrent(true)).toThrow();

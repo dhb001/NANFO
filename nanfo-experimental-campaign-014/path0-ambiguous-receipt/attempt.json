@@ -1,0 +1,18 @@
+{
+  "case_id": "path0-ambiguous-receipt",
+  "cleanup": {
+    "evidence_errors": [],
+    "removed": true,
+    "removed_resources": [
+      "53fd23929ace99644e4716caeed8b975757bb75ed475afac4bd7cf09ae3841f0",
+      "nanfo-experimental-bb1e3f530ea241b5b1e3fa73bedd4f0c"
+    ],
+    "unresolved_resources": []
+  },
+  "controller_returncode": 1,
+  "controller_status": "failed",
+  "policy": "qualified",
+  "scenario": "path0",
+  "seed": 1446,
+  "status": "acquired"
+}

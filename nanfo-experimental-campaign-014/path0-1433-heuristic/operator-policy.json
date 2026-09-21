@@ -1,0 +1,147 @@
+{
+  "action_window_seconds": 60.0,
+  "actor_id": "855d4091-af68-4d26-ba3a-536dadb4038b",
+  "assumptions": {
+    "background_path": [
+      "access1-dist1",
+      "dist1-access2"
+    ],
+    "duration_ticks": 200,
+    "foreground_paths": [
+      [
+        "access1-dist1",
+        "dist1-access2"
+      ],
+      [
+        "access1-dist2",
+        "dist2-access2"
+      ]
+    ],
+    "links": [
+      {
+        "buffer_bytes": 120000.0,
+        "capacity_source": "htb_readback",
+        "delay_ms": 5.0,
+        "initial_queue_bytes": 0.0,
+        "interface": "access1-eth1",
+        "link_id": "access1-dist1",
+        "node": "access1",
+        "source": "access1",
+        "source_label": "operator_configured_model",
+        "target": "dist1"
+      },
+      {
+        "buffer_bytes": 120000.0,
+        "capacity_source": "htb_readback",
+        "delay_ms": 5.0,
+        "initial_queue_bytes": 0.0,
+        "interface": "dist1-eth4",
+        "link_id": "dist1-access2",
+        "node": "dist1",
+        "source": "dist1",
+        "source_label": "operator_configured_model",
+        "target": "access2"
+      },
+      {
+        "buffer_bytes": 120000.0,
+        "capacity_source": "htb_readback",
+        "delay_ms": 5.0,
+        "initial_queue_bytes": 0.0,
+        "interface": "access1-eth2",
+        "link_id": "access1-dist2",
+        "node": "access1",
+        "source": "access1",
+        "source_label": "operator_configured_model",
+        "target": "dist2"
+      },
+      {
+        "buffer_bytes": 120000.0,
+        "capacity_source": "htb_readback",
+        "delay_ms": 5.0,
+        "initial_queue_bytes": 0.0,
+        "interface": "dist2-eth4",
+        "link_id": "dist2-access2",
+        "node": "dist2",
+        "source": "dist2",
+        "source_label": "operator_configured_model",
+        "target": "access2"
+      }
+    ],
+    "tick_ms": 10,
+    "version": 1
+  },
+  "checkpoint_sha256": "77dae44acab722a5a6a2e87d952a6cca65e1c4eea102a089830a8401b521d614",
+  "evaluator_sha256": "33b19659f6712877b8e8e30f838a638bd0f2b5324af94dcf41534eba7c8551d5",
+  "expires_at": "2026-09-20T22:08:13.980215Z",
+  "io_timeout_seconds": 60.0,
+  "lease_seconds": 65,
+  "max_action_duration_seconds": 30.0,
+  "max_actions": 1,
+  "max_actions_per_window": 1,
+  "max_observation_age_seconds": 30,
+  "measurement_run_id": null,
+  "min_dwell_seconds": 2.0,
+  "model_adapter_sha256": null,
+  "model_source_sha256": "04f797f8be02329adf15b44686d938c8898c21eca3fdb0d090afd5fe19153463",
+  "network_id": "3cff9629-0670-4c9e-bba6-a118e4bb0be4",
+  "objectives": {
+    "max_latency_ms": 1000.0,
+    "max_loss_pct": 75.0,
+    "min_throughput_mbps": 0.1
+  },
+  "policy_kind": "heuristic",
+  "poll_seconds": 1.0,
+  "preregistration_sha256": "f619eea796ba2d62d3c85c275707ffb7d13bc13ce5958ba4abf8fe66b6116c8b",
+  "registry_sha256": "d474c678afb4daedeb22b9f0d01fe9dca708e6d81f414cbe39dfcdc614054a67",
+  "routes": [
+    {
+      "action_id": "route0",
+      "device_ids": [
+        "access1",
+        "dist1",
+        "access2"
+      ],
+      "path": [
+        "access1",
+        "dist1",
+        "access2"
+      ]
+    },
+    {
+      "action_id": "route1",
+      "device_ids": [
+        "access1",
+        "dist2",
+        "access2"
+      ],
+      "path": [
+        "access1",
+        "dist2",
+        "access2"
+      ]
+    }
+  ],
+  "run_id": "625a1708-8519-4fb4-a30c-2dd182a56026",
+  "runtime": {
+    "container_id": "b33906b33122bb83e1186c62fbde951b9e52b7e4b1d01e8422fd9cf25881c6ec",
+    "disposable": true,
+    "image_sha256": "954462c0f00d5bbaa72ea144f6064936b399c430e6ab94bffcf1c00d134ea0d7",
+    "network_disconnected": true,
+    "resource_id": "b33906b33122bb83e1186c62fbde951b9e52b7e4b1d01e8422fd9cf25881c6ec",
+    "source_sha256": "08c312c64154c9aedcd3b22eeb3573783590e0eb7183bc999cb8ef39b958dbbd",
+    "wrapper_sha256": "e7a3c0256264e69a1975e68b97b8c2d70c1e4f098f91cb8046f90151cb260add"
+  },
+  "starts_at": "2026-09-20T22:02:12.980215Z",
+  "verification": {
+    "max_loss_fraction": 0.75,
+    "max_probe_loss_fraction": 0.75,
+    "max_rtt_ms": 1000.0,
+    "min_goodput_mbps": 0.1,
+    "min_probe_sent": 3,
+    "min_traffic_bytes": 1
+  },
+  "version": "nanfo.experimental-lab/v1",
+  "weights_sha256": "3e7e38ab4297ffd4b32b9c32d64af4b45e5f5ed1b2a74f9926f23379b0b0f967",
+  "workspace_id": "18ed47f1-7368-43f8-b91e-041eba57eca2",
+  "wrapper_equivalence_sha256": null
+}

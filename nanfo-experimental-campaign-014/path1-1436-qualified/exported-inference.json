@@ -1,0 +1,76 @@
+{
+  "frame_sha256": "70fe639393dbe8d15ed6861f688ba90e9f3ea78af1686cda9ce5243927d568e5",
+  "model_adapter_sha256": "9a927c270b7a6a43d0001511fb154e8125bfea4ec2710cc723be3851f5b5bf55",
+  "policy_kind": "model",
+  "proposal": {
+    "action_id": "route0",
+    "checkpoint_sha256": "77dae44acab722a5a6a2e87d952a6cca65e1c4eea102a089830a8401b521d614",
+    "evidence": [
+      "live_registry:9ab13dcefc397aa8ad71acd0a7b933a20227fc408678d874303973cf55dc77f9",
+      "benchmark:e6ee9c1bd99e3f6961db497db664335684fa277bd1a1c86a8034570ac116056d",
+      "qualification_protocol:adr024-rebuilt-evaluation-v1",
+      "parent_checkpoint:5b8818af655ec8efce5d3bc3def27db599f3e0df379a0ae263dcefb5f72a80a5",
+      "qualification:raw-heldout-reconstruction-and-frozen-policy-replay",
+      "scope:stationary-campus-small-v4-scoped-benchmark",
+      "safety_authorized:false",
+      "passive_snapshot:4c78de485f1ae36d266e60ebd3e4f68439f5108aee7a9e047b7b3736e570042f",
+      "input:1d345cd95683fe886c4fc0cfadf0821d1ba924c63f7b8af8732118f558919eab",
+      "checkpoint:77dae44acab722a5a6a2e87d952a6cca65e1c4eea102a089830a8401b521d614",
+      "weights:3e7e38ab4297ffd4b32b9c32d64af4b45e5f5ed1b2a74f9926f23379b0b0f967",
+      "source:04f797f8be02329adf15b44686d938c8898c21eca3fdb0d090afd5fe19153463",
+      "action_path:access1/dist1/access2",
+      "policy_probabilities:[0.9658949375152588, 0.03410504013299942]",
+      "critic_value:3.102936029434204",
+      "probabilities_are_safety_confidence:false",
+      "execution:not_applied"
+    ],
+    "observation_contract": "nanfo.passive-measured-v4.v1"
+  },
+  "qualification": {
+    "checkpoint_sha256": "77dae44acab722a5a6a2e87d952a6cca65e1c4eea102a089830a8401b521d614",
+    "evidence": [
+      "live_registry:9ab13dcefc397aa8ad71acd0a7b933a20227fc408678d874303973cf55dc77f9",
+      "benchmark:e6ee9c1bd99e3f6961db497db664335684fa277bd1a1c86a8034570ac116056d",
+      "qualification_protocol:adr024-rebuilt-evaluation-v1",
+      "parent_checkpoint:5b8818af655ec8efce5d3bc3def27db599f3e0df379a0ae263dcefb5f72a80a5",
+      "qualification:raw-heldout-reconstruction-and-frozen-policy-replay",
+      "scope:stationary-campus-small-v4-scoped-benchmark",
+      "safety_authorized:false"
+    ],
+    "manifest_sha256": "9ab13dcefc397aa8ad71acd0a7b933a20227fc408678d874303973cf55dc77f9",
+    "observation_contract": "nanfo.passive-measured-v4.v1",
+    "qualified": true,
+    "reasons": []
+  },
+  "result": {
+    "action": 0,
+    "action_path": [
+      "access1",
+      "dist1",
+      "access2"
+    ],
+    "checkpoint_sha256": "77dae44acab722a5a6a2e87d952a6cca65e1c4eea102a089830a8401b521d614",
+    "contract_sha256": "bbcbbadec55792fa3f01bef511c1e38b0e433e125f896cdc3e64f823325e0fe6",
+    "execution": "not_applied",
+    "history_sha256": "8eca89b1d0a81f3cb3fbbf2b873f6ef37b5c94b9401c041063dc6f9caaf51485",
+    "inference_seconds": 0.001285219,
+    "input_sha256": "1d345cd95683fe886c4fc0cfadf0821d1ba924c63f7b8af8732118f558919eab",
+    "operation": "infer",
+    "parent_checkpoint_sha256": "5b8818af655ec8efce5d3bc3def27db599f3e0df379a0ae263dcefb5f72a80a5",
+    "probabilities": [
+      0.9658949375152588,
+      0.03410504013299942
+    ],
+    "qualification_protocol": "adr024-rebuilt-evaluation-v1",
+    "registry_sha256": "9ab13dcefc397aa8ad71acd0a7b933a20227fc408678d874303973cf55dc77f9",
+    "report_sha256": "e6ee9c1bd99e3f6961db497db664335684fa277bd1a1c86a8034570ac116056d",
+    "safety_authorized": false,
+    "scope": "stationary-campus-small-v4-scoped-benchmark",
+    "snapshot_sha256": "4c78de485f1ae36d266e60ebd3e4f68439f5108aee7a9e047b7b3736e570042f",
+    "source_sha256": "04f797f8be02329adf15b44686d938c8898c21eca3fdb0d090afd5fe19153463",
+    "spec_sha256": "bb15142a19ed3ee87a6aec2c6f9109d789d9736a5e6afda826ad898ef5fe7200",
+    "value": 3.102936029434204,
+    "weights_sha256": "3e7e38ab4297ffd4b32b9c32d64af4b45e5f5ed1b2a74f9926f23379b0b0f967"
+  },
+  "wrapper_equivalence_sha256": "3c3c06afbc335b34e28a780c3c1aec514b47c8002985d951dac1cf4d92fc2b83"
+}

@@ -1,0 +1,70 @@
+{
+  "auth": {
+    "path": "path1-delayed-data/auth.json",
+    "sha256": "af25904069fec47f292529de864c3b4193b9d4774710d2a0bb6f6aa4ad4988f2"
+  },
+  "bootstrap": {
+    "path": "path1-delayed-data/bootstrap.json",
+    "sha256": "ac62c6aeb4d8098f420ae3bfbb740013c9260b7b58f8322df5d1d2047f24b187"
+  },
+  "bootstrap_initial_action": 1,
+  "boundary_events": {
+    "path": "path1-delayed-data/boundary_events.json",
+    "sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570"
+  },
+  "case_id": "path1-delayed-data",
+  "chain": {
+    "bootstrap_recovery": {
+      "path": "path1-delayed-data/bootstrap_recovery-3914889-0.json",
+      "sha256": "ad80c04a185a49177b2a8512b63dbce23439a3569090cb317ce71ae4c71ccbba"
+    },
+    "frame": {
+      "path": "path1-delayed-data/exported-frame.json",
+      "sha256": "d51b112528214f353d3562e993d1bac297db82dac9c934b64588940b09cdfc6a"
+    }
+  },
+  "cleanup": {
+    "path": "path1-delayed-data/cleanup.json",
+    "sha256": "8caa0efca5d077ca2f9456d2692006e32226847aafca2b727a7c977022b1e857"
+  },
+  "controller": {
+    "path": "path1-delayed-data/controller-result.json",
+    "sha256": "72596648d4019e1029418ddce83cb7dacfbeb1842f62561f647fd89a69a9bd00"
+  },
+  "fault": "delayed-data",
+  "intervention": {
+    "path": "path1-delayed-data/intervention.json",
+    "sha256": "f524d83be60ac0eb6479443c792d1142c15502d845d3bf3400f1118663cb7e64"
+  },
+  "journal": {
+    "path": "path1-delayed-data/journal.json",
+    "sha256": "553734f8513f630789e9771590c18208b50163ab02c4b0505f1b30241d49a7e8"
+  },
+  "native_authority": {
+    "path": "path1-delayed-data/campaign-authority.json",
+    "sha256": "a89a8d9b07257927b2a6b01a18a215305f11555f03f70fb213cfce8f6b3339ac"
+  },
+  "native_commands": {
+    "path": "path1-delayed-data/native_commands.json",
+    "sha256": "1c10c194bf2ec6d99bcef0886bfb9a457568119396831b77f20173c7bfee1533"
+  },
+  "native_journal": {
+    "path": "path1-delayed-data/native-journal.json",
+    "sha256": "7265d0e7113e673e58d216e2b3f20e9adec57f537bc7aa06c30572dd80b5ee5a"
+  },
+  "operator_policy": {
+    "path": "path1-delayed-data/operator-policy.json",
+    "sha256": "090ec1b00c54c939d3cc2c2fb75d36025358cd41e2cb18ab9cbbb44cd039f989"
+  },
+  "outcome": "predispatch_rejected",
+  "phase": "beforewrite",
+  "policy": "qualified",
+  "raw_frames": {
+    "path": "path1-delayed-data/raw-frame-inventory.json",
+    "sha256": "bec38e20b4eec9d1b5105d0c26b5041acd95e50c87474429da5721d5288d52d0"
+  },
+  "scenario": "path1",
+  "seed": 1447,
+  "status": "completed",
+  "write_index": 0
+}

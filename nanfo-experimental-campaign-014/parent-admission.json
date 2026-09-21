@@ -1,0 +1,11 @@
+{
+  "authorization": "explicit parent authorize live frozen013 plan014",
+  "authorize_privileged_launch": true,
+  "core_adapter_ready": true,
+  "expires_ns": 1789948162601659503,
+  "issued_ns": 1789938162601658862,
+  "plan_sha256": "f619eea796ba2d62d3c85c275707ffb7d13bc13ce5958ba4abf8fe66b6116c8b",
+  "review_corrections_sha256": "d8bfd1b738e31ee4f883dcba7214d8d7fc41bf374749efc2d3b19543f9fa9984",
+  "scope": "frozen013 only four declaredsmokes then68matrix; global7200 cleanup180 outer9000",
+  "version": "nanfo.experimental-parent-admission/v1"
+}

@@ -1,0 +1,19 @@
+{
+  "case_id": "path1-link-failure",
+  "cleanup": {
+    "evidence_errors": [],
+    "removed": true,
+    "removed_resources": [
+      "4314cfe69919de9dd56cd41344fdd8753b172721649b3b31ae8cf9258e940a28",
+      "nanfo-experimental-404ce7432052497b913da49a053b0161"
+    ],
+    "unresolved_resources": []
+  },
+  "controller_returncode": 1,
+  "controller_status": "failed",
+  "export_error_type": "ValueError",
+  "policy": "qualified",
+  "scenario": "path1",
+  "seed": 1452,
+  "status": "failed"
+}

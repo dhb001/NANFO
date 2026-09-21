@@ -1,0 +1,85 @@
+{
+  "operation": "run",
+  "records": {
+    "bootstrap_recovery": {
+      "path": "bootstrap_recovery-3668793-0.json",
+      "sha256": "3980c21f8930a40a17562a54ab91d8b45193cb9c443d8f55290d9f3b2da02708"
+    },
+    "frame": {
+      "path": "frame.json",
+      "sha256": "3018f8facd13d14eb412ef69e211967e00df21f1b046c3a96221508d7f971510"
+    },
+    "inference": {
+      "path": "inference-3668793-0.json",
+      "sha256": "7afa8a1ad3511bad48e8021449b235ce785ee8c290cac3b57c3ac0269e579f57"
+    },
+    "prepared": {
+      "path": "prepared-3668793-0.json",
+      "sha256": "38b99136fc06ef69d8a212b8e4b17c688c13570b5a4937fa17904161489f92bc"
+    },
+    "receipt": {
+      "path": "receipt-3668793-0.json",
+      "sha256": "a52c2f664e1b521e122fad05b1194e1f3080c49ae99822471f5072db0bf9135e"
+    },
+    "recovery": {
+      "path": "recovery-3668793-0.json",
+      "sha256": "d3046e6e8bd9bff9cb0ffa34e8374d23703e23a226df6e6f3aa25c1d95647cd7"
+    },
+    "simulation": {
+      "path": "simulation-3668793-0.json",
+      "sha256": "4deda4233e86cf98b01872b51d0f9934e959f8317c2d0acba4d20e4c2120708a"
+    },
+    "verification": {
+      "path": "verification-3668793-2.json",
+      "sha256": "31b3feaee1ff3b8fd882cacd474502090f3a1d46519f1628984000e2548c5082"
+    }
+  },
+  "status": "completed",
+  "timings": [
+    {
+      "finished_ns": 99480795881736,
+      "operation": "inference",
+      "started_ns": 99480781615260
+    },
+    {
+      "finished_ns": 99481470851499,
+      "operation": "simulation",
+      "started_ns": 99480943284077
+    },
+    {
+      "finished_ns": 99482210937825,
+      "operation": "prepared",
+      "started_ns": 99482204777103
+    },
+    {
+      "finished_ns": 99495643722822,
+      "operation": "receipt",
+      "started_ns": 99482806578327
+    },
+    {
+      "finished_ns": 99501143035639,
+      "operation": "verification",
+      "started_ns": 99495932538289
+    },
+    {
+      "finished_ns": 99508218941245,
+      "operation": "verification",
+      "started_ns": 99502684764219
+    },
+    {
+      "finished_ns": 99511427606714,
+      "operation": "verification",
+      "started_ns": 99509930538347
+    },
+    {
+      "finished_ns": 99514514947160,
+      "operation": "recovery",
+      "started_ns": 99511912997065
+    },
+    {
+      "finished_ns": 99515381427378,
+      "operation": "bootstrap_recovery",
+      "started_ns": 99514611876648
+    }
+  ]
+}

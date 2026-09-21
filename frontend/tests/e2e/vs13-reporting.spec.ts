@@ -48,6 +48,7 @@ test.describe("ADR019 report browser contracts (mocked bytes, not worker evidenc
     const state = createDefaultSessionState();
     await installSessionMocks(page, state);
     await loginFromUi(page);
+    await page.getByRole("button", { name: "Toggle navigation" }).click();
     await page.getByRole("link", { name: "Reports" }).click();
     await page.getByLabel("Output Format").selectOption("csv");
     await page.getByRole("button", { name: "Generate Report" }).click();

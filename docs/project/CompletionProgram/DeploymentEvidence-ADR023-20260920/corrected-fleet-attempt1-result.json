@@ -1,0 +1,6 @@
+{
+  "exit_code": 1,
+  "fleet_image": "sha256:71b31676560195b54b5480507c71c857f064ebaa7cb3f0f793e2fcd8080c9e5a",
+  "acceptance_image": "sha256:261edf18cf72481a477fdfc4d5e6a2442fda7bac9a7d3695e488fe13875dfbe5",
+  "cleanup": "owned_containers_network_and_ephemeral_data_removed"
+}

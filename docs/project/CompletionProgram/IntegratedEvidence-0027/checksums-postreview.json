@@ -1,0 +1,14 @@
+{
+  "inventory-result-postreview.json": {
+    "bytes": 56729,
+    "sha256": "d2a26ee24605cf7e5abecfcb85887ceab121ce4fd722a173d8b94302e15da1ab",
+    "source_drift_paths": [],
+    "status": "passed"
+  },
+  "measured-result-postreview.json": {
+    "bytes": 59252,
+    "sha256": "5f2ea62d9734b62e9cda9c6edff28abd5f1a5ef44bd04a6b70817f77b1461e5e",
+    "source_drift_paths": [],
+    "status": "passed"
+  }
+}

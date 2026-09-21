@@ -71,8 +71,6 @@ export const CONGESTION_POLICY_RULES: readonly CongestionPolicyRule[] = [
   },
 ] as const;
 
-const MAX_CONGESTION_METRICS_PER_DEVICE = 12;
-const MAX_CONGESTION_KEYS = 240;
 export const TWIN_METRIC_MAX_AGE_MS = 60_000;
 
 export interface TwinMetricSnapshot {
@@ -100,6 +98,9 @@ export interface TwinCongestion {
 }
 
 export interface TwinNode {
+  rotation?: [number, number, number];
+  placementSource?: "canonical" | "schematic";
+  spatialObjectId?: string;
   id: string;
   hostname: string;
   type: string;
@@ -387,18 +388,15 @@ export function buildTwinSceneModel(input: SceneAdapterInput): TwinSceneModel {
       ? input.telemetryKeysNewestFirst
       : Object.keys(input.telemetryByDeviceMetric).sort()
   )
-    .slice(0, MAX_CONGESTION_KEYS)
+    // The realtime store bounds resources/series separately from flow history.
+    // A second global or per-device truncation here would starve valid series.
     .reduce<Record<string, TelemetryDeltaData["metric"][]>>((acc, telemetryKey) => {
       const metric = input.telemetryByDeviceMetric[telemetryKey];
-      if (!metric) {
+      if (!metric || metric.metric.startsWith("flow_")) {
         return acc;
       }
 
       const bucket = acc[metric.device_id] ?? [];
-      if (bucket.length >= MAX_CONGESTION_METRICS_PER_DEVICE) {
-        return acc;
-      }
-
       bucket.push(metric);
       acc[metric.device_id] = bucket;
       return acc;

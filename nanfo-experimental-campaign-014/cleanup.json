@@ -1,0 +1,17 @@
+{
+  "private_services": {
+    "children_reaped": true,
+    "graceful": true,
+    "owned_container_removed": true,
+    "owned_pids": [
+      3391998
+    ],
+    "owned_volume_removed": true,
+    "postgres_port_closed": true,
+    "private_tree_removed": true,
+    "redis_graceful_stop": true,
+    "redis_port_closed": true
+  },
+  "removed": true,
+  "unresolved_resources": []
+}

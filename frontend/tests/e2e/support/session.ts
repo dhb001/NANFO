@@ -1,5 +1,8 @@
 import { expect, Page } from "@playwright/test";
 import { reportBytes, reportHash } from "./report-bytes";
+import "./runtime-errors";
+import type { SimulationHistory } from "../../../src/shared/types/simulation";
+import type { IntentHistory } from "../../../src/shared/types/intent";
 
 export interface MockNetwork {
   network_id: string;
@@ -115,6 +118,8 @@ export interface SessionMockState {
   plugins: MockPluginRecord[];
   reports: MockReportRecord[];
   reportFailure?: boolean;
+  simulations?: SimulationHistory["items"];
+  intents?: IntentHistory["items"];
 }
 
 export function createDefaultSessionState(): SessionMockState {
@@ -479,6 +484,27 @@ function buildReportArtifact(record: MockReportRecord, generatedAt: string): Moc
 }
 
 export async function installSessionMocks(page: Page, state: SessionMockState): Promise<void> {
+  // New durable-history reads are scoped before pagination. Specific domain tests
+  // may override these routes or seed records without changing action/detail mocks.
+  for (const kind of ["simulations", "intents"] as const) {
+    await page.route(`**/api/v1/${kind}?**`, async (route) => {
+      expect(route.request().method()).toBe("GET");
+      const url = new URL(route.request().url());
+      const pageNumber = Number(url.searchParams.get("page") ?? 1);
+      const pageSize = Number(url.searchParams.get("page_size") ?? 20);
+      expect(Number.isInteger(pageNumber) && pageNumber >= 1).toBe(true);
+      expect(Number.isInteger(pageSize) && pageSize >= 1 && pageSize <= 200).toBe(true);
+      const workspaceId = url.searchParams.get("workspace_id");
+      const networkId = url.searchParams.get("network_id");
+      if (workspaceId !== state.workspaceId || (networkId && !state.networks.some((network) => network.network_id === networkId && network.workspace_id === workspaceId))) {
+        return route.fulfill({ status: 403, json: { success: false, data: null, meta: {}, errors: { code: "FORBIDDEN", message: "History scope is not accessible." } } });
+      }
+      const items = (state[kind] ?? [])
+        .filter((item) => item.workspace_id === workspaceId && (!networkId || item.network_id === networkId))
+        .sort((a, b) => b.created_at.localeCompare(a.created_at) || ("simulation_id" in b ? b.simulation_id : b.intent_id).localeCompare("simulation_id" in a ? a.simulation_id : a.intent_id));
+      await route.fulfill({ json: { success: true, data: { items: items.slice((pageNumber - 1) * pageSize, pageNumber * pageSize), total: items.length, page: pageNumber, page_size: pageSize }, meta: {}, errors: null } });
+    });
+  }
   await page.route("**/api/v1/auth/login", async (route) => {
     await route.fulfill({
       status: 200,

@@ -43,7 +43,7 @@ for (const override of [false, true]) test(`configured scenario ${override ? "ch
         trace: [{ elapsed_ms: 100, flows: { offered: { ...outputMetrics, latency_ms: null } } }, { elapsed_ms: 200, flows: { offered: outputMetrics } }] } }, meta: {}, errors: null } });
   });
   await loginFromUi(page);
-  await page.getByRole("button", { name: /Network A/ }).click();
+  await page.locator(".network-choice").filter({ hasText: "Network A" }).click();
   await page.getByRole("link", { name: /^Simulation/ }).click();
   await expect(page.getByText(/Explicit operator example, not live topology/)).toBeVisible();
   await page.getByRole("button", { name: "Start Simulation", exact: true }).click();
@@ -92,6 +92,7 @@ for (const override of [false, true]) test(`configured scenario ${override ? "ch
   await page.route("**/api/v1/telemetry/history**", async (route) => route.fulfill({ json: { success: true, data: { items: [
     { record_id: "sample", device_id: "switch", metric: "latency_ms", value: 12, unit: "ms", source: "emulation", observed_at: "2026-09-10T00:00:00Z", tags: { synthetic: false, execution_mode: "emulation", port_no: 1, peer_host: "h2", run_id: "measured-run" } },
   ], total: 1, page: 1, page_size: 120 }, meta: {}, errors: null } }));
+  await page.getByRole("button", { name: "Toggle navigation" }).click();
   await page.getByRole("link", { name: /^Telemetry/ }).click();
   await expect(page.getByRole("img", { name: /Telemetry time series/ })).toBeVisible();
   await expect(page.getByText("Measured emulation", { exact: true }).first()).toBeVisible();

@@ -1,0 +1,13 @@
+{
+  "plan_sha256": "f619eea796ba2d62d3c85c275707ffb7d13bc13ce5958ba4abf8fe66b6116c8b",
+  "readiness": {
+    "adapter": true,
+    "core": true,
+    "deterministic_mutation_fault_contract": true,
+    "durable_bootstrap_recovery": true,
+    "matched_baseline_controller_contract": true,
+    "retention_schema_0029": true,
+    "simulator": true
+  },
+  "started_ns": 1789938260583588385
+}

@@ -1,0 +1,18 @@
+{
+  "case_id": "path0-1425-fixed0",
+  "cleanup": {
+    "evidence_errors": [],
+    "removed": true,
+    "removed_resources": [
+      "e6e36228f202656ba5465878b54a5c9e64f5a83f384977b564d6cd5cd88a67a4",
+      "nanfo-experimental-f93967fb03454dfb8ab2fccc468126b8"
+    ],
+    "unresolved_resources": []
+  },
+  "controller_returncode": 1,
+  "controller_status": "failed",
+  "policy": "fixed0",
+  "scenario": "path0",
+  "seed": 1425,
+  "status": "acquired"
+}

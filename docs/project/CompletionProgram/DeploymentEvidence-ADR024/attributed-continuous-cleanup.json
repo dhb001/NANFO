@@ -1,0 +1,20 @@
+[
+  {
+    "container_id": "09636ae17aea57170a81cd53dc541ef201e17c2749a1d3dafae96f1cfd6dafe6",
+    "removed": true,
+    "scenario": "path0"
+  },
+  {
+    "container_id": "55e24d3ff0417e8ae7867699f2b5c8b6b5d4f83516cecb772cc1cfcd4829a084",
+    "removed": true,
+    "scenario": "path1"
+  },
+  {
+    "name": "nanfo-live-acceptance-2e3b9e3db72747f78cf10bd317ba87d0-redis",
+    "removed": true
+  },
+  {
+    "name": "nanfo-live-acceptance-2e3b9e3db72747f78cf10bd317ba87d0-pg",
+    "removed": true
+  }
+]

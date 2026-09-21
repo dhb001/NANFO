@@ -1,0 +1,47 @@
+{
+  "applied_ns": 102660783360857,
+  "bootstrap_initial_action": 1,
+  "boundary": {
+    "entry": {
+      "argv": [
+        "ip",
+        "rule",
+        "del",
+        "priority",
+        "19111",
+        "from",
+        "10.78.10.2/32",
+        "to",
+        "10.78.8.2/32",
+        "table",
+        "19111"
+      ],
+      "began": 102660.584423193,
+      "completed": 102660.648105508,
+      "node": "access1",
+      "restoring": false
+    },
+    "id": "27cadae0e7478235518371479c181376407981b128bdf5be574a862d073be671",
+    "point": {
+      "effect": "pause",
+      "operation": "execute",
+      "ordinal": 1,
+      "policy_sha256": "3d1657d904c6214909a417bc8de9a65f512aa971ecadc8199a4f08cec6766297",
+      "timeout_seconds": 30,
+      "when": "after"
+    },
+    "reached_monotonic": 102660.687753677,
+    "released_monotonic": null
+  },
+  "case_id": "path1-disconnect",
+  "disconnected_seconds": 11,
+  "fault": "disconnect",
+  "intervention": "real",
+  "killed_pid": 3958871,
+  "phase": "afterwrite",
+  "policy": "qualified",
+  "returncode": -9,
+  "scenario": "path1",
+  "seed": 1453,
+  "write_index": 1
+}

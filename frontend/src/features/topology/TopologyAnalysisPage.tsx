@@ -114,7 +114,7 @@ export function TopologyAnalysisPage() {
     <div style={{ display: "grid", gap: "1rem" }}>
       <Panel
         title="Topology Analysis"
-        subtitle="VS10 deferred topology analysis endpoints with deterministic neighbors, impact, and reconcile visibility"
+        subtitle="Inspect neighboring devices, trace dependencies and reconcile topology"
         action={
           <div style={{ display: "flex", gap: "0.35rem", flexWrap: "wrap" }}>
             <Badge text={`topology ws ${liveTopologyStatus}`} tone={liveTopologyStatus === "open" ? "ok" : "warn"} />
@@ -240,7 +240,7 @@ export function TopologyAnalysisPage() {
       </div>
 
       {activeTab === "neighbours" ? (
-        <Panel title="Neighbour Analysis" subtitle="GET /topology/device/{id}/neighbors deterministic ordering + edge metadata">
+        <Panel title="Neighbour Analysis" subtitle="Direct connections and link details for the selected device">
           <QueryState
             query={neighboursQuery}
             hasData={(data) => data.neighbours.length > 0}
@@ -291,7 +291,7 @@ export function TopologyAnalysisPage() {
           </QueryState>
         </Panel>
       ) : (
-        <Panel title="Impact Analysis" subtitle="GET /topology/impact/{id} reachable dependency set with hop depth">
+        <Panel title="Impact Analysis" subtitle="Reachable dependencies and their distance from the selected device">
           <QueryState
             query={impactQuery}
             hasData={(data) => data.impacts.length > 0}

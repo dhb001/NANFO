@@ -1,0 +1,18 @@
+{
+  "case_id": "smoke-path0-qualified-1457",
+  "cleanup": {
+    "evidence_errors": [],
+    "removed": true,
+    "removed_resources": [
+      "1fda81ee70ba43ff60410e5d614f9852c692d4039ab56be48f14e5963057d53a",
+      "nanfo-experimental-dad9ac60108045468d83c1cf20e96c4d"
+    ],
+    "unresolved_resources": []
+  },
+  "controller_returncode": 0,
+  "controller_status": "completed",
+  "policy": "qualified",
+  "scenario": "path0",
+  "seed": 1457,
+  "status": "acquired"
+}

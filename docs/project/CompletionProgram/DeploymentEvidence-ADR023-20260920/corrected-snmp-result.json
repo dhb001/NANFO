@@ -1,0 +1,14 @@
+{
+  "exit_code": 0,
+  "image_id": "sha256:1e28594b60848453be3221182c4808a76b186e34e7e71835e6270085138395d6",
+  "fleet_image": "sha256:71b31676560195b54b5480507c71c857f064ebaa7cb3f0f793e2fcd8080c9e5a",
+  "proof": {
+    "status": "passed",
+    "sha256_aes": true,
+    "reads": 2,
+    "uptime_advanced": true,
+    "counters_monotonic": true,
+    "isolated_loopback": true,
+    "measured_provenance": "private_snmpd_loopback_not_physical"
+  }
+}

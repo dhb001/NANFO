@@ -15,7 +15,7 @@ interface AuthState {
   generation: number;
   endingSession: boolean;
   setSession: (values: Session & { profile: UserProfile }) => void;
-  replaceTokens: (values: Pick<Session, "accessToken" | "refreshToken">) => void;
+  replaceTokens: (values: Pick<Session, "accessToken" | "refreshToken"> & { profile?: UserProfile }) => void;
   setProfile: (profile: UserProfile) => void;
   clearSession: () => void;
 }
@@ -81,7 +81,7 @@ export const useAuthStore = create<AuthState>((set) => ({
   }),
   replaceTokens: (tokens) => set((state) => {
     if (!state.userId) return state;
-    persistSession({ ...tokens, userId: state.userId });
+    persistSession({ accessToken: tokens.accessToken, refreshToken: tokens.refreshToken, userId: state.userId });
     return tokens;
   }),
   setProfile: (profile) => set({ profile }),

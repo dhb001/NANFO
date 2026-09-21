@@ -57,9 +57,9 @@ All events must follow the mandatory envelope defined in `docs/api/EventAPI.md` 
 | `org.organization.updated` | Organization module | Audit Log Writer | `org_id`, `changed_fields: {}`, `actor_id` |
 | `org.organization.deleted` | Organization module | Audit Log Writer | `org_id`, `actor_id` |
 | `org.workspace.created` | Organization module | Audit Log Writer, Network module (validates workspace references) | `workspace_id`, `org_id`, `name`, `actor_id` |
-| `org.workspace.updated` | Organization module | Audit Log Writer | `workspace_id`, `changed_fields: {}`, `actor_id` |
+| `org.workspace.updated` | Organization module | Audit Log Writer | `workspace_id`, `org_id`, `changed_fields: {}`, `actor_id` |
 | `org.workspace.deleted` | Organization module | Audit Log Writer, Network module (must mark networks in deleted workspace as suspended) | `workspace_id`, `org_id`, `actor_id` |
-| `org.member.added` | Organization module | Audit Log Writer | `org_id`, `user_id`, `org_role`, `actor_id` |
+| `org.member.added` | Organization module | Audit Log Writer | `org_id`, `user_id`, `org_role`, `actor_id`, `restored: boolean` |
 | `org.member.removed` | Organization module | Audit Log Writer | `org_id`, `user_id`, `actor_id` |
 
 > Event type names follow `module.entity.action` per `docs/api/EventAPI.md` §1.
@@ -77,7 +77,7 @@ override an org Read-Only role. Reads require active membership and active paren
 organization/workspace. Optional token claims restrict, never expand, that scope.
 
 
-- **Orphaned workspaces after soft-delete:** If a workspace is soft-deleted, networks referencing it must transition to a `suspended` state. The Network module must consume `org.workspace.deleted` to enforce this.
+- **Descendant deletion (ADR-026):** Organization deletion rejects active workspaces (`409 ORG_HAS_WORKSPACES`). Workspace deletion asks NetworkService for active inventory and rejects it (`409 WORKSPACE_HAS_NETWORKS`). Remove descendants explicitly first; immutable history is retained. This does not rely on best-effort event delivery to suspend descendants.
 - **Cross-org data leakage:** API routes must enforce that the authenticated user's `org_id` (from JWT) matches the `org_id` in the path parameter for all org-scoped endpoints. Missing this check exposes multi-tenant data.
 - **`user_id` reference integrity:** Since `org_members.user_id` is a logical reference without a SQL FK to Identity's `users` table, it is possible to add a non-existent user. The Organization Service must validate via Identity API before inserting a membership row.
 - **Slug uniqueness enforcement at application layer:** `slug UNIQUE` is enforced in PostgreSQL, but slug normalisation (lowercase, hyphen-only) must be validated at the Pydantic layer before the DB write to surface user-friendly errors via 422 rather than a raw DB constraint violation.
@@ -98,3 +98,28 @@ organization/workspace. Optional token claims restrict, never expand, that scope
 * Write integration tests for all CRUD endpoints using an injected test database.
 * Write integration test verifying that `workspace_id` validation in the Network module correctly rejects soft-deleted workspaces.
 * Write event contract tests asserting that `org.organization.created` and `org.workspace.created` payloads match the envelope defined in `docs/api/EventAPI.md` §2.
+
+## 9. ADR-026 repair contract
+
+- Organization/workspace names are trimmed, nonblank, maximum255 characters;
+  workspace descriptions maximum4000. Slugs normalize lowercase/whitespace and
+  require3..63 alphanumeric/hyphen characters, no leading/trailing hyphen.
+- Deleted slugs remain reserved. Pre-existing and concurrent conflicts return
+  `409 ORG_SLUG_CONFLICT`.
+- PATCH requires at least one supplied field. Name cannot be null. Workspace
+  description omission preserves its value; explicit null clears it.
+- Organization/workspace/member public lists accept page>=1 and page_size1..200;
+  existing `{items,total}` data envelope remains. Rows order by created_at then UUID.
+- Roles are exactly `Admin`, `Operator`, `Read-Only`. Re-adding a removed member
+  restores the original row/created_at with the requested role and emits
+  `org.member.added` with `restored=true`; active duplicates return409.
+- Tenant mutations acquire the organization row lock before rechecking current
+  membership. Concurrent restores serialize; a completed revocation denies a
+  waiting actor. Removing the last usable Admin returns `409 ORG_LAST_ADMIN`;
+  another Admin must have an active Identity account and global write:config.
+- Every lifecycle mutation appends through Identity's public audit boundary in
+  the same transaction. Redis publication follows commit with the same event_id;
+  consumer replay is deduplicated by the existing unique audit event_id. Audit
+  failure rolls back the mutation; publication failure retains the durable audit.
+- Membership audit actor is actor_id and resource is affected user_id. Workspace
+  resource is workspace_id. Old audit evidence is never updated on replay.

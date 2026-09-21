@@ -1,0 +1,52 @@
+{
+  "applied_ns": 102271342801686,
+  "bootstrap_initial_action": 1,
+  "boundary": {
+    "entry": {
+      "argv": [
+        "ip",
+        "rule",
+        "del",
+        "priority",
+        "19111",
+        "from",
+        "10.78.10.2/32",
+        "to",
+        "10.78.8.2/32",
+        "table",
+        "19111"
+      ],
+      "began": 102271.177205867,
+      "completed": null,
+      "node": "access1",
+      "restoring": false
+    },
+    "id": "85800fa8a25320f82705904bdf11acf0ffb4ef9bba4afa407cc1b1fa956df8ab",
+    "point": {
+      "effect": "pause",
+      "operation": "execute",
+      "ordinal": 1,
+      "policy_sha256": "c66f2ef814938f1802f1a5e31fee984e23bff77f66d28893e0b3d87bc05ea557",
+      "timeout_seconds": 30,
+      "when": "before"
+    },
+    "reached_monotonic": 102271.214800349,
+    "released_monotonic": null
+  },
+  "case_id": "path1-STOP-before",
+  "core_stop": {
+    "run_id": "4b99301e-c277-475f-8128-472a00f185fc",
+    "stopped": true
+  },
+  "fault": "STOP-before",
+  "intervention": "real",
+  "phase": "beforewrite",
+  "policy": "qualified",
+  "receiver_stop": {
+    "restoration_pending": true,
+    "stop_latched": true
+  },
+  "scenario": "path1",
+  "seed": 1448,
+  "write_index": 0
+}

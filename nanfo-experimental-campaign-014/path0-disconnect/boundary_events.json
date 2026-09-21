@@ -1,0 +1,34 @@
+[
+  {
+    "entry": {
+      "argv": [
+        "ip",
+        "rule",
+        "del",
+        "priority",
+        "19111",
+        "from",
+        "10.78.10.2/32",
+        "to",
+        "10.78.8.2/32",
+        "table",
+        "19111"
+      ],
+      "began": 101710.298301823,
+      "completed": 101710.345752939,
+      "node": "access1",
+      "restoring": false
+    },
+    "id": "f8a6f08110477fd635f93da89800af1f8f3c1841a19d440caada5112b7d9f66d",
+    "point": {
+      "effect": "pause",
+      "operation": "execute",
+      "ordinal": 1,
+      "policy_sha256": "674fca0550ac3583a4fda6abf9f57dc932e1d91a5144890b1df6d75c8ca3e25e",
+      "timeout_seconds": 30,
+      "when": "after"
+    },
+    "reached_monotonic": 101710.368288307,
+    "released_monotonic": null
+  }
+]

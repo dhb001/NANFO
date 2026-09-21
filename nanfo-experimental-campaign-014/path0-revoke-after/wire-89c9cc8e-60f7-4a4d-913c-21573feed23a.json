@@ -1,0 +1,23 @@
+{
+  "request": {
+    "action": null,
+    "duration_seconds": 0,
+    "expires_at": 1789964217.4585404,
+    "fence": 13,
+    "operation": "stop",
+    "policy_sha256": "86bd94d8b035066a9f53f1bd69269afe3a72043c67f38e0fd8c2257a6ceec525",
+    "request_id": "89c9cc8e-60f7-4a4d-913c-21573feed23a",
+    "version": "nanfo.experimental-lab/v1"
+  },
+  "response": {
+    "evidence": {
+      "restoration_pending": true,
+      "stop_latched": true
+    },
+    "fence": 13,
+    "policy_sha256": "86bd94d8b035066a9f53f1bd69269afe3a72043c67f38e0fd8c2257a6ceec525",
+    "request_id": "89c9cc8e-60f7-4a4d-913c-21573feed23a",
+    "status": "ok",
+    "version": "nanfo.experimental-lab/v1"
+  }
+}

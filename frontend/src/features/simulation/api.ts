@@ -6,7 +6,14 @@ import {
   SimulationDetail,
   SimulationValidationHandoff,
   ScenarioConfig,
+  SimulationHistory,
 } from "@/shared/types/simulation";
+
+export function listSimulations(token: string, workspaceId: string, networkId: string | null, page = 1, signal?: AbortSignal) {
+  const params = new URLSearchParams({ workspace_id: workspaceId, page: String(page), page_size: "20" });
+  if (networkId) params.set("network_id", networkId);
+  return apiRequest<SimulationHistory>(`/api/v1/simulations?${params}`, { token, signal });
+}
 
 export function startSimulation(
   token: string,
@@ -52,8 +59,9 @@ export function getSimulationDetail(token: string, simulationId: string, signal?
   });
 }
 
-export function compareSimulation(token: string, simulationId: string, baselineId: string) {
+export function compareSimulation(token: string, simulationId: string, baselineId: string, signal?: AbortSignal) {
   return apiRequest<SimulationCompare>(`/api/v1/simulations/${simulationId}/compare/${baselineId}`, {
     token,
+    signal,
   });
 }

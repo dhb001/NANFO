@@ -1,0 +1,11 @@
+{
+  "bootstrap_initial_action": 1,
+  "case_id": "path1-revoke-before",
+  "fault": "revoke-before",
+  "intervention": "real",
+  "phase": "beforewrite",
+  "policy": "qualified",
+  "scenario": "path1",
+  "seed": 1450,
+  "write_index": 0
+}

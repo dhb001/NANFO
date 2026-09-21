@@ -1,0 +1,22 @@
+# Build the independent locked environment; still no registry or weights in image.
+services:
+  api:
+    image: ${NANFO_AI_IMAGE:?Set a distinct with-ai image tag}
+    build: {target: with-ai}
+    environment:
+      NANFO_MODEL_PYTHON: /opt/nanfo/ai-runtime/bin/python
+      NANFO_MODEL_ROOT: /var/lib/nanfo/models
+      NANFO_MODEL_REGISTRY: /var/lib/nanfo/model-registry/registry.json
+      NANFO_MODEL_REGISTRY_SHA256: ${NANFO_MODEL_REGISTRY_SHA256:?Pin the protected registry}
+    volumes:
+      - type: bind
+        source: ${NANFO_STATE_DIR}/models
+        target: /var/lib/nanfo/models
+        read_only: true
+        bind: {create_host_path: false}
+      - type: bind
+        source: ${NANFO_STATE_DIR}/model-registry
+        target: /var/lib/nanfo/model-registry
+        read_only: true
+        bind: {create_host_path: false}
+    mem_limit: 2g

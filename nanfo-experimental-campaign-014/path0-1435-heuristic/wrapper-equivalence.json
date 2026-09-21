@@ -1,0 +1,20 @@
+{
+  "checkpoint_sha256": "77dae44acab722a5a6a2e87d952a6cca65e1c4eea102a089830a8401b521d614",
+  "evidence_sha256": [
+    "b0a5c44cfb05ae381d4bb4a3f7a010a7d6ec0ada17bc3b9e7c510d3d389478d1"
+  ],
+  "model_adapter_sha256": "9a927c270b7a6a43d0001511fb154e8125bfea4ec2710cc723be3851f5b5bf55",
+  "model_source_sha256": "04f797f8be02329adf15b44686d938c8898c21eca3fdb0d090afd5fe19153463",
+  "registry_sha256": "87b7e193cdd030fb1445c4643d7490ada5f3eb17da96b1a52f1e7f9fb1b9e4c5",
+  "runtime": {
+    "container_id": "2e52c7c1b9450b251972ceaedd1991b13d98cbe6db1fcfafd024e007907212ac",
+    "disposable": true,
+    "image_sha256": "954462c0f00d5bbaa72ea144f6064936b399c430e6ab94bffcf1c00d134ea0d7",
+    "network_disconnected": true,
+    "resource_id": "2e52c7c1b9450b251972ceaedd1991b13d98cbe6db1fcfafd024e007907212ac",
+    "source_sha256": "08c312c64154c9aedcd3b22eeb3573783590e0eb7183bc999cb8ef39b958dbbd",
+    "wrapper_sha256": "e7a3c0256264e69a1975e68b97b8c2d70c1e4f098f91cb8046f90151cb260add"
+  },
+  "scope": "offline original matched argv equivalence and preserved raw-frame interface replay; fresh inference still fully validated",
+  "weights_sha256": "3e7e38ab4297ffd4b32b9c32d64af4b45e5f5ed1b2a74f9926f23379b0b0f967"
+}

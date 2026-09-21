@@ -1,0 +1,43 @@
+{
+  "fleet_image": "sha256:13be46a557ecb7ea22d6d7f0de2e0792b68b44db3021cf1df99ee4971d509702",
+  "parity": {
+    "files": 327,
+    "matched": true
+  },
+  "factory_checks": [
+    {
+      "passed": 3,
+      "failed": 0,
+      "execution_mode": "production",
+      "proofs": [
+        "unconfigured",
+        "partial",
+        "missing_protected_config"
+      ],
+      "driver_modules_imported": [
+        "emulation.autonomous_frr"
+      ],
+      "journal_client_has_run": false,
+      "executor_types": [
+        "BlockedExecutionInstallation"
+      ]
+    },
+    {
+      "passed": 3,
+      "failed": 0,
+      "execution_mode": "emulation",
+      "proofs": [
+        "unconfigured",
+        "partial",
+        "missing_protected_config"
+      ],
+      "driver_modules_imported": [
+        "emulation.autonomous_frr"
+      ],
+      "journal_client_has_run": false,
+      "executor_types": [
+        "BlockedExecutionInstallation"
+      ]
+    }
+  ]
+}

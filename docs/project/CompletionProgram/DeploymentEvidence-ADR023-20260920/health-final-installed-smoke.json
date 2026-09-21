@@ -1,0 +1,49 @@
+{
+  "fleet_image": "sha256:fac6029493690c0d60ee44117a393091aaa019b7dc579ac8784f2d86599007df",
+  "parity": {
+    "files": 329,
+    "matched": true
+  },
+  "smoke_checks": [
+    {
+      "passed": 10,
+      "failed": 0,
+      "proofs": [
+        "unconfigured",
+        "partial",
+        "missing_protected_config",
+        "privileged_driver_import_separation",
+        "private_0600_key_read",
+        "key_mode_0o644_rejected",
+        "key_mode_0o640_rejected",
+        "key_mode_0o400_rejected",
+        "hardlinked_key_rejected",
+        "key_digest_mismatch_rejected"
+      ],
+      "execution_mode": "production",
+      "driver_imported": false,
+      "authentic_installation_loaded": false,
+      "receiver_started": false
+    },
+    {
+      "passed": 10,
+      "failed": 0,
+      "proofs": [
+        "unconfigured",
+        "partial",
+        "missing_protected_config",
+        "privileged_driver_import_separation",
+        "private_0600_key_read",
+        "key_mode_0o644_rejected",
+        "key_mode_0o640_rejected",
+        "key_mode_0o400_rejected",
+        "hardlinked_key_rejected",
+        "key_digest_mismatch_rejected"
+      ],
+      "execution_mode": "emulation",
+      "driver_imported": false,
+      "authentic_installation_loaded": false,
+      "receiver_started": false
+    }
+  ]
+}

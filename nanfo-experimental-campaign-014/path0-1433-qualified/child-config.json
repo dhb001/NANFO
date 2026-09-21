@@ -1,0 +1,29 @@
+{
+  "actor": {
+    "actor_id": "ead1cb8d-f0fa-42f1-a14b-5314e406872f",
+    "backend": "real-private-postgres-redis",
+    "current_permissions": [
+      "write:config",
+      "execute:rollback",
+      "read:topology",
+      "read:telemetry",
+      "manage:users",
+      "manage:orgs"
+    ],
+    "login_authenticated": true,
+    "network_id": "0a81e4c8-f870-4281-8fb2-3b8f9bd1d5a6",
+    "org_id": "891829a0-0da4-4c45-a4ce-497c44bd0ab2",
+    "workspace_id": "266110b8-57d6-4e9c-8d59-acf16d9ed3d3"
+  },
+  "case": {
+    "case_id": "path0-1433-qualified",
+    "policy": "qualified",
+    "scenario": "path0",
+    "seed": 1433
+  },
+  "container_id": "e4a73003d5d5adadfc8653bb23f62fd6ccd317cc69cbb35cbc8edc5eede278fa",
+  "model_root": "/home/DHB/Documents/NANFO/ai-engine/artifacts/adr025-runtime-preparation-013/ai-engine/artifacts/adr024-qualified-001/model",
+  "owner": "18646a08f6304a0484f765b3f53c97cc",
+  "receiver_policy_sha256": "9d6279753cf382f438aec24b200e8429049994c627b3d72e4025690706ba59a2",
+  "registry_sha256": "cd4d137068962f18a0ae486b07e76a536e40b97c54db5ffd33898ee57270fca1"
+}

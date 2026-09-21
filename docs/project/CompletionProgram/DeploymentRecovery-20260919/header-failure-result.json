@@ -1,0 +1,233 @@
+{
+  "cases": {
+    "disk_capacity": {
+      "status": "passed",
+      "detail": {
+        "docker_root": "/home/.system-data/docker",
+        "capacity_filesystem": "/home",
+        "docker_available_bytes": 275777413120,
+        "staging_available_bytes": 7711121408,
+        "minimum_bytes": 1073741824
+      }
+    },
+    "installed_source_parity": {
+      "status": "passed",
+      "detail": "Installed maintenance/readiness bytes match current source"
+    },
+    "package_contract": {
+      "status": "passed",
+      "detail": {
+        "locked_stages_present": true,
+        "live_build": "pending"
+      }
+    },
+    "locked_container_build": {
+      "status": "passed",
+      "detail": {
+        "mode": "referenced_prior_locked_build_not_new_build",
+        "evidence_path": "/tmp/opencode/recovery-build-2.md",
+        "evidence_sha256": "2d11895ba03d588d8552cbc586553c2ddc8f20ea1aa239244880f472c864600c",
+        "images": {
+          "backend": {
+            "id": "sha256:3b56739212e19a16f38608078e2fa6253827762055ba102e4ae5a9c98a849720",
+            "os": "linux",
+            "architecture": "amd64"
+          },
+          "frontend": {
+            "id": "sha256:0b276d12f471b356fa62881f7eb8063a32f4558a6d7b47883216278bb52cb0f7",
+            "os": "linux",
+            "architecture": "amd64"
+          },
+          "neo4j": {
+            "id": "sha256:d544f1ef8033ddfbf3a7cc81cdc1a73f90e503153202ea44d35f293bf43d9db7",
+            "os": "linux",
+            "architecture": "amd64"
+          }
+        },
+        "installed_source_sha256": {
+          "deploy/maintenance.py": "c7476372a0eec695b15e16750551a78fe0f492cec1d572c98f31e4366642ab1e",
+          "backend/app/api/readiness.py": "785ca236ec0e16823d41ea8859e876e4cb184bce0be03901a6da6956153853b9",
+          "backend/app/core/runtime_health.py": "a1da9a3008cecc49365629eff927275fe8efce0a3fc5c7f1c3a4bbbe0ec7e6c9",
+          "backend/app/core/config.py": "3025a44ffe72bdf827a1a909a340e797bd70b99910eca2acee40da7e241b4705",
+          "backend/app/modules/network/operations.py": "ffcb6ccc69e2c54b443d672bc9e47d4fc4df515354ca8b96dd872f00066b545e",
+          "backend/app/modules/report/artifacts.py": "c95f4ab3de3c264b6a49173dffec2882010a4c40e801a6992652cdfdd6bd0115",
+          "backend/app/modules/report/service.py": "044a2f408ccd17e496e65c1231bdf96444e842b1a7dd648f41dfbe03b5c901d9",
+          "backend/app/modules/report/worker.py": "fbd723d33b4b5d9e4109daace9c071a92605fabef7275734f477760cc7dbce9e"
+        },
+        "source_mismatches": [],
+        "builds_performed": 0,
+        "pulls_performed": 0
+      }
+    },
+    "fresh_volumes": {
+      "status": "passed",
+      "detail": {
+        "empty_new_volumes": [
+          "nanfo-deploy-verify-8d409ddd6dca4fa583b20f34e4799547_init_secrets",
+          "nanfo-deploy-verify-8d409ddd6dca4fa583b20f34e4799547_lab_commands",
+          "nanfo-deploy-verify-8d409ddd6dca4fa583b20f34e4799547_lab_output",
+          "nanfo-deploy-verify-8d409ddd6dca4fa583b20f34e4799547_lab_results",
+          "nanfo-deploy-verify-8d409ddd6dca4fa583b20f34e4799547_neo4j_data",
+          "nanfo-deploy-verify-8d409ddd6dca4fa583b20f34e4799547_postgres_data",
+          "nanfo-deploy-verify-8d409ddd6dca4fa583b20f34e4799547_redis_data",
+          "nanfo-deploy-verify-8d409ddd6dca4fa583b20f34e4799547_reports",
+          "nanfo-deploy-verify-8d409ddd6dca4fa583b20f34e4799547_runtime_secrets"
+        ],
+        "existing_data": 0
+      }
+    },
+    "migration_0021": {
+      "status": "passed",
+      "detail": "0021"
+    },
+    "bootstrap_login": {
+      "status": "passed",
+      "detail": {
+        "generated_password": true,
+        "password_in_argv": false,
+        "authenticated_bootstrap_actor": true
+      }
+    },
+    "frontend_http": {
+      "status": "passed",
+      "detail": {
+        "html_bytes": 958,
+        "built_assets_fetched": 5,
+        "browser_execution": "not tested; HTTP smoke only"
+      }
+    },
+    "full_stack_readiness": {
+      "status": "passed",
+      "detail": "Gateway /ready and all six work-coupled worker healthchecks passed"
+    },
+    "simulation": {
+      "status": "passed",
+      "detail": {
+        "simulation_id": "e26fb5d8-d07f-40f2-ab2c-0b874ab6a5e0",
+        "loss_pct": 45.0,
+        "configured_model_only": true
+      }
+    },
+    "report_csv": {
+      "status": "passed",
+      "detail": {
+        "report_id": "cb7ee732-4f02-4015-b246-9a0991d29013",
+        "sha256": "4733d7aaa293601744bb180002c1eb2d62d4e61658a9f1fd8901f8d749f33719",
+        "size_bytes": 3788,
+        "snapshot_sha256": "f763735622ec95ab466372cbf22ca3e2f5fb29e7062f1f8ddcf10958a2eb98f8",
+        "format": "csv"
+      }
+    },
+    "report_pdf": {
+      "status": "passed",
+      "detail": {
+        "report_id": "b1d9e93f-9b2e-42d6-95c7-a69f38144d85",
+        "sha256": "69b4cbdff2e8227cd6955255e50ae76a0c0e9fbc8a9409fe2fad3fe30992f77d",
+        "size_bytes": 3402,
+        "snapshot_sha256": "0b233fdddec593f5885fe7410092e69b06b1bab08ea64204ec53378b6cb73f3b",
+        "format": "pdf"
+      }
+    },
+    "database_stop_readiness": {
+      "status": "passed",
+      "detail": "Actual PostgreSQL stop: /ready 503, /health 200; readiness and workers recovered"
+    },
+    "worker_stale_heartbeat": {
+      "status": "passed",
+      "detail": "Actual worker SIGSTOP produced stale-loop heartbeat with live stores; SIGCONT recovered"
+    },
+    "api_worker_restart": {
+      "status": "passed",
+      "detail": {
+        "report": {
+          "report_id": "b6e4547a-be47-45c8-a2a0-7c92d64e5590",
+          "sha256": "b87ebfb6089d57a0bd78f83e9f86088f177fdb1714c518029798e4cbc002acec",
+          "size_bytes": 3788,
+          "snapshot_sha256": "289797c36369aa3a390a969dea612f0b2a2f596739cab52bc0108f7cef00e6d8",
+          "format": "csv"
+        },
+        "simulation_id": "e48e0e01-d8d2-4479-8430-acbe95547120",
+        "restarted_services": [
+          "api",
+          "network-outbox-worker",
+          "simulation-worker",
+          "report-worker",
+          "alert-worker",
+          "execution-worker",
+          "autonomy-worker"
+        ]
+      }
+    },
+    "lab_binding": {
+      "status": "blocked",
+      "detail": "Lab profile not requested"
+    },
+    "lab_congestion": {
+      "status": "blocked",
+      "detail": "Lab profile not requested"
+    },
+    "model_diagnostic": {
+      "status": "blocked",
+      "detail": "Frozen model diagnosis not requested"
+    },
+    "coordinated_encrypted_backup": {
+      "status": "failed",
+      "detail": "Backup payload is not encrypted GCM format"
+    },
+    "distinct_fresh_restore": {
+      "status": "blocked",
+      "detail": "Prerequisite did not complete"
+    },
+    "restore_image_schema": {
+      "status": "blocked",
+      "detail": "Prerequisite did not complete"
+    },
+    "old_tokens_invalid": {
+      "status": "blocked",
+      "detail": "Prerequisite did not complete"
+    },
+    "restored_report_bytes": {
+      "status": "blocked",
+      "detail": "Prerequisite did not complete"
+    },
+    "restored_workflows": {
+      "status": "blocked",
+      "detail": "Prerequisite did not complete"
+    },
+    "restored_telemetry": {
+      "status": "blocked",
+      "detail": "Prerequisite did not complete"
+    },
+    "source_unchanged": {
+      "status": "blocked",
+      "detail": "Prerequisite did not complete"
+    },
+    "campaign": {
+      "status": "failed",
+      "detail": "Backup payload is not encrypted GCM format"
+    },
+    "cleanup": {
+      "status": "passed",
+      "detail": {
+        "containers_removed": 11,
+        "volumes_removed": 9,
+        "networks_removed": 2
+      }
+    }
+  },
+  "core_passed": false,
+  "all_green": false,
+  "step15_complete": false,
+  "counts": {
+    "passed": 16,
+    "failed": 2,
+    "blocked": 10,
+    "pending": 0
+  },
+  "live_authorized": true,
+  "agents_idle_attested": true,
+  "failure": "Backup payload is not encrypted GCM format",
+  "evidence_directory": "/tmp/opencode/nanfo-deploy-verify-yle283ev/evidence",
+  "live_requested_lab": false,
+  "live_requested_model": false
+}

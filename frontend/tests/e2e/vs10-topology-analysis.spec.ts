@@ -144,7 +144,7 @@ test.describe("VS10 topology analysis", () => {
 
     await loginFromUi(page);
     await expect(page.getByRole("heading", { name: "Networks" })).toBeVisible();
-    await page.getByRole("button", { name: /Network A/ }).click();
+    await page.locator(".network-choice").filter({ hasText: "Network A" }).click();
     await page.getByRole("link", { name: "Topology" }).click();
     await expect(page).toHaveURL(/\/ops\/topology-analysis$/);
 
@@ -251,7 +251,7 @@ test.describe("VS10 topology analysis", () => {
 
     await loginFromUi(page);
     await expect(page.getByRole("heading", { name: "Networks" })).toBeVisible();
-    await page.getByRole("button", { name: /Network A/ }).click();
+    await page.locator(".network-choice").filter({ hasText: "Network A" }).click();
     await page.getByRole("link", { name: "Topology" }).click();
 
     await expect(page.getByText("No neighbours reachable")).toBeVisible();

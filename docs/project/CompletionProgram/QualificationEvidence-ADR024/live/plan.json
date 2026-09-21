@@ -1,0 +1,56 @@
+{
+  "version": "adr024-live-service-acceptance/v1",
+  "declared_at": "2026-09-20 12:32:43.226051+00:00",
+  "image_id": "sha256:954462c0f00d5bbaa72ea144f6064936b399c430e6ab94bffcf1c00d134ea0d7",
+  "checkpoint": "/tmp/opencode/nanfo-adr024-evaluation-002/checkpoint.ptz",
+  "checkpoint_sha256": "77dae44acab722a5a6a2e87d952a6cca65e1c4eea102a089830a8401b521d614",
+  "source_directory": "/tmp/opencode/nanfo-adr024-evaluation-002/source",
+  "client_source_sha256": {
+    "__init__.py": "7bc5e4c099b6aaf9dc5e7bfb94d0affb9a5964cc4636d4a993472da4f12e05ac",
+    "__main__.py": "935a1c1166b0c1ea35a82256345000bf2c73ded718d77773bc27a71ecce28f7d",
+    "artifacts.py": "9100786be1b3c7bc7a032e23835ce2848c7483c9fc599c7d1d5ffcdeaf17694b",
+    "cli.py": "e657c223bfb97fc503aa11624be4941e5d9a270eedeba32465534ca8e21d2aa8",
+    "contracts.py": "c71b8a3cd82420f1daf3972c976ddd933b79c975c17d24d36e3726260e8214f6",
+    "drain.py": "c779a52709ecfca19f063f51c744501896345ecaefc770cf642d4b6e9be1ce03",
+    "env.py": "b2e81af8d89a038f142fa11fb247ac6af68cd80f2a50946e247a91f941d7765f",
+    "evidence.py": "f6ebe061a5a02bf74df6e7d1f2453664a574328d04d4e3557b679e139d8c30ff",
+    "expanded.py": "e8722009f90870739a8c3cc7e01be0d6a433923d8a5a7f11030c41e97ae28d30",
+    "extended_supervisor.py": "b85b658c20ab8186c424b569ee7a6e4250fa64a8cd0a0092e369b49e7b5b7f36",
+    "ppo.py": "807d86f9b942262c65a5ca92c1450f145f95f9518ee67b796cbf1985994800be",
+    "qualification.py": "d190e42b4e86925407982a2a9aedef57de5f29881e952e64bbbe45c48c900871",
+    "supervisor.py": "595c7ee1ceb0b3a670123a8fcf06e721577cccd8f953cdec43496bbd8c35f726",
+    "transport.py": "6256c5d8a4a7352c738f3eaea299103dd74e30234d19fbf23e27192032b2df0b"
+  },
+  "source_manifest_sha256": "d39eca3a9012b8b09e7e998e075336c6ca9fd24c66ea9463e0c0b49947b3334f",
+  "seed_audit_sha256": "830f0af9399b2c5f0dbb4ad8957bdba45573c44bd8fb65bc6611685a5ef8be1a",
+  "episodes": [
+    {
+      "seed": 1010,
+      "scenario": "path0",
+      "expected_route": "route1"
+    },
+    {
+      "seed": 1011,
+      "scenario": "path1",
+      "expected_route": "route0"
+    }
+  ],
+  "fixed_acquisition_action": 0,
+  "measurement_frames_per_episode": 3,
+  "window_seconds": 2.0,
+  "episode_steps": 4,
+  "training": false,
+  "recommendation_dispatch": false,
+  "budget_seconds": 900,
+  "max_observation_age_seconds": 30,
+  "cases": [
+    "real-login-scope-permission",
+    "monitor",
+    "recommend-both-directions",
+    "fresh-helper",
+    "stopfeed-stale",
+    "disconnect",
+    "expired-admission",
+    "owned-cleanup"
+  ]
+}

@@ -109,3 +109,19 @@ export interface ScenarioConfig {
   action_binding: null | { intent_id: string; plan_sha256: string; network_state_sha256: string };
   limits: { max_loss_pct: number; max_latency_ms: number; min_throughput_mbps: number };
 }
+export interface SimulationSummary {
+  simulation_id: string;
+  network_id: string;
+  workspace_id: string;
+  scenario_name: string;
+  status: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SimulationHistory {
+  items: SimulationSummary[];
+  total: number;
+  page: number;
+  page_size: number;
+}

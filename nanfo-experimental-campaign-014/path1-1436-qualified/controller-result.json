@@ -1,0 +1,175 @@
+{
+  "error_type": "ValueError",
+  "exception": [
+    {
+      "frames": [
+        {
+          "file": "verify_experimental_lab.py",
+          "function": "controller_child",
+          "line": 961
+        },
+        {
+          "file": "controller.py",
+          "function": "run",
+          "line": 447
+        },
+        {
+          "file": "controller.py",
+          "function": "step",
+          "line": 328
+        },
+        {
+          "file": "controller.py",
+          "function": "_io",
+          "line": 42
+        },
+        {
+          "file": "verify_experimental_lab.py",
+          "function": "verify",
+          "line": 714
+        },
+        {
+          "file": "verify_experimental_lab.py",
+          "function": "call",
+          "line": 662
+        },
+        {
+          "file": "verify_experimental_lab.py",
+          "function": "verify",
+          "line": 748
+        },
+        {
+          "file": "adapter.py",
+          "function": "verify",
+          "line": 234
+        },
+        {
+          "file": "verify_experimental_lab.py",
+          "function": "_guarded",
+          "line": 786
+        },
+        {
+          "file": "adapter.py",
+          "function": "_heartbeat",
+          "line": 110
+        },
+        {
+          "file": "adapter.py",
+          "function": "_renew_heartbeat",
+          "line": 117
+        },
+        {
+          "file": "controller.py",
+          "function": "checkpoint",
+          "line": 87
+        },
+        {
+          "file": "controller.py",
+          "function": "_checkpoint_state",
+          "line": 119
+        }
+      ],
+      "message": "experimental_action_expired",
+      "type": "ValueError"
+    }
+  ],
+  "operation": "run",
+  "records": {
+    "bootstrap_recovery": {
+      "path": "bootstrap_recovery-3834686-0.json",
+      "sha256": "e43d8144131743e85e8fe28c019c7476e71caa04d3d423b90b42effc273b0c24"
+    },
+    "frame": {
+      "path": "frame.json",
+      "sha256": "823b1fea849d6765e6dc99ebe83614072b7f00694ddf826c8d8e7bc8737006ad"
+    },
+    "inference": {
+      "path": "inference-3834686-0.json",
+      "sha256": "f7e5ee81faca17b3bc117af926c923e05322c30ae90f02b96bb3811441e9ead9"
+    },
+    "prepared": {
+      "path": "prepared-3834686-0.json",
+      "sha256": "4e500998d2e645235020644ae4fd7b60a8f183fdec772852e0feebd6f865f74a"
+    },
+    "receipt": {
+      "path": "receipt-3834686-0.json",
+      "sha256": "83ab214f3e09bcbee46752155e88132aae3d9560ab1f0b71208590e7dc16435e"
+    },
+    "recovery": {
+      "path": "recovery-3834686-0.json",
+      "sha256": "9384021feae39c4ad7c10dd643330e59746218ea1d86484d871bf791fca401b5"
+    },
+    "simulation": {
+      "path": "simulation-3834686-0.json",
+      "sha256": "fe1b2cb20da40874f84d7dfab0f40eaf3460d540744e7c2f02e9c8a0ec117b5b"
+    },
+    "verification": {
+      "path": "verification-3834686-4.json",
+      "sha256": "5f185a6ef342241fb903d62c70a89d76f718d1d745603fd0ece3788eec89888a"
+    }
+  },
+  "status": "completed",
+  "termination": "verified_hold_expired_and_restored",
+  "timings": [
+    {
+      "finished_ns": 101182621914366,
+      "operation": "inference",
+      "started_ns": 101178337850325
+    },
+    {
+      "finished_ns": 101183155977935,
+      "operation": "simulation",
+      "started_ns": 101182713881105
+    },
+    {
+      "finished_ns": 101183806658382,
+      "operation": "prepared",
+      "started_ns": 101183798455601
+    },
+    {
+      "finished_ns": 101189622268722,
+      "operation": "receipt",
+      "started_ns": 101184314847968
+    },
+    {
+      "finished_ns": 101195624726474,
+      "operation": "verification",
+      "started_ns": 101189904182329
+    },
+    {
+      "finished_ns": 101202423732968,
+      "operation": "verification",
+      "started_ns": 101197113434951
+    },
+    {
+      "finished_ns": 101205134370371,
+      "operation": "verification",
+      "started_ns": 101203909237814
+    },
+    {
+      "finished_ns": 101207684941011,
+      "operation": "verification",
+      "started_ns": 101206610433806
+    },
+    {
+      "finished_ns": 101210634445002,
+      "operation": "verification",
+      "started_ns": 101209323840231
+    },
+    {
+      "finished_ns": 101214512793306,
+      "operation": "verification",
+      "started_ns": 101212317749035
+    },
+    {
+      "finished_ns": 101216427104754,
+      "operation": "recovery",
+      "started_ns": 101214672784748
+    },
+    {
+      "finished_ns": 101217181262554,
+      "operation": "bootstrap_recovery",
+      "started_ns": 101216512134846
+    }
+  ]
+}

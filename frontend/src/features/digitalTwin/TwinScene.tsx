@@ -1,32 +1,31 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { Html, Line, OrbitControls } from "@react-three/drei";
-import { Box3, Group, Object3D, Vector3 } from "three";
+import { TwinOrbitControls } from "./TwinOrbitControls";
+import { SceneLabel } from "./SceneLabel";
+import { BufferGeometry, Float32BufferAttribute, Object3D, Vector3 } from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { loadOwnedModel } from "./modelResources";
+import { DeviceInstances } from "./DeviceInstances";
+import type { SpatialScene } from "@/shared/types/spatial";
+import { EMPTY_SPATIAL_SCENE } from "./spatialScene";
+import { buildSpatialGeometry, floorClipPlane, geometryCameraFocus } from "./spatialGeometry";
+import { CanonicalGeometry } from "./CanonicalGeometry";
+import type { ModelRegistration } from "./ModelRegistration";
 import { TwinLink, TwinNode, TwinOverlayObject } from "@/features/digitalTwin/hooks";
 import type { MeasuredPathSegment } from "./measuredPathMapping";
+import type { RFSample } from "./rfArtifact";
 import { CampusBuildings } from "@/features/digitalTwin/CampusBuildings";
-import {
-  deriveWirelessCoverageCells,
-  type WirelessCoverageCell,
-} from "@/features/digitalTwin/wirelessCoverage";
 import {
   type CampusBuilding,
   buildBuildingByNodeIdIndex,
   deriveSpatialBuildingScope,
-  deriveCampusBuildings,
   isNodeVisibleInBuildingView,
   resolveCampusBuildingCameraFocus,
   type CampusBuildingViewState,
 } from "@/features/digitalTwin/campusBuildings";
 import {
   DEFAULT_MAX_DEVICE_LABELS,
-  type DeviceColorMode,
-  type DeviceGeometryKind,
-  type ResolvedDeviceVisual,
   deriveAlertingDeviceIds,
-  resolveDeviceVisual,
-  selectDeviceLabels,
 } from "@/features/digitalTwin/deviceVisuals";
 
 interface AlertLike {
@@ -35,6 +34,8 @@ interface AlertLike {
 }
 
 interface TwinSceneProps {
+  spatialScene?: SpatialScene;
+  rfSamples?: readonly RFSample[];
   measuredPath?: readonly MeasuredPathSegment[];
   nodes: TwinNode[];
   links: TwinLink[];
@@ -48,28 +49,17 @@ interface TwinSceneProps {
     showCongestion: boolean;
     showOverlays: boolean;
     showModel: boolean;
-    showWirelessCoverage: boolean;
   };
   /** Alert feed consumed as-is; device association is derived in-scene. */
   alerts?: readonly AlertLike[];
   /** Maximum simultaneous DOM labels. Guards against hundreds of `<Html>` overlays. */
   maxDeviceLabels?: number;
   importedModelUrl?: string | null;
+  modelRegistration?: ModelRegistration | null;
   importedCampusBuildings?: readonly CampusBuilding[];
   onImportedModelStatusChange?: (status: "loading" | "ready" | "error", message?: string) => void;
   buildingViewState?: CampusBuildingViewState;
   onSelectBuilding?: (buildingId: string) => void;
-}
-
-interface NodesLayerProps {
-  nodes: TwinNode[];
-  selectedNodeId: string | null;
-  onSelectNode: (nodeId: string) => void;
-  showLabels: boolean;
-  showCongestion: boolean;
-  alertingDeviceIds: ReadonlySet<string>;
-  maxDeviceLabels: number;
-  buildingViewState?: CampusBuildingViewState;
 }
 
 interface LinkLabel {
@@ -92,172 +82,6 @@ function overlayColor(overlay: TwinOverlayObject) {
   return overlay.objectType === "intent_state" ? "#2873cb" : "#2f8f99";
 }
 
-function coverageFillColor(severity: WirelessCoverageCell["severity"]): string {
-  if (severity === "low") {
-    return "#3bbd7f";
-  }
-  if (severity === "medium") {
-    return "#d98a2c";
-  }
-  if (severity === "high") {
-    return "#d14a3d";
-  }
-  return "#5f8fba";
-}
-
-function coverageRingColor(severity: WirelessCoverageCell["severity"]): string {
-  if (severity === "low") {
-    return "#2b915f";
-  }
-  if (severity === "medium") {
-    return "#ba6f16";
-  }
-  if (severity === "high") {
-    return "#af2f25";
-  }
-  return "#4e7aa2";
-}
-
-/**
- * Render the primitive for a device class. Kept as a plain switch so geometry choice
- * stays declarative data in `deviceVisuals.ts` rather than logic scattered per node.
- */
-function DeviceGeometry({ kind, radius }: { kind: DeviceGeometryKind; radius: number }) {
-  if (kind === "box") {
-    const side = radius * 1.5;
-    return <boxGeometry args={[side, side, side]} />;
-  }
-  if (kind === "cylinder") {
-    return <cylinderGeometry args={[radius * 0.85, radius * 0.85, radius * 1.7, 16]} />;
-  }
-  if (kind === "cone") {
-    return <coneGeometry args={[radius, radius * 1.9, 16]} />;
-  }
-  if (kind === "octahedron") {
-    return <octahedronGeometry args={[radius, 0]} />;
-  }
-  if (kind === "sphere") {
-    return <sphereGeometry args={[radius, 16, 12]} />;
-  }
-  return <icosahedronGeometry args={[radius, 1]} />;
-}
-
-function DeviceNode({
-  node,
-  visual,
-  onSelectNode,
-  showLabel,
-}: {
-  node: TwinNode;
-  visual: ResolvedDeviceVisual;
-  onSelectNode: (nodeId: string) => void;
-  showLabel: boolean;
-}) {
-  const ringInnerRadius = visual.radius * 1.2;
-  const ringOuterRadius = ringInnerRadius + 0.14;
-
-  return (
-    <group position={[node.x, node.y, node.z]}>
-      <mesh onClick={() => onSelectNode(node.id)}>
-        <DeviceGeometry kind={visual.definition.geometry} radius={visual.radius} />
-        <meshStandardMaterial
-          color={visual.color}
-          emissive={visual.emissive}
-          emissiveIntensity={visual.emissiveIntensity}
-          roughness={0.32}
-          metalness={0.24}
-        />
-      </mesh>
-
-      {visual.ringColor ? (
-        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -(visual.radius + 0.18), 0]}>
-          <ringGeometry args={[ringInnerRadius, ringOuterRadius, 24]} />
-          <meshBasicMaterial color={visual.ringColor} transparent opacity={0.78} />
-        </mesh>
-      ) : null}
-
-      {visual.outlineColor ? (
-        <mesh>
-          <sphereGeometry args={[visual.radius * 1.45, 16, 12]} />
-          <meshBasicMaterial color={visual.outlineColor} transparent opacity={0.22} />
-        </mesh>
-      ) : null}
-
-      {showLabel ? (
-        <Html distanceFactor={18} center>
-          <div
-            style={{
-              padding: "0.16rem 0.34rem",
-              borderRadius: "8px",
-              border: "1px solid rgba(20, 48, 36, 0.25)",
-              background: "rgba(248, 252, 246, 0.88)",
-              fontSize: "10px",
-              fontFamily: "var(--font-mono)",
-              whiteSpace: "nowrap",
-            }}
-          >
-            {node.hostname}
-          </div>
-        </Html>
-      ) : null}
-    </group>
-  );
-}
-
-function NodesLayer({
-  nodes,
-  selectedNodeId,
-  onSelectNode,
-  showLabels,
-  showCongestion,
-  alertingDeviceIds,
-  maxDeviceLabels,
-  buildingViewState,
-}: NodesLayerProps) {
-  const colorMode: DeviceColorMode = "type";
-
-  // Budget DOM labels by importance instead of one per device.
-  const labelledIds = useMemo(() => {
-    if (!showLabels) {
-      return new Set<string>();
-    }
-    return selectDeviceLabels(
-      nodes.map((node) => ({ id: node.id, hostname: node.hostname, deviceType: node.type })),
-      { maxLabels: maxDeviceLabels, selectedNodeId, alertingDeviceIds },
-    );
-  }, [nodes, showLabels, maxDeviceLabels, selectedNodeId, alertingDeviceIds]);
-
-  return (
-    <group>
-      {nodes.map((node) => {
-        if (!isNodeVisibleInBuildingView(node.spatialRefId, buildingViewState)) {
-          return null;
-        }
-
-        const visual = resolveDeviceVisual({
-          deviceType: node.type,
-          status: node.status,
-          congestionSeverity: node.congestion.severity,
-          selected: selectedNodeId === node.id,
-          alerting: alertingDeviceIds.has(node.id),
-          colorMode,
-          showCongestionRing: showCongestion,
-        });
-
-        return (
-          <DeviceNode
-            key={node.id}
-            node={node}
-            visual={visual}
-            onSelectNode={onSelectNode}
-            showLabel={labelledIds.has(node.id)}
-          />
-        );
-      })}
-    </group>
-  );
-}
-
 function CameraFocusController({
   focusPosition,
   focusTarget,
@@ -272,9 +96,11 @@ function CameraFocusController({
   const desiredPosition = useMemo(() => new Vector3(), []);
   const desiredTarget = useMemo(() => new Vector3(), []);
   const currentLookAt = useMemo(() => new Vector3(), []);
+  const focusing = useRef(false);
+  useEffect(() => { focusing.current = Boolean(focusPosition && focusTarget); }, [focusPosition, focusTarget]);
 
   useFrame(() => {
-    if (!focusPosition || !focusTarget) {
+    if (!focusing.current || !focusPosition || !focusTarget) {
       return;
     }
 
@@ -286,6 +112,7 @@ function CameraFocusController({
 
     currentLookAt.lerp(desiredTarget, alpha);
     camera.lookAt(currentLookAt);
+    if (reducedMotion || camera.position.distanceToSquared(desiredPosition) < 0.001) focusing.current = false;
   });
 
   return null;
@@ -300,6 +127,13 @@ function LinksLayer({
   showLabels: boolean;
   maxLabels: number;
 }) {
+  const geometry = useMemo(() => {
+    const result = new BufferGeometry();
+    result.setAttribute("position", new Float32BufferAttribute(links.flatMap((link) => [...link.source, ...link.target]), 3));
+    result.computeBoundingSphere();
+    return result;
+  }, [links]);
+  useEffect(() => () => geometry.dispose(), [geometry]);
   // Link labels are DOM overlays too. Cap them deterministically by link id.
   const linkLabels = useMemo<LinkLabel[]>(() => {
     if (!showLabels) {
@@ -321,15 +155,12 @@ function LinksLayer({
 
   return (
     <group>
-      {links.map((link) => {
-        return (
-          <group key={link.id}>
-            <Line points={[link.source, link.target]} color="#608ea8" lineWidth={1} transparent opacity={0.72} />
-          </group>
-        );
-      })}
+      <lineSegments>
+        <primitive attach="geometry" object={geometry} />
+        <lineBasicMaterial color="#608ea8" transparent opacity={0.72} />
+      </lineSegments>
       {linkLabels.map((label) => (
-        <Html key={`${label.id}:label`} position={label.mid} distanceFactor={30} center>
+        <SceneLabel key={`${label.id}:label`} position={label.mid} distanceFactor={30}>
           <div
             style={{
               padding: "0.1rem 0.28rem",
@@ -343,7 +174,7 @@ function LinksLayer({
           >
             {label.edgeType}
           </div>
-        </Html>
+        </SceneLabel>
       ))}
     </group>
   );
@@ -368,7 +199,7 @@ function OverlaysLayer({ overlays, showLabels }: { overlays: TwinOverlayObject[]
             <meshStandardMaterial color={overlayColor(overlay)} emissive="#12263d" emissiveIntensity={0.2} roughness={0.34} metalness={0.08} />
           </mesh>
           {labelledIds.has(overlay.id) ? (
-            <Html distanceFactor={18} center>
+            <SceneLabel distanceFactor={18}>
               <div
                 style={{
                   padding: "0.1rem 0.28rem",
@@ -382,7 +213,7 @@ function OverlaysLayer({ overlays, showLabels }: { overlays: TwinOverlayObject[]
               >
                 {overlay.objectType} {overlay.status ?? overlay.state ?? ""}
               </div>
-            </Html>
+            </SceneLabel>
           ) : null}
         </group>
       ))}
@@ -403,161 +234,52 @@ function disableRaycastForModel(object: Object3D): void {
   });
 }
 
-function normalizeImportedModel(source: Object3D): Group {
-  const root = new Group();
-  const model = source.clone(true);
-  const box = new Box3().setFromObject(model);
-
-  let scale = 1;
-  if (!box.isEmpty()) {
-    const size = new Vector3();
-    const center = new Vector3();
-    box.getSize(size);
-    box.getCenter(center);
-
-    model.position.sub(center);
-    model.position.y += size.y / 2;
-
-    const maxSpan = Math.max(size.x, size.y, size.z);
-    if (maxSpan > 0) {
-      scale = Math.max(0.05, Math.min(3.4, 40 / maxSpan));
-    }
-  }
-
-  disableRaycastForModel(model);
-  root.scale.setScalar(scale);
-  root.add(model);
-  return root;
-}
-
 function SessionModelLayer({
   modelUrl,
   visible,
   onStatusChange,
+  registration,
 }: {
   modelUrl: string | null | undefined;
   visible: boolean;
   onStatusChange?: (status: "loading" | "ready" | "error", message?: string) => void;
+  registration?: ModelRegistration | null;
 }) {
-  const [modelRoot, setModelRoot] = useState<Group | null>(null);
+  const [loaded, setLoaded] = useState<{ url: string; root: Object3D } | null>(null);
 
   useEffect(() => {
     if (!modelUrl) {
-      setModelRoot(null);
+      setLoaded(null);
       return;
     }
 
-    let cancelled = false;
-    setModelRoot(null);
+    setLoaded(null);
     onStatusChange?.("loading");
 
     const loader = new GLTFLoader();
-    loader.load(
-      modelUrl,
-      (gltf) => {
-        if (cancelled) {
-          return;
-        }
-
-        const source = gltf.scene ?? gltf.scenes?.[0] ?? null;
-        if (!source) {
-          setModelRoot(null);
-          onStatusChange?.("error", "GLB/GLTF contains no scene root.");
-          return;
-        }
-
-        setModelRoot(normalizeImportedModel(source));
+    return loadOwnedModel(
+      (ready, failed) => loader.load(modelUrl, (gltf) => ready([...new Set([gltf.scene, ...gltf.scenes].filter(Boolean))]), undefined, failed),
+      (root) => {
+        disableRaycastForModel(root);
+        setLoaded({ url: modelUrl, root });
         onStatusChange?.("ready");
       },
-      undefined,
       (error) => {
-        if (cancelled) {
-          return;
-        }
-
-        setModelRoot(null);
+        setLoaded(null);
         const message = error instanceof Error ? error.message : "GLB/GLTF load failed.";
         onStatusChange?.("error", message);
       },
     );
 
-    return () => {
-      cancelled = true;
-    };
   }, [modelUrl, onStatusChange]);
 
-  if (!visible || !modelRoot) {
+  if (!visible || !loaded || loaded.url !== modelUrl || !registration) {
     return null;
   }
 
   return (
-    <group position={[0, -2.3, 0]}>
-      <primitive object={modelRoot} />
-    </group>
-  );
-}
-
-function WirelessCoverageLayer({
-  cells,
-  showLabels,
-  buildingViewState,
-}: {
-  cells: readonly WirelessCoverageCell[];
-  showLabels: boolean;
-  buildingViewState?: CampusBuildingViewState;
-}) {
-  const visibleCells = useMemo(() => {
-    return cells.filter((cell) => isNodeVisibleInBuildingView(cell.spatialRefId, buildingViewState));
-  }, [buildingViewState, cells]);
-
-  const labelledCellIds = useMemo(() => {
-    if (!showLabels) {
-      return new Set<string>();
-    }
-    return new Set(visibleCells.slice(0, 18).map((cell) => cell.id));
-  }, [showLabels, visibleCells]);
-
-  return (
-    <group>
-      {visibleCells.map((cell) => (
-        <group key={cell.id} position={[cell.x, cell.y, cell.z]}>
-          <mesh rotation={[-Math.PI / 2, 0, 0]}>
-            <circleGeometry args={[cell.radius, 28]} />
-            <meshBasicMaterial
-              color={coverageFillColor(cell.severity)}
-              transparent
-              opacity={0.08 + cell.intensity * 0.18}
-              depthWrite={false}
-            />
-          </mesh>
-          <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.01, 0]}>
-            <ringGeometry args={[Math.max(0.7, cell.radius * 0.84), cell.radius, 28]} />
-            <meshBasicMaterial
-              color={coverageRingColor(cell.severity)}
-              transparent
-              opacity={0.12 + cell.intensity * 0.32}
-              depthWrite={false}
-            />
-          </mesh>
-          {labelledCellIds.has(cell.id) ? (
-            <Html distanceFactor={24} center>
-              <div
-                style={{
-                  padding: "0.1rem 0.28rem",
-                  borderRadius: "999px",
-                  background: "rgba(14, 44, 34, 0.72)",
-                  color: "#d6f2e6",
-                  fontSize: "9px",
-                  fontFamily: "var(--font-mono)",
-                  whiteSpace: "nowrap",
-                }}
-              >
-                AP coverage (synthetic estimate)
-              </div>
-            </Html>
-          ) : null}
-        </group>
-      ))}
+    <group position={registration.position} rotation={[...registration.rotation, "ZYX"]} scale={registration.scale} dispose={null}>
+      <primitive object={loaded.root} dispose={null} />
     </group>
   );
 }
@@ -574,6 +296,8 @@ function MeasuredPathLayer({ segments }: { segments: readonly MeasuredPathSegmen
 }
 
 export function TwinScene({
+  spatialScene,
+  rfSamples,
   nodes,
   links,
   overlays,
@@ -584,18 +308,26 @@ export function TwinScene({
   alerts = EMPTY_ALERTS,
   maxDeviceLabels = DEFAULT_MAX_DEVICE_LABELS,
   importedModelUrl,
+  modelRegistration,
   importedCampusBuildings,
   onImportedModelStatusChange,
   buildingViewState,
   onSelectBuilding,
   measuredPath,
 }: TwinSceneProps) {
+  const [floorId, setFloorId] = useState("");
+  const [cutHeight, setCutHeight] = useState("");
+  const geometry = useMemo(() => buildSpatialGeometry(spatialScene ?? EMPTY_SPATIAL_SCENE), [spatialScene]);
+  const activeFloor = geometry.floors.some((floor) => floor.object_id === floorId) ? floorId : "";
+  const shapes = useMemo(() => geometry.shapes.filter((shape) => !activeFloor || geometry.floorByObject.get(shape.object.object_id) === activeFloor), [geometry, activeFloor]);
+  const clippingPlanes = useMemo(() => floorClipPlane(geometry.world.get(activeFloor), cutHeight), [geometry, activeFloor, cutHeight]);
+  const canonicalFocus = useMemo(() => geometryCameraFocus(shapes), [shapes]);
   const campusBuildings = useMemo(() => {
     if (importedCampusBuildings && importedCampusBuildings.length > 0) {
       return [...importedCampusBuildings].sort((left, right) => left.id.localeCompare(right.id));
     }
-    return deriveCampusBuildings(nodes);
-  }, [importedCampusBuildings, nodes]);
+    return [];
+  }, [importedCampusBuildings]);
 
   const buildingByNodeId = useMemo(() => {
     return buildBuildingByNodeIdIndex(campusBuildings);
@@ -636,37 +368,43 @@ export function TwinScene({
   }, [campusBuildings, mergedBuildingViewState?.selectedBuildingId]);
 
   const cameraFocus = useMemo(() => {
+    if (activeFloor) return canonicalFocus;
+    const node = nodes.find((item) => item.id === selectedNodeId && item.placementSource === "canonical");
+    if (node) return { position: [node.x + 18, node.y + 15, node.z + 18] as [number, number, number], target: [node.x, node.y, node.z] as [number, number, number] };
     if (!selectedBuilding) {
-      return null;
+      return canonicalFocus;
     }
 
     return resolveCampusBuildingCameraFocus(selectedBuilding, {
       floorKey: mergedBuildingViewState?.selectedFloorKey,
     });
-  }, [selectedBuilding, mergedBuildingViewState?.selectedFloorKey]);
+  }, [selectedBuilding, mergedBuildingViewState?.selectedFloorKey, nodes, selectedNodeId, canonicalFocus, activeFloor]);
 
   const alertingDeviceIds = useMemo(() => {
     const knownDeviceIds = new Set(nodes.map((node) => node.id));
     return deriveAlertingDeviceIds(alerts, knownDeviceIds);
   }, [alerts, nodes]);
+  const visibleNodes = useMemo(() => nodes.filter((node) =>
+    (!activeFloor || geometry.floorByObject.get(node.spatialObjectId ?? "") === activeFloor)
+    && clippingPlanes.every((plane) => plane.distanceToPoint(new Vector3(node.x, node.y, node.z)) >= 0)
+    && isNodeVisibleInBuildingView(node.spatialRefId, mergedBuildingViewState)), [nodes, mergedBuildingViewState, activeFloor, geometry, clippingPlanes]);
+  const visibleLinks = useMemo(() => {
+    const ids = new Set(visibleNodes.map((node) => node.id));
+    return links.filter((link) => ids.has(link.sourceId) && ids.has(link.targetId));
+  }, [links, visibleNodes]);
 
-  const wirelessCoverageCells = useMemo(() => {
-    return deriveWirelessCoverageCells(nodes, { campusBuildings });
-  }, [campusBuildings, nodes]);
-
-  const floorSegments = useMemo(() => Math.max(8, Math.min(42, nodes.length * 2)), [nodes.length]);
-  const floorRadius = useMemo(() => {
-    const farthest = nodes.reduce((maxValue, node) => {
-      const distance = Math.sqrt(node.x ** 2 + node.z ** 2);
-      return Math.max(maxValue, distance);
-    }, 18);
-    return Math.max(24, Math.min(90, farthest + 12));
-  }, [nodes]);
-
-  return (
+  return (<>
+    {geometry.floors.length ? <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+      <label>Canonical floor <select aria-label="Canonical floor" value={activeFloor} onChange={(event) => { setFloorId(event.target.value); setCutHeight(""); }}>
+        <option value="">All floors</option>{geometry.floors.map((floor) => <option key={floor.object_id} value={floor.object_id}>{floor.name}</option>)}
+      </select></label>
+      <label>Clip above floor (m) <input aria-label="Clip above floor (m)" type="number" min="0" max="1000000" step="any" placeholder="No cut" disabled={!activeFloor} value={cutHeight} onChange={(event) => setCutHeight(event.target.value)} /></label>
+      <span>View-only cut in floor-local Y. Blank shows full height.</span>
+    </div> : null}
     <Canvas
       dpr={[1, 1.8]}
-      camera={{ position: [18, 15, 18], fov: 46 }}
+      gl={{ localClippingEnabled: true }}
+      camera={{ position: [18, 15, 18], fov: 46, near: selectedNodeId && !activeFloor ? 0.01 : canonicalFocus?.near ?? 0.1, far: canonicalFocus?.far ?? 2000 }}
       style={{ width: "100%", height: 560, borderRadius: 16, border: "1px solid var(--line-soft)" }}
     >
       <ambientLight intensity={0.7} />
@@ -678,13 +416,10 @@ export function TwinScene({
         reducedMotion={reducedMotion}
       />
 
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -2.3, 0]}>
-        <circleGeometry args={[floorRadius, floorSegments]} />
-        <meshStandardMaterial color="#d8e7da" roughness={0.82} metalness={0.04} />
-      </mesh>
+      <CanonicalGeometry shapes={shapes} clippingPlanes={clippingPlanes} showLabels={layers.showLabels} />
 
       <CampusBuildings
-        buildings={campusBuildings}
+        buildings={activeFloor ? [] : campusBuildings}
         showLabels={layers.showLabels}
         viewState={mergedBuildingViewState}
         onSelectBuilding={onSelectBuilding}
@@ -692,35 +427,34 @@ export function TwinScene({
 
       <SessionModelLayer
         modelUrl={importedModelUrl}
-        visible={layers.showModel}
+        visible={layers.showModel && !activeFloor}
         onStatusChange={onImportedModelStatusChange}
+        registration={modelRegistration}
       />
 
-      {layers.showWirelessCoverage ? (
-        <WirelessCoverageLayer
-          cells={wirelessCoverageCells}
-          showLabels={layers.showLabels}
-          buildingViewState={mergedBuildingViewState}
-        />
-      ) : null}
+      {!activeFloor && rfSamples?.map((sample, index) => <group key={sample.receiverId} position={sample.position}>
+        <mesh raycast={() => {}}><octahedronGeometry args={[0.24, 0]} /><meshBasicMaterial color="#9a43cb" /></mesh>
+        {layers.showLabels && index < 24 ? <SceneLabel distanceFactor={18}><div style={{ background: "#fff", color: "#54216f", fontSize: 11, whiteSpace: "nowrap" }}>
+          RF modeled {sample.receiverId}: {sample.signalDbm.toFixed(1)} dBm · {sample.uncertaintyDb === null ? "uncertainty unknown" : `assumed ±${sample.uncertaintyDb} dB`}
+        </div></SceneLabel> : null}
+      </group>)}
 
       {layers.showLinks ? (
-        <LinksLayer links={links} showLabels={layers.showLabels} maxLabels={maxDeviceLabels} />
+        <LinksLayer links={visibleLinks} showLabels={layers.showLabels} maxLabels={maxDeviceLabels} />
       ) : null}
-      {layers.showLinks && measuredPath ? <MeasuredPathLayer segments={measuredPath} /> : null}
-      <NodesLayer
-        nodes={nodes}
-        selectedNodeId={selectedNodeId}
-        onSelectNode={onSelectNode}
+      {layers.showLinks && measuredPath && !activeFloor ? <MeasuredPathLayer segments={measuredPath} /> : null}
+      <DeviceInstances
+        nodes={visibleNodes}
+        selectedId={selectedNodeId}
+        onSelect={onSelectNode}
         showLabels={layers.showLabels}
         showCongestion={layers.showCongestion}
-        alertingDeviceIds={alertingDeviceIds}
-        maxDeviceLabels={maxDeviceLabels}
-        buildingViewState={mergedBuildingViewState}
+        alerts={alertingDeviceIds}
+        maxLabels={maxDeviceLabels}
       />
-      {layers.showOverlays ? <OverlaysLayer overlays={overlays} showLabels={layers.showLabels} /> : null}
+      {layers.showOverlays && !activeFloor ? <OverlaysLayer overlays={overlays} showLabels={layers.showLabels} /> : null}
 
-      <OrbitControls enableDamping={!reducedMotion} dampingFactor={reducedMotion ? 0 : 0.08} minDistance={8} maxDistance={92} />
-    </Canvas>
+      <TwinOrbitControls target={cameraFocus?.target} reducedMotion={reducedMotion} />
+    </Canvas></>
   );
 }

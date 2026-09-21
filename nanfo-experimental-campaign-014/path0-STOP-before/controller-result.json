@@ -1,0 +1,101 @@
+{
+  "error_type": "ValueError",
+  "exception": [
+    {
+      "frames": [
+        {
+          "file": "verify_experimental_lab.py",
+          "function": "controller_child",
+          "line": 961
+        },
+        {
+          "file": "controller.py",
+          "function": "run",
+          "line": 447
+        },
+        {
+          "file": "controller.py",
+          "function": "step",
+          "line": 321
+        },
+        {
+          "file": "controller.py",
+          "function": "_io",
+          "line": 41
+        },
+        {
+          "file": "controller.py",
+          "function": "checkpoint",
+          "line": 87
+        },
+        {
+          "file": "controller.py",
+          "function": "_checkpoint_state",
+          "line": 115
+        }
+      ],
+      "message": "experimental_stop_latched",
+      "type": "ValueError"
+    }
+  ],
+  "operation": "run",
+  "records": {
+    "bootstrap_recovery": {
+      "path": "bootstrap_recovery-3851423-0.json",
+      "sha256": "3a70b925bc822536697ea00b5ce437683d0f3ee08b5f78dc72f5c3d93cc7adcc"
+    },
+    "frame": {
+      "path": "frame.json",
+      "sha256": "c68a10da694d6d2912c8447b16216f0c166756ce146617c7433bf40a9589b756"
+    },
+    "inference": {
+      "path": "inference-3851423-0.json",
+      "sha256": "8c15b9fa80f3ea1021095466b882e5d8f3959dea36bd26d59970cd0d67f7218b"
+    },
+    "prepared": {
+      "path": "prepared-3851423-0.json",
+      "sha256": "5f9cb5fe43afaf19d40bf283344f83f4c17e75432b3002b36003ca1f306be06d"
+    },
+    "recovery": {
+      "path": "recovery-3851423-0.json",
+      "sha256": "43e902962cd58a1d89d8b95d3f0b54b93fe269a85a5047f58cfe4e8fb624600a"
+    },
+    "simulation": {
+      "path": "simulation-3851423-0.json",
+      "sha256": "0ad78af54d64c564e28f096d5111d6ea1afa5c2713c557cfb8f4e34bde818ce7"
+    }
+  },
+  "status": "failed",
+  "timings": [
+    {
+      "finished_ns": 101369595688233,
+      "operation": "inference",
+      "started_ns": 101365486772605
+    },
+    {
+      "finished_ns": 101370115860088,
+      "operation": "simulation",
+      "started_ns": 101369658909885
+    },
+    {
+      "finished_ns": 101370769101229,
+      "operation": "prepared",
+      "started_ns": 101370766864709
+    },
+    {
+      "finished_ns": 101375085054201,
+      "operation": "receipt",
+      "started_ns": 101371636460181
+    },
+    {
+      "finished_ns": 101376756647377,
+      "operation": "recovery",
+      "started_ns": 101375245631875
+    },
+    {
+      "finished_ns": 101377424942723,
+      "operation": "bootstrap_recovery",
+      "started_ns": 101376846082269
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "evidence_errors": [
+    "CalledProcessError"
+  ],
+  "removed": true,
+  "removed_resources": [
+    "d81e6757bd1350cb86f2ba0c43e077906b9308061ea5ce82736db7f5e548e620",
+    "nanfo-experimental-91cc1f3a35684c3698c8de2ae77912a4"
+  ],
+  "unresolved_resources": []
+}

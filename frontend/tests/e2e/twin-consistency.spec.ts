@@ -46,9 +46,13 @@ test("valid GLB persistence and explicit restore validate hash, retain groups, a
     await route.fulfill({ json: envelope({ items: groups, total: groups.length }) });
   });
   await loginFromUi(page);
-  await page.getByRole("button", { name: /Network A/ }).click();
+  await page.locator(".network-choice").filter({ hasText: "Network A" }).click();
+  await page.getByRole("button", { name: "Toggle navigation" }).click();
   await page.getByRole("link", { name: "Digital Twin" }).click();
   await expect(page.getByText("model idle", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Restore Persisted Model" })).toBeDisabled();
+  await page.getByRole("combobox", { name: "Persisted model asset", exact: true }).selectOption("asset");
+  page.once("dialog", (dialog) => dialog.accept());
   await page.getByRole("button", { name: "Restore Persisted Model" }).focus();
   await page.keyboard.press("Enter");
   await expect(page.getByText("model ready", { exact: true })).toBeVisible({ timeout: 15_000 });
@@ -65,12 +69,16 @@ test("valid GLB persistence and explicit restore validate hash, retain groups, a
   await page.getByRole("button", { name: "Persist Model Asset" }).click();
   await expect.poll(() => record.model_file_name).toBe("local.glb");
   record = { ...record, model_sha256: "0".repeat(64) };
+  await page.getByRole("button", { name: "Toggle navigation" }).click();
   await page.getByRole("link", { name: /^Overview/ }).click();
   await expect.poll(() => page.evaluate(() => {
     const tracked = window as unknown as { modelUrls: string[]; revokedModelUrls: string[] };
     return tracked.modelUrls.every((url) => tracked.revokedModelUrls.includes(url));
   })).toBe(true);
+  await page.getByRole("button", { name: "Toggle navigation" }).click();
   await page.getByRole("link", { name: "Digital Twin" }).click();
+  await page.getByRole("combobox", { name: "Persisted model asset", exact: true }).selectOption("asset");
+  page.once("dialog", (dialog) => dialog.accept());
   await page.getByRole("button", { name: "Restore Persisted Model" }).click();
   await expect(page.getByText("Persisted model SHA-256 verification failed.")).toBeVisible();
   await expect(page.getByText("model idle", { exact: true })).toBeVisible();
@@ -90,7 +98,7 @@ test("subscribed reconnect reconciles deleted REST nodes and ignores stale pushe
     });
   });
   await loginFromUi(page);
-  await page.getByRole("button", { name: /Network A/ }).click();
+  await page.locator(".network-choice").filter({ hasText: "Network A" }).click();
   await page.getByRole("link", { name: "Digital Twin" }).click();
   await expect(page.getByText("topology open", { exact: true })).toBeVisible();
   await expect(page.getByLabel("Inspect node").locator("option", { hasText: "edge-1" })).toHaveCount(1);
@@ -132,7 +140,7 @@ test("Twin-only lifecycle overlays reconcile known details after reconnect/backp
     if (subscription.channel === "digital-twin") twin = socket;
   }));
   await loginFromUi(page);
-  await page.getByRole("button", { name: /Network A/ }).click();
+  await page.locator(".network-choice").filter({ hasText: "Network A" }).click();
   await page.getByRole("link", { name: "Digital Twin" }).click();
   await expect.poll(() => Boolean(twin)).toBe(true);
   for (const [kind, id] of [["simulation", simulationId], ["intent", intentId]]) twin!.send(JSON.stringify({ event: `${kind}.started`, timestamp: "2026-09-10T00:00:00Z", data: {

@@ -1,0 +1,30 @@
+{
+  "image": "nanfo-deploy-step15-rebuild-backend:adr020-ai",
+  "image_id": "sha256:68eb136293a728c83ee2126904f7bc7c1f86e8b483ab229eb649925bfc14460d",
+  "target": "with-ai",
+  "dependency_install": "uv sync --locked --no-dev --no-editable --python /usr/local/bin/python3.12",
+  "uv": "0.8.22",
+  "uv_lock_sha256": "e7d9252cdbf2e54a17925f750345db90725b6ded4aacf8b38c295c697dfe6325",
+  "python": "3.12.14",
+  "interpreter": "/opt/nanfo/ai-runtime/bin/python",
+  "loader": "/opt/nanfo/backend/scripts/frozen_model_diagnostic.py",
+  "packages": {"torch": "2.8.0+cpu", "numpy": "2.2.6", "pydantic": "2.11.7", "gymnasium": "1.2.0"},
+  "backend_dependencies_installed_in_ai_environment": false,
+  "weights_in_image": false,
+  "runtime_source_parity_files": 229,
+  "sandbox": {
+    "uid": 10001,
+    "network": "none",
+    "root_read_only": true,
+    "tmpfs_noexec": true,
+    "capabilities": "ALL dropped",
+    "docker_seccomp": "default, no unconfined override",
+    "no_new_privileges": true,
+    "landlock_abi": 10,
+    "loader_seccomp_install": "passed",
+    "confined_torch_import_and_cpu_tensor": "passed"
+  },
+  "artifact_inference": "Not run: original frozen checkpoint/history artifacts absent from current workspace; require external read-only copied registry and artifacts",
+  "capability_default": "unavailable until explicit hash-pinned registry configuration",
+  "autonomy_activation": false
+}

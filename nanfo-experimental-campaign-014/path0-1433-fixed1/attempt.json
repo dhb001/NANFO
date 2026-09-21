@@ -1,0 +1,39 @@
+{
+  "case_id": "path0-1433-fixed1",
+  "cleanup": {
+    "evidence_errors": [
+      "CalledProcessError"
+    ],
+    "removed": true,
+    "removed_resources": [
+      "d81e6757bd1350cb86f2ba0c43e077906b9308061ea5ce82736db7f5e548e620",
+      "nanfo-experimental-91cc1f3a35684c3698c8de2ae77912a4"
+    ],
+    "unresolved_resources": []
+  },
+  "error_type": "ValueError",
+  "exception": [
+    {
+      "frames": [
+        {
+          "file": "verify_experimental_lab.py",
+          "function": "joined_case",
+          "line": 1433
+        }
+      ],
+      "message": "qualified_frozen_runtime_unavailable",
+      "type": "ValueError"
+    }
+  ],
+  "locations": [
+    {
+      "file": "verify_experimental_lab.py",
+      "line": 1433
+    }
+  ],
+  "policy": "fixed1",
+  "reason": "qualified_frozen_runtime_unavailable",
+  "scenario": "path0",
+  "seed": 1433,
+  "status": "failed"
+}

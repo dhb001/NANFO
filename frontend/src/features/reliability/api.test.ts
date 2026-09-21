@@ -43,6 +43,8 @@ describe("reliability api", () => {
       correlationId: "00000000-0000-0000-0000-000000000111",
       search: "threshold",
       limit: 50,
+      workspaceId: "workspace-1",
+      networkId: "network-1",
     });
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -54,6 +56,8 @@ describe("reliability api", () => {
     expect(requestUrl).toContain("correlation_id=00000000-0000-0000-0000-000000000111");
     expect(requestUrl).toContain("search=threshold");
     expect(requestUrl).toContain("limit=50");
+    expect(requestUrl).toContain("workspace_id=workspace-1");
+    expect(requestUrl).toContain("network_id=network-1");
     expect(requestInit.headers).toMatchObject({ Authorization: "Bearer token-1" });
   });
 

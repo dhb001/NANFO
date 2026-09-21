@@ -5,11 +5,13 @@ import { ApiClientError } from "@/shared/lib/errors";
 import { useAuthStore } from "@/shared/state/auth-store";
 import { useWorkspaceStore } from "@/shared/state/workspace-store";
 import { hasPermission } from "@/features/auth/permissions";
+import { useSessionScope } from "@/features/auth/sessionScope";
 
 export const AUTONOMY_POLL_MS = 10_000;
 export const AUTONOMY_FRESH_MS = 30_000;
 
 export function useAutonomy() {
+  const session = useSessionScope();
   const token = useAuthStore((state) => state.accessToken);
   const profile = useAuthStore((state) => state.profile);
   const generation = useAuthStore((state) => state.generation);
@@ -21,11 +23,11 @@ export function useAutonomy() {
   const canRead = hasPermission(profile, "read:telemetry");
   const canWrite = canRead && hasPermission(profile, "write:config") && hasPermission(profile, "execute:rollback");
   const enabled = Boolean(token && organizationId && workspaceId && networkId && canRead && !endingSession);
-  const queryKey = ["autonomy", generation, token, organizationId, workspaceId, networkId, profile?.permissions];
+  const queryKey = ["autonomy", generation, organizationId, workspaceId, networkId, session.authority];
   const status = useQuery({
     queryKey,
     queryFn: async ({ signal }) => {
-      const result = await getAutonomy(token!, networkId!, workspaceId!, signal);
+      const result = await session.request((credential) => getAutonomy(credential, networkId!, workspaceId!, signal));
       const confirmed = client.getQueryData<AutonomyStatus>(queryKey);
       if (confirmed && result.revision < confirmed.revision) {
         throw new ApiClientError("Older control revision received. Refresh status before changing mode.", "AUTONOMY_STALE_REVISION");
@@ -48,7 +50,7 @@ export function useAutonomy() {
     const auth = useAuthStore.getState();
     const scope = useWorkspaceStore.getState();
     if (!enabled || !canWrite || auth.endingSession || auth.generation !== generation ||
-        auth.accessToken !== token || scope.organizationId !== organizationId ||
+        !auth.accessToken || scope.organizationId !== organizationId ||
         scope.workspaceId !== workspaceId || scope.networkId !== networkId ||
         !["read:telemetry", "write:config", "execute:rollback"].every((permission) => hasPermission(auth.profile, permission))) {
       throw new Error("Current session, scope and write permissions are required.");
@@ -70,7 +72,7 @@ export function useAutonomy() {
     mutationFn: (input: AutonomyUpdate) => {
       assertCurrent();
       if (input.network_id !== networkId) throw new Error("Selected network changed.");
-      return updateAutonomy(token!, workspaceId!, input);
+      return session.request((credential) => updateAutonomy(credential, workspaceId!, input));
     },
     retry: false,
     onSuccess: confirm,
@@ -79,7 +81,7 @@ export function useAutonomy() {
   const stop = useMutation({
     mutationFn: () => {
       assertCurrent();
-      return stopAutonomy(token!, networkId!, workspaceId!);
+      return session.request((credential) => stopAutonomy(credential, networkId!, workspaceId!));
     },
     retry: false,
     onSuccess: confirm,

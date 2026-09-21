@@ -1,0 +1,73 @@
+{
+  "candidate_passed": true,
+  "metrics": {
+    "goodput_mbps": 5.9942113266965205,
+    "loss_fraction": 0.0,
+    "rtt_ms": 24.161,
+    "udp_loss_fraction": 0.0
+  },
+  "outcome": "kept_then_restored",
+  "protocol_complete": true,
+  "windows": [
+    {
+      "action": 0,
+      "checks": {
+        "goodput": true,
+        "probe_count": true,
+        "probe_loss": true,
+        "rtt": true,
+        "traffic": true,
+        "udp_loss": true
+      },
+      "metrics": {
+        "goodput_mbps": 5.990755545065564,
+        "loss_fraction": 0.0,
+        "rtt_ms": 24.18,
+        "udp_loss_fraction": 0.0
+      },
+      "passed": true,
+      "raw_sha256": "55fc71f55c4e7bdb727f3653185629f089a2c6001e035b7f7b56ed2a4c0fd6cc",
+      "step_index": 1
+    },
+    {
+      "action": 0,
+      "checks": {
+        "goodput": true,
+        "probe_count": true,
+        "probe_loss": true,
+        "rtt": true,
+        "traffic": true,
+        "udp_loss": true
+      },
+      "metrics": {
+        "goodput_mbps": 5.994125047803221,
+        "loss_fraction": 0.0,
+        "rtt_ms": 24.159,
+        "udp_loss_fraction": 0.0
+      },
+      "passed": true,
+      "raw_sha256": "f55793f058ba53bc48fb2ba611cca4c17f05ddfcb345e4242c4db23ff71290ff",
+      "step_index": 2
+    },
+    {
+      "action": 0,
+      "checks": {
+        "goodput": true,
+        "probe_count": true,
+        "probe_loss": true,
+        "rtt": true,
+        "traffic": true,
+        "udp_loss": true
+      },
+      "metrics": {
+        "goodput_mbps": 5.9942113266965205,
+        "loss_fraction": 0.0,
+        "rtt_ms": 24.161,
+        "udp_loss_fraction": 0.0
+      },
+      "passed": true,
+      "raw_sha256": "024592d74fc47160cd62b37847206def0491c7539912d6f0879b1c84a4030520",
+      "step_index": 3
+    }
+  ]
+}

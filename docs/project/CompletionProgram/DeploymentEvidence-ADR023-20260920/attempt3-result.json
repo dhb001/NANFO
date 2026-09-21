@@ -1,0 +1,260 @@
+{
+  "cases": {
+    "disk_capacity": {
+      "status": "passed",
+      "detail": {
+        "docker_root": "/home/.system-data/docker",
+        "capacity_filesystem": "/home",
+        "docker_available_bytes": 274784993280,
+        "staging_available_bytes": 3925725184,
+        "minimum_bytes": 1073741824
+      }
+    },
+    "installed_source_parity": {
+      "status": "passed",
+      "detail": "Built from fingerprinted current source"
+    },
+    "package_contract": {
+      "status": "passed",
+      "detail": {
+        "locked_stages_present": true,
+        "live_build": "pending"
+      }
+    },
+    "locked_container_build": {
+      "status": "passed",
+      "detail": {
+        "source_sha256": "4b7bdaa9b87d9d46d93762bf01d2517acfefdcfee2c43d80372bc75c8bb77702",
+        "images": {
+          "alert-worker": {
+            "id": "sha256:c9d9559f3dc08d5dff46fd104ba2d2836696f6066b389f6a5fa0e00f798812c2",
+            "os": "linux",
+            "architecture": "amd64"
+          },
+          "api": {
+            "id": "sha256:c9d9559f3dc08d5dff46fd104ba2d2836696f6066b389f6a5fa0e00f798812c2",
+            "os": "linux",
+            "architecture": "amd64"
+          },
+          "autonomy-worker": {
+            "id": "sha256:c9d9559f3dc08d5dff46fd104ba2d2836696f6066b389f6a5fa0e00f798812c2",
+            "os": "linux",
+            "architecture": "amd64"
+          },
+          "execution-worker": {
+            "id": "sha256:c9d9559f3dc08d5dff46fd104ba2d2836696f6066b389f6a5fa0e00f798812c2",
+            "os": "linux",
+            "architecture": "amd64"
+          },
+          "gateway": {
+            "id": "sha256:4785f954f79dd113d2d0c4e07dfefec0e2cc1ac32ad50d24c7c4f0b1c602bf74",
+            "os": "linux",
+            "architecture": "amd64"
+          },
+          "initialize": {
+            "id": "sha256:c9d9559f3dc08d5dff46fd104ba2d2836696f6066b389f6a5fa0e00f798812c2",
+            "os": "linux",
+            "architecture": "amd64"
+          },
+          "maintenance": {
+            "id": "sha256:c9d9559f3dc08d5dff46fd104ba2d2836696f6066b389f6a5fa0e00f798812c2",
+            "os": "linux",
+            "architecture": "amd64"
+          },
+          "neo4j": {
+            "id": "sha256:d544f1ef8033ddfbf3a7cc81cdc1a73f90e503153202ea44d35f293bf43d9db7",
+            "os": "linux",
+            "architecture": "amd64"
+          },
+          "network-outbox-worker": {
+            "id": "sha256:c9d9559f3dc08d5dff46fd104ba2d2836696f6066b389f6a5fa0e00f798812c2",
+            "os": "linux",
+            "architecture": "amd64"
+          },
+          "postgres": {
+            "id": "sha256:f3bd19c606e442c3d7bdfa8002e03fe260a1023351e0ea4598032022b68dd6e3",
+            "os": "linux",
+            "architecture": "amd64"
+          },
+          "redis": {
+            "id": "sha256:90e7a336d044f1abc9e9dbc05d65566850896d11453bbd1dd0fb7e5059f0e8fb",
+            "os": "linux",
+            "architecture": "amd64"
+          },
+          "report-worker": {
+            "id": "sha256:c9d9559f3dc08d5dff46fd104ba2d2836696f6066b389f6a5fa0e00f798812c2",
+            "os": "linux",
+            "architecture": "amd64"
+          },
+          "simulation-worker": {
+            "id": "sha256:c9d9559f3dc08d5dff46fd104ba2d2836696f6066b389f6a5fa0e00f798812c2",
+            "os": "linux",
+            "architecture": "amd64"
+          },
+          "telemetry-retention": {
+            "id": "sha256:c9d9559f3dc08d5dff46fd104ba2d2836696f6066b389f6a5fa0e00f798812c2",
+            "os": "linux",
+            "architecture": "amd64"
+          },
+          "volume-init": {
+            "id": "sha256:c9d9559f3dc08d5dff46fd104ba2d2836696f6066b389f6a5fa0e00f798812c2",
+            "os": "linux",
+            "architecture": "amd64"
+          }
+        },
+        "host_application_packages_used": false,
+        "build_cache": "allowed; locked install stages required by Dockerfiles"
+      }
+    },
+    "fresh_volumes": {
+      "status": "passed",
+      "detail": {
+        "empty_new_volumes": [
+          "nanfo-deploy-verify-204f1d10d0044a46bff59afd0b64d893_init_secrets",
+          "nanfo-deploy-verify-204f1d10d0044a46bff59afd0b64d893_lab_commands",
+          "nanfo-deploy-verify-204f1d10d0044a46bff59afd0b64d893_lab_output",
+          "nanfo-deploy-verify-204f1d10d0044a46bff59afd0b64d893_lab_results",
+          "nanfo-deploy-verify-204f1d10d0044a46bff59afd0b64d893_neo4j_data",
+          "nanfo-deploy-verify-204f1d10d0044a46bff59afd0b64d893_network_assets",
+          "nanfo-deploy-verify-204f1d10d0044a46bff59afd0b64d893_postgres_data",
+          "nanfo-deploy-verify-204f1d10d0044a46bff59afd0b64d893_redis_data",
+          "nanfo-deploy-verify-204f1d10d0044a46bff59afd0b64d893_reports",
+          "nanfo-deploy-verify-204f1d10d0044a46bff59afd0b64d893_runtime_secrets",
+          "nanfo-deploy-verify-204f1d10d0044a46bff59afd0b64d893_telemetry_archive"
+        ],
+        "existing_data": 0
+      }
+    },
+    "migration_0027": {
+      "status": "failed",
+      "detail": "Command failed (docker, exit 1); output withheld"
+    },
+    "bootstrap_login": {
+      "status": "blocked",
+      "detail": "Prerequisite did not complete"
+    },
+    "frontend_http": {
+      "status": "blocked",
+      "detail": "Prerequisite did not complete"
+    },
+    "full_stack_readiness": {
+      "status": "blocked",
+      "detail": "Prerequisite did not complete"
+    },
+    "distributed_failover": {
+      "status": "blocked",
+      "detail": "Prerequisite did not complete"
+    },
+    "simulation": {
+      "status": "blocked",
+      "detail": "Prerequisite did not complete"
+    },
+    "report_csv": {
+      "status": "blocked",
+      "detail": "Prerequisite did not complete"
+    },
+    "report_pdf": {
+      "status": "blocked",
+      "detail": "Prerequisite did not complete"
+    },
+    "spatial_asset_upload": {
+      "status": "blocked",
+      "detail": "Prerequisite did not complete"
+    },
+    "database_stop_readiness": {
+      "status": "blocked",
+      "detail": "Prerequisite did not complete"
+    },
+    "worker_stale_heartbeat": {
+      "status": "blocked",
+      "detail": "Prerequisite did not complete"
+    },
+    "api_worker_restart": {
+      "status": "blocked",
+      "detail": "Prerequisite did not complete"
+    },
+    "nonempty_archive_delete": {
+      "status": "blocked",
+      "detail": "Prerequisite did not complete"
+    },
+    "restored_archive_bytes": {
+      "status": "blocked",
+      "detail": "Prerequisite did not complete"
+    },
+    "lab_binding": {
+      "status": "blocked",
+      "detail": "Prerequisite did not complete"
+    },
+    "lab_congestion": {
+      "status": "blocked",
+      "detail": "Prerequisite did not complete"
+    },
+    "model_diagnostic": {
+      "status": "blocked",
+      "detail": "Prerequisite did not complete"
+    },
+    "coordinated_encrypted_backup": {
+      "status": "blocked",
+      "detail": "Prerequisite did not complete"
+    },
+    "distinct_fresh_restore": {
+      "status": "blocked",
+      "detail": "Prerequisite did not complete"
+    },
+    "restore_image_schema": {
+      "status": "blocked",
+      "detail": "Prerequisite did not complete"
+    },
+    "old_tokens_invalid": {
+      "status": "blocked",
+      "detail": "Prerequisite did not complete"
+    },
+    "restored_report_bytes": {
+      "status": "blocked",
+      "detail": "Prerequisite did not complete"
+    },
+    "restored_spatial_assets": {
+      "status": "blocked",
+      "detail": "Prerequisite did not complete"
+    },
+    "restored_workflows": {
+      "status": "blocked",
+      "detail": "Prerequisite did not complete"
+    },
+    "restored_telemetry": {
+      "status": "blocked",
+      "detail": "Prerequisite did not complete"
+    },
+    "source_unchanged": {
+      "status": "blocked",
+      "detail": "Prerequisite did not complete"
+    },
+    "campaign": {
+      "status": "failed",
+      "detail": "Command failed (docker, exit 1); output withheld"
+    },
+    "cleanup": {
+      "status": "passed",
+      "detail": {
+        "containers_removed": 3,
+        "volumes_removed": 11,
+        "networks_removed": 1
+      }
+    }
+  },
+  "core_passed": false,
+  "all_green": false,
+  "step15_complete": false,
+  "counts": {
+    "passed": 6,
+    "failed": 2,
+    "blocked": 25,
+    "pending": 0
+  },
+  "live_authorized": true,
+  "agents_idle_attested": true,
+  "failure": "Command failed (docker, exit 1); output withheld",
+  "evidence_directory": "/tmp/opencode/nanfo-deploy-verify-p43812ck/evidence",
+  "live_requested_lab": false,
+  "live_requested_model": false
+}

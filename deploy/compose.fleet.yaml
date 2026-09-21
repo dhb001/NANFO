@@ -1,0 +1,35 @@
+# Explicit operator-provisioned fleet; combine AFTER distributed overlay if used.
+services:
+  api:
+    environment:
+      TELEMETRY_FLEET_ENABLED: "true"
+      TELEMETRY_RUNTIME_ADAPTER_MODE: stub
+  fleet-worker:
+    extends: {file: compose.yaml, service: network-outbox-worker}
+    profiles: [fleet]
+    image: ${NANFO_FLEET_IMAGE:?Set a distinct source-matched with-fleet image}
+    platform: linux/amd64
+    build: {target: with-fleet}
+    command: [python, -m, scripts.run_fleet_collector]
+    environment:
+      NANFO_FLEET_MANIFEST_PATH: /var/lib/nanfo/fleet/manifest.json
+    networks: [fleet_egress]
+    volumes:
+      - type: bind
+        source: ${NANFO_STATE_DIR}/fleet
+        target: /var/lib/nanfo/fleet
+        read_only: true
+        bind: {create_host_path: false}
+      - type: bind
+        source: ${NANFO_STATE_DIR}/fleet-credentials
+        target: /var/lib/nanfo/fleet-credentials
+        read_only: true
+        bind: {create_host_path: false}
+    healthcheck:
+      test: [CMD, python, /opt/nanfo/deploy/entrypoint.py, python, /opt/nanfo/deploy/check_fleet_health.py]
+      interval: 15s
+      timeout: 8s
+      retries: 4
+      start_period: 60s
+networks:
+  fleet_egress: {}

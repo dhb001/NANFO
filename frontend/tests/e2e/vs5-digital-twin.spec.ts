@@ -70,7 +70,7 @@ test.describe("VS5 digital twin realtime resilience", () => {
 
     await loginFromUi(page);
     await expect(page.getByRole("heading", { name: "Networks" })).toBeVisible();
-    await page.getByRole("button", { name: /Network A/ }).click();
+    await page.locator(".network-choice").filter({ hasText: "Network A" }).click();
 
     await page.getByRole("link", { name: "Digital Twin" }).click();
     await expect(page).toHaveURL(/\/ops\/digital-twin$/);
@@ -160,7 +160,7 @@ test.describe("VS5 digital twin realtime resilience", () => {
 
     await loginFromUi(page);
     await expect(page.getByRole("heading", { name: "Networks" })).toBeVisible();
-    await page.getByRole("button", { name: /Network A/ }).click();
+    await page.locator(".network-choice").filter({ hasText: "Network A" }).click();
     await page.getByRole("link", { name: "Digital Twin" }).click();
 
     await page.getByRole("button", { name: "Congestion" }).click();
@@ -250,7 +250,7 @@ test.describe("VS5 digital twin realtime resilience", () => {
 
     await loginFromUi(page);
     await expect(page.getByRole("heading", { name: "Networks" })).toBeVisible();
-    await page.getByRole("button", { name: /Network A/ }).click();
+    await page.locator(".network-choice").filter({ hasText: "Network A" }).click();
     await page.getByRole("link", { name: "Digital Twin" }).click();
 
     await page.getByLabel("Campus model file").setInputFiles({

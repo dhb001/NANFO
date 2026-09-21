@@ -18,19 +18,80 @@ All endpoints must follow `docs/api/API_STANDARD.md` (`success`, `data`, `meta`,
 ### 3.1 Networks
 - `POST /api/v1/networks` — Create network in a workspace.
 - `GET /api/v1/networks?workspace_id={uuid}` — List networks for a workspace.
+- `PATCH /api/v1/networks/{network_id}` — Edit a nonempty subset of `name`, `description`, `cidr`; return `NetworkResponse`.
+- `DELETE /api/v1/networks/{network_id}` — Soft-delete an empty, dependency-free network; return 204.
 
 ### 3.2 Devices
 - `POST /api/v1/networks/{network_id}/devices` — Create device in network.
 - `GET /api/v1/networks/{network_id}/devices` — List devices in network.
-- `PATCH /api/v1/networks/{network_id}/devices/{device_id}` — Update device spatial reference (`spatial_ref_id`).
+- `PATCH /api/v1/networks/{network_id}/devices/{device_id}` — Edit a nonempty subset of `hostname`, `ip_address`, `device_type`, `vendor`, `model`, `location_hint`, `spatial_ref_id`; return `DeviceResponse`. Spatial-only patches remain valid.
+- `DELETE /api/v1/networks/{network_id}/devices/{device_id}` — Soft-delete a dependency-free device; return 204.
+
+#### Inventory validation and paging (ADR-026)
+
+Create and PATCH reject unknown fields. Names/hostnames are trimmed, nonempty,
+and at most 253 characters. Device types are trimmed, nonempty open vocabulary
+up to 64 characters (e.g. `router`, `switch`, `ap`, `host`, `firewall`, `server`,
+or an operator-defined type); this preserves existing vendor-neutral inventory.
+Vendor/model are nullable trimmed nonempty strings up to 253 characters;
+location hints up to 1024, spatial references up to 512. Description is nullable
+text up to 4096 characters (empty text is valid). No location is generated.
+IP accepts IPv4/IPv6 addresses only, at most 45 input characters; scoped addresses
+and prefix suffixes are rejected. CIDR accepts IPv4/IPv6 network notation with an
+explicit prefix, at most 49 input characters; host bits and scope IDs are rejected.
+Addresses/CIDRs are returned in canonical form. Invalid request values return 422.
+
+In PATCH, omission preserves a field; explicit null clears nullable fields.
+`name`, `hostname`, and `device_type` cannot be null. `{}` is invalid. Submitting
+unchanged values returns the existing representation without a new event.
+Network and device lists use `page>=1`, `page_size=1..200` (default 1/20), sorted
+by `created_at ASC, primary UUID ASC`, scoped before pagination. Internal service
+and repository callers retain batches up to 500. Data remains
+`{items,total,page,page_size}`; out-of-range pages return empty items and the total.
+
+#### Authority and deletion restrictions
+
+Reads require `read:topology`, current Organization membership and any token
+workspace/org narrowing; mutations require `write:config` and current writable
+Organization membership through WorkspaceService. Cross-tenant device IDs return
+404 within an authorized network. Soft-deleted resources return 404 on repeat
+mutation. Deletion never physically removes historical evidence or rewrites audits.
+
+409 `INVENTORY_DEPENDENCIES_ACTIVE` blocks network deletion with active devices,
+campus buildings, campus model assets, device groups, or nonempty spatial objects.
+Device deletion is blocked by active group membership, campus asset device mapping,
+or current spatial scene association. Replace/remove those active references first;
+historical spatial revisions alone do not block deletion.
+
+Both deletion paths conservatively check network-wide Simulation/Intent history
+through their owning services. Only completed/cancelled/failed simulations and
+rejected/cancelled/compensated intents are safe from summary status alone.
+`execution_failed`/`execution_completed` intents require owning Intent detail proving
+exact verified rollback or completion of a verified restore plan, respectively.
+Uncertain, unverified, merely applied, or mismatched executions remain blocked. Autonomy
+must be in monitor mode with no active execution, requested/uncertain cancellation,
+or unresolved timed override. The full exact safe-status list is in
+`docs/project/AuditRepair-Network.md`. No cross-owner SQL is used.
+
+Parent row locks serialize inventory deletion against spatial associations, asset
+mapping, building/group writes and write-authorized workflow creation; durable
+outbox writes retain per-network ordering. Mutation and event commit atomically.
 
 ### 3.3 Campus Building Persistence (Digital Twin Phase 5D)
 - `GET /api/v1/networks/{network_id}/campus/buildings` — List active persisted campus-building records for network.
 - `POST /api/v1/networks/{network_id}/campus/buildings` — Upsert campus-building records with optional `replace_existing` soft-replace behavior.
 
 ### 3.4 Campus Model Asset Persistence (Digital Twin residual closure)
+New `mapping_by_device_id` keys are canonical lowercase hyphenated device UUIDs.
+Equivalent UUID spellings with identical trimmed values deduplicate; conflicting
+values for equivalent UUIDs reject422. Historical mappings retain their spelling;
+deletion compares UUID identity across all active mappings and blocks409 on matching,
+malformed or ambiguous historical references. Retirement explicitly removes an
+active mapping from dependency checks without rewriting the retained metadata.
+
 - `GET /api/v1/networks/{network_id}/campus/model-assets` — List active persisted campus-model asset records for network.
 - `POST /api/v1/networks/{network_id}/campus/model-assets` — Upsert campus-model asset record with optional `replace_existing` soft-replace behavior.
+- `DELETE /api/v1/networks/{network_id}/campus/model-assets/{asset_id}` — Retire exactly one active metadata row, returning204 with no body. Requires current writable scope and `write:config`. Missing, foreign-network and already-retired assets return404. Retains bytes, hashes, registration, mappings and scene history; no garbage collection. Retirement removes the row from active lists/downloads and inventory-deletion dependency checks. No new domain event is emitted, consistent with asset upsert.
 
 ### 3.5 Device Groups (Network-owned targeting primitive)
 - `GET /api/v1/networks/{network_id}/device-groups` — List active network-scoped device groups and resolved active members.
@@ -55,9 +116,19 @@ Event envelope rules are governed by `docs/api/EventAPI.md`.
 
 | Event Type | Producer Path | Consumer(s) | Payload Highlights |
 |:--|:--|:--|:--|
-| `network.network.created` | network create flow | Audit consumer | `network_id`, `workspace_id`, `name`, `actor_id` |
-| `network.device.added` | device create flow | Audit, topology, ws-push | `device_id`, `network_id`, `workspace_id`, `device_type`, `spatial_ref_id`, `actor_id` |
-| `network.device.updated` | device spatial update flow | Audit, topology, ws-push | `device_id`, `network_id`, `workspace_id`, `changed_fields`, `actor_id` |
+| `network.network.created` | network create flow | Audit consumer | `network_id`, `workspace_id`, `org_id`, `name`, `actor_id` |
+| `network.network.updated` | network PATCH | Audit consumer | `network_id`, `workspace_id`, `org_id`, `changed_fields`, `actor_id` |
+| `network.network.deleted` | network DELETE | Audit consumer | `network_id`, `workspace_id`, `org_id`, `actor_id` |
+| `network.device.added` | device create flow | Audit, topology, ws-push | `device_id`, `network_id`, `workspace_id`, `org_id`, `hostname`, `ip_address`, `device_type`, `spatial_ref_id`, `actor_id` |
+| `network.device.updated` | device PATCH | Audit, topology, ws-push | `device_id`, `network_id`, `workspace_id`, `org_id`, `changed_fields`, `actor_id` |
+| `network.device.deleted` | device DELETE | Audit, topology, ws-push | `device_id`, `network_id`, `workspace_id`, `org_id`, `actor_id` |
+
+All six inventory events use the existing durable Network outbox and `stream:network`.
+`org_id` is resolved from the authorized WorkspaceService response, never a client
+payload or assumed token claim. Update `changed_fields` contains only effective
+changed fields with their new values, including explicit nulls. Neo4j and websocket
+device deltas retain hostname/type/IP/vendor/model/location/spatial changes. Existing
+events and historical audits without org scope are preserved; no backfill is implicit.
 
 Campus-building/model-asset/group persistence currently does not publish dedicated domain events; state is read through the documented REST surfaces above.
 

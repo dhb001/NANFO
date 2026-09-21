@@ -1,0 +1,86 @@
+{
+  "auth": {
+    "path": "path1-revoke-before/auth.json",
+    "sha256": "150361a44f28d85a78aeb6cd806450f6cd955d46651e02a614c5acffbbb8ff93"
+  },
+  "bootstrap": {
+    "path": "path1-revoke-before/bootstrap.json",
+    "sha256": "052b1680fd80a4c706e5160085f5bd6f44047897f5cb9760634ab8dc51e4c2cb"
+  },
+  "bootstrap_initial_action": 1,
+  "boundary_events": {
+    "path": "path1-revoke-before/boundary_events.json",
+    "sha256": "51af00f20b6a03d9f2b40858bf94fa899a4824fd7ee383d0cf34e09cbcce8386"
+  },
+  "case_id": "path1-revoke-before",
+  "chain": {
+    "bootstrap_recovery": {
+      "path": "path1-revoke-before/bootstrap_recovery-3937047-0.json",
+      "sha256": "59d40d1534317c44adac9d0d691c90f1345359b8cb2307675a6b92c4ecb8c8d9"
+    },
+    "frame": {
+      "path": "path1-revoke-before/exported-frame.json",
+      "sha256": "72d24283ea8c0915888dca63838be5eac627f552ff72019150b1c72ecc3df730"
+    },
+    "inference": {
+      "path": "path1-revoke-before/exported-inference.json",
+      "sha256": "57f4177304a7c06b8c0419343afdb6c383111c1dbcd61fe37778b3aeb613ae89"
+    },
+    "prepared": {
+      "path": "path1-revoke-before/exported-prepared.json",
+      "sha256": "1241a905d1d44c0cd44cf6de099d953680a877374d8e09921465248a047c7530"
+    },
+    "recovery": {
+      "path": "path1-revoke-before/exported-recovery.json",
+      "sha256": "7c76a5b6cbd89a1b95bc17ee57b29aaf709c6c73ea1446d7a2d2d7c7d7a5d817"
+    },
+    "simulation": {
+      "path": "path1-revoke-before/exported-simulation.json",
+      "sha256": "33b1eb303a9d515574a831b4687a7244653f86a8a470ae33a0e2750392c6ddc0"
+    }
+  },
+  "cleanup": {
+    "path": "path1-revoke-before/cleanup.json",
+    "sha256": "7b29c62e6665367ca9ebad949786e12ff0200d5719c11cecd22a0c721ac736d2"
+  },
+  "controller": {
+    "path": "path1-revoke-before/controller-result.json",
+    "sha256": "bf7c70a7437ff5a0d5659bfcb12815921bf2d8ff6f4490893523d051e24e1f51"
+  },
+  "fault": "revoke-before",
+  "intervention": {
+    "path": "path1-revoke-before/intervention.json",
+    "sha256": "72176834799b7f19518367c522686b3c09793f3ec6ac828c57d92bc0e8670644"
+  },
+  "journal": {
+    "path": "path1-revoke-before/journal.json",
+    "sha256": "5c8311a8e0f84309c64b89a47aead27fea4f71f3d12384880070aea3359924c7"
+  },
+  "native_authority": {
+    "path": "path1-revoke-before/campaign-authority.json",
+    "sha256": "3e23ae5ddab49a542f51bd909e87ade107b10c64e953494a1621e364a09a3991"
+  },
+  "native_commands": {
+    "path": "path1-revoke-before/native_commands.json",
+    "sha256": "7fed64adf3d8edc991ead6545a80660bf6def6fbaffec1c5f6e98e96be04c3ac"
+  },
+  "native_journal": {
+    "path": "path1-revoke-before/native-journal.json",
+    "sha256": "b70c1126c1d220ccbc7a7181b15c5fcb3d90e19e51d6606f2ee5db1ff927d0cf"
+  },
+  "operator_policy": {
+    "path": "path1-revoke-before/operator-policy.json",
+    "sha256": "e5dc98a1c3c41f1a6b2e74f13af48cac24953d9b8757c423694b41eba820cb5f"
+  },
+  "outcome": "restored",
+  "phase": "beforewrite",
+  "policy": "qualified",
+  "raw_frames": {
+    "path": "path1-revoke-before/raw-frame-inventory.json",
+    "sha256": "4e1bead806c8079a386cb6b61b1bc41081c5767c66771b936db5b912c5efa7bf"
+  },
+  "scenario": "path1",
+  "seed": 1450,
+  "status": "completed",
+  "write_index": 0
+}

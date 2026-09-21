@@ -1,0 +1,439 @@
+{
+  "checkpoint": {
+    "checkpoint_sha256": "77dae44acab722a5a6a2e87d952a6cca65e1c4eea102a089830a8401b521d614",
+    "manifest": {
+      "client_source_files": {
+        "__init__.py": "7bc5e4c099b6aaf9dc5e7bfb94d0affb9a5964cc4636d4a993472da4f12e05ac",
+        "__main__.py": "935a1c1166b0c1ea35a82256345000bf2c73ded718d77773bc27a71ecce28f7d",
+        "artifacts.py": "9100786be1b3c7bc7a032e23835ce2848c7483c9fc599c7d1d5ffcdeaf17694b",
+        "cli.py": "e657c223bfb97fc503aa11624be4941e5d9a270eedeba32465534ca8e21d2aa8",
+        "contracts.py": "c71b8a3cd82420f1daf3972c976ddd933b79c975c17d24d36e3726260e8214f6",
+        "drain.py": "c779a52709ecfca19f063f51c744501896345ecaefc770cf642d4b6e9be1ce03",
+        "env.py": "b2e81af8d89a038f142fa11fb247ac6af68cd80f2a50946e247a91f941d7765f",
+        "evidence.py": "f6ebe061a5a02bf74df6e7d1f2453664a574328d04d4e3557b679e139d8c30ff",
+        "expanded.py": "e8722009f90870739a8c3cc7e01be0d6a433923d8a5a7f11030c41e97ae28d30",
+        "extended_supervisor.py": "b85b658c20ab8186c424b569ee7a6e4250fa64a8cd0a0092e369b49e7b5b7f36",
+        "ppo.py": "807d86f9b942262c65a5ca92c1450f145f95f9518ee67b796cbf1985994800be",
+        "qualification.py": "d190e42b4e86925407982a2a9aedef57de5f29881e952e64bbbe45c48c900871",
+        "supervisor.py": "595c7ee1ceb0b3a670123a8fcf06e721577cccd8f953cdec43496bbd8c35f726",
+        "transport.py": "6256c5d8a4a7352c738f3eaea299103dd74e30234d19fbf23e27192032b2df0b"
+      },
+      "compatibility_hash": "b7a56c8430f0b311321b2ab11bf5fc7514c839a824bcaed9988f2c7e3476c69f",
+      "config": {
+        "clip": 0.2,
+        "entropy": 0.01,
+        "epochs": 4,
+        "gae_lambda": 0.95,
+        "gamma": 0.9,
+        "hidden": 32,
+        "learning_rate": 0.003,
+        "max_grad_norm": 0.5,
+        "minibatch": 32,
+        "rollout": 16,
+        "seed": 44,
+        "value_weight": 0.5
+      },
+      "contract": {
+        "action_map": [
+          [
+            "access1",
+            "dist1",
+            "access2"
+          ],
+          [
+            "access1",
+            "dist2",
+            "access2"
+          ]
+        ],
+        "adjacency": [
+          [
+            0,
+            1,
+            1,
+            0,
+            0
+          ],
+          [
+            1,
+            0,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            0,
+            1,
+            1
+          ],
+          [
+            0,
+            1,
+            1,
+            0,
+            0
+          ],
+          [
+            0,
+            1,
+            1,
+            0,
+            0
+          ]
+        ],
+        "architecture": "separate actor/critic Linear(16,32)-Tanh heads; orthogonal actor gain 0.01",
+        "background": [
+          "h2",
+          "h4"
+        ],
+        "censored_delay_ms": 1000.0,
+        "censored_delay_semantics": "penalty only for verified zero-reply outage; observed RTT stays null",
+        "features": [
+          "util0",
+          "util1",
+          "queue0",
+          "queue1",
+          "latency_ms",
+          "loss_fraction",
+          "goodput_mbps",
+          "offered_mbps",
+          "background_mbps",
+          "seconds_since_change",
+          "actual_offered_mbps",
+          "capacity0_mbps",
+          "capacity1_mbps"
+        ],
+        "foreground": [
+          "h1",
+          "h3"
+        ],
+        "frame_dim": 16,
+        "heuristic_hysteresis": 0.15,
+        "history_length": 1,
+        "history_padding": "repeat earliest observed frame at episode start",
+        "host_attachments": {
+          "h1": "access1",
+          "h2": "access1",
+          "h3": "access2",
+          "h4": "access2"
+        },
+        "host_link_capacity_mbps": 100,
+        "host_link_delay_ms": 1,
+        "layout": "single stationary frame: log1p(features/scales),latency_available,previous_action.onehot",
+        "link_capacity_mbps": [
+          100,
+          100,
+          50,
+          20,
+          20,
+          20,
+          20
+        ],
+        "link_delay_ms": [
+          2,
+          2,
+          3,
+          5,
+          5,
+          5,
+          5
+        ],
+        "link_endpoints": [
+          [
+            "core",
+            "dist1"
+          ],
+          [
+            "core",
+            "dist2"
+          ],
+          [
+            "dist1",
+            "dist2"
+          ],
+          [
+            "dist1",
+            "access1"
+          ],
+          [
+            "dist2",
+            "access1"
+          ],
+          [
+            "dist1",
+            "access2"
+          ],
+          [
+            "dist2",
+            "access2"
+          ]
+        ],
+        "nodes": [
+          "core",
+          "dist1",
+          "dist2",
+          "access1",
+          "access2"
+        ],
+        "observability": "stationary exogenous inputs; no future phase/seed/scenario inputs; not a safety guarantee",
+        "queue_capacity_packets": 100,
+        "reward_goodput_denominator": "actual_offered_mbps from foreground sent bytes/duration",
+        "reward_goodput_ratio_cap": 1.0,
+        "reward_scales": {
+          "delay_ms": 50.0,
+          "queue_packets": 100.0
+        },
+        "reward_weights": {
+          "delay": -0.2,
+          "goodput_ratio": 1.0,
+          "loss": -1.0,
+          "queue": -0.1,
+          "route_change": -0.05,
+          "utilization": -0.1
+        },
+        "scales": [
+          1.0,
+          1.0,
+          100.0,
+          100.0,
+          50.0,
+          1.0,
+          20.0,
+          20.0,
+          20.0,
+          10.0,
+          20.0,
+          20.0,
+          20.0
+        ],
+        "scenarios": [
+          "low",
+          "path0",
+          "path1",
+          "alternating",
+          "burst",
+          "overload"
+        ],
+        "splits": {
+          "test": [
+            3000,
+            3999
+          ],
+          "train": [
+            1000,
+            1999
+          ],
+          "validation": [
+            2000,
+            2999
+          ]
+        },
+        "state_dim": 16,
+        "topology_id": "campus-small-v1",
+        "version": 3
+      },
+      "contract_hash": "bbcbbadec55792fa3f01bef511c1e38b0e433e125f896cdc3e64f823325e0fe6",
+      "environment_spec": {
+        "actor_inputs": "measured observation history and actual HTB path capacities only; no seed/scenario/index",
+        "background_policy": "actual FRR OSPF h2->h4 and return; no pinning in either mode",
+        "capacity_observation": "path_capacity_mbps from verified HTB rate/ceil; utilization divided by actual shaped capacity",
+        "capacity_policy": "path0=[2,20], path1=[20,2], low=[20,20] Mbps; both directions on both inter-router links",
+        "control_version": "source-specific-linux-policy-routing-and-end-readback-v3",
+        "counter_interval": "per-interface before load through receiver drain and readback",
+        "demand_policy": "seeded foreground uniform(5.8,6.2), background uniform(1.8,2.2) Mbps; constant per episode",
+        "discovery_interval": "FRR readiness and all-pairs probes before episode; no SDN discovery",
+        "drain_completion": "all senders exited; receivers alive; two consecutive complete zero-byte/zero-packet queue sweeps separated by at least drain_poll_interval_seconds; completed within drain_max_seconds",
+        "drain_empty_observations": 2,
+        "drain_max_seconds": 3.0,
+        "drain_poll_interval_seconds": 0.08,
+        "drain_queue_scope": "all topology link endpoints, both directions, including hosts and alternate paths; single leaf netem per interface",
+        "drain_timeout": "truncate with measurement_complete=false; retain final endpoint totals and partial queue evidence; no valid loss/goodput outcome",
+        "drain_version": "post-sender-termination-verified-leaf-queues-v4",
+        "generator_relative_tolerance": 0.2,
+        "goodput_denominator": "actual foreground sender duration; delivered numerator includes service during control and verified drain",
+        "goodput_ratio": "received foreground bytes / actual foreground sent bytes",
+        "late_received_packets": "unavailable (null per flow); workers publish final totals only, no drain-begin streaming counter; never inferred from queue backlog",
+        "latency_measurement": "foreground ICMP RTT during load; not UDP RTT",
+        "modes": [
+          "matched",
+          "ospf"
+        ],
+        "name": "nanfo-matched-stationary-routing",
+        "observability": "stationary exogenous capacities and demands observed; sampled queues/history not a proven Markov state",
+        "ospf_cost_policy": "nominal manifest bandwidth costs frozen before impairment; single next hop prefers dist1; not capacity-aware OSPF",
+        "phase_relationship": "episode capacities and demands fixed before reset through all decisions",
+        "ping_interval": "foreground concurrent load through sender termination",
+        "ping_timeout_ms": 1000,
+        "queue_interval": "post-control load; peak sampled leaf netem; 80ms plus collection time",
+        "route_policy": "matched overrides exact h1/h3 source+destination /32 both directions at every router on route0/1; ospf ignores action",
+        "scenarios": [
+          "low",
+          "path0",
+          "path1"
+        ],
+        "schedule_version": "seeded-stationary-capacity-v3",
+        "service_outage": "valid positive probe count with zero replies; RTT null; UDP counters still required",
+        "source_files": {
+          "Dockerfile": "ccb51b29779e436726ebc5246476954f03524884f3d3981dc9740d0c204f838e",
+          "actions.py": "5b30fd997c11e04b828fc0a3c259734ec3b2394ef4f30e08e48e2359a44a018d",
+          "compose.yaml": "2f61a68bb5f6c47ec4d2f574f41d9c6f1b1a87c0a51da013220499fc9c2bd773",
+          "controller.py": "683d82b825165e7bbfb9094d59a410b8b1ce8bf51f293bddca86afd82d51dfc9",
+          "experiment.py": "50b8ac7e9265774adad802807da2fb5c7c02653c139512ef9d200563a5bcedc9",
+          "experiment_client.py": "0f8e774bdd6aded3a3f17b3d5e4f737d2856bb1610c4e571f9b84d68050dcbba",
+          "matched.py": "da13903064be198d52485a06593528d6d11d313bb2f4202e9137c5b1f9bb18fc",
+          "measurements.py": "17adcad1f9ca73d239305f147460af02ae27c1539b4a662f65d0749213236344",
+          "ospf.py": "1f427c5763a4fe463a4a3197f4473c9f21de8c37ed27304027a8d11a384e91b5",
+          "requirements.txt": "a5c31f09953e22b84658e44f0b9cef0e860df3be11881cba06451066be058016",
+          "runner.py": "0ae74392e6b719e6776aee06acef89fcd6beec9ce9436178e0618992d4e62d8e",
+          "topology.py": "d4a258a2f77f4017a6d60b064de86489c7494eaf3d95719c4c591f34f7d7c0e4",
+          "workloads.py": "4ce3c77982b80d0182557c548f71bf8fa1001f2d8f261406ec33e5fdf58141db"
+        },
+        "source_sha256": "08c312c64154c9aedcd3b22eeb3573783590e0eb7183bc999cb8ef39b958dbbd",
+        "state_reward_interval": "same returned aggregate; not a separate next-phase measurement",
+        "udp_interval": "each sender lifetime including control; receiver totals include drain",
+        "version": 4,
+        "window_bounds_seconds": [
+          2,
+          10
+        ],
+        "window_overrun_tolerance_seconds": 2
+      },
+      "episodes": 96,
+      "evidence_sha256": "b3d149ffae09380e176f9f9ef49ea428bb389fe552bc3c49ad391d75d42570d8",
+      "lab_provenance": {
+        "lab_image_id": "sha256:954462c0f00d5bbaa72ea144f6064936b399c430e6ab94bffcf1c00d134ea0d7",
+        "source_sha256": "08c312c64154c9aedcd3b22eeb3573783590e0eb7183bc999cb8ef39b958dbbd"
+      },
+      "provenance": "measured-lab",
+      "spec_hash": "bb15142a19ed3ee87a6aec2c6f9109d789d9736a5e6afda826ad898ef5fe7200",
+      "training_distribution": {
+        "episode_steps": 4,
+        "mode": "matched",
+        "scenario_selection": "episode index modulo explicit balanced stationary curriculum",
+        "scenarios": [
+          "path0",
+          "path1"
+        ],
+        "training_split": [
+          1000,
+          1999
+        ],
+        "window_seconds": 2.0
+      },
+      "training_seeds": [
+        1600,
+        1601,
+        1602,
+        1603,
+        1604,
+        1605,
+        1606,
+        1607,
+        1608,
+        1609,
+        1610,
+        1611,
+        1612,
+        1613,
+        1614,
+        1615,
+        1616,
+        1617,
+        1618,
+        1619,
+        1620,
+        1621,
+        1622,
+        1623,
+        1624,
+        1625,
+        1626,
+        1627,
+        1628,
+        1629,
+        1630,
+        1631,
+        1632,
+        1633,
+        1634,
+        1635,
+        1636,
+        1637,
+        1638,
+        1639,
+        1640,
+        1641,
+        1642,
+        1643,
+        1644,
+        1645,
+        1646,
+        1647,
+        1648,
+        1649,
+        1650,
+        1651,
+        1652,
+        1653,
+        1654,
+        1655,
+        1656,
+        1657,
+        1658,
+        1659,
+        1660,
+        1661,
+        1662,
+        1663,
+        1664,
+        1665,
+        1666,
+        1667,
+        1668,
+        1669,
+        1670,
+        1671,
+        1672,
+        1673,
+        1674,
+        1675,
+        1676,
+        1677,
+        1678,
+        1679,
+        1680,
+        1681,
+        1682,
+        1683,
+        1684,
+        1685,
+        1686,
+        1687,
+        1688,
+        1689,
+        1690,
+        1691,
+        1692,
+        1693,
+        1694,
+        1695
+      ],
+      "transitions": 384,
+      "updates": 24,
+      "version": 3,
+      "versions": {
+        "gymnasium": "1.2.0",
+        "numpy": "2.2.6",
+        "package": "0.1.0",
+        "python": "3.12.14",
+        "torch": "2.8.0+cpu"
+      },
+      "weights_sha256": "3e7e38ab4297ffd4b32b9c32d64af4b45e5f5ed1b2a74f9926f23379b0b0f967"
+    }
+  },
+  "plan_sha256": "b9e084a2c69241d3d5d3e2f60ab3f9052ee77e713befc1f43403fd21de8e4a30",
+  "selection_rule": "fixed ADR014 incumbent; tensor-identical deployment rebind; no selection on new tests",
+  "test_only": true
+}

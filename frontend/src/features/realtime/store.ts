@@ -2,7 +2,7 @@ import { create } from "zustand";
 import { AlertDeltaData, DigitalTwinDeltaData, TelemetryDeltaData, TopologyDeltaData } from "@/shared/types/ws";
 
 const MAX_ALERT_ITEMS = 200;
-const MAX_TELEMETRY_METRICS = 300;
+export const TELEMETRY_LIMITS = { resources: 300, metricsPerResource: 16, flowHistory: 300 } as const;
 const MAX_SCENE_OBJECTS = 300;
 
 export interface LiveAlertItem {
@@ -50,6 +50,32 @@ interface LiveState {
 function metricKey(metric: TelemetryDeltaData["metric"]) {
   return JSON.stringify([metric.workspace_id, metric.network_id, metric.device_id, metric.metric, metric.unit, metric.source, metric.tags?.run_id ?? null, metric.tags?.port_no ?? null, metric.tags?.peer_host ?? null,
     metric.metric.startsWith("flow_") ? [metric.observed_at, metric.tags?.table_id, metric.tags?.cookie, metric.tags?.priority, metric.tags?.flow_index, metric.event_id] : null]);
+}
+
+function resourceKey(metric: TelemetryDeltaData["metric"]) {
+  return JSON.stringify([metric.workspace_id, metric.network_id, metric.device_id]);
+}
+
+// Latest metric identities and snapshot-local flow history have independent budgets.
+// A noisy device can replace its own series, never consume another device's slots.
+function retainTelemetry(keys: string[], metrics: LiveState["telemetryByDeviceMetric"]) {
+  const resources = new Map<string, number>();
+  let flows = 0;
+  return keys.filter((key) => {
+    const metric = metrics[key];
+    let keep: boolean;
+    if (metric.metric.startsWith("flow_")) {
+      keep = ++flows <= TELEMETRY_LIMITS.flowHistory;
+    } else {
+      const resource = resourceKey(metric);
+      const count = resources.get(resource) ?? 0;
+      keep = count < TELEMETRY_LIMITS.metricsPerResource &&
+        (count > 0 || resources.size < TELEMETRY_LIMITS.resources);
+      if (keep) resources.set(resource, count + 1);
+    }
+    if (!keep) delete metrics[key];
+    return keep;
+  });
 }
 
 function pushNewestKey(keys: string[], key: string, maxItems: number) {
@@ -154,8 +180,9 @@ export const useLiveStore = create<LiveState>((set) => ({
   applyTelemetryDelta: (delta) =>
     set((state) => {
       if (!delta.metric || typeof delta.metric.device_id !== "string" || typeof delta.metric.metric !== "string" ||
+          typeof delta.metric.workspace_id !== "string" || typeof delta.metric.network_id !== "string" ||
           typeof delta.metric.source !== "string" || typeof delta.metric.observed_at !== "string" ||
-          (delta.metric.unit !== null && typeof delta.metric.unit !== "string") || !delta.metric.tags || typeof delta.metric.tags !== "object") return state;
+          (delta.metric.unit !== null && typeof delta.metric.unit !== "string") || !delta.metric.tags || typeof delta.metric.tags !== "object" || Array.isArray(delta.metric.tags)) return state;
       const key = metricKey(delta.metric);
       const observed = Date.parse(delta.metric.observed_at);
       if (!Number.isFinite(observed) || !Number.isFinite(delta.metric.value) ||
@@ -165,15 +192,9 @@ export const useLiveStore = create<LiveState>((set) => ({
         [key]: delta.metric,
       };
 
-      const { nextKeys, evictedKeys } = pushNewestKey(
-        state.telemetryKeysNewestFirst,
-        key,
-        MAX_TELEMETRY_METRICS,
+      const nextKeys = retainTelemetry(
+        [key, ...state.telemetryKeysNewestFirst.filter((item) => item !== key)], nextMetrics,
       );
-
-      for (const evictedKey of evictedKeys) {
-        delete nextMetrics[evictedKey];
-      }
 
       return {
         telemetryByDeviceMetric: nextMetrics,

@@ -91,3 +91,30 @@ All JWTs issued by `POST /api/v1/auth/login` and `POST /api/v1/auth/refresh` mus
 - `hashed_password` or any credential derivative.
 - Raw internal database row IDs other than `user_id`.
 - Any data classified as sensitive PII beyond `email`.
+
+## 9. ADR-026 capability and audit contract
+
+| Global role | Capabilities |
+|:--|:--|
+| Admin | All seeded permissions |
+| Operator | read:topology, read:telemetry, write:config, execute:rollback |
+| Read-Only | read:topology, read:telemetry |
+
+Current organization membership further restricts writes. Global Operator is not
+platform Admin; organization administration still requires local Admin membership.
+
+`GET /api/v1/audit/logs` retains global Admin authorization, current organization
+membership and narrowing claim checks. Query fields: org_id, actor_id,
+resource_type, page>=1, page_size1..200 (default50), optional search<=200 characters.
+Search is case-insensitive literal substring across event_type, correlation_id,
+resource_type, resource_id and actor_id; whitespace-only search is ignored. Search
+and existing filters apply together before counting/pagination, within the org.
+Ordering is timestamp descending then log_id descending. Success data remains
+`{items,total,page,page_size}` with existing actor/resource/metadata fields.
+
+Identity's public `append_audit_log` accepts optional event_id. Organization uses
+this boundary to atomically commit lifecycle audits with its mutations, without a
+migration. Direct append and consumer delivery share event identity. Historical
+unscoped/misattributed rows remain immutable; replay never silently corrects them.
+Any future historical repair requires verified owner scope and an explicit linked,
+append-only correction operation. No automated historical recovery is introduced.

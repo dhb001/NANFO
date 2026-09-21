@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTelemetryHealth, useTelemetryHistory, useDeviceTelemetry } from "@/features/telemetry/hooks";
 import { useAuthStore } from "@/shared/state/auth-store";
 import { useWorkspaceStore } from "@/shared/state/workspace-store";
@@ -20,12 +20,11 @@ import { Button } from "@/shared/ui/Button";
 import { TimeSeriesChart } from "./TimeSeriesChart";
 import { telemetryChartSeries } from "./chartSeries";
 import { FlowCounterIdentity } from "./FlowCounterIdentity";
+import { useSessionScope } from "@/features/auth/sessionScope";
 
 export function TelemetryPage() {
-  const token = useAuthStore((state) => state.accessToken);
-  const workspaceId = useWorkspaceStore((state) => state.workspaceId);
-  const networkId = useWorkspaceStore((state) => state.networkId);
-  return <TelemetryPageContent key={`${token}:${workspaceId}:${networkId}`} />;
+  const { key } = useSessionScope();
+  return <TelemetryPageContent key={key} />;
 }
 
 function TelemetryPageContent() {
@@ -47,6 +46,12 @@ function TelemetryPageContent() {
   const [pagination, setPagination] = useState({ key: filterKey, page: 1 });
   const page = pagination.key === filterKey ? pagination.page : 1;
   const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null);
+  const [devicePage, setDevicePage] = useState(1);
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 10_000);
+    return () => window.clearInterval(timer);
+  }, []);
   const isNarrowViewport = useIsNarrowViewport();
 
   const healthQuery = useTelemetryHealth(token);
@@ -60,7 +65,7 @@ function TelemetryPageContent() {
     page,
     pageSize: 120,
   }, !filterError);
-  const devicesQuery = useDevices(token, networkId);
+  const devicesQuery = useDevices(token, networkId, devicePage);
   const deviceHistoryQuery = useDeviceTelemetry(token, selectedDeviceId, range, metricFilter || undefined, !filterError);
 
   const liveMetrics = useLiveStore((state) => state.telemetryByDeviceMetric);
@@ -86,7 +91,7 @@ function TelemetryPageContent() {
 
   return (
     <div style={{ display: "grid", gap: "1rem" }}>
-      <Panel title="Telemetry Health" subtitle="VS2 /telemetry/health and realtime status snapshot">
+      <Panel title="Telemetry Health" subtitle="Collection health and the latest reported ingest status">
         {!canReadHealth ? <AsyncState title="Telemetry health restricted" description="Global diagnostics require Admin and read:telemetry permission. Tenant telemetry history remains available below." /> : <QueryState query={healthQuery}>
           {(health) => (
             <div
@@ -108,7 +113,7 @@ function TelemetryPageContent() {
       <div style={{ display: "grid", gridTemplateColumns: isNarrowViewport ? "1fr" : "1.2fr 1fr", gap: "1rem", alignItems: "start" }}>
         <Panel
           title="Telemetry History"
-          subtitle="Dense engineer timeline with filter + quick scan"
+          subtitle="Filter measurements, inspect trends and select a device to investigate"
           action={
             <label className="mono" style={{ fontSize: "0.75rem", color: "var(--ink-3)", display: "flex", gap: "0.4rem", alignItems: "center" }}>
               metric
@@ -217,7 +222,7 @@ function TelemetryPageContent() {
           </nav>}
         </Panel>
 
-        <Panel title="Device Drilldown" subtitle="Per-device telemetry history + realtime joins">
+        <Panel title="Device Drilldown" subtitle="Measurement history and incoming signals for the selected device">
           <QueryState
             query={devicesQuery}
             hasData={(data) => data.items.length > 0}
@@ -233,6 +238,7 @@ function TelemetryPageContent() {
                   style={{ border: "1px solid var(--line-soft)", borderRadius: "10px", padding: "0.48rem 0.5rem" }}
                 >
                   <option value="">Select device</option>
+                  {selectedDeviceId && !devices.items.some((device) => device.device_id === selectedDeviceId) && <option value={selectedDeviceId}>Selected device: {selectedDeviceId} (outside this page)</option>}
                   {devices.items.map((device) => (
                     <option key={device.device_id} value={device.device_id}>
                       {device.hostname} ({device.device_type})
@@ -271,10 +277,15 @@ function TelemetryPageContent() {
               </div>
             )}
           </QueryState>
+          <nav aria-label="Telemetry device pagination">
+            <Button disabled={devicePage <= 1 || devicesQuery.isFetching} onClick={() => setDevicePage(devicePage - 1)}>Previous devices</Button>
+            <span> Page {devicePage} | {devicesQuery.data?.total ?? "Unknown"} devices </span>
+            <Button disabled={!devicesQuery.data || devicePage * devicesQuery.data.page_size >= devicesQuery.data.total || devicesQuery.isFetching} onClick={() => setDevicePage(devicePage + 1)}>Next devices</Button>
+          </nav>
         </Panel>
       </div>
 
-      <Panel title="Realtime Metrics" subtitle="WebSocket /ws/telemetry live delta preview">
+      <Panel title="Realtime Metrics" subtitle="Latest incoming measurements from the telemetry stream">
         <div
           style={{
             display: "grid",
@@ -297,6 +308,9 @@ function TelemetryPageContent() {
                 <div style={{ fontWeight: 600 }}>{metric.metric}</div>
                  <TelemetryProvenance tags={metric.tags} />
                  <FlowCounterIdentity metric={metric.metric} observedAt={metric.observed_at} tags={metric.tags} />
+                 <div>Observed: {formatTimestamp(metric.observed_at)} | {Number.isFinite(Date.parse(metric.observed_at))
+                   ? `${Math.max(0, Math.floor((now - Date.parse(metric.observed_at)) / 1000))}s old${now - Date.parse(metric.observed_at) > 30_000 ? " — stale (>30s)" : ""}`
+                   : "Age unavailable"}</div>
                 <div className="mono" style={{ fontSize: "1.1rem", color: "var(--ink-2)" }}>
                   {Number.isFinite(metric.value) ? `${formatNumber(metric.value)} ${metric.unit ?? "(unit unavailable)"}` : "Unavailable"}
                 </div>

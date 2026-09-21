@@ -1,0 +1,11 @@
+{
+  "bootstrap_initial_action": 0,
+  "case_id": "path0-ambiguous-receipt",
+  "fault": "ambiguous-receipt",
+  "intervention": "injected_failpoint",
+  "phase": "afterwrite",
+  "policy": "qualified",
+  "scenario": "path0",
+  "seed": 1446,
+  "write_index": 1
+}

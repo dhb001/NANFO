@@ -1,0 +1,10 @@
+{
+  "inventory-result.json": {
+    "bytes": 46347,
+    "sha256": "5c922ae9616d0678c840f442fb4fa7a2e1131d34a779671a174777755fb9a78e"
+  },
+  "measured-result.json": {
+    "bytes": 48320,
+    "sha256": "ed035d60a51b67852e270d70e43210dbe7140413ab9d145c5c341d64b5ff3244"
+  }
+}

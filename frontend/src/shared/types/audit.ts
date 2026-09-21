@@ -1,3 +1,12 @@
+export interface AuditLogParams {
+  actorId?: string;
+  orgId?: string;
+  resourceType?: string;
+  search?: string;
+  page?: number;
+  pageSize?: number;
+}
+
 export interface AuditLogEntry {
   log_id: string;
   event_type: string;

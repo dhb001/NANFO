@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { SimulationPage } from "@/features/simulation/SimulationPage";
 
 vi.mock("@/features/simulation/hooks", () => ({
+  useSimulationHistory: () => ({ data: { items: [], total: 0, page: 1, page_size: 20 } }),
   useStartSimulation: () => ({}),
   usePauseSimulation: () => ({}),
   useBranchSimulation: () => ({}),

@@ -16,6 +16,13 @@ All endpoints must follow `docs/api/API_STANDARD.md`.
 - `POST /api/v1/simulations/branch`
 - `GET /api/v1/simulations/{id}`
 - `GET /api/v1/simulations/{id}/compare/{baselineId}`
+- `GET /api/v1/simulations?workspace_id=UUID&network_id=UUID&page=1&page_size=20`
+  (ADR026): authorized durable summary history, optional network filter, stable
+  newest-first ordering and server count. Exact schema: `docs/api/WorkflowHistory.md`.
+  The UI selects persisted runs with `simulation_id` and comparison `baseline_id`
+  URL parameters; selection never starts/resumes/branches a run. Drafts and active
+  tracking survive token rotation. Inspect history after an ambiguous start response
+  before creating another run; starts are not automatically retried on transport loss.
 
 ## 3.1 Event Contracts (Baseline)
 - `simulation.started` — emitted when a scenario validation handoff is queued for simulation-before-deployment processing.

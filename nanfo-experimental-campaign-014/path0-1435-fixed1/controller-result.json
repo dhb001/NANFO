@@ -1,0 +1,154 @@
+{
+  "error_type": "ValueError",
+  "exception": [
+    {
+      "frames": [
+        {
+          "file": "verify_experimental_lab.py",
+          "function": "controller_child",
+          "line": 961
+        },
+        {
+          "file": "controller.py",
+          "function": "run",
+          "line": 447
+        },
+        {
+          "file": "controller.py",
+          "function": "step",
+          "line": 328
+        },
+        {
+          "file": "controller.py",
+          "function": "_io",
+          "line": 42
+        },
+        {
+          "file": "verify_experimental_lab.py",
+          "function": "verify",
+          "line": 714
+        },
+        {
+          "file": "verify_experimental_lab.py",
+          "function": "call",
+          "line": 662
+        },
+        {
+          "file": "verify_experimental_lab.py",
+          "function": "verify",
+          "line": 748
+        },
+        {
+          "file": "adapter.py",
+          "function": "verify",
+          "line": 234
+        },
+        {
+          "file": "verify_experimental_lab.py",
+          "function": "_guarded",
+          "line": 780
+        },
+        {
+          "file": "adapter.py",
+          "function": "_heartbeat",
+          "line": 110
+        },
+        {
+          "file": "adapter.py",
+          "function": "_renew_heartbeat",
+          "line": 118
+        },
+        {
+          "file": "adapter.py",
+          "function": "_call",
+          "line": 100
+        }
+      ],
+      "message": "experimental_receiver_uncertain_or_rejected",
+      "type": "ValueError"
+    }
+  ],
+  "operation": "run",
+  "records": {
+    "bootstrap_recovery": {
+      "path": "bootstrap_recovery-3774714-0.json",
+      "sha256": "407048bb7e6c5f3b1f6329a7524dcaf3caf6931d52479aee0b5fd62c79cdd3df"
+    },
+    "frame": {
+      "path": "frame.json",
+      "sha256": "df91957224e40b285561fb4d946cd22363278e8dc5a0c588aaa04a54ffe69256"
+    },
+    "inference": {
+      "path": "inference-3774714-0.json",
+      "sha256": "c898347f33970e17ab1bddf57b9396ee01d7ae85f17c991484bb05b7f8315854"
+    },
+    "prepared": {
+      "path": "prepared-3774714-0.json",
+      "sha256": "9da741dd095bdb20736f6160c837ed719a0ba65315913db419c625e29b44884b"
+    },
+    "receipt": {
+      "path": "receipt-3774714-0.json",
+      "sha256": "5d5bce6f400dcd94c418c31a1a80121c5f2ab8b426668c19e1e2eaa7e6dabd9c"
+    },
+    "recovery": {
+      "path": "recovery-3774714-0.json",
+      "sha256": "90d755ccbec190d2936a74336fb7f8446725fb54e239179861044195c7648f30"
+    },
+    "simulation": {
+      "path": "simulation-3774714-0.json",
+      "sha256": "483954e741ae4d101bdafb70abb7c432414d59b7afe4dc605765f670217aa38a"
+    },
+    "verification": {
+      "path": "verification-3774714-1.json",
+      "sha256": "5b590958b46f4b69d1ad141283ee53e532cbf7e48c36f42a8f63202f62c883f7"
+    }
+  },
+  "status": "failed",
+  "timings": [
+    {
+      "finished_ns": 100573882096612,
+      "operation": "inference",
+      "started_ns": 100573873518635
+    },
+    {
+      "finished_ns": 100574484165822,
+      "operation": "simulation",
+      "started_ns": 100574007979932
+    },
+    {
+      "finished_ns": 100575209227579,
+      "operation": "prepared",
+      "started_ns": 100575204796919
+    },
+    {
+      "finished_ns": 100588769647495,
+      "operation": "receipt",
+      "started_ns": 100575808059976
+    },
+    {
+      "finished_ns": 100594714146337,
+      "operation": "verification",
+      "started_ns": 100589065431000
+    },
+    {
+      "finished_ns": 100602397448120,
+      "operation": "verification",
+      "started_ns": 100596431743951
+    },
+    {
+      "finished_ns": 100605071788484,
+      "operation": "verification",
+      "started_ns": 100604130831356
+    },
+    {
+      "finished_ns": 100607513649746,
+      "operation": "recovery",
+      "started_ns": 100605250160496
+    },
+    {
+      "finished_ns": 100608282306510,
+      "operation": "bootstrap_recovery",
+      "started_ns": 100607593171835
+    }
+  ]
+}

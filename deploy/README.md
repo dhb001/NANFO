@@ -1,5 +1,29 @@
 # ADR020 Deployment Package
 
+## Current-source schema contract — 2026-09-20
+
+Fresh builds from this source explicitly target **0029**, centralized in
+`backend/app/core/schema_version.py`. Initialization, readiness/maintenance,
+`manage.py` markers/adoption, archive fixtures and new `verify.py` runs agree.
+The verifier records `migration_0029`; this configuration is not a new accepted
+deployment or image identity. A fresh start checks the installed checkpoint
+before writing its marker, so an old image cannot be mislabeled0029.
+
+Historical0027/0028 (and earlier) images, build records and acceptance evidence below
+remain historical. Evidence export preserves their migration names/statuses.
+Cold restore remains exact-image/schema, without migrations; current tooling will
+not adopt/start an old0027/0028 marker as a current release. Use matching historical
+tooling for those images, or a separately reviewed explicit upgrade procedure.
+The historical measured-twin verifier remains targeted at0027 and must use its
+matching source/runtime, not current0029 readiness. Migration0029 adds no tables;
+it invalidates old Autonomy telemetry-coverage claims and requires reconciliation.
+
+Backup/restore0027+ always requires telemetry archive integrity and released
+autonomous-execution proof;0028+ additionally requires no unreleased experimental
+runs, owned resources or pending actions. This only reads ownership state; it does
+not activate a private lab mode or reset/release work. New0029 images still require
+their own live deployment/backup/restore acceptance. See `VALIDATION.md`.
+
 ## Current Build Handoff
 
 The Docker root is now `/home/.system-data/docker`. The prior image IDs and disk
@@ -105,7 +129,7 @@ than automatically rerunning or deleting volumes.
 
 Open `http://127.0.0.1:8787`. Only the gateway publishes a host port, bound explicitly
 to loopback, forwarding to non-root nginx port 8080. `/health` is liveness; `/ready`
-checks schema0019, PostgreSQL, Redis, Neo4j, API lease and event consumers. Worker
+checks the exact current-source schema0029, PostgreSQL, Redis, Neo4j, API lease and event consumers. Worker
 health uses the existing `check_worker_health.py --worker NAME` and actual completed
 loop progress under each container's private `/run/nanfo` tmpfs, not process existence.
 Both `NANFO_WORKER_HEARTBEAT_PATH` and the current backend setting

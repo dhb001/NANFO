@@ -1,0 +1,11 @@
+{
+  "bootstrap_initial_action": 0,
+  "case_id": "path0-delayed-data",
+  "fault": "delayed-data",
+  "intervention": "real",
+  "phase": "beforewrite",
+  "policy": "qualified",
+  "scenario": "path0",
+  "seed": 1437,
+  "write_index": 0
+}

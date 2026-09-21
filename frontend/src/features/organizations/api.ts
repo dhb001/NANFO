@@ -8,6 +8,22 @@ import {
   WorkspaceList,
 } from "@/shared/types/organization";
 
+export function updateOrganization(token: string, orgId: string, body: { name: string }) {
+  return apiRequest<Organization>(`/api/v1/organizations/${orgId}`, { method: "PATCH", token, body });
+}
+
+export function deleteOrganization(token: string, orgId: string) {
+  return apiRequestNoContent(`/api/v1/organizations/${orgId}`, { token });
+}
+
+export function updateWorkspace(token: string, orgId: string, workspaceId: string, body: { name?: string; description?: string | null }) {
+  return apiRequest<Workspace>(`/api/v1/organizations/${orgId}/workspaces/${workspaceId}`, { method: "PATCH", token, body });
+}
+
+export function deleteWorkspace(token: string, orgId: string, workspaceId: string) {
+  return apiRequestNoContent(`/api/v1/organizations/${orgId}/workspaces/${workspaceId}`, { token });
+}
+
 export function createOrganization(token: string, body: { name: string; slug: string }) {
   return apiRequest<Organization>("/api/v1/organizations", {
     method: "POST",
@@ -52,9 +68,9 @@ export function listWorkspaces(token: string, orgId: string, page = 1, pageSize 
   );
 }
 
-export function listOrgMembers(token: string, orgId: string, page = 1, pageSize = 20) {
+export function listOrgMembers(token: string, orgId: string, page = 1, pageSize = 20, signal?: AbortSignal) {
   return apiRequest<OrgMemberList>(
     `/api/v1/organizations/${orgId}/members?page=${page}&page_size=${pageSize}`,
-    { token },
+    { token, signal },
   );
 }

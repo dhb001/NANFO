@@ -1,0 +1,292 @@
+{
+  "cases": {
+    "disk_capacity": {
+      "status": "passed",
+      "detail": {
+        "docker_root": "/home/.system-data/docker",
+        "capacity_filesystem": "/home",
+        "docker_available_bytes": 275776086016,
+        "staging_available_bytes": 7103373312,
+        "minimum_bytes": 1073741824
+      }
+    },
+    "installed_source_parity": {
+      "status": "passed",
+      "detail": "Installed maintenance/readiness bytes match current source"
+    },
+    "package_contract": {
+      "status": "passed",
+      "detail": {
+        "locked_stages_present": true,
+        "live_build": "pending"
+      }
+    },
+    "locked_container_build": {
+      "status": "passed",
+      "detail": {
+        "mode": "referenced_prior_locked_build_not_new_build",
+        "evidence_path": "/tmp/opencode/recovery-build-final.md",
+        "evidence_sha256": "75ffe3aed7b5308ea59c7a8966ef27e5ab2c5555077bcc7f0228c9ccdb835f4b",
+        "images": {
+          "backend": {
+            "id": "sha256:c2c35eeda19ca7448f865cf9e2f48069b2533aee0eeaf998cff7d81ad648820d",
+            "os": "linux",
+            "architecture": "amd64"
+          },
+          "frontend": {
+            "id": "sha256:0b276d12f471b356fa62881f7eb8063a32f4558a6d7b47883216278bb52cb0f7",
+            "os": "linux",
+            "architecture": "amd64"
+          },
+          "neo4j": {
+            "id": "sha256:d544f1ef8033ddfbf3a7cc81cdc1a73f90e503153202ea44d35f293bf43d9db7",
+            "os": "linux",
+            "architecture": "amd64"
+          }
+        },
+        "installed_source_sha256": {
+          "deploy/maintenance.py": "c7476372a0eec695b15e16750551a78fe0f492cec1d572c98f31e4366642ab1e",
+          "backend/app/api/readiness.py": "785ca236ec0e16823d41ea8859e876e4cb184bce0be03901a6da6956153853b9",
+          "backend/app/core/runtime_health.py": "a1da9a3008cecc49365629eff927275fe8efce0a3fc5c7f1c3a4bbbe0ec7e6c9",
+          "backend/app/core/config.py": "3025a44ffe72bdf827a1a909a340e797bd70b99910eca2acee40da7e241b4705",
+          "backend/app/modules/network/operations.py": "ffcb6ccc69e2c54b443d672bc9e47d4fc4df515354ca8b96dd872f00066b545e",
+          "backend/app/modules/report/artifacts.py": "c95f4ab3de3c264b6a49173dffec2882010a4c40e801a6992652cdfdd6bd0115",
+          "backend/app/modules/report/service.py": "044a2f408ccd17e496e65c1231bdf96444e842b1a7dd648f41dfbe03b5c901d9",
+          "backend/app/modules/report/worker.py": "fbd723d33b4b5d9e4109daace9c071a92605fabef7275734f477760cc7dbce9e"
+        },
+        "source_mismatches": [],
+        "builds_performed": 0,
+        "pulls_performed": 0
+      }
+    },
+    "fresh_volumes": {
+      "status": "passed",
+      "detail": {
+        "empty_new_volumes": [
+          "nanfo-deploy-verify-9a556e75c8154cf4864a3b18b6133bf2_init_secrets",
+          "nanfo-deploy-verify-9a556e75c8154cf4864a3b18b6133bf2_lab_commands",
+          "nanfo-deploy-verify-9a556e75c8154cf4864a3b18b6133bf2_lab_output",
+          "nanfo-deploy-verify-9a556e75c8154cf4864a3b18b6133bf2_lab_results",
+          "nanfo-deploy-verify-9a556e75c8154cf4864a3b18b6133bf2_neo4j_data",
+          "nanfo-deploy-verify-9a556e75c8154cf4864a3b18b6133bf2_postgres_data",
+          "nanfo-deploy-verify-9a556e75c8154cf4864a3b18b6133bf2_redis_data",
+          "nanfo-deploy-verify-9a556e75c8154cf4864a3b18b6133bf2_reports",
+          "nanfo-deploy-verify-9a556e75c8154cf4864a3b18b6133bf2_runtime_secrets"
+        ],
+        "existing_data": 0
+      }
+    },
+    "migration_0021": {
+      "status": "passed",
+      "detail": "0021"
+    },
+    "bootstrap_login": {
+      "status": "passed",
+      "detail": {
+        "generated_password": true,
+        "password_in_argv": false,
+        "authenticated_bootstrap_actor": true
+      }
+    },
+    "frontend_http": {
+      "status": "passed",
+      "detail": {
+        "html_bytes": 958,
+        "built_assets_fetched": 5,
+        "browser_execution": "not tested; HTTP smoke only"
+      }
+    },
+    "full_stack_readiness": {
+      "status": "passed",
+      "detail": "Gateway /ready and all six work-coupled worker healthchecks passed"
+    },
+    "simulation": {
+      "status": "passed",
+      "detail": {
+        "simulation_id": "34ba4e98-52b7-4668-a075-2c7c0210c35c",
+        "loss_pct": 45.0,
+        "configured_model_only": true
+      }
+    },
+    "report_csv": {
+      "status": "passed",
+      "detail": {
+        "report_id": "638b8b9d-f463-4b17-ad2e-2773fc8e1cbc",
+        "sha256": "579e376cbad3fcca28483576d4cacb5423c15bccc5ad9ac7cc149c1d66b54234",
+        "size_bytes": 3788,
+        "snapshot_sha256": "96bb52e401e82ef2a40284bcaf2aa8e12070785c7f5c8a333140eae6dd30fcac",
+        "format": "csv"
+      }
+    },
+    "report_pdf": {
+      "status": "passed",
+      "detail": {
+        "report_id": "6d9a8003-92ff-497c-ba0a-98953db31d56",
+        "sha256": "bb0e93b8a64af29c8c407630cf928623587959a8be3dc49dc20dbb79021af467",
+        "size_bytes": 3404,
+        "snapshot_sha256": "be2effb96fc4b562006daf97efbf61ab0495d5a20642bf71cc4c0859dc7770f0",
+        "format": "pdf"
+      }
+    },
+    "database_stop_readiness": {
+      "status": "passed",
+      "detail": "Actual PostgreSQL stop: /ready 503, /health 200; readiness and workers recovered"
+    },
+    "worker_stale_heartbeat": {
+      "status": "passed",
+      "detail": "Actual worker SIGSTOP produced stale-loop heartbeat with live stores; SIGCONT recovered"
+    },
+    "api_worker_restart": {
+      "status": "passed",
+      "detail": {
+        "report": {
+          "report_id": "997f362d-61b0-4597-b493-29a81678b8f8",
+          "sha256": "91809fa4bd823302abf3066af10000e01696a849c365e0d2755d82ea8769fea9",
+          "size_bytes": 3788,
+          "snapshot_sha256": "6dbcb59a3470209abe75465bc29292d2462525d2360bd1cefd82481074a1317a",
+          "format": "csv"
+        },
+        "simulation_id": "30b69ec0-fbf0-4704-b68d-8b083c69c346",
+        "restarted_services": [
+          "api",
+          "network-outbox-worker",
+          "simulation-worker",
+          "report-worker",
+          "alert-worker",
+          "execution-worker",
+          "autonomy-worker"
+        ]
+      }
+    },
+    "lab_binding": {
+      "status": "blocked",
+      "detail": "Lab profile not requested"
+    },
+    "lab_congestion": {
+      "status": "blocked",
+      "detail": "Lab profile not requested"
+    },
+    "model_diagnostic": {
+      "status": "blocked",
+      "detail": "Frozen model diagnosis not requested"
+    },
+    "coordinated_encrypted_backup": {
+      "status": "passed",
+      "detail": {
+        "manifest_sha256": "d6d1a594e3f08d1d1af9f70f51e852e76612c2e8222fa70de450b404fb9ad305",
+        "encrypted_volumes": 9,
+        "encrypted_bind_directories": 1,
+        "source_writers_stopped": true,
+        "neo4j_graph": {
+          "node_labels": [
+            {
+              "count": 9,
+              "identity": "Device"
+            },
+            {
+              "count": 9,
+              "identity": "DeviceEventRevision"
+            }
+          ],
+          "nodes": 18,
+          "relationship_types": [],
+          "relationships": 0,
+          "revision_tombstones": 0,
+          "revisions": 9,
+          "revisions_sha256": "64b242f8dbc6b55565d59f52041d9a0dc752ba819d1471e58ac2ba547dc3117f"
+        }
+      }
+    },
+    "distinct_fresh_restore": {
+      "status": "passed",
+      "detail": {
+        "source_project": "nanfo-deploy-verify-9a556e75c8154cf4864a3b18b6133bf2",
+        "target_project": "nanfo-deploy-verify-dbe0a385e18b4b3896ea11a16d0c02f3",
+        "fresh_distinct_volumes": 9,
+        "neo4j_graph": {
+          "node_labels": [
+            {
+              "count": 9,
+              "identity": "Device"
+            },
+            {
+              "count": 9,
+              "identity": "DeviceEventRevision"
+            }
+          ],
+          "nodes": 18,
+          "relationship_types": [],
+          "relationships": 0,
+          "revision_tombstones": 0,
+          "revisions": 9,
+          "revisions_sha256": "64b242f8dbc6b55565d59f52041d9a0dc752ba819d1471e58ac2ba547dc3117f"
+        }
+      }
+    },
+    "restore_image_schema": {
+      "status": "passed",
+      "detail": {
+        "exact_image_ids_os_architecture": true,
+        "schema": "0021",
+        "target_migrations_executed": false
+      }
+    },
+    "old_tokens_invalid": {
+      "status": "passed",
+      "detail": "Unexpired old access and refresh rejected; new login accepted"
+    },
+    "restored_report_bytes": {
+      "status": "passed",
+      "detail": {
+        "identical_downloads": 3,
+        "formats": [
+          "csv",
+          "pdf"
+        ]
+      }
+    },
+    "restored_workflows": {
+      "status": "passed",
+      "detail": {
+        "simulation_checkpoint_identical": true,
+        "restart_workflow_survived": true,
+        "physical_workflows_identical": 0
+      }
+    },
+    "restored_telemetry": {
+      "status": "blocked",
+      "detail": "No actual measured telemetry existed; empty-to-empty is not survival proof"
+    },
+    "source_unchanged": {
+      "status": "passed",
+      "detail": "Verified"
+    },
+    "campaign": {
+      "status": "passed",
+      "detail": "Verified"
+    },
+    "cleanup": {
+      "status": "passed",
+      "detail": {
+        "containers_removed": 22,
+        "volumes_removed": 18,
+        "networks_removed": 4
+      }
+    }
+  },
+  "core_passed": true,
+  "all_green": false,
+  "step15_complete": false,
+  "counts": {
+    "passed": 24,
+    "failed": 0,
+    "blocked": 4,
+    "pending": 0
+  },
+  "live_authorized": true,
+  "agents_idle_attested": true,
+  "failure": null,
+  "evidence_directory": "/tmp/opencode/nanfo-deploy-verify-gx9u923y/evidence",
+  "live_requested_lab": false,
+  "live_requested_model": false
+}

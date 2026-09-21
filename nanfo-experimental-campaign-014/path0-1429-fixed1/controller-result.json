@@ -1,0 +1,149 @@
+{
+  "error_type": "ValueError",
+  "exception": [
+    {
+      "frames": [
+        {
+          "file": "verify_experimental_lab.py",
+          "function": "controller_child",
+          "line": 961
+        },
+        {
+          "file": "controller.py",
+          "function": "run",
+          "line": 447
+        },
+        {
+          "file": "controller.py",
+          "function": "step",
+          "line": 328
+        },
+        {
+          "file": "controller.py",
+          "function": "_io",
+          "line": 42
+        },
+        {
+          "file": "verify_experimental_lab.py",
+          "function": "verify",
+          "line": 714
+        },
+        {
+          "file": "verify_experimental_lab.py",
+          "function": "call",
+          "line": 662
+        },
+        {
+          "file": "verify_experimental_lab.py",
+          "function": "verify",
+          "line": 748
+        },
+        {
+          "file": "adapter.py",
+          "function": "verify",
+          "line": 234
+        },
+        {
+          "file": "verify_experimental_lab.py",
+          "function": "_guarded",
+          "line": 786
+        },
+        {
+          "file": "adapter.py",
+          "function": "_heartbeat",
+          "line": 110
+        },
+        {
+          "file": "adapter.py",
+          "function": "_renew_heartbeat",
+          "line": 118
+        },
+        {
+          "file": "adapter.py",
+          "function": "_call",
+          "line": 100
+        }
+      ],
+      "message": "experimental_receiver_uncertain_or_rejected",
+      "type": "ValueError"
+    }
+  ],
+  "operation": "run",
+  "records": {
+    "bootstrap_recovery": {
+      "path": "bootstrap_recovery-3583529-0.json",
+      "sha256": "2da5c6694a0c70a4f76ff14e4db983da25d52005c1bd0af561d87a85ec12908a"
+    },
+    "frame": {
+      "path": "frame.json",
+      "sha256": "62d9fff77a4ac6677bc1e5ce570a95c8944b4aabd72d07ceb9ff2c5839bdd55f"
+    },
+    "inference": {
+      "path": "inference-3583529-0.json",
+      "sha256": "0745b60abb19a538c47cb7b241973ccc1ae9a328e6167480e9763581832f9a2e"
+    },
+    "prepared": {
+      "path": "prepared-3583529-0.json",
+      "sha256": "f1ed6ae0b3f22909e3e4b77f07a7ff5411bacdec713a42736db6c18f037ee71b"
+    },
+    "receipt": {
+      "path": "receipt-3583529-0.json",
+      "sha256": "1c815a030f8a41e0fe19c88e02a2280030f7bf02d2e5ad03d641a315c80de069"
+    },
+    "recovery": {
+      "path": "recovery-3583529-0.json",
+      "sha256": "5e444fe6ee3e38881e1cbd071e9d878127d17473edae9d9d49cb0a07c77fda1f"
+    },
+    "simulation": {
+      "path": "simulation-3583529-0.json",
+      "sha256": "fcd27d1d21ee5981e304eca7240d24c1dfad231b818def7767667cdd53643cbf"
+    },
+    "verification": {
+      "path": "verification-3583529-0.json",
+      "sha256": "b9d280631128ff8150aea8312060290f0612e484a3a0595c0a84679c2c738c2b"
+    }
+  },
+  "status": "failed",
+  "timings": [
+    {
+      "finished_ns": 98598830985745,
+      "operation": "inference",
+      "started_ns": 98598819188743
+    },
+    {
+      "finished_ns": 98599434326651,
+      "operation": "simulation",
+      "started_ns": 98598959344695
+    },
+    {
+      "finished_ns": 98600154017825,
+      "operation": "prepared",
+      "started_ns": 98600149508278
+    },
+    {
+      "finished_ns": 98613877881800,
+      "operation": "receipt",
+      "started_ns": 98600777898949
+    },
+    {
+      "finished_ns": 98619859276147,
+      "operation": "verification",
+      "started_ns": 98614168707152
+    },
+    {
+      "finished_ns": 98624475617717,
+      "operation": "verification",
+      "started_ns": 98621460463013
+    },
+    {
+      "finished_ns": 98626574204192,
+      "operation": "recovery",
+      "started_ns": 98624640901803
+    },
+    {
+      "finished_ns": 98627285696737,
+      "operation": "bootstrap_recovery",
+      "started_ns": 98626646973088
+    }
+  ]
+}

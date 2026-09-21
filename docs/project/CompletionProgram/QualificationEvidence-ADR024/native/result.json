@@ -1,0 +1,229 @@
+{
+  "authority_kind": "scoped-manual-driver-campaign",
+  "autonomy_qualified": false,
+  "cases": [
+    {
+      "action": 0,
+      "case": "exclusive-lock",
+      "status": "passed"
+    },
+    {
+      "action": 0,
+      "case": "STOP-0",
+      "status": "passed"
+    },
+    {
+      "action": 0,
+      "case": "STOP-1",
+      "status": "passed"
+    },
+    {
+      "action": 0,
+      "case": "STOP-2",
+      "status": "passed"
+    },
+    {
+      "action": 0,
+      "case": "STOP-3",
+      "status": "passed"
+    },
+    {
+      "action": 0,
+      "case": "STOP-4",
+      "status": "passed"
+    },
+    {
+      "action": 0,
+      "case": "STOP-5",
+      "status": "passed"
+    },
+    {
+      "action": 0,
+      "case": "STOP-6",
+      "status": "passed"
+    },
+    {
+      "action": 0,
+      "case": "STOP-7",
+      "status": "passed"
+    },
+    {
+      "action": 0,
+      "case": "STOP-8",
+      "status": "passed"
+    },
+    {
+      "action": 0,
+      "case": "STOP-9",
+      "status": "passed"
+    },
+    {
+      "action": 0,
+      "case": "STOP-10",
+      "status": "passed"
+    },
+    {
+      "action": 0,
+      "case": "STOP-11",
+      "status": "passed"
+    },
+    {
+      "action": 0,
+      "case": "STOP-12",
+      "status": "passed"
+    },
+    {
+      "action": 0,
+      "case": "expired-0",
+      "status": "passed"
+    },
+    {
+      "action": 0,
+      "case": "binding-refusal-0",
+      "status": "passed"
+    },
+    {
+      "action": 0,
+      "case": "foreign-12",
+      "status": "passed"
+    },
+    {
+      "action": 0,
+      "case": "restart-3",
+      "status": "passed"
+    },
+    {
+      "action": 0,
+      "case": "lost-receipt-3",
+      "status": "passed"
+    },
+    {
+      "action": 0,
+      "case": "recovery-interrupted-3",
+      "status": "passed"
+    },
+    {
+      "action": 0,
+      "case": "normal-12",
+      "status": "passed"
+    },
+    {
+      "action": 1,
+      "case": "exclusive-lock",
+      "status": "passed"
+    },
+    {
+      "action": 1,
+      "case": "STOP-0",
+      "status": "passed"
+    },
+    {
+      "action": 1,
+      "case": "STOP-1",
+      "status": "passed"
+    },
+    {
+      "action": 1,
+      "case": "STOP-2",
+      "status": "passed"
+    },
+    {
+      "action": 1,
+      "case": "STOP-3",
+      "status": "passed"
+    },
+    {
+      "action": 1,
+      "case": "STOP-4",
+      "status": "passed"
+    },
+    {
+      "action": 1,
+      "case": "STOP-5",
+      "status": "passed"
+    },
+    {
+      "action": 1,
+      "case": "STOP-6",
+      "status": "passed"
+    },
+    {
+      "action": 1,
+      "case": "STOP-7",
+      "status": "passed"
+    },
+    {
+      "action": 1,
+      "case": "STOP-8",
+      "status": "passed"
+    },
+    {
+      "action": 1,
+      "case": "STOP-9",
+      "status": "passed"
+    },
+    {
+      "action": 1,
+      "case": "STOP-10",
+      "status": "passed"
+    },
+    {
+      "action": 1,
+      "case": "STOP-11",
+      "status": "passed"
+    },
+    {
+      "action": 1,
+      "case": "STOP-12",
+      "status": "passed"
+    },
+    {
+      "action": 1,
+      "case": "expired-0",
+      "status": "passed"
+    },
+    {
+      "action": 1,
+      "case": "binding-refusal-0",
+      "status": "passed"
+    },
+    {
+      "action": 1,
+      "case": "foreign-12",
+      "status": "passed"
+    },
+    {
+      "action": 1,
+      "case": "restart-3",
+      "status": "passed"
+    },
+    {
+      "action": 1,
+      "case": "lost-receipt-3",
+      "status": "passed"
+    },
+    {
+      "action": 1,
+      "case": "recovery-interrupted-3",
+      "status": "passed"
+    },
+    {
+      "action": 1,
+      "case": "normal-12",
+      "status": "passed"
+    }
+  ],
+  "claim": "native-driver-verified",
+  "environment": "isolated-emulation",
+  "failures": [],
+  "hard_transition_deadline_proved": false,
+  "physical_rf_qualified": false,
+  "receiver_journal_acceptance": false,
+  "safety_calibrated": false,
+  "safety_certificate": null,
+  "sealed_queue_theorem": "conditional-on-reviewed-native-enforcement",
+  "status": "passed",
+  "trusted_installation": null,
+  "unresolved_resources": [],
+  "version": "nanfo.native-driver-acceptance/v1"
+}

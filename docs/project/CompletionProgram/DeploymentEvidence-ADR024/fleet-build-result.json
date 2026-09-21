@@ -1,0 +1,18 @@
+{
+  "snapshot": "/tmp/opencode/nanfo-adr023-frozen-ei7ulj7m",
+  "tag": "nanfo-deploy-adr023-fleet:mdwd31s8",
+  "exit_code": 0,
+  "command": [
+    "docker",
+    "build",
+    "--target",
+    "with-fleet",
+    "-f",
+    "deploy/Dockerfile.backend",
+    "-t",
+    "nanfo-deploy-adr023-fleet:mdwd31s8",
+    "."
+  ],
+  "image_id": "sha256:ff58e0c92eb0a3d5ba038efb0ea9c4c225fa04b972da0c29c0309175ff0b5d0b",
+  "packages": "libsnmp-base 5.9.3+dfsg-2+deb12u1\nlibsnmp40 5.9.3+dfsg-2+deb12u1\nsnmp 5.9.3+dfsg-2+deb12u1\n"
+}

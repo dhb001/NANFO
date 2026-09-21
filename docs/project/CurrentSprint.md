@@ -1,5 +1,130 @@
 # Current Sprint State
 
+## ADR026 Parallel Audit Repair — Integrated (2026-09-20)
+
+- A01–A17 and requested inventory/admin/history/guided-Twin workflows implemented.
+  Completion matrix and limitations: `AuditRepair-Completion.md`; approved contracts
+  in ADR026. Independent review's3 P2 findings reproduced, fixed and reverified.
+- Final frontend575unit/70browser pass; affected postreview11browser pass. Type/lint/
+  build/perf pass387.96KiB against original410.16KiB cap. Backend3632pass/289skip,
+  Ruff clean; full isolated PostgreSQL253pass/12Redis-dependent skip; deployment248pass.
+- Current schema integration tracks concurrent0029, retaining historical0027/0028
+  evidence. Owned test stores cleaned; no shared migration/live deployment/commit.
+- Remaining verification: realRedis/Valkey-dependent lane and actual HTTP smoke are
+  wired into zero-skip CI but not locally runnable; historical audit correction is
+  an explicit append-only data operation, not automatic evidence rewriting.
+
+## Frontend / Backend Workflow Audit (2026-09-20)
+
+- Audit requested after redesign; report and repair order:
+  `FrontendBackendAudit-2026-09-20.md` (A01–A17). Historical pre-repair checkpoint;
+  implemented closure is recorded above and in `AuditRepair-Completion.md`.
+- Confirmed token-refresh draft loss, first-page inventory, hidden create failures,
+  audit row overlap/scope/actor defects, membership re-add failure, alert filtering
+  and scope ambiguity, slug typing, validation and role-fixture gaps.
+- Current backend run3371pass/1fail/239skip; isolated PostgreSQL210pass/2fail/1skip;
+  deployment216pass. Six browser defect probes reproduced uncovered issues. Fresh
+  migration to0028 passed. Ruff has1 experimental E731; schema/fixture drift is
+  documented separately from runtime defects. Prior same-source frontend527/54 pass.
+
+
+## Network Atlas UI / UX Refresh (2026-09-20)
+
+- Delivered the user-requested midnight/cobalt/lime identity across the application:
+  login, overview, shared shell, route introductions, forms, tables, panels and states.
+- Grouped mobile disclosure navigation, task-oriented overview shortcuts and brief
+  reduced-motion-aware transitions. Command palette now retains arrow selection,
+  traps keyboard focus and restores focus on close. Digital Twin scene precedes
+  configuration, with supporting metadata arranged in a responsive grid.
+- Frontend typecheck/lint pass;527 unit/component tests pass and the13 Twin tests
+  pass again after layout changes. Full Chromium suite:54/54 with no retries.
+  Desktop/tablet/mobile checks at1440/768/390px; all route headings/overflow checked.
+- Production build and unchanged performance gates pass:409.70KiB JS gzip against
+  410.16KiB limit. Screenshot review used contract fixtures, not live-network evidence.
+  Design handoff and validation details are in DecisionLog/DevelopmentJournal.
+
+## ADR024 Measured Qualification Closure (2026-09-20)
+
+- User clarified no physical RF survey or equipment exists. PhysicalRF qualification
+  remains externally blocked; no simulated measurement is counted as a survey.
+- Recovered exact archivedv4 sources, truthfully rebuilt image954462…; derived
+  checkpoint77dae44a… preserves all original tensors and parent checkpoint. Fresh
+  preregistered seeds3003–3014, five policies,300 windows/240 decisions passed original
+  constant/OSPF/directionality gates, independently reconstructed. No training/retuning.
+- Actual6frame passive feed→confined inference→worker campaign produced4 durable
+  correct-route recommendations at9.737–14.155s; stale/disconnect/admission/revocation
+  gates passed. This resolves scoped live recommendation runtime mismatch, not actuation.
+- Native static-FIB Mininet manual-driver campaign42/42 passed480 mutations,
+  STOP0–12, restart/lost receipts/compensation, foreign-state denial and12/12 probes.
+  Independent review accepts native-driver-verified, not autonomous-qualified.
+- Implemented versioned burst/service semantics and raw-ns canonical causal clocks;
+  v1 preserved. Future native service/deadline guarantees and joined model/safety/
+  durable receiver acceptance remain unestablished; no calibration installed.
+- Backend3282pass/212skip, Ruff clean. ADR024 deployment29pass/0fail/4blocked,
+ 216tests/20installed checks, confined fresh benchmark qualification passes.
+  Credential-free evidence and reusable155MiB raw/model set are preserved via
+  `CompletionProgram/QualificationEvidence.md`; original artifacts unchanged.
+
+
+## ADR024 Evidence Preservation (2026-09-20)
+
+- Preserved 1,107 credential-screened files with exact source/destination hashes
+  under `ai-engine/artifacts/adr024-qualified-001/` (Git-ignored, durable local).
+- Compact results, independent reviews, plans and complete relocation/raw/source
+  manifests are in `CompletionProgram/QualificationEvidence-ADR024/` (under 1 MiB).
+- Offline relocated frozen report reconstruction and both recorded inference
+  directions passed; 61 registry references resolve. Eleven copy-safety tests pass.
+- Operator commands, hashes, exclusions and scope limits:
+  `CompletionProgram/QualificationEvidence.md`. No lab or activation performed.
+
+## ADR023 Remaining Six Workstreams (2026-09-20)
+
+- Implemented dimensioned boxes/slabs/walls, canonical RF transforms and frontend
+  geometry editing/rendering/floor clipping. Preserved old revision/RF hashes.
+- Distributed mode now runs in actual app composition with leader-only domain work,
+  independent socket fanout, failover/readiness and bounded poison/replay recovery.
+- All five evidence owners pin references;0025 archives/verifies/deletes eligible
+  unreferenced records and restores identities with permanent replay tombstones.
+  Fleet0026 adds device leases, durable spool and packaged multi-device SNMP collection.
+- Continuous qualified provider/registry/inference and passive acquisition code is
+  installed conditionally.0027 safety/execution journals, OVS/FRR receivers and protected
+  journal-only API clients are implemented. No authentic physical calibration or
+  matching currentv4 runtime observations were supplied; activation remains blocked.
+- Final gates: backend3154pass/209opt-in skip, frontend527unit/52no-retry browser,
+  type/lint/build/perf passed408.36KiB. AI463 prior suite unchanged. Independent review
+  all11 defects closed. Corrected distributed/core/archive29pass/0fail/4blocked;
+  deployment216tests, installed smoke20, packaged fleet6/6 and transport1/1.
+- Eleven-volume encrypted fresh restore, nonempty archives/pins/tombstones and
+  geometry/assets/history verified. Shared resources preserved. Current register:
+  `CompletionProgram/README.md`; exact final source/image evidence:
+  `CompletionProgram/DeploymentEvidence-ADR023-20260920/LATEST-HEALTH-FINAL.md`.
+
+
+## ADR021/022 Measured Twin Completion Program (2026-09-20)
+
+- User-authorized parallel implementation delivered inventory outbox0020, canonical
+  scene0021, immutable history0022, registered protected binary assets0023 and
+  telemetry evidence-pin/keyset foundations0024. Main/router, six-worker deployment,
+  migration metadata and runtime readiness are integrated at0024.
+- Twin supports canonical transforms, conflict-safe editing/history restore, persisted
+  registration, authenticated model bytes, instanced rendering and backend RF artifact
+  overlays. SNMPv3 real guarded collection and operator RF/calibration/snapshot tools
+  are implemented. AI adds non-actuating shadow review, scoped registry/scheduler,
+  persistent tiered memory, deterministic consensus and reflection.
+- Final gates: backend2612 passed/138 opt-in skipped; frontend523 unit and51 Chromium
+  tests passed without retries; AI463 passed; backend/frontend lint/type checks passed.
+  Bundle409.77KiB remains below unchanged410.16KiB. Deployment174 tests passed.
+- Current0024 live service lanes:14/14 inventory/spatial/CAS/outbox and8/8 actual
+  measured-SNMP/cursor pipeline passed. Corrected source-matched core Docker campaign:
+  26 passed/0 failed/4 blocked, including encrypted10-volume backup/fresh restore,
+  exact asset/report bytes, registration/history and old-session denial.
+- Full vision remains OPEN: complete owner evidence-retention integration, dimensioned
+  geometry, distributed fanout, collector fleet/packaging, physical calibration,
+  continuous qualified AI providers and autonomous executor/recovery. No physical
+  qualification or production autonomy is implied. Full capability and evidence map:
+  `CompletionProgram/README.md`. Existing shared services were preserved; no commits.
+
+
 ## UI Visual Redesign (2026-09-18)
 
 - Delivered user-requested network-instrument visual direction: ink navigation,

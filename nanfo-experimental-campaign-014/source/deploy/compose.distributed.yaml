@@ -1,0 +1,18 @@
+# Apply to the entire serving pool, never start a second legacy singleton API.
+services:
+  api:
+    environment:
+      API_REALTIME_DISTRIBUTED: "true"
+  api2:
+    extends: {file: compose.yaml, service: api}
+    environment:
+      API_REALTIME_DISTRIBUTED: "true"
+  gateway:
+    depends_on:
+      api2: {condition: service_healthy}
+    configs:
+      - source: distributed-upstream
+        target: /etc/nginx/nginx-upstream.conf
+configs:
+  distributed-upstream:
+    file: ./nginx-distributed-upstream.conf

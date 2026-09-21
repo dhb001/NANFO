@@ -1,0 +1,20 @@
+{
+  "container_id": "631a3e076f210ca804997ca9e03d1afdc15e0f9b061f56172dc491c570c842a1",
+  "controller_policy_sha256": null,
+  "expires_at": 1789939178.592663,
+  "heartbeat_seconds": 10,
+  "image_id": "sha256:954462c0f00d5bbaa72ea144f6064936b399c430e6ab94bffcf1c00d134ea0d7",
+  "max_duration_seconds": 30,
+  "max_loss_fraction": 0.75,
+  "max_observation_age_seconds": 30,
+  "max_rtt_ms": 1000,
+  "min_dwell_seconds": 2,
+  "min_goodput_mbps": 0.1,
+  "model_sha256": "77dae44acab722a5a6a2e87d952a6cca65e1c4eea102a089830a8401b521d614",
+  "owner_label": "ad92321030004666936a5afa7f9b696f",
+  "scenario": "path0",
+  "seed": 1425,
+  "source_sha256": "08c312c64154c9aedcd3b22eeb3573783590e0eb7183bc999cb8ef39b958dbbd",
+  "version": "nanfo.experimental-receiver-policy/v1",
+  "wrapper_sha256": "e7a3c0256264e69a1975e68b97b8c2d70c1e4f098f91cb8046f90151cb260add"
+}

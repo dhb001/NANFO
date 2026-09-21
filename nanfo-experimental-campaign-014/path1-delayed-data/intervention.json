@@ -1,0 +1,16 @@
+{
+  "applied_ns": 102193879148071,
+  "bootstrap_initial_action": 1,
+  "case_id": "path1-delayed-data",
+  "delay_seconds": 31,
+  "fault": "delayed-data",
+  "intervention": "real",
+  "observation_ready": {
+    "monotonic_ns": 102162824277518
+  },
+  "phase": "beforewrite",
+  "policy": "qualified",
+  "scenario": "path1",
+  "seed": 1447,
+  "write_index": 0
+}

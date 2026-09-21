@@ -1,23 +1,16 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { acknowledgeAlert, listAlerts, resolveAlert, getAlert, getAlertHistory } from "@/features/reliability/api";
 
-interface UseAlertsQueryOptions {
-  status?: "active" | "acknowledged" | "resolved";
-  severity?: string;
-  source?: string;
-  correlationId?: string;
-  search?: string;
-  limit?: number;
-}
+import { AlertListParams } from "@/shared/types/alerts";
 
-export function useAlertsQuery(token: string | null, options: UseAlertsQueryOptions = {}) {
+export function useAlertsQuery(token: string | null, options: AlertListParams = {}, enabled = true) {
   return useQuery({
     queryKey: ["alerts", token, options],
     queryFn: async () => {
       const response = await listAlerts(token as string, options);
       return response.data;
     },
-    enabled: Boolean(token),
+    enabled: Boolean(token) && enabled,
   });
 }
 

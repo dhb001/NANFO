@@ -1,0 +1,24 @@
+[
+  {
+    "run": "nanfo-deploy-verify-b_fzalg0",
+    "destination": "/home/DHB/Documents/NANFO/deploy/state/adr023-private-evidence/nanfo-deploy-verify-b_fzalg0",
+    "files": 15,
+    "verified_sha256": {
+      "backup/manifest.hmac": "f25dd64bb79cc384150c24c6253ad94321264e6d24b0c71dfeab929831548d0a",
+      "backup/manifest.json": "0ad15462fb7aefd9f715b09ebc4ceb2e3a7cb2a24e8014124d882c68ba39d57a",
+      "backup/volume-0011.tar.gcm": "7961afc93818a523f3ab9c4af0a97d03dbb9ab8acdd422de726387f2b7c25ccc",
+      "backup/volume-0010.tar.gcm": "6283681bf0cf81abb81e6ef12e540efc314051e35546e2db2531464dcc48888e",
+      "backup/volume-0009.tar.gcm": "3a65e52102f65b8abd6fbc4c049811eb22b61ca2daa036280682fdaf79034ece",
+      "backup/volume-0008.tar.gcm": "111a993857ad8828b18fb568d7e2747cf648a1d0eda899ddc4028fbc18034a49",
+      "backup/volume-0007.tar.gcm": "d30d32ae974a80788502b00b7f6dfe1190438969807fd298129b6052d1d8ba36",
+      "backup/volume-0006.tar.gcm": "f4ad28b73261bdb7064e572e20f8f6c9e423b0cab0abd60158cdb7a1169c9db5",
+      "backup/volume-0005.tar.gcm": "7ac88db41cc001d398c96419abada774b17016476779866aacd1ce6ce14adead",
+      "backup/volume-0004.tar.gcm": "7388e48168df96c53f98c99598a36ab14d13d52eb795bfeb9848e605d6d90982",
+      "backup/volume-0003.tar.gcm": "07aeab4479da124d3d41024faacf61b9d38fe77e83864ee9079e9cc8e2c67a91",
+      "backup/volume-0002.tar.gcm": "21b3f8f62021b86ebcea3e0f84197232b58a95eb14217ecba5063f4bc7e0ff0e",
+      "backup/volume-0001.tar.gcm": "e74c1ddc5d65335edf79dbfba30171a7277aa9dece4043312dd424839521b969",
+      "backup/volume-0000.tar.gcm": "95adac174734a3ef5af027af3bd5b8d30700b1cd7f3b1f85eef22519efc378bd",
+      "keys/backup.key": "e07aabb4e023259a5121e738bd8ba2352210fdf180564ac75031093b85fc5584"
+    }
+  }
+]

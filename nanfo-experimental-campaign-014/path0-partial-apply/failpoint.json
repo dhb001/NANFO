@@ -1,0 +1,8 @@
+{
+  "effect": "raise",
+  "operation": "execute",
+  "ordinal": 1,
+  "policy_sha256": "5b57c83abb36b887e1c15c27e31adce7e724d085a4f35e3fadd3605bd663adf6",
+  "timeout_seconds": 30,
+  "when": "after"
+}

@@ -1,0 +1,160 @@
+{
+  "bootstrap_cleanup_error": "ValueError",
+  "error_type": "ValueError",
+  "exception": [
+    {
+      "frames": [
+        {
+          "file": "verify_experimental_lab.py",
+          "function": "controller_child",
+          "line": 961
+        },
+        {
+          "file": "controller.py",
+          "function": "run",
+          "line": 461
+        },
+        {
+          "file": "controller.py",
+          "function": "recover",
+          "line": 382
+        },
+        {
+          "file": "controller.py",
+          "function": "_restore",
+          "line": 361
+        },
+        {
+          "file": "controller.py",
+          "function": "_io",
+          "line": 42
+        },
+        {
+          "file": "verify_experimental_lab.py",
+          "function": "recover",
+          "line": 717
+        },
+        {
+          "file": "verify_experimental_lab.py",
+          "function": "call",
+          "line": 662
+        },
+        {
+          "file": "verify_experimental_lab.py",
+          "function": "recover",
+          "line": 751
+        },
+        {
+          "file": "adapter.py",
+          "function": "recover",
+          "line": 254
+        },
+        {
+          "file": "adapter.py",
+          "function": "_call",
+          "line": 100
+        }
+      ],
+      "message": "experimental_receiver_uncertain_or_rejected",
+      "type": "ValueError"
+    },
+    {
+      "frames": [
+        {
+          "file": "controller.py",
+          "function": "run",
+          "line": 447
+        },
+        {
+          "file": "controller.py",
+          "function": "step",
+          "line": 321
+        },
+        {
+          "file": "controller.py",
+          "function": "_io",
+          "line": 42
+        },
+        {
+          "file": "verify_experimental_lab.py",
+          "function": "execute",
+          "line": 711
+        },
+        {
+          "file": "verify_experimental_lab.py",
+          "function": "call",
+          "line": 662
+        },
+        {
+          "file": "verify_experimental_lab.py",
+          "function": "execute",
+          "line": 743
+        },
+        {
+          "file": "adapter.py",
+          "function": "execute",
+          "line": 225
+        },
+        {
+          "file": "verify_experimental_lab.py",
+          "function": "_guarded",
+          "line": 787
+        },
+        {
+          "file": "adapter.py",
+          "function": "_call",
+          "line": 100
+        }
+      ],
+      "message": "experimental_receiver_uncertain_or_rejected",
+      "type": "ValueError"
+    }
+  ],
+  "operation": "run",
+  "records": {
+    "frame": {
+      "path": "frame.json",
+      "sha256": "888b5d965b7a7da90a505d43a7b98e21643534674dab6bc186ecb0dbe5c19dd4"
+    },
+    "inference": {
+      "path": "inference-3951212-0.json",
+      "sha256": "c256dbb966326eb040c4d11e55410dc539fb7ed70419ab6a9d2e2ad514c1cd40"
+    },
+    "prepared": {
+      "path": "prepared-3951212-0.json",
+      "sha256": "8a889eec07b2e9dc1f87a10cb8e9d7f1c80a5513a243cd48dd0b9fb612711268"
+    },
+    "simulation": {
+      "path": "simulation-3951212-0.json",
+      "sha256": "0d02f08fc94b6aa039d84a54efdf1bfd8c6f473cbfc4a38f4c661a861742812c"
+    }
+  },
+  "status": "failed",
+  "timings": [
+    {
+      "finished_ns": 102576453995662,
+      "operation": "inference",
+      "started_ns": 102572178363592
+    },
+    {
+      "finished_ns": 102576990718360,
+      "operation": "simulation",
+      "started_ns": 102576544555717
+    },
+    {
+      "finished_ns": 102577640237866,
+      "operation": "prepared",
+      "started_ns": 102577638040417
+    },
+    {
+      "finished_ns": 102584051338552,
+      "operation": "receipt",
+      "started_ns": 102578414946760
+    },
+    {
+      "finished_ns": 102585255629308,
+      "operation": "recovery",
+      "started_ns": 102584263817931
+    }
+  ]
+}

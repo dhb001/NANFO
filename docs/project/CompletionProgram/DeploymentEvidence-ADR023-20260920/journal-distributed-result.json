@@ -1,0 +1,546 @@
+{
+  "cases": {
+    "disk_capacity": {
+      "status": "passed",
+      "detail": {
+        "docker_root": "/home/.system-data/docker",
+        "capacity_filesystem": "/home",
+        "docker_available_bytes": 272400470016,
+        "staging_available_bytes": 3877474304,
+        "minimum_bytes": 1073741824
+      }
+    },
+    "installed_source_parity": {
+      "status": "passed",
+      "detail": {
+        "files": 327,
+        "matched": true
+      }
+    },
+    "package_contract": {
+      "status": "passed",
+      "detail": {
+        "locked_stages_present": true,
+        "live_build": "pending"
+      }
+    },
+    "locked_container_build": {
+      "status": "passed",
+      "detail": {
+        "source_sha256": "c684c8e6ac6d94e7efbda2b307ef0ee1092649b4e257fb56ddc280a7d021c830",
+        "images": {
+          "alert-worker": {
+            "id": "sha256:e75fa2bdc7f1c0b6c646e0bc0514bed2c808dca268655e4340b2b9b62e504282",
+            "os": "linux",
+            "architecture": "amd64"
+          },
+          "api": {
+            "id": "sha256:e75fa2bdc7f1c0b6c646e0bc0514bed2c808dca268655e4340b2b9b62e504282",
+            "os": "linux",
+            "architecture": "amd64"
+          },
+          "api2": {
+            "id": "sha256:e75fa2bdc7f1c0b6c646e0bc0514bed2c808dca268655e4340b2b9b62e504282",
+            "os": "linux",
+            "architecture": "amd64"
+          },
+          "autonomy-worker": {
+            "id": "sha256:e75fa2bdc7f1c0b6c646e0bc0514bed2c808dca268655e4340b2b9b62e504282",
+            "os": "linux",
+            "architecture": "amd64"
+          },
+          "execution-worker": {
+            "id": "sha256:e75fa2bdc7f1c0b6c646e0bc0514bed2c808dca268655e4340b2b9b62e504282",
+            "os": "linux",
+            "architecture": "amd64"
+          },
+          "gateway": {
+            "id": "sha256:4785f954f79dd113d2d0c4e07dfefec0e2cc1ac32ad50d24c7c4f0b1c602bf74",
+            "os": "linux",
+            "architecture": "amd64"
+          },
+          "initialize": {
+            "id": "sha256:e75fa2bdc7f1c0b6c646e0bc0514bed2c808dca268655e4340b2b9b62e504282",
+            "os": "linux",
+            "architecture": "amd64"
+          },
+          "maintenance": {
+            "id": "sha256:e75fa2bdc7f1c0b6c646e0bc0514bed2c808dca268655e4340b2b9b62e504282",
+            "os": "linux",
+            "architecture": "amd64"
+          },
+          "neo4j": {
+            "id": "sha256:d544f1ef8033ddfbf3a7cc81cdc1a73f90e503153202ea44d35f293bf43d9db7",
+            "os": "linux",
+            "architecture": "amd64"
+          },
+          "network-outbox-worker": {
+            "id": "sha256:e75fa2bdc7f1c0b6c646e0bc0514bed2c808dca268655e4340b2b9b62e504282",
+            "os": "linux",
+            "architecture": "amd64"
+          },
+          "postgres": {
+            "id": "sha256:f3bd19c606e442c3d7bdfa8002e03fe260a1023351e0ea4598032022b68dd6e3",
+            "os": "linux",
+            "architecture": "amd64"
+          },
+          "redis": {
+            "id": "sha256:90e7a336d044f1abc9e9dbc05d65566850896d11453bbd1dd0fb7e5059f0e8fb",
+            "os": "linux",
+            "architecture": "amd64"
+          },
+          "report-worker": {
+            "id": "sha256:e75fa2bdc7f1c0b6c646e0bc0514bed2c808dca268655e4340b2b9b62e504282",
+            "os": "linux",
+            "architecture": "amd64"
+          },
+          "simulation-worker": {
+            "id": "sha256:e75fa2bdc7f1c0b6c646e0bc0514bed2c808dca268655e4340b2b9b62e504282",
+            "os": "linux",
+            "architecture": "amd64"
+          },
+          "telemetry-retention": {
+            "id": "sha256:e75fa2bdc7f1c0b6c646e0bc0514bed2c808dca268655e4340b2b9b62e504282",
+            "os": "linux",
+            "architecture": "amd64"
+          },
+          "volume-init": {
+            "id": "sha256:e75fa2bdc7f1c0b6c646e0bc0514bed2c808dca268655e4340b2b9b62e504282",
+            "os": "linux",
+            "architecture": "amd64"
+          }
+        },
+        "host_application_packages_used": false,
+        "build_cache": "allowed; locked install stages required by Dockerfiles"
+      }
+    },
+    "fresh_volumes": {
+      "status": "passed",
+      "detail": {
+        "empty_new_volumes": [
+          "nanfo-deploy-verify-a61fa2bc6508453fb0971a186f7f18e4_init_secrets",
+          "nanfo-deploy-verify-a61fa2bc6508453fb0971a186f7f18e4_lab_commands",
+          "nanfo-deploy-verify-a61fa2bc6508453fb0971a186f7f18e4_lab_output",
+          "nanfo-deploy-verify-a61fa2bc6508453fb0971a186f7f18e4_lab_results",
+          "nanfo-deploy-verify-a61fa2bc6508453fb0971a186f7f18e4_neo4j_data",
+          "nanfo-deploy-verify-a61fa2bc6508453fb0971a186f7f18e4_network_assets",
+          "nanfo-deploy-verify-a61fa2bc6508453fb0971a186f7f18e4_postgres_data",
+          "nanfo-deploy-verify-a61fa2bc6508453fb0971a186f7f18e4_redis_data",
+          "nanfo-deploy-verify-a61fa2bc6508453fb0971a186f7f18e4_reports",
+          "nanfo-deploy-verify-a61fa2bc6508453fb0971a186f7f18e4_runtime_secrets",
+          "nanfo-deploy-verify-a61fa2bc6508453fb0971a186f7f18e4_telemetry_archive"
+        ],
+        "existing_data": 0
+      }
+    },
+    "migration_0027": {
+      "status": "passed",
+      "detail": "0027"
+    },
+    "bootstrap_login": {
+      "status": "passed",
+      "detail": {
+        "generated_password": true,
+        "password_in_argv": false,
+        "authenticated_bootstrap_actor": true
+      }
+    },
+    "frontend_http": {
+      "status": "passed",
+      "detail": {
+        "html_bytes": 958,
+        "built_assets_fetched": 5,
+        "browser_execution": "not tested; HTTP smoke only"
+      }
+    },
+    "full_stack_readiness": {
+      "status": "passed",
+      "detail": "Gateway /ready and all six work-coupled worker healthchecks passed"
+    },
+    "distributed_failover": {
+      "status": "passed",
+      "detail": {
+        "apis": 2,
+        "leader_failover": true,
+        "follower_work": "delegated",
+        "sockets": "separate multiprocess acceptance required"
+      }
+    },
+    "simulation": {
+      "status": "passed",
+      "detail": {
+        "simulation_id": "32ac4d84-3e79-40e9-a6a9-f31232645831",
+        "loss_pct": 45.0,
+        "configured_model_only": true
+      }
+    },
+    "report_csv": {
+      "status": "passed",
+      "detail": {
+        "report_id": "22779835-8ca9-44a9-a132-9001fa975d0e",
+        "sha256": "1fc5ab9d5c8cb842860868975ca386a92f349e618cde99003336e0ce3124332d",
+        "size_bytes": 3788,
+        "snapshot_sha256": "42f455e901600dc308d21389ba87820fa23de0aafb4d68d0754f934acebe3e1c",
+        "format": "csv"
+      }
+    },
+    "report_pdf": {
+      "status": "passed",
+      "detail": {
+        "report_id": "95c72b7c-2474-4d8e-91f6-7ee334e5370f",
+        "sha256": "157b418ff06f22e93ae3beddd4e60093404aaaeace1c13b772ee6a192edec5ab",
+        "size_bytes": 3409,
+        "snapshot_sha256": "3de2f59ae1c5b8fb37d20af611a74f1439637bcfdeb10ab6f5af6ef87da7cfb8",
+        "format": "pdf"
+      }
+    },
+    "spatial_asset_upload": {
+      "status": "passed",
+      "detail": {
+        "asset": {
+          "registration": {
+            "version": 1,
+            "translation": {
+              "x": 2.0,
+              "y": 0.0,
+              "z": 3.0
+            },
+            "rotation": {
+              "x": 0.0,
+              "y": 0.25,
+              "z": 0.0
+            },
+            "scale": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            },
+            "target_units": "m",
+            "target_up_axis": "y",
+            "source": "deployment-acceptance"
+          },
+          "storage_backend": "local_cas",
+          "download_path": "/api/v1/networks/739f6771-e7f0-425a-bd2a-e6f082878347/campus-model-assets/c37e2af0-8985-4be2-afae-c1704d39f2e0/download",
+          "campus_model_asset_id": "c37e2af0-8985-4be2-afae-c1704d39f2e0",
+          "network_id": "739f6771-e7f0-425a-bd2a-e6f082878347",
+          "model_file_name": "acceptance.gltf",
+          "model_mime_type": "model/gltf+json",
+          "model_data_base64": "eyJhc3NldCI6eyJ2ZXJzaW9uIjoiMi4wIn0sInNjZW5lcyI6W3sibm9kZXMiOltdfV0sInNjZW5lIjowfQ==",
+          "model_sha256": "58cbc1cdab6449017cc429d7b6b068b43b21050c7261d9577ac017d03cf80b0b",
+          "model_size_bytes": 61,
+          "mapping_by_device_id": {},
+          "source": "deployment-acceptance",
+          "created_at": "2026-09-20T10:34:35.329027Z",
+          "updated_at": "2026-09-20T10:34:35.329027Z"
+        },
+        "body_sha256": "58cbc1cdab6449017cc429d7b6b068b43b21050c7261d9577ac017d03cf80b0b",
+        "body_bytes": 61,
+        "scene": {
+          "version": 1,
+          "coordinate_system": {
+            "units": "m",
+            "up_axis": "y"
+          },
+          "objects": [
+            {
+              "object_id": "acceptance-campus",
+              "parent_id": null,
+              "object_type": "campus",
+              "name": "Deployment fixture",
+              "position": {
+                "x": 4.0,
+                "y": 0.0,
+                "z": 2.0
+              },
+              "rotation": {
+                "x": 0.0,
+                "y": 0.0,
+                "z": 0.0
+              },
+              "device_id": null,
+              "provenance": {
+                "source": "deployment-fixture",
+                "accuracy_m": null
+              }
+            }
+          ],
+          "revision": 2
+        },
+        "history": {
+          "items": [
+            {
+              "revision": 2,
+              "recorded_at": "2026-09-20T10:34:35.450271Z",
+              "actor_id": "2fdf8727-8537-45c0-9a18-a1dffbbd0433",
+              "origin": "replacement",
+              "object_count": 1
+            },
+            {
+              "revision": 1,
+              "recorded_at": "2026-09-20T10:34:35.407879Z",
+              "actor_id": "2fdf8727-8537-45c0-9a18-a1dffbbd0433",
+              "origin": "replacement",
+              "object_count": 1
+            }
+          ],
+          "total": 2,
+          "page": 1,
+          "page_size": 20
+        },
+        "revision": {
+          "version": 1,
+          "coordinate_system": {
+            "units": "m",
+            "up_axis": "y"
+          },
+          "objects": [
+            {
+              "object_id": "acceptance-campus",
+              "parent_id": null,
+              "object_type": "campus",
+              "name": "Deployment fixture",
+              "position": {
+                "x": 1.0,
+                "y": 0.0,
+                "z": 2.0
+              },
+              "rotation": {
+                "x": 0.0,
+                "y": 0.0,
+                "z": 0.0
+              },
+              "device_id": null,
+              "provenance": {
+                "source": "deployment-fixture",
+                "accuracy_m": null
+              }
+            }
+          ],
+          "revision": 1
+        }
+      }
+    },
+    "database_stop_readiness": {
+      "status": "passed",
+      "detail": "Actual PostgreSQL stop: /ready 503, /health 200; readiness and workers recovered"
+    },
+    "worker_stale_heartbeat": {
+      "status": "passed",
+      "detail": "Actual worker SIGSTOP produced stale-loop heartbeat with live stores; SIGCONT recovered"
+    },
+    "api_worker_restart": {
+      "status": "passed",
+      "detail": {
+        "report": {
+          "report_id": "86a42e5d-3e5e-40d9-90b8-788d90eb6f18",
+          "sha256": "0346e73ea53a8ec4ce3e857cdc5bf4e0fb83dc092a4d614a9861bf9ce51b2627",
+          "size_bytes": 3788,
+          "snapshot_sha256": "4727b6d8ae1ec0796c867353dae215fbfdfa06fb8a2d3b27efae8331d39bc285",
+          "format": "csv"
+        },
+        "simulation_id": "203d2567-69d8-45c9-b743-9ee915c96c11",
+        "restarted_services": [
+          "api",
+          "api2",
+          "network-outbox-worker",
+          "simulation-worker",
+          "report-worker",
+          "alert-worker",
+          "execution-worker",
+          "autonomy-worker"
+        ]
+      }
+    },
+    "nonempty_archive_delete": {
+      "status": "passed",
+      "detail": {
+        "fixture": {
+          "workspace_id": "4bc18ebf-15ce-466d-be81-70b64cb8ccca",
+          "network_id": "739f6771-e7f0-425a-bd2a-e6f082878347",
+          "device_id": "b44c9464-64ef-4c41-a949-f729c99de309",
+          "records": {
+            "historical": {
+              "bytes": 578,
+              "event_id": "ce8db2db-f2b3-437d-b211-845d136a2e4b",
+              "record_id": "7191b4ba-ef6c-4de7-84e6-5d3b443ef11e",
+              "sha256": "ab8b2082052ea025236b12a0ab834e3d356acdf7b37bfdd81e0dd86fe6d9a712"
+            },
+            "archive": {
+              "bytes": 578,
+              "event_id": "d100c0ce-26d7-4432-a5eb-45cb5e22c6b6",
+              "record_id": "ea20301c-7310-4206-9e6c-521c2f538906",
+              "sha256": "cb74442ca4292dcd4881134e1beab9d25444a636d97afd39c0291e6e38cadbeb"
+            },
+            "pinned": {
+              "bytes": 578,
+              "event_id": "6c48a62e-f31a-4fde-87b7-71dcb7d1e4fe",
+              "record_id": "223c1d0f-2bb2-49fb-9ac2-f2e42a51a700",
+              "sha256": "5b77536d5c021460b279bbf5afc2332b572d33f7d59f9669b763513811be6b3e"
+            }
+          }
+        },
+        "proof": {
+          "archive_bytes": 578,
+          "archive_sha256": "cb74442ca4292dcd4881134e1beab9d25444a636d97afd39c0291e6e38cadbeb",
+          "historical_retained": true,
+          "provenance": "synthetic_deployment_fixture_not_measured",
+          "released_pin_retained": true,
+          "row_restored": false,
+          "tombstone_replay_rejected": true
+        }
+      }
+    },
+    "restored_archive_bytes": {
+      "status": "passed",
+      "detail": {
+        "archive_bytes": 578,
+        "archive_sha256": "cb74442ca4292dcd4881134e1beab9d25444a636d97afd39c0291e6e38cadbeb",
+        "historical_retained": true,
+        "provenance": "synthetic_deployment_fixture_not_measured",
+        "released_pin_retained": true,
+        "row_restored": true,
+        "tombstone_replay_rejected": true
+      }
+    },
+    "lab_binding": {
+      "status": "blocked",
+      "detail": "Lab profile not requested"
+    },
+    "lab_congestion": {
+      "status": "blocked",
+      "detail": "Lab profile not requested"
+    },
+    "model_diagnostic": {
+      "status": "blocked",
+      "detail": "Frozen model diagnosis not requested"
+    },
+    "coordinated_encrypted_backup": {
+      "status": "passed",
+      "detail": {
+        "manifest_sha256": "706b342be6ba0cb2ad998e18d6fa9cbdbb0ef9fa5debadae60caa01dbba42a2a",
+        "encrypted_volumes": 11,
+        "encrypted_bind_directories": 1,
+        "source_writers_stopped": true,
+        "neo4j_graph": {
+          "node_labels": [
+            {
+              "count": 9,
+              "identity": "Device"
+            },
+            {
+              "count": 9,
+              "identity": "DeviceEventRevision"
+            }
+          ],
+          "nodes": 18,
+          "relationship_types": [],
+          "relationships": 0,
+          "revision_tombstones": 0,
+          "revisions": 9,
+          "revisions_sha256": "66cde69c3a1c8ab07a32ba969012798c697de9cd76ac18bc4d1165b8588ca614"
+        }
+      }
+    },
+    "distinct_fresh_restore": {
+      "status": "passed",
+      "detail": {
+        "source_project": "nanfo-deploy-verify-a61fa2bc6508453fb0971a186f7f18e4",
+        "target_project": "nanfo-deploy-verify-0b1bc7a39d6b472b836b39f23891201c",
+        "fresh_distinct_volumes": 11,
+        "neo4j_graph": {
+          "node_labels": [
+            {
+              "count": 9,
+              "identity": "Device"
+            },
+            {
+              "count": 9,
+              "identity": "DeviceEventRevision"
+            }
+          ],
+          "nodes": 18,
+          "relationship_types": [],
+          "relationships": 0,
+          "revision_tombstones": 0,
+          "revisions": 9,
+          "revisions_sha256": "66cde69c3a1c8ab07a32ba969012798c697de9cd76ac18bc4d1165b8588ca614"
+        }
+      }
+    },
+    "restore_image_schema": {
+      "status": "passed",
+      "detail": {
+        "exact_image_ids_os_architecture": true,
+        "schema": "0027",
+        "target_migrations_executed": false
+      }
+    },
+    "old_tokens_invalid": {
+      "status": "passed",
+      "detail": "Unexpired old access and refresh rejected; new login accepted"
+    },
+    "restored_report_bytes": {
+      "status": "passed",
+      "detail": {
+        "identical_downloads": 3,
+        "formats": [
+          "csv",
+          "pdf"
+        ]
+      }
+    },
+    "restored_spatial_assets": {
+      "status": "passed",
+      "detail": {
+        "asset_id": "c37e2af0-8985-4be2-afae-c1704d39f2e0",
+        "sha256": "58cbc1cdab6449017cc429d7b6b068b43b21050c7261d9577ac017d03cf80b0b",
+        "bytes": 61,
+        "registration_sha256": "ef4d34802ad008d88b647948325dc435152c57bd2511bc79d8ae4bffd8786ab5",
+        "history_revisions": 2
+      }
+    },
+    "restored_workflows": {
+      "status": "passed",
+      "detail": {
+        "simulation_checkpoint_identical": true,
+        "restart_workflow_survived": true,
+        "physical_workflows_identical": 0
+      }
+    },
+    "restored_telemetry": {
+      "status": "blocked",
+      "detail": "No actual measured telemetry existed; empty-to-empty is not survival proof"
+    },
+    "source_unchanged": {
+      "status": "passed",
+      "detail": "Verified"
+    },
+    "campaign": {
+      "status": "passed",
+      "detail": "Verified"
+    },
+    "cleanup": {
+      "status": "passed",
+      "detail": {
+        "containers_removed": 24,
+        "volumes_removed": 22,
+        "networks_removed": 4
+      }
+    }
+  },
+  "core_passed": true,
+  "all_green": false,
+  "step15_complete": false,
+  "counts": {
+    "passed": 29,
+    "failed": 0,
+    "blocked": 4,
+    "pending": 0
+  },
+  "live_authorized": true,
+  "agents_idle_attested": true,
+  "failure": null,
+  "evidence_directory": "/tmp/opencode/nanfo-deploy-verify-fnh8dvek/evidence",
+  "live_requested_lab": false,
+  "live_requested_model": false
+}

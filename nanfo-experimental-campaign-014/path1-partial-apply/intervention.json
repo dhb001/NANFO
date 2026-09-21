@@ -1,0 +1,44 @@
+{
+  "applied_ns": 102984441427191,
+  "bootstrap_initial_action": 1,
+  "boundary": {
+    "entry": {
+      "argv": [
+        "ip",
+        "rule",
+        "del",
+        "priority",
+        "19111",
+        "from",
+        "10.78.10.2/32",
+        "to",
+        "10.78.8.2/32",
+        "table",
+        "19111"
+      ],
+      "began": 102984.204312688,
+      "completed": 102984.258088194,
+      "node": "access1",
+      "restoring": false
+    },
+    "id": "e05776ab71e492215c3bb8beeaad2fcb5cc94d95472af3edfd981de772ebb11e",
+    "point": {
+      "effect": "raise",
+      "operation": "execute",
+      "ordinal": 1,
+      "policy_sha256": "de6c3ef7c9de23feea0c6709459d3da1d1ea17309dc103c5bf1b5bdf48fe3cf0",
+      "timeout_seconds": 30,
+      "when": "after"
+    },
+    "reached_monotonic": 102984.28844284,
+    "released_monotonic": null
+  },
+  "case_id": "path1-partial-apply",
+  "fault": "partial-apply",
+  "intervention": "injected_failpoint",
+  "phase": "afterwrite",
+  "policy": "qualified",
+  "scenario": "path1",
+  "seed": 1455,
+  "write_index": 1
+}

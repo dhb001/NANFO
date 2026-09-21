@@ -39,6 +39,14 @@ describe("persisted model validation", () => {
       { model_mime_type: "text/html" }, { mapping_by_device_id: { foreign: "campus" } }, { network_id: "foreign" },
     ]) await expect(decodePersistedModel({ ...record, ...change }, "n", new Set(["d"]))).rejects.toThrow();
   });
+  it("validates downloaded binary against metadata rather than falling back to valid inline bytes", async () => {
+    vi.stubGlobal("crypto", webcrypto);
+    const record = await asset();
+    expect((await decodePersistedModel(record, "n", new Set(["d"]), new Uint8Array(glb()))).size).toBe(record.model_size_bytes);
+    const corrupt = new Uint8Array(glb()); corrupt[corrupt.length - 1] ^= 1;
+    await expect(decodePersistedModel(record, "n", new Set(["d"]), corrupt)).rejects.toThrow("SHA-256");
+    await expect(decodePersistedModel(record, "n", new Set(["d"]), corrupt.slice(1))).rejects.toThrow("size mismatch");
+  });
   it("rejects unsupported or malformed glTF and prevents external resource fetch", async () => {
     const fetchSpy = vi.fn();
     vi.stubGlobal("fetch", fetchSpy);

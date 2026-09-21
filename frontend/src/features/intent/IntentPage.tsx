@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
-import { useExecuteIntent, useIntentDetail, useValidateIntent } from "@/features/intent/hooks";
+import { useExecuteIntent, useIntentDetail, useValidateIntent, useIntentHistory } from "@/features/intent/hooks";
 import { useAuthStore } from "@/shared/state/auth-store";
 import { useWorkspaceStore } from "@/shared/state/workspace-store";
 import { Panel } from "@/shared/ui/Panel";
@@ -29,15 +29,16 @@ import { LabActionFields } from "@/features/intent/LabActionFields";
 import type { ExecuteIntentRequest } from "@/shared/types/intent";
 import { PathEvidencePanel } from "./PathEvidencePanel";
 import { SceneReconciliationStatus } from "@/features/realtime/SceneReconciliationStatus";
+import { useSessionScope } from "@/features/auth/sessionScope";
+import { useUrlSelection } from "@/shared/lib/urlSelection";
 
 export function IntentPage() {
-  const token = useAuthStore((state) => state.accessToken);
-  const workspaceId = useWorkspaceStore((state) => state.workspaceId);
-  const networkId = useWorkspaceStore((state) => state.networkId);
-  return <IntentPageContent key={`${token}:${workspaceId}:${networkId}`} />;
+  const { key } = useSessionScope();
+  return <IntentPageContent key={key} />;
 }
 
 function IntentPageContent() {
+  const session = useSessionScope();
   const token = useAuthStore((state) => state.accessToken);
   const profile = useAuthStore((state) => state.profile);
   const mode = useExecutionModeStore((state) => state.mode);
@@ -47,7 +48,9 @@ function IntentPageContent() {
   const [action, setAction] = useState("reroute_path");
   const [scopeJson, setScopeJson] = useState('{"building":"A","segment":"core"}');
   const [constraintsJson, setConstraintsJson] = useState('{"max_downtime":0}');
-  const [intentId, setIntentId] = useState<string | null>(null);
+  const [intentId, setIntentId] = useUrlSelection("intent_id", session.urlScope);
+  const [historyPage, setHistoryPage] = useState(1);
+  const history = useIntentHistory(token, workspaceId, networkId, historyPage);
   const [idempotencyKey, setIdempotencyKey] = useState(`intent-${Date.now()}`);
   const [validationError, setValidationError] = useState<string | null>(null);
   const [handoffSummary, setHandoffSummary] = useState<string | null>(null);
@@ -68,7 +71,7 @@ function IntentPageContent() {
   const canExecute = canExecuteIntent(detailQuery.data);
   const permitted = hasPermission(profile, "write:config") && hasPermission(profile, "execute:rollback");
   const available = mode === "emulation" && permitted;
-  const selectedDetail = !detailQuery.isError && detailQuery.data?.intent_id === intentId && detailQuery.data?.workspace_id === workspaceId;
+  const selectedDetail = !detailQuery.isError && detailQuery.data?.intent_id === intentId && detailQuery.data?.workspace_id === workspaceId && (!networkId || !detailQuery.data?.network_id || detailQuery.data.network_id === networkId);
   const labAction = detailQuery.data?.intent_payload?.action === "reroute_path" || detailQuery.data?.intent_payload?.action === "throttle_qos";
 
   const sceneObjects = useLiveStore((state) => state.sceneObjects);
@@ -99,8 +102,8 @@ function IntentPageContent() {
   }, [refetch, intentId, realtimeIntent]);
 
   useEffect(() => {
-    if (!available) setManualApproval(false);
-  }, [available]);
+    setManualApproval(false);
+  }, [available, session.authority, intentId]);
 
   async function validate(event: FormEvent) {
     event.preventDefault();
@@ -144,6 +147,7 @@ function IntentPageContent() {
         },
         idempotencyKey,
       });
+      session.assertCurrent();
       setIntentId(response.intent_id);
       setSimulationId("");
       setExecutionRequest(null);
@@ -159,6 +163,8 @@ function IntentPageContent() {
   }
 
   async function execute(cancel = false) {
+    // Browser back/forward must never apply an immutable retry to another intent.
+    if (executionRequest && (executionRequest.intent_id !== intentId || executionRequest.workspace_id !== workspaceId)) return;
     if (!available || executionPending.current || !selectedDetail ||
       (!cancel && (terminalState || !manualApproval || !canExecute || !labAction || !simulationIdValid)) || (cancel && !canCancel)) return;
     if (!workspaceId || !intentId) {
@@ -184,6 +190,7 @@ function IntentPageContent() {
         request,
         idempotencyKey: request.idempotency_key,
       });
+      session.assertCurrent();
       setExecutionNotice(response.status === "execution_started"
         ? cancel ? "Cancellation requested. Reconciliation or rollback must finish before a terminal outcome is known."
           : "Execution accepted, not completed. Waiting for authoritative readback."
@@ -195,6 +202,7 @@ function IntentPageContent() {
       });
       await detailQuery.refetch();
     } catch (error) {
+      try { session.assertCurrent(); } catch { return; }
       if (error instanceof ApiClientError && error.code === "INTENT_IDEMPOTENCY_CONFLICT") {
         if (!cancel) setExecutionRequest(null);
         pushToast({
@@ -267,7 +275,23 @@ function IntentPageContent() {
 
   return (
     <div style={{ display: "grid", gap: "1rem" }}>
-      <Panel title="Intent Validate and Execute" subtitle="VS8 explainability, confidence, lifecycle transitions">
+      <Panel title="Intent history" subtitle="Persisted intents in the selected workspace and network; selection never approves or executes">
+        <Button tone="ghost" disabled={!workspaceId || history.isFetching} onClick={() => void history.refetch()}>Refresh intent history</Button>
+        <QueryState query={history} hasData={(data) => data.items.length > 0} emptyTitle="No intent history" emptyDescription="No persisted intents on this page.">
+          {(data) => <ul>{data.items.map((item) => <li key={item.intent_id}>
+            <Button tone="ghost" disabled={executionInFlight || executeMutation.isPending || validateMutation.isPending} onClick={() => {
+              setIntentId(item.intent_id); setManualApproval(false); setSimulationId(""); setExecutionRequest(null); setExecutionNotice(null);
+            }}>{item.action ?? "Intent"} — {item.status}</Button>
+            <span className="mono"> {item.intent_id} | {item.created_at}</span>
+          </li>)}</ul>}
+        </QueryState>
+        <nav aria-label="Intent history pagination">
+          <Button disabled={historyPage <= 1 || history.isFetching} onClick={() => setHistoryPage(historyPage - 1)}>Previous intents</Button>
+          <span> Page {historyPage} | {history.data?.total ?? "Unknown"} intents </span>
+          <Button disabled={!history.data || historyPage * history.data.page_size >= history.data.total || history.isFetching} onClick={() => setHistoryPage(historyPage + 1)}>Next intents</Button>
+        </nav>
+      </Panel>
+      <Panel title="Intent Validate and Execute" subtitle="Define an outcome, review the evidence and validate before execution">
         {handoffSummary ? (
           <div
             style={{
@@ -399,7 +423,7 @@ function IntentPageContent() {
             {canCancel && terminalState ? <p>Cancel requests compensation of the completed policy. The server checks current ownership; rollback is not confirmed until readback verifies it.</p> : null}
             <input
               aria-label="Intent ID"
-              disabled={executeMutation.isPending || validateMutation.isPending}
+              disabled={executeMutation.isPending || validateMutation.isPending || Boolean(executionRequest)}
               value={intentId ?? ""}
               onChange={(event) => {
                 setIntentId(event.target.value || null);
@@ -430,7 +454,7 @@ function IntentPageContent() {
       </Panel>
 
       <div style={{ display: "grid", gridTemplateColumns: isNarrowViewport ? "1fr" : "1fr 1fr", gap: "1rem", alignItems: "start" }}>
-        <Panel title="Intent Detail" subtitle="GET /intents/{id} + lifecycle timeline">
+        <Panel title="Intent Detail" subtitle="Evidence, execution history and lifecycle for the selected intent">
           {intentId ? <div style={{ marginBottom: "0.7rem" }}>
             <p>Detail polling backs off to 15 seconds and stops after 40 reads or a terminal result. Realtime reconnects also reconcile detail. A deadline or connection loss is not proof of cancellation.</p>
             <Button tone="ghost" disabled={detailQuery.isFetching} onClick={() => void detailQuery.refetch()}>Refresh execution status</Button>
@@ -535,7 +559,7 @@ function IntentPageContent() {
           </QueryState>
         </Panel>
 
-        <Panel title="Realtime Intent Deltas" subtitle="/ws/digital-twin intent.* mapped scene_object updates">
+        <Panel title="Realtime Intent Deltas" subtitle="Incoming intent lifecycle updates from the digital twin stream">
           <SceneReconciliationStatus />
           {intentRealtimeCards.length === 0 ? (
             <div style={{ color: "var(--ink-3)" }}>No intent realtime deltas observed yet.</div>

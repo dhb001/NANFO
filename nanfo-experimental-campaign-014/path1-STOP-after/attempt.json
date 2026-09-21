@@ -1,0 +1,18 @@
+{
+  "case_id": "path1-STOP-after",
+  "cleanup": {
+    "evidence_errors": [],
+    "removed": true,
+    "removed_resources": [
+      "7d674dc1a08edf1e232243e835a79beda0e1854ae4f18f250cfe7d010cd3839e",
+      "nanfo-experimental-99ec554e802a4234b11360f38f13b043"
+    ],
+    "unresolved_resources": []
+  },
+  "controller_returncode": 1,
+  "controller_status": "failed",
+  "policy": "qualified",
+  "scenario": "path1",
+  "seed": 1449,
+  "status": "acquired"
+}

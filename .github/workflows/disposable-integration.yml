@@ -1,0 +1,160 @@
+name: Disposable database integration
+
+# Bounded database fixtures only; no privileged network lab or shared stores.
+on:
+  pull_request:
+    paths:
+      - 'backend/**'
+      - 'emulation/**'
+      - 'deploy/**'
+      - '.github/workflows/**'
+      - 'docs/adr/**'
+  push:
+    branches: [main, master]
+    paths:
+      - 'backend/**'
+      - 'emulation/**'
+      - 'deploy/**'
+      - '.github/workflows/**'
+      - 'docs/adr/**'
+  workflow_dispatch:
+    inputs:
+      run_database_tests:
+        description: Run PostgreSQL and Redis fixtures on disposable hosted-runner services
+        type: boolean
+        required: true
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: disposable-database-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  database-contracts:
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.run_database_tests }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: backend
+    services:
+      postgres:
+        image: postgres:17.6-bookworm@sha256:f3bd19c606e442c3d7bdfa8002e03fe260a1023351e0ea4598032022b68dd6e3
+        env:
+          POSTGRES_USER: nanfo_test
+          POSTGRES_DB: nanfo_test
+          POSTGRES_PASSWORD: nanfo_test
+        ports:
+          - 5432/tcp
+        options: >-
+          --health-cmd "pg_isready -U nanfo_test -d nanfo_test"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+      redis:
+        image: redis:7.4.5-bookworm@sha256:90e7a336d044f1abc9e9dbc05d65566850896d11453bbd1dd0fb7e5059f0e8fb
+        ports:
+          - 6379/tcp
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+    env:
+      POETRY_VIRTUALENVS_IN_PROJECT: 'true'
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.12.14'
+      - name: Install locked backend test environment
+        run: |
+          python -m pip install poetry==2.4.1
+          poetry check --lock
+          poetry sync --with dev --no-root --no-interaction
+      - name: Bound database lock and statement waits on the disposable service
+        env:
+          PGPORT: ${{ job.services.postgres.ports['5432'] }}
+        run: |
+          poetry run python - <<'PY'
+          import os
+          import psycopg2
+
+          connection = psycopg2.connect(host='127.0.0.1', port=os.environ['PGPORT'],
+              user='nanfo_test', password='nanfo_test', dbname='nanfo_test')
+          try:
+              connection.autocommit = True
+              with connection.cursor() as cursor:
+                  cursor.execute("ALTER SYSTEM SET lock_timeout = '30s'")
+                  cursor.execute("ALTER SYSTEM SET statement_timeout = '120s'")
+                  cursor.execute('SELECT pg_reload_conf()')
+                  assert cursor.fetchone()[0]
+          finally:
+              connection.close()
+          PY
+      - name: Disposable-schema migrations, transactions, recovery and Redis gates
+        env:
+          # Public fixture credentials, usable only for this disposable runner service.
+          INTENT_TEST_DSN: postgresql+psycopg2://nanfo_test:nanfo_test@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/nanfo_test
+          REPORT_TEST_DSN: postgresql+psycopg2://nanfo_test:nanfo_test@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/nanfo_test
+          AUTONOMY_TEST_DSN: postgresql+asyncpg://nanfo_test:nanfo_test@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/nanfo_test
+          RETENTION_TEST_DSN: postgresql+asyncpg://nanfo_test:nanfo_test@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/nanfo_test
+          FLEET_TEST_DSN: postgresql+asyncpg://nanfo_test:nanfo_test@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/nanfo_test
+          SIMULATION_TEST_DSN: postgresql+psycopg2://nanfo_test:nanfo_test@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/nanfo_test
+          ALERT_TEST_DSN: postgresql+psycopg2://nanfo_test:nanfo_test@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/nanfo_test
+          PLUGIN_TEST_DSN: postgresql+psycopg2://nanfo_test:nanfo_test@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/nanfo_test
+          TELEMETRY_TEST_DSN: postgresql+asyncpg://nanfo_test:nanfo_test@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/nanfo_test
+          NETWORK_OUTBOX_TEST_DSN: postgresql+psycopg2://nanfo_test:nanfo_test@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/nanfo_test
+          SPATIAL_TEST_DSN: postgresql+psycopg2://nanfo_test:nanfo_test@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/nanfo_test
+          ASSET_TEST_DSN: postgresql+psycopg2://nanfo_test:nanfo_test@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/nanfo_test
+          EXPERIMENTAL_TEST_DSN: postgresql+asyncpg://nanfo_test:nanfo_test@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/nanfo_test
+          AUDIT_TEST_DSN: postgresql+asyncpg://nanfo_test:nanfo_test@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/nanfo_test
+          IDENTITY_TEST_DSN: postgresql+asyncpg://nanfo_test:nanfo_test@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/nanfo_test
+          INTENT_TEST_REDIS_URL: redis://127.0.0.1:${{ job.services.redis.ports['6379'] }}/0
+          REPORT_TEST_REDIS_URL: redis://127.0.0.1:${{ job.services.redis.ports['6379'] }}/1
+          AUTH_TEST_REDIS_URL: redis://127.0.0.1:${{ job.services.redis.ports['6379'] }}/2
+          AUDIT_TEST_REDIS_URL: redis://127.0.0.1:${{ job.services.redis.ports['6379'] }}/3
+          AUDIT_HTTP_TEST_REDIS_URL: redis://127.0.0.1:${{ job.services.redis.ports['6379'] }}/4
+        run: >-
+          poetry run pytest --no-cov -q --junitxml=database-results.xml
+          tests/integration/test_intent_execution_postgres.py
+          tests/integration/test_report_postgres.py
+          tests/integration/test_autonomy_postgres.py
+          tests/integration/test_autonomy_operator_postgres.py
+          tests/integration/test_simulation_postgres.py
+          tests/integration/test_alert_postgres.py
+          tests/integration/test_plugin_postgres.py
+          tests/integration/test_telemetry_history_sql.py
+          tests/integration/test_login_rate_limit_redis.py
+          tests/integration/test_network_outbox_postgres.py
+          tests/integration/test_spatial_postgres.py
+          tests/integration/test_asset_postgres.py
+          tests/integration/test_telemetry_lifecycle_postgres.py
+          tests/integration/test_retention_complete_postgres.py
+          tests/integration/test_fleet_postgres.py
+          tests/integration/test_autonomous_execution_postgres.py
+          tests/integration/test_experimental_lab_postgres.py
+          tests/integration/test_network_inventory_postgres.py
+          tests/integration/test_identity_audit_repair_postgres.py
+          tests/integration/test_alert_scope_postgres.py
+          tests/integration/test_workflow_history_postgres.py
+          scripts/test_audit_role_profiles.py
+          scripts/test_audit_http_smoke.py
+      - name: Require executed database and Redis cases (no silent opt-in skips)
+        run: |
+          python - <<'PY'
+          import xml.etree.ElementTree as ET
+
+          cases = ET.parse('database-results.xml').getroot().findall('.//testcase')
+          assert cases, 'No database cases recorded'
+          for tag in ('skipped', 'failure', 'error'):
+              assert not any(case.find(tag) is not None for case in cases), f'Database lane recorded {tag}'
+          print(f'{len(cases)} database/Redis cases passed; zero skips')
+          PY
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: disposable-database-results
+          path: backend/database-results.xml
+          retention-days: 7

@@ -96,7 +96,9 @@ def test_budget_and_ownership_refuse_before_measuring(tmp_path, monkeypatch):
         holdout.session(tmp_path, "ospf", "nanfo-training-" + "a" * 32)
 
 
-def test_holdout_has_one_hour_deadline_not_original_training_reserve(tmp_path):
+def test_holdout_has_one_hour_deadline_not_original_training_reserve(tmp_path, monkeypatch):
+    # Constructor arithmetic is correct; arbitrary uptime floats can lose low bits.
+    monkeypatch.setattr(holdout.time, "monotonic", lambda: 1024.25)
     runner = holdout.Holdout(tmp_path, {"campaign_id": "a" * 32, "checkpoint": {}})
     assert runner.hardDeadline - runner.started == 3600
     assert runner.workDeadline - runner.started == 3480

@@ -14,7 +14,7 @@ test("logout revokes the session and removes persisted identity and context", as
   await expect(page.getByLabel("Email")).toHaveValue("");
   await expect(page.getByLabel("Password")).toHaveValue("");
   await loginFromUi(page);
-  await expect(page.getByText("edge-1")).toBeVisible();
+  await expect(page.getByText("edge-1", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Logout", exact: true }).click();
   await expect(page).toHaveURL(/\/login$/);
   expect(logoutCalls).toBe(1);
@@ -39,7 +39,8 @@ test("read-only profile cannot execute actions or enter audit via direct navigat
     }, meta: { execution_mode: "demo" }, errors: null } });
   });
   await loginFromUi(page);
-  await expect(page.getByRole("button", { name: "Create Network" })).toBeDisabled();
+  await page.getByText("Create a network", { exact: true }).click();
+  await expect(page.getByRole("form", { name: "Create network" }).getByRole("button", { name: "Create Network" })).toBeDisabled();
   await expect(page.getByRole("link", { name: /^Audit/ })).toHaveCount(0);
   await page.goto("/ops/audit");
   await expect(page.getByText("Permission denied", { exact: true })).toBeVisible();
@@ -60,7 +61,7 @@ test("independent tabs do not inherit or clear each other's sessions", async ({ 
   const state = createDefaultSessionState();
   await installSessionMocks(page, state);
   await loginFromUi(page);
-  await expect(page.getByText("edge-1")).toBeVisible();
+  await expect(page.getByText("edge-1", { exact: true })).toBeVisible();
   const second = await context.newPage();
   await installSessionMocks(second, state);
   await second.goto("/ops/overview");
@@ -73,7 +74,7 @@ test("independent tabs do not inherit or clear each other's sessions", async ({ 
   await second.getByRole("button", { name: "Logout", exact: true }).click();
   await expect(second).toHaveURL(/\/login$/);
   await page.reload();
-  await expect(page.getByText("edge-1")).toBeVisible();
+  await expect(page.getByText("edge-1", { exact: true })).toBeVisible();
   expect(await page.evaluate(() => sessionStorage.getItem("nanfo.auth.session"))).not.toBeNull();
   expect(await page.evaluate(() => localStorage.getItem("nanfo.auth.session"))).toBeNull();
 });

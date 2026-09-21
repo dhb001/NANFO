@@ -1,5 +1,155 @@
 # Development Journal
 
+## [2026-09-20] - ADR026 Parallel Audit Repairs and Integration
+
+- Seven user-authorized parallel workstreams completed audit fixes and missing
+  full-stack inventory lifecycle/history/admin/guided-Twin workflows. Added ADR026,
+  owner contract docs, targeted regressions, regular disposable CI and local runner.
+- Integrated org fencing with alert fresh-authority reads; reconciled stable query
+  identities/realtime rotation; automatic off-page membership discovery; completed
+  asset/group/building cleanup for reachable inventory deletion. Independent review
+  caught opaque request-ID normalization, legacy UUID-map deletion bypass and busy
+  scene retry lockout; owners fixed and reviewer confirmed closure of all3.
+- Final frontend575tests, full70browser/no retries plus11affected browser review;
+  type/lint/build/original perf gates pass387.96KiB. Three tree shaking recovers budget
+  without dropping features. Backend3632pass/289skip; isolatedPG253pass/12skip;
+  deployment248pass; Ruff clean. Detailed evidence: `AuditRepair-Completion.md`.
+- Concurrent0029 coverage migration preserved and centralized current release
+  targeting integrated without rewriting historical0027/0028 acceptance. Earlier
+  harness DB crashes retained honestly; bounded diagnostic/resource setup completed
+  full selected lane and cleaned all owned stores. Redis absent locally;12 actual
+  skips and pending HTTP/Redis CI acceptance remain explicit. No commits/deployment.
+
+## [2026-09-20] - Cross-Layer Workflow Audit
+
+- Reviewed12 routes, public API/client coverage and targeted owning service/repository
+  paths. Wrote `FrontendBackendAudit-2026-09-20.md` with17 prioritized findings,
+  capability matrix, regression proposals and explicit evidence limits.
+- Six temporary Playwright defect probes reproduced inventory truncation, hidden
+  errors, overlapping audit rows, rotating-token remount loss, alert scope/filter
+  behavior and organization slug typing. Real disposable PostgreSQL confirmed
+  inaccessible inventory audits, wrong membership actor, failed member re-add,
+  deleted-slug conflict and invalid-IP/pagination database failures. Also resolved
+  actual Operator permission mapping versus frontend fixture assumptions.
+- Backend3371pass/1fail/239skip; corrected isolated DB lane210pass/2fail/1skip;
+  deployment216pass. Fresh0028 migration successful; two failures use obsolete0021
+  spatial fixture, one full-suite assertion expects0027head; Ruff1 E731. Initial
+  DSN-driver and PYTHONPATH harness errors were corrected and not counted as defects.
+- All owned PostgreSQL children/temporary data/ports cleaned. No application code
+  repaired or existing services migrated; worktree implementation remains intact.
+
+
+## [2026-09-20] - Network Atlas Visual and Interaction Refresh
+
+- Applied a distinct midnight-blue navigation/cobalt-action/lime-accent identity,
+  custom isometric network illustration and revised login/overview compositions.
+  Shared tokens, panels, forms, tables, status states and typography carry through
+  existing routes; plain-language feature introductions replace implementation jargon.
+- Mobile navigation exposes grouped destinations with Escape/focus handling. Overview
+  provides permission-aware workflow links. Palette arrow navigation no longer resets
+  selection; Tab stays in the dialog and closing returns focus. Added browser regression
+  coverage for those keyboard paths, all route hierarchy and reduced motion.
+- Moved the Twin scene above configuration and grouped supporting scene context without
+  changing existing spatial edits, import state or rendering ownership. Preserved the
+  pre-existing uncommitted runtime/spatial work. No new dependencies or contracts.
+- Visual review covered login, overview, mobile navigation, reports, simulation,
+  telemetry and Twin screenshots in `/tmp/opencode/nanfo-ui-*.png`. The initial route
+  sweep reloaded away its selected context; corrected it to exercise in-app navigation.
+  Full-suite mobile tests were updated to open the new menu before choosing routes.
+  Earlier failures and timeout were resolved; final54/54 Chromium tests passed without
+  retries (`npx playwright test --retries=0 --workers=2`).
+- Verification: `npm run typecheck`, `npm run lint`, `npm test` (527pass), subsequent
+  Twin component run (13pass), `npm run perf:bundle` (409.70KiB/410.16KiB), whitespace
+  check. Browser fixtures validate UI behavior, not operational backend acceptance.
+
+## [2026-09-20] - Fresh Runtime and Native Driver Qualification (ADR024)
+
+- Recovered13 exact lab and14 AI source hashes from preserved archives. Historical
+  image absent; rebuilt v4image954462… inherited verified dependencies. Original
+  loader correctly rejected its new identity. Documented new derived artifact with
+  identical tensor bytes and true image provenance; original remained untouched.
+- One preregistered five-policy campaign:1475.8s,60episodes,300windows,240decisions,
+  no invalid windows/retries/training. Same strict qualification gates passed; separate
+  reviewer reconstructed raw metrics, seed disjointness and original writer/loader.
+- Actual ongoing feed acceptance sixframes/fourrecommendations passed via real auth,
+  Postgres/Redis/worker; correct directions and<30s persisted freshness. All disposable
+  lab/store resources cleaned and exclusive slot transferred explicitly.
+- Native static-FIB driver actual42cases,480mutations,460sealed snapshots,6/6 probes
+  peraction passed; independent command/readback review accepted narrow manual scope.
+  No FRR daemon convergence, hard deadline or joined autonomous safety claim.
+- Fixed native timestamp quantization and versioned available-service/burst-aware
+  diagnostic semantics with conservative provider mapping; no safety-policy relaxation.
+  Final backend3282pass/212skip and source-matched deployment29pass/0fail/4blocked.
+- User confirmed no RF equipment/data; physical survey remains impossible here.
+  Native causal guarantees and joined loaded-network autonomous loop also remain
+  unqualified. Preserved full model/raw evidence outside tmp with exact hash receipt
+  and credential exclusions; no fabricated human/instrument attestation.
+
+
+## [2026-09-20] - ADR024 Durable Qualification Evidence
+
+- Added an offline allowlisted preservation operator using existing protected
+  release read/publication helpers, exact-byte receipts and relative registry roots.
+- Stored 1,107 selected source files (157,709,961 bytes) plus manifests locally in
+  Git-ignored `ai-engine/artifacts/adr024-qualified-001/`; compact Git-eligible
+  evidence is under 1 MiB in `CompletionProgram/QualificationEvidence-ADR024/`.
+- Original/derived model hashes and complete tensor identity preserved. Credential,
+  admission, environment and generic-log exclusions documented without raw edits.
+- Copy timeout occurred during final verification after publication; verification-only
+  finalization completed without replacing files. Relocated original frozen report
+  reconstruction and both recorded inference directions passed, as did eleven safety
+  tests and scoped lint. No lab/services, firmware or model semantics changed.
+- Full hashes, independent review references and offline commands:
+  `CompletionProgram/QualificationEvidence.md`.
+
+## [2026-09-20] - Operational Twin Runtime (ADR023)
+
+- Parallel teams completed dimensioned geometry/UI, main-integrated distributed
+  realtime, cross-owner archival retention, durable fleet collection, qualified
+  observation/inference software, passive source bridge, independent qualification
+  tooling and concrete OVS/FRR receiver/journal-client execution interfaces.
+- Independent review reproduced11 flaws: poison leadership cycling, plan/delay
+  trust gaps, missed Core evidence pins, lock-wait authority, conflicting telemetry
+  replay, archive ancestor redirection, FRR final-read authority, health-key modes,
+  expiry race and config reload. Owners added regressions; independent verification
+  closed all11. Journal client now imports no privileged emulation drivers.
+- Fixed packaged Debian Net-SNMP private cert directory initialization without
+  weakening stderr validation. Packaged fleet6/6 passed two healthy/one bad target,
+  persistence, dedup, heartbeat staleness, restart and revocation.
+- Final backend3154pass/209skip; frontend527unit/52browser; type/lint/build/perf pass
+ 408.36KiB; deployment216 tests and20 installed image checks. Final source-matched
+  distributed campaign29pass/0fail/4blocked, eleven-volume archive/asset/history restore.
+- Actual UDP/FIFO validation establishes its narrow sealed-queue bound only. It is
+  not FRR/OVS calibration or physical RF. Authentic survey, causal guarantees and
+  admitted matching frozenv4 measurements remain external prerequisites. No training,
+  physical qualification or privileged autonomous actuation was fabricated.
+
+
+## [2026-09-20] - Parallel Measured Twin Program (ADR021/022)
+
+- Implemented and integrated durable Network events, canonical spatial transforms,
+  history/restore, protected content-addressed model assets and saved registration,
+  bounded tenant-aware socket queues, fair metric state, real SNMPv3 collection,
+  RF/snapshot/calibration tooling, artifact overlays, telemetry cursors/pins and
+  operator-only AI scheduling/memory/consensus. Added CI and secure release evidence.
+- Independent reviews reproduced and fixed foreign-alert queue starvation,
+  lock-wait/spatial authority races, SNMP mid-batch revocation, interrupted CAS
+  hardlink publication and final-file-read authority races. Regression evidence is
+  retained in individual CompletionProgram handoffs.
+- Live deployment exposed Neo4j signal forwarding, encrypted-header verification,
+  buffered archive descriptor and restored-readiness defects. Fixed root causes,
+  preserved failed attempts and reran source-matched campaigns. Corrected0024 core:
+  26pass/0fail/4blocked;10-volume backup/fresh restore retained exact model/report bytes,
+  registration/history/workflows and invalidated old sessions. Owned resources cleaned.
+- Final backend2612pass/138skip; frontend523pass/browser51pass; AI463pass;
+  deployment174pass. Type/lint/build/original bundle gates passed (409.77KiB).
+  One earlier full browser invocation exceeded command timeout during concurrent
+  builds; subsequent full standalone runs passed with no retries.
+- Service acceptance14/14 and actual SNMP pipeline/cursor8/8 passed at0024. Software
+  and evidence boundaries, remaining implementation and physical prerequisites are
+  explicit in `CompletionProgram/README.md`; the complete autonomous vision is open.
+
+
 ## [2026-09-18] - Network Instrument UI Redesign
 
 - Replaced pastel gradients and uniform rounded cards with an ink/copper/paper

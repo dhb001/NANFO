@@ -1,6 +1,94 @@
 # Package Validation
 
-## Current Status
+## Integrated0029 verification — 2026-09-20,21:02 UTC
+
+User-approved current-source contract advances to0029, preserving the external
+telemetry-coverage invalidation migration unchanged. It adds no tables;0028
+experimental ownership and0027 archive/autonomous safety floors still apply.
+Historical0027 **and0028** matrices remain exportable unchanged; current lifecycle
+refuses both old markers. Exact chain checks now cover0029→0001 through the
+centralized target. The historical measured-twin target remains0027.
+
+```bash
+# From backend/, after the full isolated suite completed:
+PYTHONPATH=..:. poetry run pytest -c pyproject.toml ../deploy/tests ../deploy/test_lifecycle.py -q --no-cov
+poetry run pytest tests/unit/test_runtime_health.py tests/unit/test_verify_measured_twin.py tests/integration/test_readiness.py scripts/test_audit_isolated_suite.py -q --no-cov
+```
+
+**248 deployment tests passed in5.01s** (all prior244 plus4 additional historical/
+current compatibility cases). **87 runtime/readiness/verifier/runner tests passed
+in3.91s**. The full owned PostgreSQL default lane separately passed253, skipped12
+Redis-dependent cases, failed0; details in `AuditRepair-Verification.md`.
+These supersede the prior schema-drift failure, without relabeling earlier evidence.
+No live Docker deployment acceptance or existing-store migration is claimed.
+
+## Current-source compatibility repair — 2026-09-20
+
+Source target0028 now agrees across fresh initialization, runtime readiness,
+maintenance, lifecycle metadata/adoption and the deployment verifier. The existing
+runtime-health0028 work was preserved, replacing its literal with the centralized
+dependency-free `app.core.schema_version.CURRENT_SCHEMA`. Host CLIs import that
+same contract through `deploy/schema_contract.py` without backend dependencies.
+New verifier runs use `migration_0028`; original0027 matrices remain exportable
+without renaming or changing statuses. Historical records below are not rewritten.
+
+Fresh start verifies the actual installed maintenance checkpoint before issuing a
+current marker. Historical0027 markers/archives cannot be adopted by current
+composition; no implicit upgrade is added. Cold restore can still authenticate and
+use exact historical images with their own maintenance tooling. Archive safety
+requirements use revision floors:0027+ retains archive and autonomous release
+proof,0028+ also requires experimental ownership fully released. Maintenance checks
+all three experimental ownership dimensions without mutation, and restored proof
+is compared to the authenticated source checkpoint before session invalidation.
+
+Offline verification (from `backend/`):
+
+```bash
+PYTHONPATH=..:. poetry run pytest -c pyproject.toml ../deploy/tests ../deploy/test_lifecycle.py -q --no-cov
+poetry run pytest tests/unit/test_runtime_health.py tests/unit/test_verify_measured_twin.py tests/integration/test_readiness.py -q --no-cov
+```
+
+**244 deployment tests passed** (original216 plus28 compatibility regressions),
+**76 runtime/readiness/historical-verifier tests passed**. Scoped Ruff passed.
+Direct host `python deploy/{manage,verify,release_manifest}.py --help` imports passed
+without initializing app settings or requiring backend dependencies. An initial
+deployment-only command omitted the required repository PYTHONPATH/config and
+failed collection; the explicit command above is the verified invocation.
+
+No Docker build, service mutation, schema upgrade, live deployment acceptance or
+historical-image certification was performed. New0028 live acceptance remains
+required before claiming a new accepted release; source consistency and unit
+tests do not substitute for that evidence.
+
+## Current ADR021 Inspection — 2026-09-19
+
+**Read-only inspection complete; live acceptance not run.** The five ADR020 rebuild
+images in `core-build-adr020-current.json` are present as Linux/amd64. The
+Compose-pinned PostgreSQL 17.6 and Redis 7.4.5 images are absent. Existing verifier
+capacity check reports 276,187,082,752 bytes available on Docker's `/home` filesystem
+and 7,969,120,256 bytes on staging, above its 1 GiB minimum. No build, pull, container
+lifecycle, migration, pruning or lab command was executed.
+
+ADR021 migration 0020/0021 integration, source-matched release images, persistent
+full build records and missing pinned stores block acceptance. Initializer,
+runtime-health and verifier assertions still target 0019 at inspection time; parent
+must align these before the serialized run. Current images predate the latest
+frontend/ADR021 changes. Optional frozen checkpoint is absent despite an available
+AI runtime image.
+
+New `release_manifest.py` creates/verifies exact-byte lock/source/build-record
+manifests and atomically exports bounded, allowlisted status/resource evidence
+with original and exported checksums. Secret/key directories and free-text
+diagnostics are excluded; export preserves failed/blocked statuses. It is offline
+integrity tooling, not a live acceptance result or a replacement for encrypted
+backups. 24 release tests and 46 verifier tests pass; 76 operations/lifecycle tests
+pass with the existing backend interpreter.
+
+Exact IDs, missing store digests, prerequisites, safe integration command template,
+evidence export instructions and limits:
+[`CompletionProgram/Deployment.md`](../docs/project/CompletionProgram/Deployment.md).
+
+## Previous Resume Status — 2026-09-14 (Historical)
 
 **Authorized resume on 2026-09-14: BLOCKED by missing pinned images, not disk.**
 The live command ran with `deploy/core-build-adr020-final.json` and all four exact

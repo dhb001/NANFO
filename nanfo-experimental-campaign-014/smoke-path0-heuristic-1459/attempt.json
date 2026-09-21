@@ -1,0 +1,18 @@
+{
+  "case_id": "smoke-path0-heuristic-1459",
+  "cleanup": {
+    "evidence_errors": [],
+    "removed": true,
+    "removed_resources": [
+      "f85224ae81fd7252411c3dd731160132725ec94f73aaacd0af4278228f7d103d",
+      "nanfo-experimental-e8a03d95d1d74acc9be3dc8fddd74eed"
+    ],
+    "unresolved_resources": []
+  },
+  "controller_returncode": 0,
+  "controller_status": "completed",
+  "policy": "heuristic",
+  "scenario": "path0",
+  "seed": 1459,
+  "status": "acquired"
+}

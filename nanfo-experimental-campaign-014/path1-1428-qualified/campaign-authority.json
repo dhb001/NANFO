@@ -1,0 +1,302 @@
+[
+  {
+    "authorized": true,
+    "checked_monotonic": 98214.664425886,
+    "entry": {
+      "argv": [
+        "ip",
+        "route",
+        "add",
+        "10.78.10.2/32",
+        "via",
+        "10.78.4.1",
+        "dev",
+        "access1-eth1",
+        "onlink",
+        "table",
+        "19110",
+        "proto",
+        "static"
+      ],
+      "began": 98214.568106589,
+      "completed": null,
+      "node": "access1",
+      "restoring": false
+    },
+    "id": "af241509117d2ce06fd9833525ba82bbd6daaeb40e0f8ec4023fae228f5030a4"
+  },
+  {
+    "authorized": true,
+    "checked_monotonic": 98214.794357854,
+    "entry": {
+      "argv": [
+        "ip",
+        "rule",
+        "add",
+        "priority",
+        "19110",
+        "from",
+        "10.78.8.2/32",
+        "to",
+        "10.78.10.2/32",
+        "table",
+        "19110"
+      ],
+      "began": 98214.680254436,
+      "completed": null,
+      "node": "access1",
+      "restoring": false
+    },
+    "id": "3a7121f1e042539db0b6f6e611ab7fce72220f8016f5aca821d0d2b2a996b1cd"
+  },
+  {
+    "authorized": true,
+    "checked_monotonic": 98214.880498745,
+    "entry": {
+      "argv": [
+        "ip",
+        "route",
+        "add",
+        "10.78.10.2/32",
+        "via",
+        "10.78.6.2",
+        "dev",
+        "dist1-eth4",
+        "onlink",
+        "table",
+        "19110",
+        "proto",
+        "static"
+      ],
+      "began": 98214.807792459,
+      "completed": null,
+      "node": "dist1",
+      "restoring": false
+    },
+    "id": "db5a04ead86b66d65988c476dd9ea7d64623136fa0227c145ecb6c3c92daa038"
+  },
+  {
+    "authorized": true,
+    "checked_monotonic": 98214.988372549,
+    "entry": {
+      "argv": [
+        "ip",
+        "rule",
+        "add",
+        "priority",
+        "19110",
+        "from",
+        "10.78.8.2/32",
+        "to",
+        "10.78.10.2/32",
+        "table",
+        "19110"
+      ],
+      "began": 98214.894352088,
+      "completed": null,
+      "node": "dist1",
+      "restoring": false
+    },
+    "id": "01b7eb54544f5f8ba1c678b06176f943ef90a0e1a6f492dede1d569ca5d3e634"
+  },
+  {
+    "authorized": true,
+    "checked_monotonic": 98215.097964626,
+    "entry": {
+      "argv": [
+        "ip",
+        "route",
+        "add",
+        "10.78.10.2/32",
+        "via",
+        "10.78.10.2",
+        "dev",
+        "access2-eth3",
+        "onlink",
+        "table",
+        "19110",
+        "proto",
+        "static"
+      ],
+      "began": 98215.004282071,
+      "completed": null,
+      "node": "access2",
+      "restoring": false
+    },
+    "id": "28394fafcf663dc3f7aac6bcecb5bba0180114c5190ad35b660c6fd8b123be1a"
+  },
+  {
+    "authorized": true,
+    "checked_monotonic": 98215.205435992,
+    "entry": {
+      "argv": [
+        "ip",
+        "rule",
+        "add",
+        "priority",
+        "19110",
+        "from",
+        "10.78.8.2/32",
+        "to",
+        "10.78.10.2/32",
+        "table",
+        "19110"
+      ],
+      "began": 98215.111833558,
+      "completed": null,
+      "node": "access2",
+      "restoring": false
+    },
+    "id": "0fe9ebb247233801076ea8825254db70cba9abc969702a870a7bda023906d7f5"
+  },
+  {
+    "authorized": true,
+    "checked_monotonic": 98215.335802137,
+    "entry": {
+      "argv": [
+        "ip",
+        "route",
+        "add",
+        "10.78.8.2/32",
+        "via",
+        "10.78.6.1",
+        "dev",
+        "access2-eth1",
+        "onlink",
+        "table",
+        "19111",
+        "proto",
+        "static"
+      ],
+      "began": 98215.219511082,
+      "completed": null,
+      "node": "access2",
+      "restoring": false
+    },
+    "id": "badc579ee4f222fd4b813e9ef3b6324dc37e52c011597c95342264c7cf481aef"
+  },
+  {
+    "authorized": true,
+    "checked_monotonic": 98215.446843261,
+    "entry": {
+      "argv": [
+        "ip",
+        "rule",
+        "add",
+        "priority",
+        "19111",
+        "from",
+        "10.78.10.2/32",
+        "to",
+        "10.78.8.2/32",
+        "table",
+        "19111"
+      ],
+      "began": 98215.352895367,
+      "completed": null,
+      "node": "access2",
+      "restoring": false
+    },
+    "id": "d85cc9e2874f06b6da37dca78a293a355a6bc504cfb010242b77188816e7d827"
+  },
+  {
+    "authorized": true,
+    "checked_monotonic": 98215.561036679,
+    "entry": {
+      "argv": [
+        "ip",
+        "route",
+        "add",
+        "10.78.8.2/32",
+        "via",
+        "10.78.4.2",
+        "dev",
+        "dist1-eth3",
+        "onlink",
+        "table",
+        "19111",
+        "proto",
+        "static"
+      ],
+      "began": 98215.461388927,
+      "completed": null,
+      "node": "dist1",
+      "restoring": false
+    },
+    "id": "1ea2136034c57fff2a00090bf25209b33e0b47dc7c36f952ff36ea195b99ffa1"
+  },
+  {
+    "authorized": true,
+    "checked_monotonic": 98215.670563773,
+    "entry": {
+      "argv": [
+        "ip",
+        "rule",
+        "add",
+        "priority",
+        "19111",
+        "from",
+        "10.78.10.2/32",
+        "to",
+        "10.78.8.2/32",
+        "table",
+        "19111"
+      ],
+      "began": 98215.575396815,
+      "completed": null,
+      "node": "dist1",
+      "restoring": false
+    },
+    "id": "1a40629304f91120d10723f5649f1dc98130701d6a11e4bb530186a65eb3af78"
+  },
+  {
+    "authorized": true,
+    "checked_monotonic": 98215.757747157,
+    "entry": {
+      "argv": [
+        "ip",
+        "route",
+        "add",
+        "10.78.8.2/32",
+        "via",
+        "10.78.8.2",
+        "dev",
+        "access1-eth3",
+        "onlink",
+        "table",
+        "19111",
+        "proto",
+        "static"
+      ],
+      "began": 98215.684979004,
+      "completed": null,
+      "node": "access1",
+      "restoring": false
+    },
+    "id": "8eb7885de0de0e4d7ed2d113cc717c015a143ef565cee2486aa6d28ea4df646b"
+  },
+  {
+    "authorized": true,
+    "checked_monotonic": 98215.888727988,
+    "entry": {
+      "argv": [
+        "ip",
+        "rule",
+        "add",
+        "priority",
+        "19111",
+        "from",
+        "10.78.10.2/32",
+        "to",
+        "10.78.8.2/32",
+        "table",
+        "19111"
+      ],
+      "began": 98215.774619321,
+      "completed": null,
+      "node": "access1",
+      "restoring": false
+    },
+    "id": "f922fee4d9c0f5aa21205228fac313f30ad1c8e0f8dbe4eb4c01c220c4893eaa"
+  }
+]

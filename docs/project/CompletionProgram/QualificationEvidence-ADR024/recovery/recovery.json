@@ -1,0 +1,167 @@
+{
+  "archive_all_files": {
+    "emulation/.dockerignore": "64876ce98cc43db237ef71705920985dbda74f0f670a544af561f6e8563aaf63",
+    "emulation/.gitignore": "eef0a70f662c6a0d566945db087a5515be09ab4abf30789b5a7e69b7fd70875d",
+    "emulation/DRAIN-V4-VALIDATION.md": "520a34dd4f4c8ccc44b5e6093cc9c1899d9498a05ee629e257c9b3ea0b0b2546",
+    "emulation/Dockerfile": "ccb51b29779e436726ebc5246476954f03524884f3d3981dc9740d0c204f838e",
+    "emulation/EXPERIMENT.md": "410c95f3f82a17d07d0cf8150046f73f300bf6e04cf992f15a124e31cdac851a",
+    "emulation/MATCHED-VALIDATION.md": "8e38eb6a432af01ce35d3c9b86d55891cc3efd314400a2d2b2cb65aa2b8d08bb",
+    "emulation/README.md": "480a85eabf616a089a2ce35f84c7099ef707fbfcf43a9376c2077ab41a106320",
+    "emulation/STEP7-VALIDATION.md": "ea1fcc6bbdd328668df8d1a02d29ac32990c26d6d62ad93a3546c2cb55b100f8",
+    "emulation/__init__.py": "9f0ac359983701c537e4ebde9b412a3b8de66de3264321784b0fbab409ed89d5",
+    "emulation/actions.py": "5b30fd997c11e04b828fc0a3c259734ec3b2394ef4f30e08e48e2359a44a018d",
+    "emulation/apt-sources.list": "1b39437ed24df2a63b6739f4e5d2510e31b139e79eb3f71dfa65655e4215113e",
+    "emulation/compose.yaml": "2f61a68bb5f6c47ec4d2f574f41d9c6f1b1a87c0a51da013220499fc9c2bd773",
+    "emulation/control.py": "b87e830229908e3f4090a3a91515067fc4049cdeca674e2a368c9b8308768cf4",
+    "emulation/controller.py": "683d82b825165e7bbfb9094d59a410b8b1ce8bf51f293bddca86afd82d51dfc9",
+    "emulation/experiment.py": "50b8ac7e9265774adad802807da2fb5c7c02653c139512ef9d200563a5bcedc9",
+    "emulation/experiment_client.py": "0f8e774bdd6aded3a3f17b3d5e4f737d2856bb1610c4e571f9b84d68050dcbba",
+    "emulation/experiment_smoke.py": "d6045ac50ad9993024d4568b660b4f5dc700ace3283038bbfc2f834e1987791c",
+    "emulation/logging.conf": "49dddd1368c014b6f40c1067b2c5d3ea8b4aa3bc7cfbfb1d9045cf175e6228cf",
+    "emulation/mailbox.py": "f20e2f0c32d9e8135ce6110ab5c4d477f5f13e7983ccc6fd9840c51874bffa74",
+    "emulation/matched.py": "da13903064be198d52485a06593528d6d11d313bb2f4202e9137c5b1f9bb18fc",
+    "emulation/measurements.py": "17adcad1f9ca73d239305f147460af02ae27c1539b4a662f65d0749213236344",
+    "emulation/ospf.py": "1f427c5763a4fe463a4a3197f4473c9f21de8c37ed27304027a8d11a384e91b5",
+    "emulation/requirements.txt": "a5c31f09953e22b84658e44f0b9cef0e860df3be11881cba06451066be058016",
+    "emulation/ruff.toml": "798f588e069d329c11eb910db598fd359332cf4ae83ca998e4467ddfbaef7a65",
+    "emulation/runner.py": "0ae74392e6b719e6776aee06acef89fcd6beec9ce9436178e0618992d4e62d8e",
+    "emulation/tests/test_actions.py": "dbe68895971001a374df83665884270d25d1ed1063bf0699df039af2bde84267",
+    "emulation/tests/test_controller.py": "fcc058873091e52e9fcdd291bd32e572b2990e380163f9b9707ad5091f1b563f",
+    "emulation/tests/test_emulation.py": "155c30403c5a8621a8290152c22ea0dc9ea9f53af49f0addf92ac14c19ee9b08",
+    "emulation/tests/test_experiment.py": "87723199db5e309d2cc8d0c39be07587326bee07e3dc24aef74ebf274420fa42",
+    "emulation/tests/test_matched.py": "dc67bfcc3db882666f60bf1beda7722ec91bebe4dda7d191364cf4da38559e9f",
+    "emulation/tests/test_ospf.py": "3bdca7defe364c3fc768739f6aee0e652788faa0047284ec0a21fc2141aa0407",
+    "emulation/tests/test_runner.py": "a4003e7dfda43c000376695078ad585a0aca21476bba11a4b3891f09fceb4151",
+    "emulation/topology.py": "d4a258a2f77f4017a6d60b064de86489c7494eaf3d95719c4c591f34f7d7c0e4",
+    "emulation/verify_actions.py": "a053d4d121812ef59dfc4eed8cf96d661f10918bab56cf934b602f9a94265d45",
+    "emulation/verify_matched.py": "159ef653512bc721e7161be23056ef412e79938061c874e7fce96dffafb00d46",
+    "emulation/workloads.py": "4ce3c77982b80d0182557c548f71bf8fa1001f2d8f261406ec33e5fdf58141db"
+  },
+  "archive_sha256": "444663dc3a7223044a9e8830ba5dd24cd3e1b041c60dc278e4bba56eb7252384",
+  "checkpoint_sha256": "5b8818af655ec8efce5d3bc3def27db599f3e0df379a0ae263dcefb5f72a80a5",
+  "client_source_files": {
+    "__init__.py": "7bc5e4c099b6aaf9dc5e7bfb94d0affb9a5964cc4636d4a993472da4f12e05ac",
+    "__main__.py": "935a1c1166b0c1ea35a82256345000bf2c73ded718d77773bc27a71ecce28f7d",
+    "artifacts.py": "9100786be1b3c7bc7a032e23835ce2848c7483c9fc599c7d1d5ffcdeaf17694b",
+    "cli.py": "e657c223bfb97fc503aa11624be4941e5d9a270eedeba32465534ca8e21d2aa8",
+    "contracts.py": "c71b8a3cd82420f1daf3972c976ddd933b79c975c17d24d36e3726260e8214f6",
+    "drain.py": "c779a52709ecfca19f063f51c744501896345ecaefc770cf642d4b6e9be1ce03",
+    "env.py": "b2e81af8d89a038f142fa11fb247ac6af68cd80f2a50946e247a91f941d7765f",
+    "evidence.py": "f6ebe061a5a02bf74df6e7d1f2453664a574328d04d4e3557b679e139d8c30ff",
+    "expanded.py": "e8722009f90870739a8c3cc7e01be0d6a433923d8a5a7f11030c41e97ae28d30",
+    "extended_supervisor.py": "b85b658c20ab8186c424b569ee7a6e4250fa64a8cd0a0092e369b49e7b5b7f36",
+    "ppo.py": "807d86f9b942262c65a5ca92c1450f145f95f9518ee67b796cbf1985994800be",
+    "qualification.py": "d190e42b4e86925407982a2a9aedef57de5f29881e952e64bbbe45c48c900871",
+    "supervisor.py": "595c7ee1ceb0b3a670123a8fcf06e721577cccd8f953cdec43496bbd8c35f726",
+    "transport.py": "6256c5d8a4a7352c738f3eaea299103dd74e30234d19fbf23e27192032b2df0b"
+  },
+  "client_source_sha256": "04f797f8be02329adf15b44686d938c8898c21eca3fdb0d090afd5fe19153463",
+  "contract_sha256": "bbcbbadec55792fa3f01bef511c1e38b0e433e125f896cdc3e64f823325e0fe6",
+  "dependencies_inherited_exact": true,
+  "dependency_locks": {
+    "pyproject.toml": "d1837cdc330af3b8c0adba4e44eaccb183e32b5347d9a4ad34e8c5fabbee28f4",
+    "uv.lock": "e7d9252cdbf2e54a17925f750345db90725b6ded4aacf8b38c295c697dfe6325"
+  },
+  "environment_version": 4,
+  "git_snapshot_matches": {
+    "0408c41e48a42f7cc0254b12bb3bdac9ea9805ac": [
+      "Dockerfile",
+      "controller.py",
+      "experiment_client.py",
+      "matched.py",
+      "measurements.py",
+      "requirements.txt",
+      "topology.py"
+    ],
+    "f9c67dbc3236e1e7e9ed41d7f91b2cc69e5f08c3": [
+      "Dockerfile",
+      "controller.py",
+      "measurements.py",
+      "requirements.txt",
+      "topology.py"
+    ]
+  },
+  "historical_image_id": "sha256:6b4ed91c2e7be7e4fbbb536ad3a808eb0e98c9d5f8165a5008846586893016ff",
+  "historical_image_identity_reproduced": false,
+  "historical_image_present": false,
+  "historical_sessions": [
+    {
+      "evidence_sha256": "107077a6f206895acb5c26017167f86ce6985a102834f783ad7b7d472d72a8ed",
+      "policy": "ppo"
+    },
+    {
+      "evidence_sha256": "ae5e0c10bf1603b1217315061e6f9368b13698f3a7159b6348f6b745819886f0",
+      "policy": "constant1"
+    },
+    {
+      "evidence_sha256": "5d9fd8757c966b7204190c6679b38780cc30373520c81ab496b4810a4567b739",
+      "policy": "constant0"
+    },
+    {
+      "evidence_sha256": "b81c1aa8b1faa8c3ee1cda9db26592b43b7f9db047b8f4d40aa9cd0ebd439ef4",
+      "policy": "heuristic"
+    },
+    {
+      "evidence_sha256": "e3a380871d8a5be697bec6864981867bdf2438ecdb32462bd8e3c9fd5b157683",
+      "policy": "ospf"
+    }
+  ],
+  "inherited_base_image_id": "sha256:aafbad31e766488bbfd0709a5b12798677505c8bae3cc7b957405b0b16ecee03",
+  "lab_source_files": {
+    "Dockerfile": "ccb51b29779e436726ebc5246476954f03524884f3d3981dc9740d0c204f838e",
+    "actions.py": "5b30fd997c11e04b828fc0a3c259734ec3b2394ef4f30e08e48e2359a44a018d",
+    "compose.yaml": "2f61a68bb5f6c47ec4d2f574f41d9c6f1b1a87c0a51da013220499fc9c2bd773",
+    "controller.py": "683d82b825165e7bbfb9094d59a410b8b1ce8bf51f293bddca86afd82d51dfc9",
+    "experiment.py": "50b8ac7e9265774adad802807da2fb5c7c02653c139512ef9d200563a5bcedc9",
+    "experiment_client.py": "0f8e774bdd6aded3a3f17b3d5e4f737d2856bb1610c4e571f9b84d68050dcbba",
+    "matched.py": "da13903064be198d52485a06593528d6d11d313bb2f4202e9137c5b1f9bb18fc",
+    "measurements.py": "17adcad1f9ca73d239305f147460af02ae27c1539b4a662f65d0749213236344",
+    "ospf.py": "1f427c5763a4fe463a4a3197f4473c9f21de8c37ed27304027a8d11a384e91b5",
+    "requirements.txt": "a5c31f09953e22b84658e44f0b9cef0e860df3be11881cba06451066be058016",
+    "runner.py": "0ae74392e6b719e6776aee06acef89fcd6beec9ce9436178e0618992d4e62d8e",
+    "topology.py": "d4a258a2f77f4017a6d60b064de86489c7494eaf3d95719c4c591f34f7d7c0e4",
+    "workloads.py": "4ce3c77982b80d0182557c548f71bf8fa1001f2d8f261406ec33e5fdf58141db"
+  },
+  "lab_source_sha256": "08c312c64154c9aedcd3b22eeb3573783590e0eb7183bc999cb8ef39b958dbbd",
+  "live_qualified": false,
+  "measurements_started": false,
+  "rebuilt_image_id": "sha256:954462c0f00d5bbaa72ea144f6064936b399c430e6ab94bffcf1c00d134ea0d7",
+  "rebuilt_spec_exact": true,
+  "rebuilt_tag": "nanfo-adr024-v4-evaluation:64c0645681704358b41516aa36f0b108",
+  "runtime_versions": {
+    "gymnasium": "1.2.0",
+    "numpy": "2.2.6",
+    "package": "0.1.0",
+    "python": "3.12.14",
+    "torch": "2.8.0+cpu"
+  },
+  "spec_sha256": "bb15142a19ed3ee87a6aec2c6f9109d789d9736a5e6afda826ad898ef5fe7200",
+  "training_started": false,
+  "validator_boundaries": {
+    "cases": {
+      "original": {
+        "returncode": 0,
+        "stderr": "",
+        "stdout": "{\"action\": 0, \"probabilities\": [0.9718289375305176, 0.028171034529805183], \"value\": 3.2172513008117676, \"input_sha256\": \"ea3a62d0a12bbc608b75b49b10a294bbcaeb2ec9ce276f07965d490352c5729a\", \"policy_sha256\": \"5b8818af655ec8efce5d3bc3def27db599f3e0df379a0ae263dcefb5f72a80a5\", \"inference_seconds\": 0.001250779, \"execution\": \"not_applied\", \"qualification_checked\": false, \"evidence\": [{\"path_capacity_mbps\": [20.0, 2.0], \"path_utilization\": [0.324203659422537, 0.0003871009380411687], \"path_queue_packets\": [6.0, 1.0], \"latency_ms\": 24.252, \"loss_fraction\": 0.0, \"goodput_mbps\": 5.941790074660005, \"offered_mbps\": 5.942, \"actual_offered_mbps\": 5.941790074660005, \"background_mbps\": 2.132, \"previous_action\": 0, \"seconds_since_change\": 20.302170097998896}], \"spec_hash\": \"bb15142a19ed3ee87a6aec2c6f9109d789d9736a5e6afda826ad898ef5fe7200\", \"generalization\": false, \"contract_hash\": \"bbcbbadec55792fa3f01bef511c1e38b0e433e125f896cdc3e64f823325e0fe6\", \"checkpoint_weights_sha256\": \"3e7e38ab4297ffd4b32b9c32d64af4b45e5f5ed1b2a74f9926f23379b0b0f967\", \"checkpoint_provenance\": \"measured-lab\", \"artifact_validation_and_inference_seconds\": 0.077550609}\n"
+      },
+      "rebuilt_image": {
+        "returncode": 1,
+        "stderr": "{\"status\": \"failed\", \"error\": \"inference image/source provenance differs from checkpoint\"}\n",
+        "stdout": ""
+      },
+      "wrong_source": {
+        "returncode": 1,
+        "stderr": "{\"status\": \"failed\", \"error\": \"lab provenance differs from spec\"}\n",
+        "stdout": ""
+      },
+      "wrong_spec": {
+        "returncode": 1,
+        "stderr": "{\"status\": \"failed\", \"error\": \"lab spec hash mismatch\"}\n",
+        "stdout": ""
+      }
+    },
+    "evidence_kind": "historical-replay-and-mutated-unit-copies-not-live",
+    "rebuilt_live_inference_compatible": false
+  },
+  "version": "nanfo.adr024-runtime-recovery/v1"
+}

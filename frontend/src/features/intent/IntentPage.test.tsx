@@ -15,6 +15,7 @@ const mockDetailRefetch = vi.fn();
 const mockUseIntentDetail = vi.fn();
 
 vi.mock("@/features/intent/hooks", () => ({
+  useIntentHistory: () => ({ data: { items: [], total: 0, page: 1, page_size: 20 } }),
   useValidateIntent: () => ({
     mutateAsync: mockValidateAsync,
     isPending: false,
@@ -122,10 +123,36 @@ describe("IntentPage", () => {
     expect(first.request).toMatchObject({ manual_approval: true, cancel: false, intent_id: "lab-intent" });
     expect(first.request).not.toHaveProperty("simulation_id");
     expect(first.idempotencyKey).toBe(first.request.idempotency_key);
+    act(() => useAuthStore.getState().replaceTokens({ accessToken: "rotated", refreshToken: "rotated-refresh" }));
+    expect(screen.getByLabelText("Intent ID")).toHaveValue("lab-intent");
+    expect(screen.getByLabelText("Idempotency Key")).toHaveValue(first.idempotencyKey);
+    expect(screen.getByRole("checkbox", { name: /explicitly approve/ })).toBeChecked();
     await userEvent.click(screen.getByRole("button", { name: "Execute" }));
     expect(mockExecuteAsync.mock.calls[1][0]).toEqual(first);
     expect(screen.getByText(/Execution accepted, not completed/)).toBeInTheDocument();
     expect(screen.queryByText("Execution Completed")).not.toBeInTheDocument();
+  });
+  it("retains drafts and immutable pending execution through rotation, revoking approval on authority change", async () => {
+    authorizeLab();
+    let finish!: (value: unknown) => void;
+    mockExecuteAsync.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+    render(<IntentPage />);
+    await userEvent.type(screen.getByLabelText("Intent ID"), "lab-intent");
+    await userEvent.clear(screen.getByLabelText("Scope JSON"));
+    await userEvent.type(screen.getByLabelText("Scope JSON"), "draft in progress");
+    await userEvent.click(screen.getByRole("checkbox", { name: /explicitly approve/ }));
+    await userEvent.click(screen.getByRole("button", { name: "Execute" }));
+    const request = mockExecuteAsync.mock.calls[0][0];
+    act(() => useAuthStore.getState().replaceTokens({ accessToken: "rotated", refreshToken: "new-refresh" }));
+    expect(screen.getByLabelText("Scope JSON")).toHaveValue("draft in progress");
+    expect(screen.getByLabelText("Idempotency Key")).toHaveValue(request.idempotencyKey);
+    await act(async () => finish({ status: "execution_started", queue_status: "queued" }));
+    expect(screen.getByText(/Execution accepted, not completed/)).toBeInTheDocument();
+    act(() => useAuthStore.getState().setProfile({ ...useAuthStore.getState().profile!, roles: ["Admin"] }));
+    expect(screen.getByRole("checkbox", { name: /explicitly approve/ })).not.toBeChecked();
+    expect(screen.getByLabelText("Scope JSON")).toHaveValue("draft in progress");
+    expect(screen.getByLabelText("Idempotency Key")).toHaveValue(request.idempotencyKey);
+    expect(mockExecuteAsync).toHaveBeenCalledTimes(1);
   });
   it("sends only an explicit valid simulation UUID, preserves it on retry, and omits it for cancel", async () => {
     authorizeLab();

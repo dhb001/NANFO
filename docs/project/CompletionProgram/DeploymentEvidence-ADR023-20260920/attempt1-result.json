@@ -1,0 +1,164 @@
+{
+  "cases": {
+    "disk_capacity": {
+      "status": "passed",
+      "detail": {
+        "docker_root": "/home/.system-data/docker",
+        "capacity_filesystem": "/home",
+        "docker_available_bytes": 274785918976,
+        "staging_available_bytes": 3968401408,
+        "minimum_bytes": 1073741824
+      }
+    },
+    "installed_source_parity": {
+      "status": "blocked",
+      "detail": "Prerequisite did not complete"
+    },
+    "package_contract": {
+      "status": "passed",
+      "detail": {
+        "locked_stages_present": true,
+        "live_build": "pending"
+      }
+    },
+    "locked_container_build": {
+      "status": "failed",
+      "detail": "Command failed (docker, exit 1); output withheld"
+    },
+    "fresh_volumes": {
+      "status": "blocked",
+      "detail": "Prerequisite did not complete"
+    },
+    "migration_0027": {
+      "status": "blocked",
+      "detail": "Prerequisite did not complete"
+    },
+    "bootstrap_login": {
+      "status": "blocked",
+      "detail": "Prerequisite did not complete"
+    },
+    "frontend_http": {
+      "status": "blocked",
+      "detail": "Prerequisite did not complete"
+    },
+    "full_stack_readiness": {
+      "status": "blocked",
+      "detail": "Prerequisite did not complete"
+    },
+    "distributed_failover": {
+      "status": "blocked",
+      "detail": "Prerequisite did not complete"
+    },
+    "simulation": {
+      "status": "blocked",
+      "detail": "Prerequisite did not complete"
+    },
+    "report_csv": {
+      "status": "blocked",
+      "detail": "Prerequisite did not complete"
+    },
+    "report_pdf": {
+      "status": "blocked",
+      "detail": "Prerequisite did not complete"
+    },
+    "spatial_asset_upload": {
+      "status": "blocked",
+      "detail": "Prerequisite did not complete"
+    },
+    "database_stop_readiness": {
+      "status": "blocked",
+      "detail": "Prerequisite did not complete"
+    },
+    "worker_stale_heartbeat": {
+      "status": "blocked",
+      "detail": "Prerequisite did not complete"
+    },
+    "api_worker_restart": {
+      "status": "blocked",
+      "detail": "Prerequisite did not complete"
+    },
+    "nonempty_archive_delete": {
+      "status": "blocked",
+      "detail": "Prerequisite did not complete"
+    },
+    "restored_archive_bytes": {
+      "status": "blocked",
+      "detail": "Prerequisite did not complete"
+    },
+    "lab_binding": {
+      "status": "blocked",
+      "detail": "Prerequisite did not complete"
+    },
+    "lab_congestion": {
+      "status": "blocked",
+      "detail": "Prerequisite did not complete"
+    },
+    "model_diagnostic": {
+      "status": "blocked",
+      "detail": "Prerequisite did not complete"
+    },
+    "coordinated_encrypted_backup": {
+      "status": "blocked",
+      "detail": "Prerequisite did not complete"
+    },
+    "distinct_fresh_restore": {
+      "status": "blocked",
+      "detail": "Prerequisite did not complete"
+    },
+    "restore_image_schema": {
+      "status": "blocked",
+      "detail": "Prerequisite did not complete"
+    },
+    "old_tokens_invalid": {
+      "status": "blocked",
+      "detail": "Prerequisite did not complete"
+    },
+    "restored_report_bytes": {
+      "status": "blocked",
+      "detail": "Prerequisite did not complete"
+    },
+    "restored_spatial_assets": {
+      "status": "blocked",
+      "detail": "Prerequisite did not complete"
+    },
+    "restored_workflows": {
+      "status": "blocked",
+      "detail": "Prerequisite did not complete"
+    },
+    "restored_telemetry": {
+      "status": "blocked",
+      "detail": "Prerequisite did not complete"
+    },
+    "source_unchanged": {
+      "status": "blocked",
+      "detail": "Prerequisite did not complete"
+    },
+    "campaign": {
+      "status": "failed",
+      "detail": "Command failed (docker, exit 1); output withheld"
+    },
+    "cleanup": {
+      "status": "passed",
+      "detail": {
+        "containers_removed": 0,
+        "volumes_removed": 0,
+        "networks_removed": 0
+      }
+    }
+  },
+  "core_passed": false,
+  "all_green": false,
+  "step15_complete": false,
+  "counts": {
+    "passed": 3,
+    "failed": 2,
+    "blocked": 28,
+    "pending": 0
+  },
+  "live_authorized": true,
+  "agents_idle_attested": true,
+  "failure": "Command failed (docker, exit 1); output withheld",
+  "evidence_directory": "/tmp/opencode/nanfo-deploy-verify-3o5ofh3a/evidence",
+  "live_requested_lab": false,
+  "live_requested_model": false
+}

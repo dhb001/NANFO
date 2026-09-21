@@ -11,17 +11,25 @@ import {
   upsertCampusBuildings,
   upsertDeviceGroups,
   updateDeviceSpatialRef,
+  updateNetwork,
+  deleteNetwork,
+  updateDevice,
+  deleteDevice,
 } from "@/features/networks/api";
 import type {
   UpsertCampusModelAssetInput,
   UpsertDeviceGroupInput,
+  CreateNetworkInput,
+  CreateDeviceInput,
+  UpdateNetworkInput,
+  UpdateDeviceInput,
 } from "@/shared/types/network";
 
-export function useNetworks(token: string | null, workspaceId: string | null) {
+export function useNetworks(token: string | null, workspaceId: string | null, page = 1, pageSize = 20) {
   return useQuery({
-    queryKey: ["networks", token, workspaceId],
+    queryKey: ["networks", token, workspaceId, page, pageSize],
     queryFn: async () => {
-      const response = await listNetworks(token as string, workspaceId as string);
+      const response = await listNetworks(token as string, workspaceId as string, page, pageSize);
       return response.data;
     },
     enabled: Boolean(token && workspaceId),
@@ -31,21 +39,22 @@ export function useNetworks(token: string | null, workspaceId: string | null) {
 export function useCreateNetwork(token: string | null, workspaceId: string | null) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (name: string) => {
-      const response = await createNetwork(token as string, { workspace_id: workspaceId as string, name });
+    mutationFn: async (input: string | Omit<CreateNetworkInput, "workspace_id">) => {
+      if (!token || !workspaceId) throw new Error("Workspace context is required.");
+      const response = await createNetwork(token, { ...(typeof input === "string" ? { name: input } : input), workspace_id: workspaceId });
       return response.data;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["networks", token, workspaceId] });
+      queryClient.invalidateQueries({ queryKey: ["networks"] });
     },
   });
 }
 
-export function useDevices(token: string | null, networkId: string | null) {
+export function useDevices(token: string | null, networkId: string | null, page = 1, pageSize = 20) {
   return useQuery({
-    queryKey: ["devices", token, networkId],
+    queryKey: ["devices", token, networkId, page, pageSize],
     queryFn: async () => {
-      const response = await listDevices(token as string, networkId as string);
+      const response = await listDevices(token as string, networkId as string, page, pageSize);
       return response.data;
     },
     enabled: Boolean(token && networkId),
@@ -55,8 +64,9 @@ export function useDevices(token: string | null, networkId: string | null) {
 export function useCreateDevice(token: string | null, networkId: string | null) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (input: { hostname: string; deviceType: string; spatialRefId?: string }) => {
-      const response = await createDevice(token as string, networkId as string, {
+    mutationFn: async (input: CreateDeviceInput | { hostname: string; deviceType: string; spatialRefId?: string }) => {
+      if (!token || !networkId) throw new Error("Network context is required.");
+      const response = await createDevice(token, networkId, "device_type" in input ? input : {
         hostname: input.hostname,
         device_type: input.deviceType,
         spatial_ref_id: input.spatialRefId,
@@ -64,8 +74,56 @@ export function useCreateDevice(token: string | null, networkId: string | null) 
       return response.data;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["devices", token, networkId] });
-      queryClient.invalidateQueries({ queryKey: ["topology", token, networkId] });
+      queryClient.invalidateQueries({ queryKey: ["devices"] });
+      queryClient.invalidateQueries({ queryKey: ["topology"] });
+    },
+  });
+}
+
+export function useUpdateNetwork(token: string | null, workspaceId: string | null) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ networkId, changes }: { networkId: string; changes: UpdateNetworkInput }) => {
+      if (!token || !workspaceId) throw new Error("Workspace context is required.");
+      return (await updateNetwork(token, networkId, changes)).data;
+    },
+    onSuccess: () => { void client.invalidateQueries({ queryKey: ["networks"] }); },
+  });
+}
+
+export function useDeleteNetwork(token: string | null, workspaceId: string | null) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: async (networkId: string) => {
+      if (!token || !workspaceId) throw new Error("Workspace context is required.");
+      await deleteNetwork(token, networkId);
+    },
+    onSuccess: () => { void client.invalidateQueries({ queryKey: ["networks"] }); },
+  });
+}
+
+export function useUpdateDevice(token: string | null, networkId: string | null) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ deviceId, changes }: { deviceId: string; changes: UpdateDeviceInput }) => {
+      if (!token || !networkId) throw new Error("Network context is required.");
+      return (await updateDevice(token, networkId, deviceId, changes)).data;
+    },
+    onSuccess: () => {
+      for (const key of ["devices", "topology", "topology-node"]) void client.invalidateQueries({ queryKey: [key] });
+    },
+  });
+}
+
+export function useDeleteDevice(token: string | null, networkId: string | null) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: async (deviceId: string) => {
+      if (!token || !networkId) throw new Error("Network context is required.");
+      await deleteDevice(token, networkId, deviceId);
+    },
+    onSuccess: () => {
+      for (const key of ["devices", "topology", "topology-node"]) void client.invalidateQueries({ queryKey: [key] });
     },
   });
 }

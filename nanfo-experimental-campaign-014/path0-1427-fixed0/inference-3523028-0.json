@@ -1,0 +1,31 @@
+{
+  "frame_sha256": "c2db4e964f70f70cb9f7f697b53d8ec52d92530afa4229ceb78b144f1680d722",
+  "model_adapter_sha256": null,
+  "policy_kind": "fixed0",
+  "proposal": {
+    "action_id": "route0",
+    "checkpoint_sha256": null,
+    "evidence": [
+      "comparator:fixed-route/v1"
+    ],
+    "observation_contract": "nanfo.passive-measured-v4.v1"
+  },
+  "qualification": null,
+  "result": {
+    "action": 0,
+    "action_path": [
+      "access1",
+      "dist1",
+      "access2"
+    ],
+    "execution": "not_applied",
+    "input_sha256": "65747def51f9046b07c55871c2cebbdc1a5b7ce9ed575116dd898f7a925cb948",
+    "operation": "compare",
+    "policy_kind": "fixed0",
+    "probabilities": null,
+    "rule": "fixed-route/v1",
+    "safety_authorized": false,
+    "value": null
+  },
+  "wrapper_equivalence_sha256": null
+}

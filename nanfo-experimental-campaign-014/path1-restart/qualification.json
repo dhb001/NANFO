@@ -1,0 +1,16 @@
+{
+  "checkpoint_sha256": "77dae44acab722a5a6a2e87d952a6cca65e1c4eea102a089830a8401b521d614",
+  "evidence": [
+    "live_registry:550a0cca98acc9bf5e8aed19fa5133a688e460969f00287da0469731bef33772",
+    "benchmark:e6ee9c1bd99e3f6961db497db664335684fa277bd1a1c86a8034570ac116056d",
+    "qualification_protocol:adr024-rebuilt-evaluation-v1",
+    "parent_checkpoint:5b8818af655ec8efce5d3bc3def27db599f3e0df379a0ae263dcefb5f72a80a5",
+    "qualification:raw-heldout-reconstruction-and-frozen-policy-replay",
+    "scope:stationary-campus-small-v4-scoped-benchmark",
+    "safety_authorized:false"
+  ],
+  "manifest_sha256": "550a0cca98acc9bf5e8aed19fa5133a688e460969f00287da0469731bef33772",
+  "observation_contract": "nanfo.passive-measured-v4.v1",
+  "qualified": true,
+  "reasons": []
+}

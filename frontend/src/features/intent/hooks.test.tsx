@@ -6,6 +6,7 @@ import { useExecuteIntent, useIntentDetail } from "@/features/intent/hooks";
 import { executeIntent, getIntentDetail } from "@/features/intent/api";
 import { useLiveStore } from "@/features/realtime/store";
 import { ApiClientError } from "@/shared/lib/errors";
+import { useAuthStore } from "@/shared/state/auth-store";
 
 vi.mock("@/features/intent/api", () => ({ getIntentDetail: vi.fn(), executeIntent: vi.fn(), validateIntent: vi.fn() }));
 
@@ -20,6 +21,7 @@ describe("intent detail recovery", () => {
   }
 
   beforeEach(() => {
+    useAuthStore.setState({ accessToken: "token", endingSession: false });
     vi.useFakeTimers();
     vi.clearAllMocks();
     client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity } } });

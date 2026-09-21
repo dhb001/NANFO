@@ -6,6 +6,25 @@ import { buildTwinSceneModel, type TwinNode } from "@/features/digitalTwin/scene
 import { topologyEdgeIdentity } from "@/features/topology/edgeIdentity";
 
 describe("digital twin hooks", () => {
+  it("passes all store-retained resources through beyond 240 keys, even behind noisy flow history", () => {
+    useLiveStore.getState().reset();
+    const now = new Date().toISOString();
+    const metric = { event_id: "m", workspace_id: "w", network_id: "n", device_id: "quiet", metric: "packet_loss", value: 5, unit: "%", source: "plugin", observed_at: now, tags: {} };
+    useLiveStore.getState().applyTelemetryDelta({ delta_type: "metric", metric });
+    for (let i = 0; i < 15; i++) useLiveStore.getState().applyTelemetryDelta({ delta_type: "metric", metric: { ...metric, metric: `temperature${i}`, unit: "C", event_id: `extra${i}` } });
+    const nodes = [{ device_id: "quiet", hostname: "quiet", device_type: "switch", status: "active", spatial_ref_id: null }];
+    for (let i = 0; i < 270; i++) {
+      const id = `d${i}`;
+      nodes.push({ ...nodes[0], device_id: id, hostname: id });
+      useLiveStore.getState().applyTelemetryDelta({ delta_type: "metric", metric: { ...metric, device_id: id, event_id: id } });
+    }
+    for (let i = 0; i < 300; i++) useLiveStore.getState().applyTelemetryDelta({ delta_type: "metric", metric: { ...metric, metric: "flow_bytes", event_id: `flow${i}` } });
+    const { result, unmount } = renderHook(() => useTwinSceneModel(nodes));
+    expect(result.current.nodes).toHaveLength(271);
+    expect(result.current.nodes.every((node) => node.congestion.severity === "high")).toBe(true);
+    expect(result.current.nodeById.quiet.congestion.metrics).toHaveLength(1);
+    unmount(); useLiveStore.getState().reset();
+  });
   it("suppresses removed REST nodes and expires congestion on the clock without another push", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-09-10T00:00:00Z"));

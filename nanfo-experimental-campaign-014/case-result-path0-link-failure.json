@@ -1,0 +1,86 @@
+{
+  "auth": {
+    "path": "path0-link-failure/auth.json",
+    "sha256": "6c311c7e3f225cb16c94553dbb658050d573201faaa7633d54d0161ed9f0fb07"
+  },
+  "bootstrap": {
+    "path": "path0-link-failure/bootstrap.json",
+    "sha256": "0b90b833462b6771f969e8f4d5692a52165686409fad92cac0269ca353a2a6ed"
+  },
+  "bootstrap_initial_action": 0,
+  "boundary_events": {
+    "path": "path0-link-failure/boundary_events.json",
+    "sha256": "f0fb62099f0e38da52d87448083d6a2127c45162177e5d21864f0b9494dbd556"
+  },
+  "case_id": "path0-link-failure",
+  "chain": {
+    "bootstrap_recovery": {
+      "path": "path0-link-failure/bootstrap_recovery-3876458-0.json",
+      "sha256": "6f724a08e534fc966dc2963a3f02448db33e36a3e4d9b57de449c6943bfa05b3"
+    },
+    "frame": {
+      "path": "path0-link-failure/exported-frame.json",
+      "sha256": "269eb26151618ab622f337dab1f0d0735049456c72215728fba63005603cf57b"
+    },
+    "inference": {
+      "path": "path0-link-failure/exported-inference.json",
+      "sha256": "1863c72d794bb2a0eeed61badf6d4353bb044a81fb77edf6b3a04aeadfe94a6d"
+    },
+    "prepared": {
+      "path": "path0-link-failure/exported-prepared.json",
+      "sha256": "a2bffb9dd73eb0152d6a5fa6331008f8904e6f16ff9b47d778d7f4f5c02214f7"
+    },
+    "recovery": {
+      "path": "path0-link-failure/exported-recovery.json",
+      "sha256": "e03f18668897004f79898b85c4e1db6bb4305de271df24eb0fe022c801f3816e"
+    },
+    "simulation": {
+      "path": "path0-link-failure/exported-simulation.json",
+      "sha256": "64fa988b1c1940df824f55440e52c5ccd543f4649395202d39e04fdbb9c8d540"
+    }
+  },
+  "cleanup": {
+    "path": "path0-link-failure/cleanup.json",
+    "sha256": "9eff89f4899ac1cb45fbb22e44de58d6df1f3f96b7da19c20f3db6597c9b5318"
+  },
+  "controller": {
+    "path": "path0-link-failure/controller-result.json",
+    "sha256": "45a2a770aecd69233ac7b8e0936275f5174612da6f63008c28390f4551d65044"
+  },
+  "fault": "link-failure",
+  "intervention": {
+    "path": "path0-link-failure/intervention.json",
+    "sha256": "087581cff8d24e365accea78dd0973c1a1832b786091c75e4e989d61a29ab10b"
+  },
+  "journal": {
+    "path": "path0-link-failure/journal.json",
+    "sha256": "8790a8353362c68339767688bb9454313ca1153704dcc9dff99a33ba07d5376f"
+  },
+  "native_authority": {
+    "path": "path0-link-failure/campaign-authority.json",
+    "sha256": "09dbaa87504c32f851809e536a0c5ffc192226e4a6a0e59dda36d3df8b108653"
+  },
+  "native_commands": {
+    "path": "path0-link-failure/native_commands.json",
+    "sha256": "60e47f10b9a79f84d8ccd698f63a88f74f4b3dfaf52e203d2555532b1d3983d2"
+  },
+  "native_journal": {
+    "path": "path0-link-failure/native-journal.json",
+    "sha256": "5c4655333dba7c551a3e4d92c22985976e94cc910da6d5e84553e978ba642dc9"
+  },
+  "operator_policy": {
+    "path": "path0-link-failure/operator-policy.json",
+    "sha256": "e8dfd1aff602c17422e974fbbbcdab40acbf51b1890db6c37e3847ebd4b8ffd3"
+  },
+  "outcome": "restored",
+  "phase": "afterwrite",
+  "policy": "qualified",
+  "raw_frames": {
+    "path": "path0-link-failure/raw-frame-inventory.json",
+    "sha256": "9fe0f86d678bbee53518daf02eb553f83c6edae849fb3fc0f9ae7c572ff77b11"
+  },
+  "scenario": "path0",
+  "seed": 1442,
+  "status": "completed",
+  "write_index": 1
+}

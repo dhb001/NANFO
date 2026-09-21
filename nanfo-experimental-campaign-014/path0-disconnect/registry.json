@@ -1,0 +1,169 @@
+{
+  "action_ids": [
+    "route0",
+    "route1"
+  ],
+  "checkpoint": {
+    "path": "checkpoint.ptz",
+    "sha256": "77dae44acab722a5a6a2e87d952a6cca65e1c4eea102a089830a8401b521d614",
+    "size_bytes": 38460
+  },
+  "contract_sha256": "bbcbbadec55792fa3f01bef511c1e38b0e433e125f896cdc3e64f823325e0fe6",
+  "expires_at": "2026-09-21T04:23:14.375436+00:00",
+  "installed_at": "2026-09-21T04:17:13.375436+00:00",
+  "lineage": {
+    "path": "lineage.json",
+    "sha256": "c18cd15bce1dcc2883dc2e5f0c968ab11171e1eef4c4d19cf9531784760a0fb3",
+    "size_bytes": 2242
+  },
+  "max_observation_age_seconds": 30,
+  "model_id": "adr024-rebuilt-v4",
+  "observation_contract": "nanfo.passive-measured-v4.v1",
+  "parent_checkpoint": {
+    "path": "parent-checkpoint.ptz",
+    "sha256": "5b8818af655ec8efce5d3bc3def27db599f3e0df379a0ae263dcefb5f72a80a5",
+    "size_bytes": 38460
+  },
+  "plan": {
+    "path": "plan.json",
+    "sha256": "b9e084a2c69241d3d5d3e2f60ab3f9052ee77e713befc1f43403fd21de8e4a30",
+    "size_bytes": 16925
+  },
+  "qualification_protocol": "adr024-rebuilt-evaluation-v1",
+  "report": {
+    "path": "test-report.json",
+    "sha256": "e6ee9c1bd99e3f6961db497db664335684fa277bd1a1c86a8034570ac116056d",
+    "size_bytes": 1968189
+  },
+  "runtime_action": "linux-frr-host-route",
+  "runtime_versions": {
+    "gymnasium": "1.2.0",
+    "numpy": "2.2.6",
+    "package": "0.1.0",
+    "python": "3.12.14",
+    "torch": "2.8.0+cpu"
+  },
+  "scopes": [
+    {
+      "network_id": "f955d835-f5e6-4525-8d57-a4b0b85848bb",
+      "snapshot_path": "snapshot.json",
+      "workspace_id": "9b381bdc-4845-409a-a817-02b73b591a04"
+    }
+  ],
+  "seed_audit": {
+    "path": "seed-audit.json",
+    "sha256": "7313600bd0e01630fc03ce557289be379ff365070ba8b94abca80c99672e7b62",
+    "size_bytes": 1365866
+  },
+  "selection": {
+    "path": "selection.json",
+    "sha256": "9bbec32118e1915944f49b28779bba8be1a29009480ee0856d9bde643eab4f0e",
+    "size_bytes": 13895
+  },
+  "sessions": [
+    {
+      "attachment": {
+        "path": "test-ppo/feed-attachment.json",
+        "sha256": "1ae8497e2dc2778cb89868b1c89d59272dda07d18313e77da0b8d72482c6d6f7",
+        "size_bytes": 264
+      },
+      "evidence": {
+        "path": "test-ppo/evidence.jsonl",
+        "sha256": "5e4199a42d665960ac80b149d8a792939653d72417b443482c1ed0ffdf30066a",
+        "size_bytes": 4923891
+      },
+      "summary": {
+        "path": "test-ppo/summary.json",
+        "sha256": "7b9a236fc259a0f81acc6146c4de593082e559a3f3ae99ed026aaf2ac92c91da",
+        "size_bytes": 38264
+      }
+    },
+    {
+      "attachment": {
+        "path": "test-heuristic/feed-attachment.json",
+        "sha256": "7c6afcdaf80250a689710a0693ba1194d91872cc041d4b72998da428ead36487",
+        "size_bytes": 264
+      },
+      "evidence": {
+        "path": "test-heuristic/evidence.jsonl",
+        "sha256": "9dc7567e4ef28f1e839d29ad73de2c3fd26346751fdb1d57f524f71cfc92d996",
+        "size_bytes": 4916825
+      },
+      "summary": {
+        "path": "test-heuristic/summary.json",
+        "sha256": "70f9a0f46f5cf2f5764e0c449d3a7542848d7dd03c8b0511e25b717a2d8eb7d8",
+        "size_bytes": 30087
+      }
+    },
+    {
+      "attachment": {
+        "path": "test-constant1/feed-attachment.json",
+        "sha256": "79448e5836b3b07501646ff13a75f41a87a7cd65ac4bff3ed760f5906de394d7",
+        "size_bytes": 263
+      },
+      "evidence": {
+        "path": "test-constant1/evidence.jsonl",
+        "sha256": "0c0b959fc6e3aa770109a180eb2df2c4659c4d2ade917fd718d485440ce625c9",
+        "size_bytes": 4917519
+      },
+      "summary": {
+        "path": "test-constant1/summary.json",
+        "sha256": "0ef273c39739c977fed11c7c42dabb88f7c504b9af661de351edd6bdb8a89c6f",
+        "size_bytes": 29872
+      }
+    },
+    {
+      "attachment": {
+        "path": "test-ospf/feed-attachment.json",
+        "sha256": "a7b4e377f28451b7489b9e5493799bf487c209cf9bda699a6a94615c32f5abc0",
+        "size_bytes": 264
+      },
+      "evidence": {
+        "path": "test-ospf/evidence.jsonl",
+        "sha256": "7c123184b40f5f4c021af4ba14da6787db7939b87e9e7a9733ce1607b73c1312",
+        "size_bytes": 4524748
+      },
+      "summary": {
+        "path": "test-ospf/summary.json",
+        "sha256": "cec9c430102137e5f9154f6e470d2e43b4c9ca4b72dde4d1e5d8619eec3764e5",
+        "size_bytes": 29542
+      }
+    },
+    {
+      "attachment": {
+        "path": "test-constant0/feed-attachment.json",
+        "sha256": "868e16038d7cfa8cc1154ed1b8196b4e256d99f801e08e95c5d89da7e3589c5f",
+        "size_bytes": 264
+      },
+      "evidence": {
+        "path": "test-constant0/evidence.jsonl",
+        "sha256": "8afe5fa1dba1d9bbecf84f6737f326118d3fef29efff700385943152fee5c0f9",
+        "size_bytes": 4904361
+      },
+      "summary": {
+        "path": "test-constant0/summary.json",
+        "sha256": "b5646f9f676c3475ef6f39d6668e456a959d3098623989ac47a6f053aa183b4d",
+        "size_bytes": 29623
+      }
+    }
+  ],
+  "source_directory": "source",
+  "source_sha256": {
+    "__init__.py": "7bc5e4c099b6aaf9dc5e7bfb94d0affb9a5964cc4636d4a993472da4f12e05ac",
+    "__main__.py": "935a1c1166b0c1ea35a82256345000bf2c73ded718d77773bc27a71ecce28f7d",
+    "artifacts.py": "9100786be1b3c7bc7a032e23835ce2848c7483c9fc599c7d1d5ffcdeaf17694b",
+    "cli.py": "e657c223bfb97fc503aa11624be4941e5d9a270eedeba32465534ca8e21d2aa8",
+    "contracts.py": "c71b8a3cd82420f1daf3972c976ddd933b79c975c17d24d36e3726260e8214f6",
+    "drain.py": "c779a52709ecfca19f063f51c744501896345ecaefc770cf642d4b6e9be1ce03",
+    "env.py": "b2e81af8d89a038f142fa11fb247ac6af68cd80f2a50946e247a91f941d7765f",
+    "evidence.py": "f6ebe061a5a02bf74df6e7d1f2453664a574328d04d4e3557b679e139d8c30ff",
+    "expanded.py": "e8722009f90870739a8c3cc7e01be0d6a433923d8a5a7f11030c41e97ae28d30",
+    "extended_supervisor.py": "b85b658c20ab8186c424b569ee7a6e4250fa64a8cd0a0092e369b49e7b5b7f36",
+    "ppo.py": "807d86f9b942262c65a5ca92c1450f145f95f9518ee67b796cbf1985994800be",
+    "qualification.py": "d190e42b4e86925407982a2a9aedef57de5f29881e952e64bbbe45c48c900871",
+    "supervisor.py": "595c7ee1ceb0b3a670123a8fcf06e721577cccd8f953cdec43496bbd8c35f726",
+    "transport.py": "6256c5d8a4a7352c738f3eaea299103dd74e30234d19fbf23e27192032b2df0b"
+  },
+  "spec_sha256": "bb15142a19ed3ee87a6aec2c6f9109d789d9736a5e6afda826ad898ef5fe7200",
+  "version": 1
+}

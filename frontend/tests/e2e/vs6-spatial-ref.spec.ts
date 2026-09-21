@@ -41,10 +41,11 @@ test.describe("VS6 spatial references", () => {
 
     await loginFromUi(page);
 
-    await page.getByLabel("Spatial reference for edge-1").fill("campus-a/building-2/floor-1/rack-1");
-    await page.getByRole("button", { name: "Save" }).click();
+    await page.getByRole("button", { name: "Edit edge-1" }).click();
+    await page.getByRole("form", { name: "Edit device" }).getByLabel("Spatial reference").fill("campus-a/building-2/floor-1/rack-1");
+    await page.getByRole("button", { name: "Save device" }).click();
 
-    await expect(page.getByText("Spatial reference updated")).toBeVisible();
+    await expect(page.getByRole("form", { name: "Edit device" })).toHaveCount(0);
     expect(observedPatch).toEqual({ spatial_ref_id: "campus-a/building-2/floor-1/rack-1" });
   });
 });

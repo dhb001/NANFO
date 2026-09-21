@@ -1,0 +1,6 @@
+# Merge the live-provider installation onto api2 as well as api/autonomy-worker.
+services:
+  api2:
+    extends: {file: compose.live-ai.yaml, service: api}
+    environment:
+      API_REALTIME_DISTRIBUTED: "true"

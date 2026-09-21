@@ -145,7 +145,7 @@ test.describe("VS7 branch and compare", () => {
     await loginFromUi(page);
 
     await expect(page.getByRole("heading", { name: "Networks" })).toBeVisible();
-    await page.getByRole("button", { name: /Network A/ }).click();
+    await page.locator(".network-choice").filter({ hasText: "Network A" }).click();
 
     await page.getByRole("link", { name: "Simulation" }).click();
     await expect(page.getByRole("button", { name: "Start Simulation" })).toBeEnabled();

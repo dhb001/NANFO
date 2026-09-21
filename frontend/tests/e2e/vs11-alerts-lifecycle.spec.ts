@@ -102,6 +102,7 @@ test.describe("VS11 alerts lifecycle", () => {
       ] } : state.alerts[0], meta: {}, errors: null } });
     });
     await loginFromUi(page);
+    await page.getByRole("button", { name: "Toggle navigation" }).click();
     await page.getByRole("link", { name: "Reliability" }).click();
     const expand = page.getByRole("button", { name: "Details and History" });
     await expand.focus(); await page.keyboard.press("Enter");

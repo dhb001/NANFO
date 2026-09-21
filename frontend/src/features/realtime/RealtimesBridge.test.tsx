@@ -11,6 +11,13 @@ import { operatorProfile } from "@/test/profile";
 import { useLiveStore } from "@/features/realtime/store";
 import * as simulationApi from "@/features/simulation/api";
 import type { SimulationDetail } from "@/shared/types/simulation";
+import { authorityKey } from "@/features/auth/sessionScope";
+
+function stableScope() {
+  const auth = useAuthStore.getState();
+  const scope = useWorkspaceStore.getState();
+  return JSON.stringify([auth.generation, auth.userId, scope.organizationId, scope.workspaceId, scope.networkId]);
+}
 
 interface CapturedSocketOptions {
   path: string;
@@ -151,15 +158,40 @@ describe("RealtimeBridge", () => {
     expect(capturedSockets.every((socket) => !socket.enabled)).toBe(true);
   });
 
+  it("rejects telemetry callbacks from old epochs, tokens and scopes and isolates malformed frames", () => {
+    const { unmount } = render(<RealtimeBridge />);
+    const old = getSocket("/ws/telemetry");
+    const metric = { event_id: "m", device_id: "d", metric: "cpu", workspace_id: useWorkspaceStore.getState().workspaceId, network_id: useWorkspaceStore.getState().networkId, value: 42, observed_at: "2026-09-19T00:00:00Z", source: "plugin", unit: "%", tags: {} };
+    const frame = { event: "telemetry.received", data: { metric } };
+    act(() => {
+      old.onFrame({ event: "telemetry.received", data: null });
+      old.onFrame({ event: "telemetry.received", data: { metric: { ...metric, value: "bad" } } });
+      old.onFrame(frame);
+    });
+    expect(useLiveStore.getState().telemetryKeysNewestFirst).toHaveLength(1);
+    act(() => useLiveStore.getState().reset());
+    act(() => old.onFrame(frame));
+    expect(useLiveStore.getState().telemetryKeysNewestFirst).toEqual([]);
+    const fresh = capturedSockets.filter((item) => item.path === "/ws/telemetry").at(-1)!;
+    act(() => useAuthStore.setState({ accessToken: "rotated" }));
+    act(() => fresh.onFrame(frame));
+    expect(useLiveStore.getState().telemetryKeysNewestFirst).toEqual([]);
+    const rotated = capturedSockets.filter((item) => item.path === "/ws/telemetry").at(-1)!;
+    act(() => useWorkspaceStore.getState().setNetworkId("other"));
+    act(() => rotated.onFrame(frame));
+    expect(useLiveStore.getState().telemetryKeysNewestFirst).toEqual([]);
+    unmount();
+  });
+
   it("coalesces subscribed and backpressure reconciliation and excludes other tokens/networks", () => {
     vi.useFakeTimers();
     const token = useAuthStore.getState().accessToken;
     const scope = useWorkspaceStore.getState();
     const selected = ["topology", token, scope.networkId];
     const other = ["topology", token, "other"];
-    const history = ["telemetry", "history", token, { networkId: scope.networkId }];
-    const otherHistory = ["telemetry", "history", token, { networkId: "other" }];
-    const intent = ["intent", token, "i", scope.workspaceId];
+    const history = ["telemetry", "history", stableScope(), authorityKey(), { networkId: scope.networkId }];
+    const otherHistory = ["telemetry", "history", stableScope(), authorityKey(), { networkId: "other" }];
+    const intent = ["intent", stableScope(), authorityKey(), "i", scope.workspaceId];
     for (const key of [selected, other, history, otherHistory, intent, ["alerts", token, {}]]) client.setQueryData(key, { data: { nodes: [] } });
     const invalidation = vi.spyOn(client, "invalidateQueries");
     const { unmount } = render(<RealtimeBridge />);
@@ -185,11 +217,10 @@ describe("RealtimeBridge", () => {
 
   it("reconciles active simulation detail and comparison and queues at most one follow-up while REST is pending", async () => {
     vi.useFakeTimers();
-    const token = useAuthStore.getState().accessToken;
     let finish!: (value: unknown) => void;
     const fetchDetail = vi.fn().mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; })).mockResolvedValue({ status: "completed" });
-    const detail = new QueryObserver(client, { queryKey: ["simulation", token, "sim"], queryFn: fetchDetail, initialData: { status: "queued" }, staleTime: Infinity });
-    const compare = new QueryObserver(client, { queryKey: ["simulation-compare", token, "sim", "base"], queryFn: vi.fn().mockResolvedValue({}), initialData: {}, staleTime: Infinity });
+    const detail = new QueryObserver(client, { queryKey: ["simulation", stableScope(), authorityKey(), "sim"], queryFn: fetchDetail, initialData: { status: "queued" }, staleTime: Infinity });
+    const compare = new QueryObserver(client, { queryKey: ["simulation-compare", stableScope(), authorityKey(), "sim", "base"], queryFn: vi.fn().mockResolvedValue({}), initialData: {}, staleTime: Infinity });
     const unsubscribeDetail = detail.subscribe(() => undefined);
     const unsubscribeCompare = compare.subscribe(() => undefined);
     const invalidation = vi.spyOn(client, "invalidateQueries");

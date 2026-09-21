@@ -1,0 +1,14 @@
+{
+  "candidate_passed": false,
+  "invalid_frame_sha256": "01fa398f2d0e760868acdf32e202abf839bb88e499f8289338f0d7e25ca3c2e5",
+  "metrics": {
+    "goodput_mbps": null,
+    "loss_fraction": null,
+    "rtt_ms": null,
+    "udp_loss_fraction": null
+  },
+  "outcome": "measurement_invalid",
+  "protocol_complete": false,
+  "reason": "measurement_invalid",
+  "windows": []
+}

@@ -55,7 +55,7 @@ test("ADR018 mobile keyboard panels preserve server outcomes, immutable training
   });
   await page.route(`**/api/v1/intents/${overrideFixture().intent_id}?*`, (route) => route.fulfill({ json: envelope(overrideIntentFixture(session.userId)) }));
   await page.route("**/api/v1/telemetry/paths?*", (route) => route.fulfill({ json: envelope(pathData) }));
-  await loginFromUi(page); await expect(page.getByText("edge-1")).toBeVisible();
+  await loginFromUi(page); await expect(page.getByText("edge-1", { exact: true })).toBeVisible();
   await page.setViewportSize({ width: 390, height: 844 });
   await page.keyboard.press("g"); await page.keyboard.press("n");
   await expect(page.getByTestId("autonomy-mode")).toHaveText("monitor");

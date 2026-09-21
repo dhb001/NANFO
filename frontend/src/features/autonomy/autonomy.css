@@ -5,7 +5,9 @@
   overflow-wrap: anywhere;
 }
 
-.autonomy-page h1 { font-size: 1.5rem; }
+.autonomy-page h1 { font-size: clamp(1.8rem, 3vw, 2.65rem); font-weight: 550; letter-spacing: -0.055em; }
+.autonomy-page > header { border-bottom: 1px solid var(--line-soft); padding: 0.25rem 0 1.25rem; }
+.autonomy-page > header p { margin-top: 0.6rem; max-width: 95ch; }
 .autonomy-page p { color: var(--ink-2); }
 .autonomy-page dl { display: grid; gap: 0.5rem; }
 .autonomy-page dt { color: var(--ink-3); font-size: 0.85rem; }
@@ -28,7 +30,7 @@
   min-width: 0;
   padding: 0.6rem;
   border: 1px solid var(--line-strong);
-  border-radius: 8px;
+  border-radius: var(--radius-s);
   background: var(--surface-card);
 }
 .autonomy-page button { min-height: 44px; }
@@ -40,7 +42,12 @@
   padding: 1rem;
   display: grid;
   gap: 0.65rem;
+  background: #fff7f8;
+  border-left-width: 5px;
 }
+.autonomy-stop h2 { color: var(--danger); font-size: 1.1rem; }
+.autonomy-stop p { font-size: 0.82rem; }
+.autonomy-page nav.autonomy-actions { border-bottom: 1px solid var(--line-soft); padding-bottom: 1rem; }
 .autonomy-warning { color: var(--danger); }
 .autonomy-evidence {
   white-space: pre-wrap;

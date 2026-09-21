@@ -1,0 +1,120 @@
+{
+  "error_type": "ValueError",
+  "exception": [
+    {
+      "frames": [
+        {
+          "file": "verify_experimental_lab.py",
+          "function": "controller_child",
+          "line": 961
+        },
+        {
+          "file": "controller.py",
+          "function": "run",
+          "line": 447
+        },
+        {
+          "file": "controller.py",
+          "function": "step",
+          "line": 331
+        },
+        {
+          "file": "controller.py",
+          "function": "checkpoint",
+          "line": 87
+        },
+        {
+          "file": "controller.py",
+          "function": "_checkpoint_state",
+          "line": 119
+        }
+      ],
+      "message": "experimental_action_expired",
+      "type": "ValueError"
+    }
+  ],
+  "operation": "run",
+  "records": {
+    "bootstrap_recovery": {
+      "path": "bootstrap_recovery-3504226-0.json",
+      "sha256": "df7bd1dc158f266b31f70442f7ef6279f0c98439bbc810e565231c5cbac783e7"
+    },
+    "frame": {
+      "path": "frame.json",
+      "sha256": "7bd8829f31fcfb3216bc70f116a6fd93d07db333de6903c2dde1e27d2f3ed439"
+    },
+    "inference": {
+      "path": "inference-3504226-0.json",
+      "sha256": "00cbf9e0a47de67b0390d5b67a0cfc4478805f7ae69cb72ee7675a587f4393cf"
+    },
+    "prepared": {
+      "path": "prepared-3504226-0.json",
+      "sha256": "d05b2f4f364c1fd568b2a8de905490a1b4bdb8fdcd72a38963f694353fe511d4"
+    },
+    "receipt": {
+      "path": "receipt-3504226-0.json",
+      "sha256": "326e662e2e3ae57c2fe0ee57c63617c8dea65c51da0ba6d70d5da2a23f2d35b4"
+    },
+    "recovery": {
+      "path": "recovery-3504226-0.json",
+      "sha256": "c384fad7ad8b543095910ec161295de8c24376dabeb3455ae519bce69a963758"
+    },
+    "simulation": {
+      "path": "simulation-3504226-0.json",
+      "sha256": "5d98ec34256cba4a9fbdd177bb669540922793305ef1bb2008596323feaaf575"
+    },
+    "verification": {
+      "path": "verification-3504226-2.json",
+      "sha256": "8abfae17fa70f09fcef6acae7e025f1ae8499371aaa1851b67ae4ffe11225594"
+    }
+  },
+  "status": "completed",
+  "termination": "verified_hold_expired_and_restored",
+  "timings": [
+    {
+      "finished_ns": 97788548225970,
+      "operation": "inference",
+      "started_ns": 97784039251127
+    },
+    {
+      "finished_ns": 97789126697304,
+      "operation": "simulation",
+      "started_ns": 97788618865093
+    },
+    {
+      "finished_ns": 97789844075891,
+      "operation": "prepared",
+      "started_ns": 97789839408137
+    },
+    {
+      "finished_ns": 97803391968444,
+      "operation": "receipt",
+      "started_ns": 97790422220160
+    },
+    {
+      "finished_ns": 97809087602157,
+      "operation": "verification",
+      "started_ns": 97803804108944
+    },
+    {
+      "finished_ns": 97816781529093,
+      "operation": "verification",
+      "started_ns": 97810798249462
+    },
+    {
+      "finished_ns": 97819585568410,
+      "operation": "verification",
+      "started_ns": 97818340697716
+    },
+    {
+      "finished_ns": 97822454035070,
+      "operation": "recovery",
+      "started_ns": 97819884483249
+    },
+    {
+      "finished_ns": 97823263198301,
+      "operation": "bootstrap_recovery",
+      "started_ns": 97822543200570
+    }
+  ]
+}

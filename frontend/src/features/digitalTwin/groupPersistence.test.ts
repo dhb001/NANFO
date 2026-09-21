@@ -18,3 +18,14 @@ it("sends a non-destructive upsert request retaining unrelated groups", async ()
   expect(response.data.total).toBe(2);
   expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("/networks/network/device-groups"), expect.objectContaining({ method: "POST" }));
 });
+
+it("sends the custom editor's exact stable-key membership payload", async () => {
+  const group = { group_key: "operator-group", name: "Operator group", group_type: "custom" as const, description: null, selector: {}, device_ids: ["00000000-0000-0000-0000-000000000021"] };
+  const fetchMock = vi.fn<typeof fetch>(async (_url, options) => {
+    expect(JSON.parse(String(options?.body))).toEqual({ replace_existing: false, groups: [group] });
+    return Response.json({ success: true, data: { items: [], total: 0 }, meta: {}, errors: null });
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  await upsertDeviceGroups("token", "network", { replaceExisting: false, groups: [group] });
+  expect(fetchMock).toHaveBeenCalledOnce();
+});

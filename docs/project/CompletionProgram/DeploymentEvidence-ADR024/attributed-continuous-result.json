@@ -1,0 +1,26 @@
+{
+  "status": "passed",
+  "cases": [
+    "real_login_and_scope_pass",
+    "path0-monitor",
+    "path0-recommend-1",
+    "path0-recommend-2",
+    "path0-stale-blocked",
+    "path0-expired-denied",
+    "path1-monitor",
+    "path1-recommend-1",
+    "path1-recommend-2",
+    "path1-stale-blocked",
+    "path1-expired-denied",
+    "actual_membership_revocation_denied"
+  ],
+  "output": "/tmp/opencode/nanfo-live-acceptance-7ngrbdgv",
+  "recommendation_dispatch": false,
+  "schema": "0027",
+  "actor_id": "fd12b8ef-c836-42f2-a073-c5f461a14343",
+  "network_id": "42b946c3-d97f-4bb7-9fb7-21003ffcad51",
+  "workspace_id": "df205958-3a65-4272-8714-d1d065597074",
+  "training": false,
+  "safety_authorized": false,
+  "recommendations_applied": false
+}

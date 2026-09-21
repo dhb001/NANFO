@@ -1,3 +1,14 @@
+export interface AlertListParams {
+  status?: "active" | "acknowledged" | "resolved";
+  severity?: string;
+  source?: string;
+  correlationId?: string;
+  search?: string;
+  limit?: number;
+  workspaceId?: string;
+  networkId?: string;
+}
+
 export interface AlertRecord {
   alert_id: string;
   alert_key: string;
@@ -16,6 +27,7 @@ export interface AlertRecord {
 
 export interface AlertListResult {
   items: AlertRecord[];
+  /** Returned bounded matches, not a global or all-matches count. */
   total: number;
   status_counts: Record<string, number>;
 }

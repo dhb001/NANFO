@@ -57,15 +57,16 @@ export function LoginPage() {
     <main className="login-layout">
       <section className="login-story" aria-label="NANFO network intelligence">
         <BrandMark />
-        <div className="login-story-copy"><div className="eyebrow">Observe. Understand. Orchestrate.</div><h2>Complex networks.<br /><em>Clear perspective.</em></h2></div>
+        <div className="login-story-copy"><div className="eyebrow">The network atlas / NANFO</div><h2>Find clarity.<br /><em>In every<br />connection.</em></h2><p>A considered workspace for observing, understanding and orchestrating your network.</p></div>
         <NetworkArtwork />
-        <div className="login-story-footer"><span>Network operations, considered.</span><span>N / 01</span></div>
+        <div className="login-story-footer"><span>01 Observe &nbsp; / &nbsp; 02 Understand &nbsp; / &nbsp; 03 Orchestrate</span><span>N /</span></div>
       </section>
       <div className="login-form-side">
       <div className="login-form">
-        <div className="eyebrow">Operator workspace</div>
+        <div className="login-entry-mark" aria-hidden="true">↗</div>
+        <div className="eyebrow">Your next perspective</div>
         <h1>NANFO Access</h1>
-        <p className="login-intro">Welcome back. Sign in to your network workspace.</p>
+        <p className="login-intro">Welcome back. Your network workspace awaits.</p>
 
         <form onSubmit={onSubmit}>
           <label>

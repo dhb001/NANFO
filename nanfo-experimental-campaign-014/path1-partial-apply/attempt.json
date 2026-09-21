@@ -1,0 +1,18 @@
+{
+  "case_id": "path1-partial-apply",
+  "cleanup": {
+    "evidence_errors": [],
+    "removed": true,
+    "removed_resources": [
+      "3be60cbb77d449917cafef1c56761c382259cd3c8939a600558af54b5416bbd5",
+      "nanfo-experimental-7f7b634a8ec948a0bfcfa555f8342903"
+    ],
+    "unresolved_resources": []
+  },
+  "controller_returncode": 1,
+  "controller_status": "failed",
+  "policy": "qualified",
+  "scenario": "path1",
+  "seed": 1455,
+  "status": "acquired"
+}

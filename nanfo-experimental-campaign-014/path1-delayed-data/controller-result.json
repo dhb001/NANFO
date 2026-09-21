@@ -1,0 +1,55 @@
+{
+  "error_type": "ValueError",
+  "exception": [
+    {
+      "frames": [
+        {
+          "file": "verify_experimental_lab.py",
+          "function": "controller_child",
+          "line": 961
+        },
+        {
+          "file": "controller.py",
+          "function": "run",
+          "line": 447
+        },
+        {
+          "file": "controller.py",
+          "function": "step",
+          "line": 296
+        },
+        {
+          "file": "controller.py",
+          "function": "_frame_allowed",
+          "line": 225
+        },
+        {
+          "file": "authority.py",
+          "function": "frame_allowed",
+          "line": 38
+        }
+      ],
+      "message": "experimental_frame_scope_or_age_denied",
+      "type": "ValueError"
+    }
+  ],
+  "operation": "run",
+  "records": {
+    "bootstrap_recovery": {
+      "path": "bootstrap_recovery-3914889-0.json",
+      "sha256": "ad80c04a185a49177b2a8512b63dbce23439a3569090cb317ce71ae4c71ccbba"
+    },
+    "frame": {
+      "path": "frame.json",
+      "sha256": "d51b112528214f353d3562e993d1bac297db82dac9c934b64588940b09cdfc6a"
+    }
+  },
+  "status": "failed",
+  "timings": [
+    {
+      "finished_ns": 102196643917224,
+      "operation": "bootstrap_recovery",
+      "started_ns": 102194075580991
+    }
+  ]
+}

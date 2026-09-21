@@ -1,0 +1,18 @@
+{
+  "case_id": "path1-1432-qualified",
+  "cleanup": {
+    "evidence_errors": [],
+    "removed": true,
+    "removed_resources": [
+      "07b187ae0d037db672f9301484de2cc342fb0f5372a9a25158e8a5796561b18c",
+      "nanfo-experimental-86ee66caf2fc45b39c4e3acc24d4698d"
+    ],
+    "unresolved_resources": []
+  },
+  "controller_returncode": 0,
+  "controller_status": "completed",
+  "policy": "qualified",
+  "scenario": "path1",
+  "seed": 1432,
+  "status": "acquired"
+}

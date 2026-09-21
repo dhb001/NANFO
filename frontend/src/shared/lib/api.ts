@@ -4,6 +4,7 @@ import { ApiClientError } from "@/shared/lib/errors";
 import { useExecutionModeStore } from "@/shared/state/execution-mode-store";
 import { useAuthStore } from "@/shared/state/auth-store";
 import { useWorkspaceStore } from "@/shared/state/workspace-store";
+import { authorityKey } from "@/features/auth/sessionScope";
 
 type Method = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
@@ -47,7 +48,9 @@ export async function apiRequest<T>(
 
   let payload: ApiEnvelope<T> | null = null;
   if (response.status !== 204) {
-    payload = (await response.json()) as ApiEnvelope<T>;
+    try { payload = (await response.json()) as ApiEnvelope<T>; } catch {
+      if (response.ok) throw new ApiClientError("API returned an unreadable response. Mutation outcome may be unknown; inspect history before retrying.", "API_INVALID_RESPONSE", response.status);
+    }
   }
 
   if (token && token === session.accessToken &&
@@ -65,6 +68,9 @@ export async function apiRequest<T>(
     const refreshed = current.accessToken !== token || await refreshSession();
     if (refreshed && session.generation === useAuthStore.getState().generation &&
         context === useWorkspaceStore.getState() && !useAuthStore.getState().endingSession) {
+      if (method !== "GET" && authorityKey(session.profile) !== authorityKey()) {
+        throw new ApiClientError("Permissions changed. Review and explicitly approve the action again.", "API_AUTHORITY_CHANGED", 403);
+      }
       return apiRequest<T>(path, { method, body, headers, signal, token: useAuthStore.getState().accessToken }, false);
     }
   }
@@ -112,6 +118,9 @@ export async function apiRequestNoContent(
     const refreshed = useAuthStore.getState().accessToken !== token || await refreshSession();
     if (refreshed && session.generation === useAuthStore.getState().generation &&
         context === useWorkspaceStore.getState() && !useAuthStore.getState().endingSession) {
+      if (authorityKey(session.profile) !== authorityKey()) {
+        throw new ApiClientError("Permissions changed. Review the action again.", "API_AUTHORITY_CHANGED", 403);
+      }
       return apiRequestNoContent(path, { method, body, headers, signal, token: useAuthStore.getState().accessToken }, false);
     }
   }

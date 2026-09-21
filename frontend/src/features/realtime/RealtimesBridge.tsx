@@ -6,6 +6,7 @@ import { useManagedWebSocket } from "@/shared/realtime/useManagedWebSocket";
 import { useLiveStore } from "@/features/realtime/store";
 import { recoverSocketUpgrade, refreshSession } from "@/features/auth/session";
 import { hasPermission } from "@/features/auth/permissions";
+import { authorityKey, useSessionScope } from "@/features/auth/sessionScope";
 import { useUiStore } from "@/shared/state/ui-store";
 import { reconcileKnownScenes } from "./reconcileScenes";
 import {
@@ -50,14 +51,17 @@ export function RealtimeBridge() {
   const workspaceId = useWorkspaceStore((state) => state.workspaceId);
   const networkId = useWorkspaceStore((state) => state.networkId);
   const pushToast = useUiStore((state) => state.pushToast);
+  const session = useSessionScope();
 
-  const contextKey = JSON.stringify([generation, userId, organizationId, workspaceId, networkId, profile?.permissions]);
-  const isCurrent = useCallback(() => {
+  const contextKey = JSON.stringify([generation, userId, organizationId, workspaceId, networkId, session.authority]);
+  const epoch = useLiveStore((state) => state.epoch);
+  const isScopeCurrent = useCallback(() => {
     const auth = useAuthStore.getState();
     const scope = useWorkspaceStore.getState();
-    return !auth.endingSession && auth.accessToken === token &&
-      JSON.stringify([auth.generation, auth.userId, scope.organizationId, scope.workspaceId, scope.networkId, auth.profile?.permissions]) === contextKey;
-  }, [token, contextKey]);
+    return !auth.endingSession && Boolean(auth.accessToken) && useLiveStore.getState().epoch === epoch &&
+      JSON.stringify([auth.generation, auth.userId, scope.organizationId, scope.workspaceId, scope.networkId, authorityKey(auth.profile)]) === contextKey;
+  }, [contextKey, epoch]);
+  const isCurrent = useCallback(() => isScopeCurrent() && useAuthStore.getState().accessToken === token, [isScopeCurrent, token]);
   const scoped = { contextKey, isCurrent, onUpgradeFailure: recoverSocketUpgrade };
   const lastToastByCodeRef = useRef<Record<string, number>>({});
   const reconcileTimer = useRef<number | null>(null);
@@ -68,50 +72,64 @@ export function RealtimeBridge() {
     reconcileTimer.current = null;
     pendingChannels.current.clear();
     sceneAbort.current?.abort();
-  }, [contextKey, token]);
+  }, [contextKey, epoch]);
 
   const reconcile = useCallback(function queueReconciliation(channel: string) {
-    if (!isCurrent()) return;
+    if (!isScopeCurrent()) return;
     pendingChannels.current.add(channel);
     if (reconcileTimer.current !== null) return;
     const timer = window.setTimeout(() => {
       const channels = new Set(pendingChannels.current);
       pendingChannels.current.clear();
-      if (!isCurrent()) return;
+      if (!isScopeCurrent()) return;
+      const token = useAuthStore.getState().accessToken!;
       const graph = queryClient.getQueryData<{ data: { nodes: { device_id: string }[] } }>(["topology", token, networkId]);
       const deviceIds = new Set(graph?.data.nodes.map((node) => node.device_id));
       const controller = new AbortController();
       sceneAbort.current = controller;
       const scenes = channels.has("digitalTwin") && token && workspaceId && networkId && hasPermission(useAuthStore.getState().profile, "read:topology")
-        ? reconcileKnownScenes(token, workspaceId, networkId, isCurrent, controller.signal) : Promise.resolve();
+        ? reconcileKnownScenes(token, workspaceId, networkId, isScopeCurrent, controller.signal, () => useAuthStore.getState().accessToken!) : Promise.resolve();
       void Promise.all([scenes, queryClient.invalidateQueries({ predicate: (query) => {
         const key = query.queryKey;
         if (channels.has("topology") && key[1] === token) {
+          if (key[0] === "networks") return key[2] === workspaceId;
           if (key[0] === "topology" || key[0] === "devices") return key[2] === networkId;
           if (["topology-node", "topology-neighbours", "topology-impact"].includes(String(key[0]))) return deviceIds.has(String(key[2]));
         }
-        if (channels.has("telemetry") && key[0] === "telemetry" && key[2] === token) {
-          if (key[1] === "device") return deviceIds.has(String(key[3]));
+        if (channels.has("telemetry") && key[0] === "telemetry" && key[2] === session.key && key[3] === session.authority) {
+          // Device reads are already tenant-bound, including devices outside a
+          // partial/unmounted graph or beyond the first inventory page.
+          if (key[1] === "device") return true;
           if (key[1] === "history") {
-            const scope = key[3] as { networkId?: string; workspaceId?: string } | undefined;
-            return scope?.networkId ? scope.networkId === networkId : scope?.workspaceId === workspaceId;
+            const scope = key[4] as { networkId?: string; workspaceId?: string } | undefined;
+            return (!scope?.workspaceId || scope.workspaceId === workspaceId) &&
+              (scope?.networkId ? scope.networkId === networkId : scope?.workspaceId === workspaceId);
           }
         }
-        // Alerts and simulation detail keys have no network dimension in the existing contract.
-        if (channels.has("alerts") && key[0] === "alerts") return key[1] === token;
-        if (channels.has("digitalTwin") && key[1] === token) {
-          if (key[0] === "intent") return key[3] === workspaceId;
-          if (key[0] === "simulation" || key[0] === "simulation-compare") return query.isActive();
+        if (channels.has("alerts") && key[0] === "alerts" && key[1] === token) {
+          const options = key[2];
+          if (options && typeof options === "object") {
+            const scope = options as { workspaceId?: string; networkId?: string };
+            return (!scope.workspaceId || scope.workspaceId === workspaceId) && (!scope.networkId || scope.networkId === networkId);
+          }
+          // Detail/history have only an ID in their key. Require cached owner
+          // evidence rather than invalidating another network's inspected alert.
+          const detail = queryClient.getQueryData<{ payload?: { workspace_id?: string; network_id?: string } }>(["alerts", token, "detail", key[3]]);
+          return detail?.payload?.workspace_id === workspaceId && (!networkId || detail.payload.network_id === networkId);
+        }
+        if (channels.has("digitalTwin") && key[1] === session.key && key[2] === session.authority) {
+          if (key[0] === "intent") return key[3] === "history" || key[4] === workspaceId;
+          if (key[0] === "simulation" || key[0] === "simulation-compare") return true;
         }
         return false;
       } }, { cancelRefetch: false })]).finally(() => {
         if (reconcileTimer.current !== timer) return;
         reconcileTimer.current = null;
-        if (pendingChannels.current.size && isCurrent()) queueReconciliation(pendingChannels.current.values().next().value!);
+        if (pendingChannels.current.size && isScopeCurrent()) queueReconciliation(pendingChannels.current.values().next().value!);
       });
     }, 500);
     reconcileTimer.current = timer;
-  }, [isCurrent, networkId, queryClient, token, workspaceId]);
+  }, [isScopeCurrent, networkId, queryClient, workspaceId, session.key, session.authority]);
 
   const applyTopologyDelta = useLiveStore((state) => state.applyTopologyDelta);
   const applyTelemetryDelta = useLiveStore((state) => state.applyTelemetryDelta);
@@ -171,7 +189,7 @@ export function RealtimeBridge() {
     onSubscribed: () => reconcile("topology"),
     onStatusChange: (status) => setConnectionStatus("topology", status),
     onFrame: (frame) => {
-      if (isTopologyFrame(frame) && frame.data?.node) {
+      if (isCurrent() && isTopologyFrame(frame) && frame.data?.node) {
         applyTopologyDelta(frame.data, frame.timestamp);
         reconcile("topology");
       }
@@ -190,7 +208,7 @@ export function RealtimeBridge() {
     onSubscribed: () => reconcile("telemetry"),
     onStatusChange: (status) => setConnectionStatus("telemetry", status),
     onFrame: (frame) => {
-      if (isTelemetryFrame(frame) && frame.data?.metric &&
+      if (isCurrent() && isTelemetryFrame(frame) && frame.data?.metric &&
           frame.data.metric.workspace_id === workspaceId && frame.data.metric.network_id === networkId) {
         applyTelemetryDelta(frame.data);
       }
@@ -209,7 +227,7 @@ export function RealtimeBridge() {
     onSubscribed: () => reconcile("alerts"),
     onStatusChange: (status) => setConnectionStatus("alerts", status),
     onFrame: (frame) => {
-      if (isAlertFrame(frame) && frame.data?.alert) {
+      if (isCurrent() && isAlertFrame(frame) && frame.data?.alert) {
         // Alerts has no documented subscription filter. Fail closed on unscoped payloads.
         const payload = frame.data.alert.payload;
         if (payload.workspace_id !== workspaceId || (networkId && payload.network_id !== networkId)) return;

@@ -1,0 +1,11 @@
+{
+  "bootstrap_initial_action": 0,
+  "case_id": "path0-STOP-before",
+  "fault": "STOP-before",
+  "intervention": "real",
+  "phase": "beforewrite",
+  "policy": "qualified",
+  "scenario": "path0",
+  "seed": 1438,
+  "write_index": 0
+}

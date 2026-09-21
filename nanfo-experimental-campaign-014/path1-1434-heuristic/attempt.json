@@ -1,0 +1,18 @@
+{
+  "case_id": "path1-1434-heuristic",
+  "cleanup": {
+    "evidence_errors": [],
+    "removed": true,
+    "removed_resources": [
+      "d384264b7967a87beed0a878b62df6a3ad1e772202093217e1de8e8b2d8560fc",
+      "nanfo-experimental-ea2e1b1b254d4a11afd280f4916adba2"
+    ],
+    "unresolved_resources": []
+  },
+  "controller_returncode": 1,
+  "controller_status": "failed",
+  "policy": "heuristic",
+  "scenario": "path1",
+  "seed": 1434,
+  "status": "acquired"
+}

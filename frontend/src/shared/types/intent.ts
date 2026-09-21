@@ -105,3 +105,19 @@ export interface ExecuteIntentRequest {
   manual_approval?: boolean;
   cancel?: boolean;
 }
+export interface IntentSummary {
+  intent_id: string;
+  network_id: string | null;
+  workspace_id: string;
+  action: string | null;
+  status: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface IntentHistory {
+  items: IntentSummary[];
+  total: number;
+  page: number;
+  page_size: number;
+}

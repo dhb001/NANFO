@@ -42,11 +42,13 @@ test.describe("VS1 overview flows", () => {
     await loginFromUi(page);
 
     await expect(page.getByText("Workspace Capacity")).toBeVisible();
-    await expect(page.getByText("edge-1")).toBeVisible();
+    await expect(page.getByText("edge-1", { exact: true })).toBeVisible();
 
-    await page.getByLabel("Spatial reference for edge-1").fill("campus-a/building-1/floor-3/rack-9");
-    await page.getByRole("button", { name: "Save" }).click();
+    await page.getByRole("button", { name: "Edit edge-1" }).click();
+    await page.getByRole("form", { name: "Edit device" }).getByLabel("Spatial reference").fill("campus-a/building-1/floor-3/rack-9");
+    await page.getByRole("button", { name: "Save device" }).click();
 
-    await expect(page.getByText("Spatial reference updated")).toBeVisible();
+    await expect(page.getByRole("form", { name: "Edit device" })).toHaveCount(0);
+    await expect(page.getByText(/Selected device: edge-1/)).toBeVisible();
   });
 });

@@ -1,4 +1,4 @@
-import { apiRequest } from "@/shared/lib/api";
+import { apiRequest, apiRequestNoContent } from "@/shared/lib/api";
 import {
   CampusBuildingList,
   CampusModelAssetList,
@@ -10,24 +10,11 @@ import {
   UpsertCampusModelAssetInput,
   UpsertCampusBuildingInput,
   UpsertDeviceGroupInput,
+  CreateNetworkInput,
+  CreateDeviceInput,
+  UpdateNetworkInput,
+  UpdateDeviceInput,
 } from "@/shared/types/network";
-
-interface CreateNetworkInput {
-  workspace_id: string;
-  name: string;
-  description?: string;
-  cidr?: string;
-}
-
-interface CreateDeviceInput {
-  hostname: string;
-  ip_address?: string;
-  device_type: string;
-  vendor?: string;
-  model?: string;
-  location_hint?: string;
-  spatial_ref_id?: string;
-}
 
 export function listNetworks(token: string, workspaceId: string, page = 1, pageSize = 20) {
   return apiRequest<NetworkList>(
@@ -57,6 +44,22 @@ export function createDevice(token: string, networkId: string, body: CreateDevic
     body,
     token,
   });
+}
+
+export function updateNetwork(token: string, networkId: string, body: UpdateNetworkInput) {
+  return apiRequest<Network>(`/api/v1/networks/${networkId}`, { method: "PATCH", body, token });
+}
+
+export function deleteNetwork(token: string, networkId: string) {
+  return apiRequestNoContent(`/api/v1/networks/${networkId}`, { token });
+}
+
+export function updateDevice(token: string, networkId: string, deviceId: string, body: UpdateDeviceInput) {
+  return apiRequest<Device>(`/api/v1/networks/${networkId}/devices/${deviceId}`, { method: "PATCH", body, token });
+}
+
+export function deleteDevice(token: string, networkId: string, deviceId: string) {
+  return apiRequestNoContent(`/api/v1/networks/${networkId}/devices/${deviceId}`, { token });
 }
 
 export function updateDeviceSpatialRef(token: string, networkId: string, deviceId: string, spatialRefId: string | null) {
@@ -107,6 +110,7 @@ export function upsertCampusModelAssets(token: string, networkId: string, input:
       model_sha256: input.model_sha256,
       model_size_bytes: input.model_size_bytes,
       mapping_by_device_id: input.mapping_by_device_id,
+      ...(input.registration !== undefined ? { registration: input.registration } : {}),
       source: input.source ?? null,
       replace_existing: input.replace_existing ?? true,
     },

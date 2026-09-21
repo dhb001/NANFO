@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useExitPresence } from "@/shared/ui/useExitPresence";
 import { useNavigate } from "react-router-dom";
 import { useUiStore } from "@/shared/state/ui-store";
@@ -37,6 +37,19 @@ export function CommandPalette() {
   const present = useExitPresence(open);
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
+  const surfaceRef = useRef<HTMLDivElement>(null);
+  const returnFocus = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    returnFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    surfaceRef.current?.querySelector("input")?.focus();
+    return () => { if (returnFocus.current?.isConnected) returnFocus.current.focus(); };
+  }, [open]);
+
+  useEffect(() => {
+    surfaceRef.current?.querySelector('[data-active="true"]')?.scrollIntoView?.({ block: "nearest" });
+  }, [activeIndex]);
 
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -60,9 +73,16 @@ export function CommandPalette() {
       return;
     }
 
-    setActiveIndex(0);
-
     const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Tab") {
+        const controls = surfaceRef.current?.querySelectorAll<HTMLElement>("input, button");
+        if (!controls?.length) return;
+        const first = controls[0];
+        const last = controls[controls.length - 1];
+        if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+        else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+        return;
+      }
       if (event.key === "Escape") {
         event.preventDefault();
         setOpen(false);
@@ -79,6 +99,7 @@ export function CommandPalette() {
         return;
       }
       if (event.key === "Enter") {
+        if (event.target instanceof HTMLButtonElement) return;
         const entry = filtered[activeIndex];
         if (!entry) {
           return;
@@ -110,15 +131,15 @@ export function CommandPalette() {
           }}
         >
           <div
+            ref={surfaceRef}
             className="command-palette-surface"
           >
             <div className="command-search">
               <input
                 value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                autoFocus
+                onChange={(event) => { setQuery(event.target.value); setActiveIndex(0); }}
                 aria-label="Search commands"
-                placeholder="Jump to route (example: twin, telemetry, G D)"
+                placeholder="Where would you like to go?"
               />
             </div>
 
@@ -153,6 +174,7 @@ export function CommandPalette() {
                 })
               )}
             </div>
+            <div className="command-footer"><span>↑ ↓ to explore &nbsp; · &nbsp; Enter to open</span><span>Esc to close</span></div>
           </div>
         </div>
       ) : null

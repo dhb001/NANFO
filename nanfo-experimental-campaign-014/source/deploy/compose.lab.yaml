@@ -1,0 +1,29 @@
+# Explicitly opt-in; never add the lab to the default lifecycle start command.
+services:
+  lab:
+    image: ${NANFO_LAB_IMAGE:?Set an operator-verified lab image digest or sha256 image ID}
+    profiles: [lab]
+    privileged: true
+    network_mode: none
+    environment:
+      EMULATION_CONTROL_ENABLED: ${EMULATION_CONTROL_ENABLED:-false}
+      EMULATION_BINDING_DIGEST: ${EMULATION_BINDING_DIGEST:-}
+    volumes:
+      - lab_output:/output
+      - lab_commands:/commands:ro
+      - lab_results:/results
+    tmpfs: ["/run:exec,nosuid,nodev,size=64m", "/tmp:exec,nosuid,nodev,size=64m"]
+    pids_limit: 256
+    mem_limit: 768m
+    cpus: 2
+    stop_grace_period: 30s
+    restart: "no"
+    logging:
+      driver: json-file
+      options: {max-size: 2m, max-file: "2"}
+    healthcheck:
+      test: [CMD, python, -m, emulation.runner, --request, status]
+      interval: 10s
+      timeout: 5s
+      start_period: 60s
+      retries: 3

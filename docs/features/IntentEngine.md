@@ -42,6 +42,13 @@ Enable safe, vendor-neutral change orchestration with rollback confidence.
 - `POST /api/v1/intents/validate`
 - `POST /api/v1/intents/execute`
 - `GET /api/v1/intents/{id}`
+- `GET /api/v1/intents?workspace_id=UUID&network_id=UUID&page=1&page_size=20`
+  (ADR026): authorized durable summary history; optional network filter and bounded
+  action projection. Exact schema: `docs/api/WorkflowHistory.md`. UI `intent_id`
+  deep links load detail without approval/execution. Successful token rotation keeps
+  drafts and immutable execution/retry identity; changed roles/permissions revoke
+  local approval. Lost responses require detail reconciliation or an explicit retry
+  with the same identity, never automatic transport-error replay.
 
 ## Database
 - Intent records, status transitions, execution provenance.

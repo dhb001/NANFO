@@ -1,0 +1,136 @@
+{
+  "error_type": "HTTPException",
+  "exception": [
+    {
+      "frames": [
+        {
+          "file": "verify_experimental_lab.py",
+          "function": "controller_child",
+          "line": 961
+        },
+        {
+          "file": "controller.py",
+          "function": "run",
+          "line": 447
+        },
+        {
+          "file": "controller.py",
+          "function": "step",
+          "line": 321
+        },
+        {
+          "file": "controller.py",
+          "function": "_io",
+          "line": 41
+        },
+        {
+          "file": "controller.py",
+          "function": "checkpoint",
+          "line": 89
+        },
+        {
+          "file": "authority.py",
+          "function": "check",
+          "line": 14
+        },
+        {
+          "file": "authority.py",
+          "function": "check_in_transaction",
+          "line": 22
+        },
+        {
+          "file": "service.py",
+          "function": "authorize",
+          "line": 129
+        },
+        {
+          "file": "service.py",
+          "function": "assert_network_workspace_access",
+          "line": 225
+        },
+        {
+          "file": "service.py",
+          "function": "_authorize_network_workspace_access",
+          "line": 245
+        },
+        {
+          "file": "service.py",
+          "function": "assert_workspace_membership",
+          "line": 245
+        },
+        {
+          "file": "service.py",
+          "function": "get_active_workspace",
+          "line": 395
+        },
+        {
+          "file": "service.py",
+          "function": "_assert_org_membership",
+          "line": 215
+        }
+      ],
+      "message": "403: Insufficient permissions.",
+      "type": "HTTPException"
+    }
+  ],
+  "operation": "run",
+  "records": {
+    "bootstrap_recovery": {
+      "path": "bootstrap_recovery-3863976-0.json",
+      "sha256": "f76df5974fd9a81e411672674b083240d566d7fb38878754e83e44d6814a0c9f"
+    },
+    "frame": {
+      "path": "frame.json",
+      "sha256": "00821a0ea560e6fbc235258c1c3ece96388bee3b5f466664271aa717e98fcd17"
+    },
+    "inference": {
+      "path": "inference-3863976-0.json",
+      "sha256": "ddf88cb9fc678b474a5998c74bb135651d588b2e87ca5ca0ed5e89fbe9c95e03"
+    },
+    "prepared": {
+      "path": "prepared-3863976-0.json",
+      "sha256": "90987e922e69fc7e05913f454b6aec7945f07261acdabcab25acac053d84cb92"
+    },
+    "recovery": {
+      "path": "recovery-3863976-0.json",
+      "sha256": "65b2c114506ddf1e88c11b167c68a47f04fcfd3f305ae86132a9734abb815a6e"
+    },
+    "simulation": {
+      "path": "simulation-3863976-0.json",
+      "sha256": "9a9861fed83fbe8f2e5aaa051ce28c56edf2ffc3c08cb5ffa675ee9244d01bb2"
+    }
+  },
+  "status": "failed",
+  "timings": [
+    {
+      "finished_ns": 101502337098531,
+      "operation": "inference",
+      "started_ns": 101498170534211
+    },
+    {
+      "finished_ns": 101502871809189,
+      "operation": "simulation",
+      "started_ns": 101502390348602
+    },
+    {
+      "finished_ns": 101503545874163,
+      "operation": "prepared",
+      "started_ns": 101503543607336
+    },
+    {
+      "finished_ns": 101507622048772,
+      "operation": "receipt",
+      "started_ns": 101504303013857
+    },
+    {
+      "finished_ns": 101509181663664,
+      "operation": "recovery",
+      "started_ns": 101507793138522
+    },
+    {
+      "finished_ns": 101509840019929,
+      "operation": "bootstrap_recovery",
+      "started_ns": 101509259833602
+    }
+  ]
+}

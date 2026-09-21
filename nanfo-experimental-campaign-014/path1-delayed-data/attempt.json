@@ -1,0 +1,18 @@
+{
+  "case_id": "path1-delayed-data",
+  "cleanup": {
+    "evidence_errors": [],
+    "removed": true,
+    "removed_resources": [
+      "dda5abb1f7f73ebb7c19b06e21c840a8764be630abbf0d2e07162002ffd1b659",
+      "nanfo-experimental-bcec3bce1c0e47989081ef50f8e6abc8"
+    ],
+    "unresolved_resources": []
+  },
+  "controller_returncode": 1,
+  "controller_status": "failed",
+  "policy": "qualified",
+  "scenario": "path1",
+  "seed": 1447,
+  "status": "acquired"
+}

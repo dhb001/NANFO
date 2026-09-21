@@ -1,3 +1,24 @@
+export interface CreateNetworkInput {
+  workspace_id: string;
+  name: string;
+  description?: string | null;
+  cidr?: string | null;
+}
+
+export type UpdateNetworkInput = Partial<Omit<CreateNetworkInput, "workspace_id">>;
+
+export interface CreateDeviceInput {
+  hostname: string;
+  device_type: string;
+  ip_address?: string | null;
+  vendor?: string | null;
+  model?: string | null;
+  location_hint?: string | null;
+  spatial_ref_id?: string | null;
+}
+
+export type UpdateDeviceInput = Partial<CreateDeviceInput>;
+
 export interface Network {
   network_id: string;
   workspace_id: string;
@@ -148,7 +169,20 @@ export interface UpsertCampusBuildingInput {
   source?: string | null;
 }
 
+export interface AssetRegistration {
+  version: 1;
+  translation: { x: number; y: number; z: number };
+  rotation: { x: number; y: number; z: number };
+  scale: { x: number; y: number; z: number };
+  target_units: "m";
+  target_up_axis: "y";
+  source: string;
+}
+
 export interface CampusModelAssetRecord {
+  registration?: AssetRegistration | null;
+  storage_backend?: "inline" | "local_cas";
+  download_path?: string | null;
   campus_model_asset_id: string;
   network_id: string;
   model_file_name: string;
@@ -168,6 +202,7 @@ export interface CampusModelAssetList {
 }
 
 export interface UpsertCampusModelAssetInput {
+  registration?: AssetRegistration | null;
   model_file_name: string;
   model_mime_type: string;
   model_data_base64: string;

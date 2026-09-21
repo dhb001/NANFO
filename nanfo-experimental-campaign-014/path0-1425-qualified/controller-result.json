@@ -1,0 +1,85 @@
+{
+  "operation": "run",
+  "records": {
+    "bootstrap_recovery": {
+      "path": "bootstrap_recovery-3443479-0.json",
+      "sha256": "b31bdacfb0277bb72cf2435aaeb4f7527f8103515e39a130904a19fb62442eec"
+    },
+    "frame": {
+      "path": "frame.json",
+      "sha256": "e522990891b295eb9131932e5012e686e83431c84eda55847834e0e0edee9c6a"
+    },
+    "inference": {
+      "path": "inference-3443479-0.json",
+      "sha256": "41adc194e63ebf83cf0d22f35d741ae1ac8572646b20b26799c4e644b066d9f5"
+    },
+    "prepared": {
+      "path": "prepared-3443479-0.json",
+      "sha256": "5dd749580b53f4fc44edfdfe8df5f4054d8c9f37014575afb3795b87efd34884"
+    },
+    "receipt": {
+      "path": "receipt-3443479-0.json",
+      "sha256": "00a9577890256be5e4e0aa9d522c3d4c1b3a60cd966bdfba4950c620cdcceda9"
+    },
+    "recovery": {
+      "path": "recovery-3443479-0.json",
+      "sha256": "8d02c4069ed12084c8082192a77a0fe65fc17cdf813c3b9c31d7b3548efab2b9"
+    },
+    "simulation": {
+      "path": "simulation-3443479-0.json",
+      "sha256": "d62024b2d597637d22e40fc8a5aa393795c8747feac38b8965ae53c7ff2ba6e4"
+    },
+    "verification": {
+      "path": "verification-3443479-2.json",
+      "sha256": "cd607b4a504126195f178091df8219c821176f4602e22e44612f79372fb87410"
+    }
+  },
+  "status": "completed",
+  "timings": [
+    {
+      "finished_ns": 97165207252514,
+      "operation": "inference",
+      "started_ns": 97160611011049
+    },
+    {
+      "finished_ns": 97165764023774,
+      "operation": "simulation",
+      "started_ns": 97165278327234
+    },
+    {
+      "finished_ns": 97166470594108,
+      "operation": "prepared",
+      "started_ns": 97166467873098
+    },
+    {
+      "finished_ns": 97179742694683,
+      "operation": "receipt",
+      "started_ns": 97167054476466
+    },
+    {
+      "finished_ns": 97185316909156,
+      "operation": "verification",
+      "started_ns": 97180110202758
+    },
+    {
+      "finished_ns": 97192110553801,
+      "operation": "verification",
+      "started_ns": 97186846403385
+    },
+    {
+      "finished_ns": 97195317371641,
+      "operation": "verification",
+      "started_ns": 97193786618456
+    },
+    {
+      "finished_ns": 97198709906123,
+      "operation": "recovery",
+      "started_ns": 97195788730177
+    },
+    {
+      "finished_ns": 97199460148572,
+      "operation": "bootstrap_recovery",
+      "started_ns": 97198793350652
+    }
+  ]
+}

@@ -1,0 +1,421 @@
+{
+  "autonomy_qualified": false,
+  "cases": [
+    {
+      "action": 0,
+      "adds": 0,
+      "case": "STOP-0",
+      "deletes": 0,
+      "raw_reconstruction": "passed"
+    },
+    {
+      "action": 0,
+      "adds": 1,
+      "case": "STOP-1",
+      "deletes": 1,
+      "raw_reconstruction": "passed"
+    },
+    {
+      "action": 0,
+      "adds": 2,
+      "case": "STOP-2",
+      "deletes": 2,
+      "raw_reconstruction": "passed"
+    },
+    {
+      "action": 0,
+      "adds": 3,
+      "case": "STOP-3",
+      "deletes": 3,
+      "raw_reconstruction": "passed"
+    },
+    {
+      "action": 0,
+      "adds": 4,
+      "case": "STOP-4",
+      "deletes": 4,
+      "raw_reconstruction": "passed"
+    },
+    {
+      "action": 0,
+      "adds": 5,
+      "case": "STOP-5",
+      "deletes": 5,
+      "raw_reconstruction": "passed"
+    },
+    {
+      "action": 0,
+      "adds": 6,
+      "case": "STOP-6",
+      "deletes": 6,
+      "raw_reconstruction": "passed"
+    },
+    {
+      "action": 0,
+      "adds": 7,
+      "case": "STOP-7",
+      "deletes": 7,
+      "raw_reconstruction": "passed"
+    },
+    {
+      "action": 0,
+      "adds": 8,
+      "case": "STOP-8",
+      "deletes": 8,
+      "raw_reconstruction": "passed"
+    },
+    {
+      "action": 0,
+      "adds": 9,
+      "case": "STOP-9",
+      "deletes": 9,
+      "raw_reconstruction": "passed"
+    },
+    {
+      "action": 0,
+      "adds": 10,
+      "case": "STOP-10",
+      "deletes": 10,
+      "raw_reconstruction": "passed"
+    },
+    {
+      "action": 0,
+      "adds": 11,
+      "case": "STOP-11",
+      "deletes": 11,
+      "raw_reconstruction": "passed"
+    },
+    {
+      "action": 0,
+      "adds": 12,
+      "case": "STOP-12",
+      "deletes": 12,
+      "raw_reconstruction": "passed"
+    },
+    {
+      "action": 0,
+      "adds": 0,
+      "case": "expired-0",
+      "deletes": 0,
+      "raw_reconstruction": "passed"
+    },
+    {
+      "action": 0,
+      "adds": 12,
+      "case": "foreign-12",
+      "deletes": 12,
+      "raw_reconstruction": "passed"
+    },
+    {
+      "action": 0,
+      "adds": 3,
+      "case": "restart-3",
+      "deletes": 3,
+      "raw_reconstruction": "passed"
+    },
+    {
+      "action": 0,
+      "adds": 3,
+      "case": "lost-receipt-3",
+      "deletes": 3,
+      "raw_reconstruction": "passed"
+    },
+    {
+      "action": 0,
+      "adds": 12,
+      "case": "recovery-interrupted-3",
+      "deletes": 12,
+      "raw_reconstruction": "passed"
+    },
+    {
+      "action": 0,
+      "adds": 12,
+      "case": "normal-12",
+      "deletes": 12,
+      "raw_reconstruction": "passed"
+    },
+    {
+      "action": 1,
+      "adds": 0,
+      "case": "STOP-0",
+      "deletes": 0,
+      "raw_reconstruction": "passed"
+    },
+    {
+      "action": 1,
+      "adds": 1,
+      "case": "STOP-1",
+      "deletes": 1,
+      "raw_reconstruction": "passed"
+    },
+    {
+      "action": 1,
+      "adds": 2,
+      "case": "STOP-2",
+      "deletes": 2,
+      "raw_reconstruction": "passed"
+    },
+    {
+      "action": 1,
+      "adds": 3,
+      "case": "STOP-3",
+      "deletes": 3,
+      "raw_reconstruction": "passed"
+    },
+    {
+      "action": 1,
+      "adds": 4,
+      "case": "STOP-4",
+      "deletes": 4,
+      "raw_reconstruction": "passed"
+    },
+    {
+      "action": 1,
+      "adds": 5,
+      "case": "STOP-5",
+      "deletes": 5,
+      "raw_reconstruction": "passed"
+    },
+    {
+      "action": 1,
+      "adds": 6,
+      "case": "STOP-6",
+      "deletes": 6,
+      "raw_reconstruction": "passed"
+    },
+    {
+      "action": 1,
+      "adds": 7,
+      "case": "STOP-7",
+      "deletes": 7,
+      "raw_reconstruction": "passed"
+    },
+    {
+      "action": 1,
+      "adds": 8,
+      "case": "STOP-8",
+      "deletes": 8,
+      "raw_reconstruction": "passed"
+    },
+    {
+      "action": 1,
+      "adds": 9,
+      "case": "STOP-9",
+      "deletes": 9,
+      "raw_reconstruction": "passed"
+    },
+    {
+      "action": 1,
+      "adds": 10,
+      "case": "STOP-10",
+      "deletes": 10,
+      "raw_reconstruction": "passed"
+    },
+    {
+      "action": 1,
+      "adds": 11,
+      "case": "STOP-11",
+      "deletes": 11,
+      "raw_reconstruction": "passed"
+    },
+    {
+      "action": 1,
+      "adds": 12,
+      "case": "STOP-12",
+      "deletes": 12,
+      "raw_reconstruction": "passed"
+    },
+    {
+      "action": 1,
+      "adds": 0,
+      "case": "expired-0",
+      "deletes": 0,
+      "raw_reconstruction": "passed"
+    },
+    {
+      "action": 1,
+      "adds": 12,
+      "case": "foreign-12",
+      "deletes": 12,
+      "raw_reconstruction": "passed"
+    },
+    {
+      "action": 1,
+      "adds": 3,
+      "case": "restart-3",
+      "deletes": 3,
+      "raw_reconstruction": "passed"
+    },
+    {
+      "action": 1,
+      "adds": 3,
+      "case": "lost-receipt-3",
+      "deletes": 3,
+      "raw_reconstruction": "passed"
+    },
+    {
+      "action": 1,
+      "adds": 12,
+      "case": "recovery-interrupted-3",
+      "deletes": 12,
+      "raw_reconstruction": "passed"
+    },
+    {
+      "action": 1,
+      "adds": 12,
+      "case": "normal-12",
+      "deletes": 12,
+      "raw_reconstruction": "passed"
+    }
+  ],
+  "claim": "native-driver-verified",
+  "cleanup_limit": "final container deletion has owner receipt; no retained post-removal docker inspection",
+  "distinct_namespace_inodes": 17,
+  "fixture": "real Mininet namespace graph with static FIB; FRR/OSPF daemons not started",
+  "hard_transition_deadline_proved": false,
+  "max_command_seconds": 0.229714005,
+  "mutations": 480,
+  "namespace_identities": [
+    {
+      "netns_inode": 4026533236,
+      "pid": 25,
+      "start_ticks": 10628119
+    },
+    {
+      "netns_inode": 4026533290,
+      "pid": 29,
+      "start_ticks": 10628121
+    },
+    {
+      "netns_inode": 4026533016,
+      "pid": 13,
+      "start_ticks": 10628115
+    },
+    {
+      "netns_inode": 4026533072,
+      "pid": 17,
+      "start_ticks": 10628116
+    },
+    {
+      "netns_inode": 4026533175,
+      "pid": 21,
+      "start_ticks": 10628118
+    },
+    {
+      "netns_inode": 4026533344,
+      "pid": 33,
+      "start_ticks": 10628122
+    },
+    {
+      "netns_inode": 4026533398,
+      "pid": 37,
+      "start_ticks": 10628124
+    },
+    {
+      "netns_inode": 4026533452,
+      "pid": 41,
+      "start_ticks": 10628125
+    },
+    {
+      "netns_inode": 4026533506,
+      "pid": 45,
+      "start_ticks": 10628126
+    },
+    {
+      "netns_inode": 4026533074,
+      "pid": 27538,
+      "start_ticks": 10642252
+    },
+    {
+      "netns_inode": 4026533190,
+      "pid": 27542,
+      "start_ticks": 10642254
+    },
+    {
+      "netns_inode": 4026533029,
+      "pid": 27526,
+      "start_ticks": 10642247
+    },
+    {
+      "netns_inode": 4026533018,
+      "pid": 27530,
+      "start_ticks": 10642249
+    },
+    {
+      "netns_inode": 4026533134,
+      "pid": 27534,
+      "start_ticks": 10642251
+    },
+    {
+      "netns_inode": 4026533175,
+      "pid": 27546,
+      "start_ticks": 10642255
+    },
+    {
+      "netns_inode": 4026533309,
+      "pid": 27550,
+      "start_ticks": 10642257
+    },
+    {
+      "netns_inode": 4026533368,
+      "pid": 27554,
+      "start_ticks": 10642258
+    },
+    {
+      "netns_inode": 4026533427,
+      "pid": 27558,
+      "start_ticks": 10642259
+    }
+  ],
+  "native_command_count": 54646,
+  "owner_exception_cases": [
+    {
+      "action": 0,
+      "case": "exclusive-lock",
+      "limitation": "owner exception receipt and pinned executed harness; no dedicated raw exception event"
+    },
+    {
+      "action": 0,
+      "case": "binding-refusal-0",
+      "limitation": "owner exception receipt and pinned executed harness; no dedicated raw exception event"
+    },
+    {
+      "action": 1,
+      "case": "exclusive-lock",
+      "limitation": "owner exception receipt and pinned executed harness; no dedicated raw exception event"
+    },
+    {
+      "action": 1,
+      "case": "binding-refusal-0",
+      "limitation": "owner exception receipt and pinned executed harness; no dedicated raw exception event"
+    }
+  ],
+  "physical_rf_qualified": false,
+  "probes": [
+    {
+      "action": 0,
+      "monotonic_ns": 67268270040293,
+      "stdout": "PING 10.78.10.2 (10.78.10.2) 56(84) bytes of data.\n64 bytes from 10.78.10.2: icmp_seq=1 ttl=61 time=48.3 ms\n64 bytes from 10.78.10.2: icmp_seq=2 ttl=61 time=24.2 ms\n64 bytes from 10.78.10.2: icmp_seq=3 ttl=61 time=24.2 ms\n\n--- 10.78.10.2 ping statistics ---\n3 packets transmitted, 3 received, 0% packet loss, time 201ms\nrtt min/avg/max/mdev = 24.168/32.215/48.309/11.379 ms\n"
+    },
+    {
+      "action": 0,
+      "monotonic_ns": 67268500878099,
+      "stdout": "PING 10.78.8.2 (10.78.8.2) 56(84) bytes of data.\n64 bytes from 10.78.8.2: icmp_seq=1 ttl=61 time=24.2 ms\n64 bytes from 10.78.8.2: icmp_seq=2 ttl=61 time=24.2 ms\n64 bytes from 10.78.8.2: icmp_seq=3 ttl=61 time=24.2 ms\n\n--- 10.78.8.2 ping statistics ---\n3 packets transmitted, 3 received, 0% packet loss, time 201ms\nrtt min/avg/max/mdev = 24.159/24.170/24.177/0.008 ms\n"
+    },
+    {
+      "action": 1,
+      "monotonic_ns": 67409616138707,
+      "stdout": "PING 10.78.10.2 (10.78.10.2) 56(84) bytes of data.\n64 bytes from 10.78.10.2: icmp_seq=1 ttl=61 time=48.4 ms\n64 bytes from 10.78.10.2: icmp_seq=2 ttl=61 time=24.2 ms\n64 bytes from 10.78.10.2: icmp_seq=3 ttl=61 time=24.2 ms\n\n--- 10.78.10.2 ping statistics ---\n3 packets transmitted, 3 received, 0% packet loss, time 201ms\nrtt min/avg/max/mdev = 24.176/32.247/48.362/11.394 ms\n"
+    },
+    {
+      "action": 1,
+      "monotonic_ns": 67409846775690,
+      "stdout": "PING 10.78.8.2 (10.78.8.2) 56(84) bytes of data.\n64 bytes from 10.78.8.2: icmp_seq=1 ttl=61 time=24.2 ms\n64 bytes from 10.78.8.2: icmp_seq=2 ttl=61 time=24.2 ms\n64 bytes from 10.78.8.2: icmp_seq=3 ttl=61 time=24.2 ms\n\n--- 10.78.8.2 ping statistics ---\n3 packets transmitted, 3 received, 0% packet loss, time 201ms\nrtt min/avg/max/mdev = 24.200/24.214/24.234/0.014 ms\n"
+    }
+  ],
+  "protocol_sha256": "777edceccf45133aa2e0670db39d8800723882b118e332ae0342c3eb241b328e",
+  "raw_command_cases_passed": 38,
+  "seal_setup_and_raw_snapshots_passed": true,
+  "snapshots": 460,
+  "source_pins_passed": true
+}

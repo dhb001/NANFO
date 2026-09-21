@@ -5,6 +5,7 @@ import {
   useSimulationCompare,
   useSimulationDetail,
   useStartSimulation,
+  useSimulationHistory,
 } from "@/features/simulation/hooks";
 import { useAuthStore } from "@/shared/state/auth-store";
 import { useWorkspaceStore } from "@/shared/state/workspace-store";
@@ -23,23 +24,27 @@ import { modeledMetrics, modeledOutput, modelHistorySeries, type ModeledMetric }
 import { TimeSeriesChart } from "@/features/telemetry/TimeSeriesChart";
 import { SceneReconciliationStatus } from "@/features/realtime/SceneReconciliationStatus";
 import type { ScenarioValidationState } from "@/shared/types/simulation";
+import { useSessionScope } from "@/features/auth/sessionScope";
+import { useUrlSelection } from "@/shared/lib/urlSelection";
 
 const defaultChecks = ["simulation_before_deployment", "blast_radius_assessment"];
 
 export function SimulationPage() {
-  const token = useAuthStore((state) => state.accessToken);
-  const workspaceId = useWorkspaceStore((state) => state.workspaceId);
-  const networkId = useWorkspaceStore((state) => state.networkId);
-  return <SimulationPageContent key={`${token}:${workspaceId}:${networkId}`} />;
+  const { key } = useSessionScope();
+  return <SimulationPageContent key={key} />;
 }
 
 function SimulationPageContent() {
+  const session = useSessionScope();
   const token = useAuthStore((state) => state.accessToken);
+  const workspaceId = useWorkspaceStore((state) => state.workspaceId);
   const networkId = useWorkspaceStore((state) => state.networkId);
 
   const [scenarioName, setScenarioName] = useState("Campus baseline validation");
-  const [trackedSimulationId, setTrackedSimulationId] = useState<string | null>(null);
-  const [baselineSimulationId, setBaselineSimulationId] = useState<string | null>(null);
+  const [trackedSimulationId, setTrackedSimulationId] = useUrlSelection("simulation_id", session.urlScope);
+  const [baselineSimulationId, setBaselineSimulationId] = useUrlSelection("baseline_id", session.urlScope);
+  const [historyPage, setHistoryPage] = useState(1);
+  const history = useSimulationHistory(token, workspaceId, networkId, historyPage);
   const [branchScenario, setBranchScenario] = useState("Branch candidate");
   const [scenarioJson, setScenarioJson] = useState(JSON.stringify(exampleScenario, null, 2));
   const [editBranchInputs, setEditBranchInputs] = useState(false);
@@ -89,6 +94,7 @@ function SimulationPageContent() {
         validation_checks: defaultChecks,
         scenario_config: scenarioConfig,
       });
+      session.assertCurrent();
       setTrackedSimulationId(response.simulation_id);
       setHandoff(response.validation);
       if (!baselineSimulationId) setBaselineSimulationId(response.simulation_id);
@@ -102,6 +108,7 @@ function SimulationPageContent() {
     try {
       const response = await startMutation.mutateAsync({ network_id: selectedDetail.network_id, scenario_name: selectedDetail.scenario_name,
         simulation_id: selectedDetail.simulation_id, validation_checks: defaultChecks });
+      session.assertCurrent();
       setHandoff(response.validation);
     } catch { /* Mutation failure is rendered below. Resume never resubmits edited inputs. */ }
   }
@@ -117,6 +124,7 @@ function SimulationPageContent() {
         scenarioName: branchScenario,
         ...(editBranchInputs ? { scenarioConfig: parseScenarioConfig(scenarioJson) } : {}),
       });
+      session.assertCurrent();
       setBaselineSimulationId(selectedDetail.simulation_id);
       setTrackedSimulationId(response.simulation_id);
       setHandoff(response.validation);
@@ -125,6 +133,22 @@ function SimulationPageContent() {
 
   return (
     <div style={{ display: "grid", gap: "1rem" }}>
+      <Panel title="Simulation history" subtitle="Persisted runs in the selected workspace and network; selecting a run only loads detail">
+        <Button tone="ghost" disabled={!workspaceId || history.isFetching} onClick={() => void history.refetch()}>Refresh simulation history</Button>
+        <p>A lost start or branch response may still have created a run. Inspect history before starting another.</p>
+        <QueryState query={history} hasData={(data) => data.items.length > 0} emptyTitle="No simulation history" emptyDescription="No persisted runs on this page.">
+          {(data) => <ul>{data.items.map((item) => <li key={item.simulation_id}>
+            <Button tone="ghost" disabled={busy} onClick={() => { setTrackedSimulationId(item.simulation_id); setHandoff(undefined); }}>{item.scenario_name} — {item.status}</Button>
+            <span className="mono"> {item.simulation_id} | {item.created_at}</span>
+            <Button tone="ghost" disabled={busy} onClick={() => setBaselineSimulationId(item.simulation_id)}>Use as baseline</Button>
+          </li>)}</ul>}
+        </QueryState>
+        <nav aria-label="Simulation history pagination">
+          <Button disabled={historyPage <= 1 || history.isFetching} onClick={() => setHistoryPage(historyPage - 1)}>Previous simulations</Button>
+          <span> Page {historyPage} | {history.data?.total ?? "Unknown"} runs </span>
+          <Button disabled={!history.data || historyPage * history.data.page_size >= history.data.total || history.isFetching} onClick={() => setHistoryPage(historyPage + 1)}>Next simulations</Button>
+        </nav>
+      </Panel>
       <Panel title="Simulation Lifecycle" subtitle="Configured deterministic what-if model, never live traffic or production authorization">
         <form
           onSubmit={start}
@@ -245,7 +269,7 @@ function SimulationPageContent() {
       </Panel>
 
       <div style={{ display: "grid", gridTemplateColumns: isNarrowViewport ? "minmax(0, 1fr)" : "repeat(2, minmax(0, 1fr))", gap: "1rem", alignItems: "start" }}>
-        <Panel title="Simulation Detail" subtitle="GET /simulations/{id}">
+        <Panel title="Simulation Detail" subtitle="Configuration, progress and evidence for the selected run">
           <Button tone="ghost" disabled={!trackedSimulationId || detailQuery.isFetching} onClick={() => void detailQuery.refetch()}>Refresh simulation status</Button>
           <p>Active detail polling is bounded to 40 reads, then use Refresh. A stalled worker or lost connection is not completion.</p>
           <QueryState
@@ -279,7 +303,7 @@ function SimulationPageContent() {
           </QueryState>
         </Panel>
 
-        <Panel title="Compare" subtitle="GET /simulations/{id}/compare/{baselineId}">
+        <Panel title="Compare" subtitle="Review the selected run against a compatible baseline">
           {baselineQuery.isError && <AsyncState title="Baseline detail unavailable" description="Comparison remains unavailable until the baseline can be read." action={<Button tone="ghost" onClick={() => void baselineQuery.refetch()}>Retry baseline</Button>} />}
           <label style={{ display: "grid" }}>Comparison metric<select aria-label="Comparison metric" value={metric} onChange={(event) => setMetric(event.target.value as ModeledMetric)}>{Object.entries(modeledMetrics).map(([key, value]) => <option key={key} value={key}>{value.label} ({value.unit}; {value.higherIsBetter ? "higher" : "lower"} is better)</option>)}</select></label>
           <p>Candidate minus baseline; latency/loss decreases and goodput increases are favorable. Model-only comparisons require matching workload and modeled time. Missing or incompatible metrics are unavailable, never zero.</p>
@@ -301,7 +325,7 @@ function SimulationPageContent() {
         </Panel>
       </div>
 
-      <Panel title="Realtime Simulation Timeline" subtitle="/ws/digital-twin scene-object updates for simulation lifecycle">
+      <Panel title="Realtime Simulation Timeline" subtitle="Incoming progress and lifecycle changes for simulation runs">
         <SceneReconciliationStatus />
         {simulationSceneObjects.length === 0 ? (
           <div style={{ color: "var(--ink-3)" }}>Awaiting simulation scene deltas...</div>

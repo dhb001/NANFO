@@ -1,7 +1,6 @@
 import { lazy, Suspense, useEffect, useRef, useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
-import { useAuthStore } from "@/shared/state/auth-store";
-import { useWorkspaceStore } from "@/shared/state/workspace-store";
+import { useSessionScope } from "@/features/auth/sessionScope";
 import { Panel } from "@/shared/ui/Panel";
 import { Button } from "@/shared/ui/Button";
 import { Badge } from "@/shared/ui/Badge";
@@ -33,14 +32,12 @@ const reasonLabels: Record<string, string> = {
 };
 
 export function AutonomyPage() {
-  const auth = useAuthStore();
-  const scope = useWorkspaceStore();
-  const key = JSON.stringify([auth.generation, auth.accessToken, auth.profile?.permissions,
-    scope.organizationId, scope.workspaceId, scope.networkId]);
+  const { key } = useSessionScope();
   return <AutonomyPageContent key={key} />;
 }
 
 function AutonomyPageContent() {
+  const { authority } = useSessionScope();
   const { status: query, update, stop, enabled, canRead, canWrite, networkId, workspaceId, organizationId } = useAutonomy();
   const [mode, setMode] = useState<AutonomyMode>("monitor");
   const [hash, setHash] = useState("");
@@ -52,6 +49,7 @@ function AutonomyPageContent() {
   const saving = useRef(false);
   const stopping = useRef(false);
   const stopAttempt = useRef(0);
+  useEffect(() => { setHash(""); setExpiry(""); }, [authority]);
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 1_000);
     return () => window.clearInterval(timer);

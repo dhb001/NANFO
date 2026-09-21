@@ -1,0 +1,6 @@
+{
+  "calibrated": false,
+  "error_type": "ValueError",
+  "reason": "campaign_blocked_or_incomplete",
+  "status": "failed"
+}

@@ -1,4 +1,4 @@
-import { fireEvent, render, renderHook, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, renderHook, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TelemetryPage } from "@/features/telemetry/TelemetryPage";
@@ -7,6 +7,7 @@ import { useAuthStore } from "@/shared/state/auth-store";
 import { useWorkspaceStore } from "@/shared/state/workspace-store";
 import { operatorProfile } from "@/test/profile";
 import { TelemetryProvenance } from "./TelemetryProvenance";
+import { useLiveStore } from "@/features/realtime/store";
 
 vi.mock("@tanstack/react-virtual", () => ({
   useVirtualizer: ({ count }: { count: number }) => ({
@@ -30,6 +31,47 @@ describe("telemetry diagnostic boundaries", () => {
       : response({ items: [], total: 0, page: 1, page_size: 120 }));
   });
   afterEach(() => vi.unstubAllGlobals());
+
+  it("reaches device 41 with server totals and retains off-page selection and filters through rotation", async () => {
+    fetchMock.mockImplementation(async (input) => {
+      const url = new URL(String(input), "http://localhost");
+      if (url.pathname.endsWith("/devices")) {
+        const page = Number(url.searchParams.get("page"));
+        return response({ items: [{ device_id: `device-${page === 3 ? 41 : page}`, hostname: `Device page ${page}`, device_type: "router" }], total: 41, page, page_size: 20 });
+      }
+      return response({ items: [], total: 0, page: 1, page_size: 120 });
+    });
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(<QueryClientProvider client={client}><TelemetryPage /></QueryClientProvider>);
+    await screen.findByText("Page 1 | 41 devices");
+    fireEvent.click(screen.getByRole("button", { name: "Next devices" }));
+    await screen.findByText("Page 2 | 41 devices");
+    fireEvent.click(screen.getByRole("button", { name: "Next devices" }));
+    await screen.findByText("Device page 3 (router)");
+    fireEvent.change(screen.getByLabelText("Telemetry device"), { target: { value: "device-41" } });
+    fireEvent.change(screen.getByLabelText("Filter telemetry metric"), { target: { value: "latency_ms" } });
+    act(() => useAuthStore.setState({ accessToken: "rotated" }));
+    await waitFor(() => expect(screen.getByLabelText("Telemetry device")).toHaveValue("device-41"));
+    expect(screen.getByLabelText("Filter telemetry metric")).toHaveValue("latency_ms");
+    expect(screen.getByText("Page 3 | 41 devices")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Previous devices" }));
+    await screen.findByText(/Selected device: device-41/);
+    expect(screen.getByLabelText("Telemetry device")).toHaveValue("device-41");
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("device-41"))).toBe(true);
+    client.clear();
+  });
+
+  it("labels realtime observation timestamps and stale age", () => {
+    const observed = new Date(Date.now() - 60_000).toISOString();
+    useLiveStore.setState({ telemetryKeysNewestFirst: ["sample"], telemetryByDeviceMetric: {
+      sample: { device_id: "device", network_id: "network", workspace_id: "workspace", metric: "latency_ms", value: 4, unit: "ms", source: "test", tags: {}, observed_at: observed, event_id: "sample" },
+    } });
+    const client = new QueryClient();
+    render(<QueryClientProvider client={client}><TelemetryPage /></QueryClientProvider>);
+    expect(screen.getByText(/Observed:.*60s old.*stale/)).toBeInTheDocument();
+    act(() => useLiveStore.getState().reset());
+    client.clear();
+  });
 
   it("does not request health for a non-Admin but still requests tenant history", async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });

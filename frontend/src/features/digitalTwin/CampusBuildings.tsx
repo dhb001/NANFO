@@ -1,4 +1,4 @@
-import { Html } from "@react-three/drei";
+import { SceneLabel } from "./SceneLabel";
 import type { ThreeEvent } from "@react-three/fiber";
 import { useMemo } from "react";
 import { DoubleSide, Shape } from "three";
@@ -133,7 +133,7 @@ function BuildingMesh({
       ) : null}
 
       {showLabel ? (
-        <Html distanceFactor={28} position={[0, labelY, 0]} center>
+        <SceneLabel distanceFactor={28} position={[0, labelY, 0]}>
           <div
             style={{
               padding: "0.14rem 0.38rem",
@@ -148,7 +148,7 @@ function BuildingMesh({
           >
             {building.label} f{building.floors} n{building.nodeCount}
           </div>
-        </Html>
+        </SceneLabel>
       ) : null}
     </group>
   );

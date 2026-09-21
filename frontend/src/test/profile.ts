@@ -5,5 +5,5 @@ export const operatorProfile: UserProfile = {
   email: "operator@example.com",
   display_name: "Test operator",
   roles: ["Operator"],
-  permissions: ["read:topology", "read:telemetry", "write:config"],
+  permissions: ["read:topology", "read:telemetry", "write:config", "execute:rollback"],
 };

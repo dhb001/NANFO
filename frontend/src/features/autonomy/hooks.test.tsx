@@ -71,4 +71,26 @@ describe("scoped autonomy polling", () => {
     await act(async () => { await expect(oldStop.mutateAsync()).rejects.toThrow(); });
     expect(stopAutonomy).not.toHaveBeenCalled();
   });
+  it("keeps the pending STOP and polling identity across rotation and confirms its late receipt", async () => {
+    let finish!: (value: typeof data) => void;
+    vi.mocked(stopAutonomy).mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+    const { result } = renderHook(useAutonomy, { wrapper });
+    await advance(1);
+    const keys = client.getQueryCache().getAll().map((query) => query.queryHash);
+    let pending!: Promise<typeof data>;
+    act(() => { pending = result.current.stop.mutateAsync(); });
+    await advance(1);
+    act(() => useAuthStore.setState({ accessToken: "rotated" }));
+    await advance(1);
+    expect(result.current.stop.isPending).toBe(true);
+    expect(client.getQueryCache().getAll().map((query) => query.queryHash)).toEqual(keys);
+    expect(stopAutonomy).toHaveBeenCalledTimes(1);
+    read.mockResolvedValue({ ...data, revision: data.revision + 1, emergency_stopped: true });
+    await act(async () => { finish({ ...data, revision: data.revision + 1, emergency_stopped: true }); await pending; });
+    await advance(1);
+    expect(result.current.status.data?.revision).toBe(data.revision + 1);
+    await advance(10_010);
+    expect(read.mock.calls.at(-1)?.[0]).toBe("rotated");
+    expect(stopAutonomy).toHaveBeenCalledTimes(1);
+  });
 });

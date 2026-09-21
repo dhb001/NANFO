@@ -1,0 +1,45 @@
+{
+  "applied_ns": 101506865196719,
+  "bootstrap_initial_action": 0,
+  "boundary": {
+    "entry": {
+      "argv": [
+        "ip",
+        "rule",
+        "del",
+        "priority",
+        "19111",
+        "from",
+        "10.78.10.2/32",
+        "to",
+        "10.78.8.2/32",
+        "table",
+        "19111"
+      ],
+      "began": 101506.605119029,
+      "completed": null,
+      "node": "access1",
+      "restoring": false
+    },
+    "id": "fb84448454c2a36c99215404906bf8ab15fd228819e9350db48308442d568433",
+    "point": {
+      "effect": "pause",
+      "operation": "execute",
+      "ordinal": 1,
+      "policy_sha256": "44bb41df4745a6e41a8ff0b90b4ebb7c12d60e481c94e02bdd6d7191cae7b084",
+      "timeout_seconds": 30,
+      "when": "before"
+    },
+    "reached_monotonic": 101506.62994076,
+    "released_monotonic": null
+  },
+  "case_id": "path0-revoke-before",
+  "current_authority_denied": true,
+  "fault": "revoke-before",
+  "intervention": "real",
+  "phase": "beforewrite",
+  "policy": "qualified",
+  "scenario": "path0",
+  "seed": 1440,
+  "write_index": 0
+}

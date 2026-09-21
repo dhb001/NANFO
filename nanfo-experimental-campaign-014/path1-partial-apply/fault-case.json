@@ -1,0 +1,11 @@
+{
+  "bootstrap_initial_action": 1,
+  "case_id": "path1-partial-apply",
+  "fault": "partial-apply",
+  "intervention": "injected_failpoint",
+  "phase": "afterwrite",
+  "policy": "qualified",
+  "scenario": "path1",
+  "seed": 1455,
+  "write_index": 1
+}

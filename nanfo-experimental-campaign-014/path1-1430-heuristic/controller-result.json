@@ -1,0 +1,130 @@
+{
+  "error_type": "ValueError",
+  "exception": [
+    {
+      "frames": [
+        {
+          "file": "verify_experimental_lab.py",
+          "function": "controller_child",
+          "line": 961
+        },
+        {
+          "file": "controller.py",
+          "function": "run",
+          "line": 447
+        },
+        {
+          "file": "controller.py",
+          "function": "step",
+          "line": 328
+        },
+        {
+          "file": "controller.py",
+          "function": "_io",
+          "line": 42
+        },
+        {
+          "file": "verify_experimental_lab.py",
+          "function": "verify",
+          "line": 714
+        },
+        {
+          "file": "verify_experimental_lab.py",
+          "function": "call",
+          "line": 662
+        },
+        {
+          "file": "verify_experimental_lab.py",
+          "function": "verify",
+          "line": 748
+        },
+        {
+          "file": "adapter.py",
+          "function": "verify",
+          "line": 234
+        },
+        {
+          "file": "verify_experimental_lab.py",
+          "function": "_guarded",
+          "line": 787
+        },
+        {
+          "file": "adapter.py",
+          "function": "_call",
+          "line": 100
+        }
+      ],
+      "message": "experimental_receiver_uncertain_or_rejected",
+      "type": "ValueError"
+    }
+  ],
+  "operation": "run",
+  "records": {
+    "bootstrap_recovery": {
+      "path": "bootstrap_recovery-3626412-0.json",
+      "sha256": "6756daf297edbd1c372b66f6475e3514eebc34b4641bf924c7e5d474a7f49dcd"
+    },
+    "frame": {
+      "path": "frame.json",
+      "sha256": "ae58415a751e479640dd82288d16be7bb1cd7b86812969b5bd70e6b89218cde4"
+    },
+    "inference": {
+      "path": "inference-3626412-0.json",
+      "sha256": "a2927af3dc04fea0b66d73822da60ff2919fc9118e0da1b1260a679fef9139a9"
+    },
+    "prepared": {
+      "path": "prepared-3626412-0.json",
+      "sha256": "65922d5ca2dd617c6cab7ac1f36f5c71b273f2f59b07b035f13d7cf838f3ce4f"
+    },
+    "receipt": {
+      "path": "receipt-3626412-0.json",
+      "sha256": "60f6f67b2986429f0e24da4629ad93da2779ab4b12f678e28e518435685011e2"
+    },
+    "recovery": {
+      "path": "recovery-3626412-0.json",
+      "sha256": "aaa7cdab39a9f3d10ddfc1c9fb7d6c02b530bf5c8f87d1e186239e4fc35a02b3"
+    },
+    "simulation": {
+      "path": "simulation-3626412-0.json",
+      "sha256": "99b2d38b9cb036206e0e7d8ca415a051d593d6cb891f6055e9b07319b75018fb"
+    }
+  },
+  "status": "failed",
+  "timings": [
+    {
+      "finished_ns": 99038860089080,
+      "operation": "inference",
+      "started_ns": 99038850376200
+    },
+    {
+      "finished_ns": 99039408515599,
+      "operation": "simulation",
+      "started_ns": 99038904524741
+    },
+    {
+      "finished_ns": 99040060845992,
+      "operation": "prepared",
+      "started_ns": 99040057833773
+    },
+    {
+      "finished_ns": 99052982831048,
+      "operation": "receipt",
+      "started_ns": 99040613404357
+    },
+    {
+      "finished_ns": 99061824878556,
+      "operation": "verification",
+      "started_ns": 99053261960310
+    },
+    {
+      "finished_ns": 99062359804305,
+      "operation": "recovery",
+      "started_ns": 99061989406109
+    },
+    {
+      "finished_ns": 99063100684375,
+      "operation": "bootstrap_recovery",
+      "started_ns": 99062437135648
+    }
+  ]
+}

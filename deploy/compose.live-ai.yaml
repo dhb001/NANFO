@@ -1,0 +1,31 @@
+# Explicit monitor/recommend installation only; no calibrated executor is implied.
+# If distributed serving is selected, apply compose.distributed-live-ai.yaml last.
+x-live-ai: &live-ai
+  image: ${NANFO_AI_IMAGE:?Set a distinct source-matched with-ai image}
+  build: {target: with-ai}
+  environment:
+    NANFO_MODEL_PYTHON: /opt/nanfo/ai-runtime/bin/python
+    NANFO_MODEL_ROOT: /var/lib/nanfo/models
+    NANFO_LIVE_MODEL_REGISTRY: /var/lib/nanfo/live-registry/registry.json
+    NANFO_LIVE_MODEL_REGISTRY_SHA256: ${NANFO_LIVE_MODEL_REGISTRY_SHA256:?Pin the authentic protected live registry}
+    NANFO_LIVE_OBSERVATION_ROOT: /var/lib/nanfo/live-observations
+  volumes:
+    - type: bind
+      source: ${NANFO_STATE_DIR}/models
+      target: /var/lib/nanfo/models
+      read_only: true
+      bind: {create_host_path: false}
+    - type: bind
+      source: ${NANFO_STATE_DIR}/live-registry
+      target: /var/lib/nanfo/live-registry
+      read_only: true
+      bind: {create_host_path: false}
+    - type: bind
+      source: ${NANFO_STATE_DIR}/live-observations
+      target: /var/lib/nanfo/live-observations
+      read_only: true
+      bind: {create_host_path: false}
+  mem_limit: 2g
+services:
+  api: *live-ai
+  autonomy-worker: *live-ai

@@ -1,0 +1,24 @@
+{
+  "exit_code": 0,
+  "fleet_image": "sha256:71b31676560195b54b5480507c71c857f064ebaa7cb3f0f793e2fcd8080c9e5a",
+  "acceptance_image": "sha256:94ea3f41311b80b51105b647cd76a67cf38f9c6db9ed780bda0bc1c2bf11fdb8",
+  "proof": {
+    "status": "passed",
+    "passed": 6,
+    "failed": 0,
+    "blocked": 0,
+    "proofs": [
+      "actual_cli_two_targets_bad_third_isolated",
+      "real_redis_publication_owner_persistence_dedup",
+      "bad_target_health_unavailable",
+      "daemon_cli_healthy_current_two_target_manifest",
+      "stale_heartbeat_sigkill_restart",
+      "actor_revocation_prevents_publication"
+    ],
+    "persisted_records": 12,
+    "schema": "0027",
+    "provenance": "actual_private_snmpd_loopback_not_physical",
+    "scope": "packaged_worker_CLI_and_owner_persistence; no_API_consumer_or_ambiguous_ack_claim"
+  },
+  "cleanup": "owned_containers_network_and_ephemeral_data_removed"
+}

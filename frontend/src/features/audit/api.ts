@@ -1,9 +1,9 @@
 import { apiRequest } from "@/shared/lib/api";
-import { AuditLogList } from "@/shared/types/audit";
+import { AuditLogList, AuditLogParams } from "@/shared/types/audit";
 
 export function getAuditLogs(
   token: string,
-  query: { actorId?: string; orgId?: string; resourceType?: string; page?: number; pageSize?: number },
+  query: AuditLogParams,
 ) {
   const params = new URLSearchParams();
   if (query.actorId) {
@@ -15,6 +15,7 @@ export function getAuditLogs(
   if (query.resourceType) {
     params.set("resource_type", query.resourceType);
   }
+  if (query.search) params.set("search", query.search);
   params.set("page", String(query.page ?? 1));
   params.set("page_size", String(query.pageSize ?? 50));
 

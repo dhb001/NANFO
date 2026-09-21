@@ -2,6 +2,87 @@
 
 Lightweight chronological notes for decisions that do not require a full ADR.
 
+## 2026-09-20: ADR026 Integrated Repair Decisions
+
+User explicitly approved executing the whole audit plan in parallel. ADR026 defines
+additive public inventory/history/scope contracts and the Operator capability map;
+owner boundaries remain intact. Completed matrix: `AuditRepair-Completion.md`.
+Atomic Identity-owned organization audit supersedes best-effort-only audit delivery;
+resource shared authority fences avoid inverse-lock deadlocks while administration
+retains exclusivity. Credential rotation preserves workflow lifetime, while tenant
+or authority changes retain explicit invalidation. Soft retirement and verified
+restoration permit intentional inventory cleanup without discarding evidence.
+Current deployment schema follows the concurrently supplied0029 through a centralized
+contract; historical0027/0028 evidence remains historical. Tests and Redis-dependent
+skips are reported separately; no automatic historical audit rewrite or live upgrade.
+
+## 2026-09-20: Evidence-Based Cross-Layer Audit
+
+User requested an audit and recommended improvements/fixes. Findings are recorded
+in `FrontendBackendAudit-2026-09-20.md`; repairs remain pending. Distinguish missing
+UI for existing endpoints from absent full-stack capabilities and intentionally
+private CLI operations. Retain0027 release boundaries independently of experimental
+0028 migration head. Browser fixture passes do not substitute for actual permission,
+pagination, token-rotation or PostgreSQL lifecycle behavior. Follow the report's
+regressions and owning-module boundaries when implementing fixes.
+
+
+## 2026-09-20: Network Atlas UI Design Handoff
+
+The user requested a full visual/UX rework with a distinct personality and restrained
+motion. Adopt a midnight/cobalt atlas identity, clear route introductions, consistent
+work surfaces, responsive disclosure navigation, and task-oriented overview links.
+Scope: frontend shell, shared presentation, login, overview and feature presentation
+copy. Existing feature data owners, contracts, permission checks and database schema
+continue to apply; no API or data changes are needed. Use CSS/SVG rather than new
+runtime dependencies. Validate keyboard/focus behavior, responsive dense screens,
+reduced motion, existing workflow tests and the unchanged bundle budget. Preserve
+the ongoing spatial/realtime implementation already present in the working tree.
+
+Outcome: implemented and reviewed at desktop/tablet/mobile sizes. All527 unit and
+54 Chromium tests pass; Twin13 component tests rechecked after layout changes.
+Type/lint/build and original bundle limits pass (409.70KiB JS gzip). Scene-first
+composition preserves configuration controls and their existing state. Mobile
+navigation uses an in-flow disclosure to avoid an additional modal/focus trap;
+the existing command dialog now handles its own focus containment and restoration.
+
+## 2026-09-20: ADR024 Truthful Runtime Requalification
+
+Rebuilt exactv4 sources cannot impersonate the missing historical image. Preserve
+the original checkpoint and use an explicitly derived artifact with identical
+tensors, parent lineage and actual rebuilt identity; qualify it independently on
+new preregistered data using unchanged gates. This campaign passed and actual fresh
+recommendations followed. Native manual-driver readback/compensation evidence is
+reported independently of unavailable causal safety calibration. User has no RF
+survey/equipment, so physical validation cannot be claimed. No human attester,
+hard Linux timing guarantee or physical sensor result is invented.
+
+
+## 2026-09-20: ADR023 Source Completion Versus Qualification
+
+The remaining-six request explicitly extends parallel implementation. Canonical
+geometry remains additive version1 with omission-preserving history hashes.
+Distributed fanout is opt-in; only elected leadership collects/processes domain
+events. Retention conservatively preserves all ever-pinned/unknown history and
+archives before deleting eligible new rows. Fleet and receiver processes retain
+separate ownership. API execution clients stage/read/cancel journals only; drivers
+stay in admitted receiver processes. Real measured FIFO proof cannot qualify an
+unrelated FRR/OVS network, and frozenv4 qualification cannot bless currentv5 inputs.
+Final reviewed source and deployment evidence are recorded without activating
+unqualified physical autonomy.
+
+
+## 2026-09-20: Parallel Completion Scope and Evidence
+
+The user explicitly authorized parallel P0–P3 implementation and selected isolated
+local lab verification. ADR021/022 define module ownership, approved spatial/asset
+contracts and migrations0020–0024. Source-matched core recovery is accepted; physical
+calibration and autonomous provider qualification remain independent. Local CAS is
+an actual protected binary backend, not S3. AI scheduling/memory is an actual
+non-actuating operator runtime, not installed live qualified autonomy. Preserve
+all failed campaigns and publish precise capability state in CompletionProgram.
+
+
 ## 2026-09-18: Network Instrument Visual Direction
 
 User-requested visual redesign: ink navigation, warm neutral work surfaces, copper

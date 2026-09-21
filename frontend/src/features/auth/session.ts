@@ -48,12 +48,14 @@ export function refreshSession(forLogout = false): Promise<boolean> {
       const pair = await refresh(refreshToken);
       if (!isCurrent()) return false;
       if (!pair.access_token || !pair.refresh_token) throw new Error("Incomplete token pair");
-      session.replaceTokens({ accessToken: pair.access_token, refreshToken: pair.refresh_token });
-      if (useAuthStore.getState().endingSession) return true;
+      if (useAuthStore.getState().endingSession) {
+        session.replaceTokens({ accessToken: pair.access_token, refreshToken: pair.refresh_token });
+        return true;
+      }
       const profile = await getProfile(pair.access_token);
       if (!isCurrent()) return false;
       if (profile.user_id !== session.userId) throw new Error("Session identity changed");
-      session.setProfile(profile);
+      session.replaceTokens({ accessToken: pair.access_token, refreshToken: pair.refresh_token, profile });
       return true;
     } catch {
       if (isCurrent() && !useAuthStore.getState().endingSession) session.clearSession();

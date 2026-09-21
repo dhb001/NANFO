@@ -1,0 +1,118 @@
+{
+  "applied_ns": 101642187368922,
+  "bootstrap_initial_action": 0,
+  "boundary": {
+    "entry": {
+      "argv": [
+        "ip",
+        "rule",
+        "del",
+        "priority",
+        "19111",
+        "from",
+        "10.78.10.2/32",
+        "to",
+        "10.78.8.2/32",
+        "table",
+        "19111"
+      ],
+      "began": 101641.909202003,
+      "completed": 101641.95322704,
+      "node": "access1",
+      "restoring": false
+    },
+    "id": "043961f740bc7d6009943b70c71e789de55a638d7231437cc02bdcf897296599",
+    "point": {
+      "effect": "pause",
+      "operation": "execute",
+      "ordinal": 1,
+      "policy_sha256": "9cf68a000d5abff1110da044dd0a8246fc78ae0f89d7f2c7f3f3184edbb43dcc",
+      "timeout_seconds": 30,
+      "when": "after"
+    },
+    "reached_monotonic": 101641.975190442,
+    "released_monotonic": null
+  },
+  "case_id": "path0-link-failure",
+  "fault": "link-failure",
+  "intervention": "real",
+  "link_down": {
+    "finished_ns": 101642817435204,
+    "identity": {
+      "netns": "net:[4026533352]",
+      "pid": 103,
+      "start_ticks": 16168680
+    },
+    "interface": "access1-eth2",
+    "node": "access1",
+    "readback": [
+      {
+        "address": "8e:d2:2c:ac:8a:26",
+        "broadcast": "ff:ff:ff:ff:ff:ff",
+        "flags": [
+          "BROADCAST",
+          "MULTICAST"
+        ],
+        "group": "default",
+        "ifindex": 3,
+        "ifname": "access1-eth2",
+        "link_index": 4,
+        "link_netnsid": 1,
+        "link_type": "ether",
+        "linkmode": "DEFAULT",
+        "mtu": 1500,
+        "operstate": "DOWN",
+        "qdisc": "htb",
+        "txqlen": 1000
+      }
+    ],
+    "returncode": 0,
+    "started_ns": 101642470248892,
+    "state": "down",
+    "stderr": "",
+    "stdout": ""
+  },
+  "link_up": {
+    "finished_ns": 101648670765316,
+    "identity": {
+      "netns": "net:[4026533352]",
+      "pid": 103,
+      "start_ticks": 16168680
+    },
+    "interface": "access1-eth2",
+    "node": "access1",
+    "readback": [
+      {
+        "address": "8e:d2:2c:ac:8a:26",
+        "broadcast": "ff:ff:ff:ff:ff:ff",
+        "flags": [
+          "BROADCAST",
+          "MULTICAST",
+          "UP",
+          "LOWER_UP"
+        ],
+        "group": "default",
+        "ifindex": 3,
+        "ifname": "access1-eth2",
+        "link_index": 4,
+        "link_netnsid": 1,
+        "link_type": "ether",
+        "linkmode": "DEFAULT",
+        "mtu": 1500,
+        "operstate": "UP",
+        "qdisc": "htb",
+        "txqlen": 1000
+      }
+    ],
+    "returncode": 0,
+    "started_ns": 101648350093891,
+    "state": "up",
+    "stderr": "",
+    "stdout": ""
+  },
+  "phase": "afterwrite",
+  "policy": "qualified",
+  "scenario": "path0",
+  "seed": 1442,
+  "write_index": 1
+}

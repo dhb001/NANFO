@@ -1,0 +1,25 @@
+# Explicit journal-only provider installation; no receiver/namespace/driver process.
+# Execution mode stays operator-owned. Only authentic emulation installations load.
+x-autonomous-client: &autonomous-client
+  environment:
+    NANFO_AUTONOMOUS_PROVIDER_CONFIG: /var/lib/nanfo/autonomous-config/provider.json
+    NANFO_AUTONOMOUS_PROVIDER_CONFIG_SHA256: ${NANFO_AUTONOMOUS_PROVIDER_CONFIG_SHA256:?Pin the protected provider config bytes}
+  volumes:
+    - type: bind
+      source: ${NANFO_STATE_DIR}/autonomous-config
+      target: /var/lib/nanfo/autonomous-config
+      read_only: true
+      bind: {create_host_path: false}
+    - type: bind
+      source: ${NANFO_STATE_DIR}/autonomous-evidence
+      target: /var/lib/nanfo/autonomous-evidence
+      read_only: true
+      bind: {create_host_path: false}
+    - type: bind
+      source: ${NANFO_STATE_DIR}/autonomous-source
+      target: /var/lib/nanfo/autonomous-source
+      read_only: true
+      bind: {create_host_path: false}
+services:
+  api: *autonomous-client
+  autonomy-worker: *autonomous-client

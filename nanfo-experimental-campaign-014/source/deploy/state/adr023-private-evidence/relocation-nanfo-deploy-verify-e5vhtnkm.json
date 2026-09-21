@@ -1,0 +1,24 @@
+[
+  {
+    "run": "nanfo-deploy-verify-e5vhtnkm",
+    "destination": "/home/DHB/Documents/NANFO/deploy/state/adr023-private-evidence/nanfo-deploy-verify-e5vhtnkm",
+    "files": 15,
+    "verified_sha256": {
+      "backup/manifest.hmac": "1360fb86d07e46e8e3d4a1e60509d1f2c592081857b28f4d0c9256c5aae3ea3c",
+      "backup/manifest.json": "21065946b4c7a8b23a76c249ef63430175a60fb2aa7ce049e55c3eba72613f73",
+      "backup/volume-0011.tar.gcm": "5498c685f741378d96a9073bf36f2315638954ae8766762f4707c3abbda1c426",
+      "backup/volume-0010.tar.gcm": "0f96aa14aabdea113fc69911907af66f61a37ec4b6d2077c55c3f4598d12efe4",
+      "backup/volume-0009.tar.gcm": "bd48bde767039bffb7d05c3dafe3702dcdea09bf513178a9949d9c5115e6e042",
+      "backup/volume-0008.tar.gcm": "1144ba9b9974ea8ef4c758bc50e640cce8fc7e8ad8235f3b8b059e3faa50513b",
+      "backup/volume-0007.tar.gcm": "69ab3ebf98eda7d6875c29ce0bfbedd638238dfe1484de1e8f299e9b8d16b033",
+      "backup/volume-0006.tar.gcm": "309cbe90d828918a876433de238bba9feffdffcc76087ea68bd23f50433edff6",
+      "backup/volume-0005.tar.gcm": "4c780110f52ce47314109b5c7c7806d0f938b22dbd830bc5871b2cbc9c688ddd",
+      "backup/volume-0004.tar.gcm": "cd719b92a9564640358e976e81b8647b0ed3a226090fbcf007c8ea218ee65352",
+      "backup/volume-0003.tar.gcm": "bfcf4934e3042c2e533211d5558a8e06895c09482480b2e9018c1614b7118d3a",
+      "backup/volume-0002.tar.gcm": "a496d72358cbae2a970056d88a3469a6fc851a9dd998800b60be18ad12f5cd6e",
+      "backup/volume-0001.tar.gcm": "1122c3c1f1e985f23463aaba8b7400b825d305f5737809a670993147d3c805c7",
+      "backup/volume-0000.tar.gcm": "c20869dbc6fa5cba6cbd7b417ebc4488c7ef075c17930e5929ca63ba9614f4b8",
+      "keys/backup.key": "c5c8365de58a9ac1c52320b2c07eb9b954036666d0dd39bf3ed01872c670a088"
+    }
+  }
+]

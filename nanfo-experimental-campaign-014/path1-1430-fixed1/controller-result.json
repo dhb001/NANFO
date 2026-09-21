@@ -1,0 +1,120 @@
+{
+  "error_type": "ValueError",
+  "exception": [
+    {
+      "frames": [
+        {
+          "file": "verify_experimental_lab.py",
+          "function": "controller_child",
+          "line": 961
+        },
+        {
+          "file": "controller.py",
+          "function": "run",
+          "line": 447
+        },
+        {
+          "file": "controller.py",
+          "function": "step",
+          "line": 328
+        },
+        {
+          "file": "controller.py",
+          "function": "_io",
+          "line": 41
+        },
+        {
+          "file": "controller.py",
+          "function": "checkpoint",
+          "line": 87
+        },
+        {
+          "file": "controller.py",
+          "function": "_checkpoint_state",
+          "line": 119
+        }
+      ],
+      "message": "experimental_action_expired",
+      "type": "ValueError"
+    }
+  ],
+  "operation": "run",
+  "records": {
+    "bootstrap_recovery": {
+      "path": "bootstrap_recovery-3617260-0.json",
+      "sha256": "6882ce48b85d96c04bafafea408cf0d4c38516c1351bfce7fefca1629e26d8ef"
+    },
+    "frame": {
+      "path": "frame.json",
+      "sha256": "11fc23d8637342562c626c37daa89667704d687f16508235c9336628112929f5"
+    },
+    "inference": {
+      "path": "inference-3617260-0.json",
+      "sha256": "d8aa9d21d679039f34f14c750ea9e3797efbf323a82eda11809673846f7b9e78"
+    },
+    "prepared": {
+      "path": "prepared-3617260-0.json",
+      "sha256": "ebd08ff3aa492af5c0c931584b111b84721d282b9713fd27d8b41b5d0692002e"
+    },
+    "receipt": {
+      "path": "receipt-3617260-0.json",
+      "sha256": "b085343a897a8da65de55cd56045829481bb23c71f603efe9ded1c9468a32d74"
+    },
+    "recovery": {
+      "path": "recovery-3617260-0.json",
+      "sha256": "59f67f2f36aa658cefdf24e4bcddfb5cbcb0dc196221e4da8efc6b9fe6b2d482"
+    },
+    "simulation": {
+      "path": "simulation-3617260-0.json",
+      "sha256": "268f9b0b1651563623235b5e62b360e73cf271a845ecda277b9cf145b32e1c44"
+    },
+    "verification": {
+      "path": "verification-3617260-0.json",
+      "sha256": "069159fe08f30ec40e2e564c75c71ae45020a4eaa276d89a29c88d3aed81e4e3"
+    }
+  },
+  "status": "completed",
+  "termination": "verified_hold_expired_and_restored",
+  "timings": [
+    {
+      "finished_ns": 98946556580762,
+      "operation": "inference",
+      "started_ns": 98946543727080
+    },
+    {
+      "finished_ns": 98947189262163,
+      "operation": "simulation",
+      "started_ns": 98946694646802
+    },
+    {
+      "finished_ns": 98947870499270,
+      "operation": "prepared",
+      "started_ns": 98947866102004
+    },
+    {
+      "finished_ns": 98960958641970,
+      "operation": "receipt",
+      "started_ns": 98948454612213
+    },
+    {
+      "finished_ns": 98967507472267,
+      "operation": "verification",
+      "started_ns": 98961481608911
+    },
+    {
+      "finished_ns": 98978081507129,
+      "operation": "verification",
+      "started_ns": 98969292616687
+    },
+    {
+      "finished_ns": 98978657979832,
+      "operation": "recovery",
+      "started_ns": 98978255500527
+    },
+    {
+      "finished_ns": 98979436236417,
+      "operation": "bootstrap_recovery",
+      "started_ns": 98978741479384
+    }
+  ]
+}

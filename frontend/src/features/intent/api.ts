@@ -5,7 +5,14 @@ import {
   IntentDetailResult,
   ValidateIntentRequest,
   ValidateIntentResult,
+  IntentHistory,
 } from "@/shared/types/intent";
+
+export function listIntents(token: string, workspaceId: string, networkId: string | null, page = 1, signal?: AbortSignal) {
+  const params = new URLSearchParams({ workspace_id: workspaceId, page: String(page), page_size: "20" });
+  if (networkId) params.set("network_id", networkId);
+  return apiRequest<IntentHistory>(`/api/v1/intents?${params}`, { token, signal });
+}
 
 export function validateIntent(token: string, body: ValidateIntentRequest, idempotencyKey?: string) {
   return apiRequest<ValidateIntentResult>("/api/v1/intents/validate", {

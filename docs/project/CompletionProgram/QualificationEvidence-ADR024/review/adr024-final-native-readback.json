@@ -1,0 +1,14 @@
+{
+  "raw_prefix_inventory_and_path_results": 34,
+  "normal_verification_hashes": [
+    {
+      "action": 0,
+      "independently_recomputed_readback_sha256": "595f204c046bcae63de655c58eff2d0835db3f0bcee7f26aed2949fdf9032185"
+    },
+    {
+      "action": 1,
+      "independently_recomputed_readback_sha256": "8ef56c42c6727830d75f166991b22b722fa2d5de6d5b320db7d3a6958335e143"
+    }
+  ],
+  "status": "passed"
+}

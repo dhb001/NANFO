@@ -9,8 +9,7 @@
  *
  * Design constraints honoured here:
  * - Pure and synchronous. No React, no three.js imports, so it is fully unit-testable.
- * - The existing per-node mesh architecture is preserved. This module only describes
- *   *what* to draw (geometry kind, colour, radius); `TwinScene` still decides *how*.
+ * - Describes what to draw; the renderer batches compatible device instances.
  * - Tier names deliberately mirror the backend taxonomy in
  *   `app/modules/network/synthetic_topology.py` so the spatial view and the topology
  *   hierarchy agree on what "distribution" means.

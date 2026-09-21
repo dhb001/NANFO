@@ -1,0 +1,120 @@
+{
+  "error_type": "ValueError",
+  "exception": [
+    {
+      "frames": [
+        {
+          "file": "verify_experimental_lab.py",
+          "function": "controller_child",
+          "line": 961
+        },
+        {
+          "file": "controller.py",
+          "function": "run",
+          "line": 447
+        },
+        {
+          "file": "controller.py",
+          "function": "step",
+          "line": 331
+        },
+        {
+          "file": "controller.py",
+          "function": "checkpoint",
+          "line": 87
+        },
+        {
+          "file": "controller.py",
+          "function": "_checkpoint_state",
+          "line": 119
+        }
+      ],
+      "message": "experimental_action_expired",
+      "type": "ValueError"
+    }
+  ],
+  "operation": "run",
+  "records": {
+    "bootstrap_recovery": {
+      "path": "bootstrap_recovery-3799405-0.json",
+      "sha256": "bd7ae4bd43f76ce0be131ddd9de338280674bd873497c207efd033ee8f2b3766"
+    },
+    "frame": {
+      "path": "frame.json",
+      "sha256": "700c251acda2477f22a18bad880f689f3f392e7bb0dc63918c5177ed3b9d607a"
+    },
+    "inference": {
+      "path": "inference-3799405-0.json",
+      "sha256": "0f6d122cf6517b6608c1c78cf454fde7deb93de10ea17607cc1bff30bff73a61"
+    },
+    "prepared": {
+      "path": "prepared-3799405-0.json",
+      "sha256": "4ddff9b10afe380cf89e13bb8384457a305cc4bf27d9d1e3a9a9c19d523c6ee1"
+    },
+    "receipt": {
+      "path": "receipt-3799405-0.json",
+      "sha256": "2c7c310353b8d4c96a22f12801470970554049e411085b0b13df598e1b3b8247"
+    },
+    "recovery": {
+      "path": "recovery-3799405-0.json",
+      "sha256": "6aa0b165d15b97658b1abc3947ce52ecbd7662555557f551ee38fabe7a843bc7"
+    },
+    "simulation": {
+      "path": "simulation-3799405-0.json",
+      "sha256": "2e9a78aa38694677f8d8ca4707671c8ff7bd6498851d42327ef253efec8ebd03"
+    },
+    "verification": {
+      "path": "verification-3799405-2.json",
+      "sha256": "6d1b7948348c903ed85d74016ee72e56800f52d7a22248abecca7cdcfc94f539"
+    }
+  },
+  "status": "completed",
+  "termination": "verified_hold_expired_and_restored",
+  "timings": [
+    {
+      "finished_ns": 100828716426394,
+      "operation": "inference",
+      "started_ns": 100824167065038
+    },
+    {
+      "finished_ns": 100829313670086,
+      "operation": "simulation",
+      "started_ns": 100828796033311
+    },
+    {
+      "finished_ns": 100830005342203,
+      "operation": "prepared",
+      "started_ns": 100830002423790
+    },
+    {
+      "finished_ns": 100843312333113,
+      "operation": "receipt",
+      "started_ns": 100830566200987
+    },
+    {
+      "finished_ns": 100849383318108,
+      "operation": "verification",
+      "started_ns": 100843621291956
+    },
+    {
+      "finished_ns": 100856812466339,
+      "operation": "verification",
+      "started_ns": 100851022137628
+    },
+    {
+      "finished_ns": 100859848784872,
+      "operation": "verification",
+      "started_ns": 100858493887588
+    },
+    {
+      "finished_ns": 100862596832743,
+      "operation": "recovery",
+      "started_ns": 100860227948613
+    },
+    {
+      "finished_ns": 100863364653996,
+      "operation": "bootstrap_recovery",
+      "started_ns": 100862670277210
+    }
+  ]
+}

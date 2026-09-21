@@ -1,0 +1,430 @@
+{
+  "cases": {
+    "disk_capacity": {
+      "status": "passed",
+      "detail": {
+        "docker_root": "/home/.system-data/docker",
+        "capacity_filesystem": "/home",
+        "docker_available_bytes": 274809827328,
+        "staging_available_bytes": 4705157120,
+        "minimum_bytes": 1073741824
+      }
+    },
+    "installed_source_parity": {
+      "status": "passed",
+      "detail": "Installed maintenance/readiness bytes match current source"
+    },
+    "package_contract": {
+      "status": "passed",
+      "detail": {
+        "locked_stages_present": true,
+        "live_build": "pending"
+      }
+    },
+    "locked_container_build": {
+      "status": "passed",
+      "detail": {
+        "mode": "referenced_prior_locked_build_not_new_build",
+        "evidence_path": "/tmp/opencode/adr022-build-corrected.md",
+        "evidence_sha256": "dcef9f069e20f4631266aa4df94d3e86ee0c24b69453a79a9584c2167bc2812d",
+        "images": {
+          "backend": {
+            "id": "sha256:feecb2f3ad41554364df2ef745d0ace4de8be83cf96f1e90bc1417990a62eeba",
+            "os": "linux",
+            "architecture": "amd64"
+          },
+          "frontend": {
+            "id": "sha256:712b31ddc68c7757eb6eda1a54bbd9c83feab6bc8720ed675e36d331a1c116a6",
+            "os": "linux",
+            "architecture": "amd64"
+          },
+          "neo4j": {
+            "id": "sha256:d544f1ef8033ddfbf3a7cc81cdc1a73f90e503153202ea44d35f293bf43d9db7",
+            "os": "linux",
+            "architecture": "amd64"
+          }
+        },
+        "installed_source_sha256": {
+          "deploy/maintenance.py": "ca6158cb4dc92fe71a6d34ffb474382923fd4d2ceef675d1dbcc000870d52d71",
+          "deploy/asset_checkpoint.py": "e9f655cc96f069477e3a952b17a570dd30553fc59a6ae9eef341262164703d0a",
+          "backend/app/api/readiness.py": "785ca236ec0e16823d41ea8859e876e4cb184bce0be03901a6da6956153853b9",
+          "backend/app/core/runtime_health.py": "c8221472bd8427e22a6ae22345ebf3c5b2e443a1e33cef5e6ef42d6455d8a007",
+          "backend/app/core/config.py": "3025a44ffe72bdf827a1a909a340e797bd70b99910eca2acee40da7e241b4705",
+          "backend/app/modules/network/operations.py": "ffcb6ccc69e2c54b443d672bc9e47d4fc4df515354ca8b96dd872f00066b545e",
+          "backend/app/modules/report/artifacts.py": "c95f4ab3de3c264b6a49173dffec2882010a4c40e801a6992652cdfdd6bd0115",
+          "backend/app/modules/report/service.py": "044a2f408ccd17e496e65c1231bdf96444e842b1a7dd648f41dfbe03b5c901d9",
+          "backend/app/modules/report/worker.py": "fbd723d33b4b5d9e4109daace9c071a92605fabef7275734f477760cc7dbce9e"
+        },
+        "source_mismatches": [],
+        "builds_performed": 0,
+        "pulls_performed": 0
+      }
+    },
+    "fresh_volumes": {
+      "status": "passed",
+      "detail": {
+        "empty_new_volumes": [
+          "nanfo-deploy-verify-02e7cb04db09404889a686265ff6ff93_init_secrets",
+          "nanfo-deploy-verify-02e7cb04db09404889a686265ff6ff93_lab_commands",
+          "nanfo-deploy-verify-02e7cb04db09404889a686265ff6ff93_lab_output",
+          "nanfo-deploy-verify-02e7cb04db09404889a686265ff6ff93_lab_results",
+          "nanfo-deploy-verify-02e7cb04db09404889a686265ff6ff93_neo4j_data",
+          "nanfo-deploy-verify-02e7cb04db09404889a686265ff6ff93_network_assets",
+          "nanfo-deploy-verify-02e7cb04db09404889a686265ff6ff93_postgres_data",
+          "nanfo-deploy-verify-02e7cb04db09404889a686265ff6ff93_redis_data",
+          "nanfo-deploy-verify-02e7cb04db09404889a686265ff6ff93_reports",
+          "nanfo-deploy-verify-02e7cb04db09404889a686265ff6ff93_runtime_secrets"
+        ],
+        "existing_data": 0
+      }
+    },
+    "migration_0024": {
+      "status": "passed",
+      "detail": "0024"
+    },
+    "bootstrap_login": {
+      "status": "passed",
+      "detail": {
+        "generated_password": true,
+        "password_in_argv": false,
+        "authenticated_bootstrap_actor": true
+      }
+    },
+    "frontend_http": {
+      "status": "passed",
+      "detail": {
+        "html_bytes": 958,
+        "built_assets_fetched": 5,
+        "browser_execution": "not tested; HTTP smoke only"
+      }
+    },
+    "full_stack_readiness": {
+      "status": "passed",
+      "detail": "Gateway /ready and all six work-coupled worker healthchecks passed"
+    },
+    "simulation": {
+      "status": "passed",
+      "detail": {
+        "simulation_id": "468fc6a2-32c3-4c00-a8f4-db76bfecc1f0",
+        "loss_pct": 45.0,
+        "configured_model_only": true
+      }
+    },
+    "report_csv": {
+      "status": "passed",
+      "detail": {
+        "report_id": "2951e0c2-a2ad-4f9a-a113-1b4d26b27581",
+        "sha256": "121b1552218a6c4a45a39d98e7b530d3458464fbdf14328ee5edd671a31d3245",
+        "size_bytes": 3788,
+        "snapshot_sha256": "eb6b246a7307ad4b551d0b9f4bd564abbed91da03d90aba981e73f01b316e1da",
+        "format": "csv"
+      }
+    },
+    "report_pdf": {
+      "status": "passed",
+      "detail": {
+        "report_id": "0d6d5ea9-ddce-4e45-a6d0-090f9793ebb1",
+        "sha256": "5adc5e353d635017a5011b815f13b703c46fe7a7c1114cc525573ba7179e2d07",
+        "size_bytes": 3404,
+        "snapshot_sha256": "63a1067b95d026e72f0359e0cc509c7b8bd77b0972fd75e91df32a8e969538a5",
+        "format": "pdf"
+      }
+    },
+    "spatial_asset_upload": {
+      "status": "passed",
+      "detail": {
+        "asset": {
+          "registration": {
+            "version": 1,
+            "translation": {
+              "x": 2.0,
+              "y": 0.0,
+              "z": 3.0
+            },
+            "rotation": {
+              "x": 0.0,
+              "y": 0.25,
+              "z": 0.0
+            },
+            "scale": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            },
+            "target_units": "m",
+            "target_up_axis": "y",
+            "source": "deployment-acceptance"
+          },
+          "storage_backend": "local_cas",
+          "download_path": "/api/v1/networks/2bd12f6f-a4e8-4772-b415-86f09ebf95ca/campus-model-assets/679f7d51-1621-44a9-acb7-4bca91b39cc8/download",
+          "campus_model_asset_id": "679f7d51-1621-44a9-acb7-4bca91b39cc8",
+          "network_id": "2bd12f6f-a4e8-4772-b415-86f09ebf95ca",
+          "model_file_name": "acceptance.gltf",
+          "model_mime_type": "model/gltf+json",
+          "model_data_base64": "eyJhc3NldCI6eyJ2ZXJzaW9uIjoiMi4wIn0sInNjZW5lcyI6W3sibm9kZXMiOltdfV0sInNjZW5lIjowfQ==",
+          "model_sha256": "58cbc1cdab6449017cc429d7b6b068b43b21050c7261d9577ac017d03cf80b0b",
+          "model_size_bytes": 61,
+          "mapping_by_device_id": {},
+          "source": "deployment-acceptance",
+          "created_at": "2026-09-19T21:56:59.207373Z",
+          "updated_at": "2026-09-19T21:56:59.207373Z"
+        },
+        "body_sha256": "58cbc1cdab6449017cc429d7b6b068b43b21050c7261d9577ac017d03cf80b0b",
+        "body_bytes": 61,
+        "scene": {
+          "version": 1,
+          "coordinate_system": {
+            "units": "m",
+            "up_axis": "y"
+          },
+          "objects": [
+            {
+              "object_id": "acceptance-campus",
+              "parent_id": null,
+              "object_type": "campus",
+              "name": "Deployment fixture",
+              "position": {
+                "x": 4.0,
+                "y": 0.0,
+                "z": 2.0
+              },
+              "rotation": {
+                "x": 0.0,
+                "y": 0.0,
+                "z": 0.0
+              },
+              "device_id": null,
+              "provenance": {
+                "source": "deployment-fixture",
+                "accuracy_m": null
+              }
+            }
+          ],
+          "revision": 2
+        },
+        "history": {
+          "items": [
+            {
+              "revision": 2,
+              "recorded_at": "2026-09-19T21:56:59.371179Z",
+              "actor_id": "db45e7fa-04e6-4846-953b-b20b8d2fc7cf",
+              "origin": "replacement",
+              "object_count": 1
+            },
+            {
+              "revision": 1,
+              "recorded_at": "2026-09-19T21:56:59.314519Z",
+              "actor_id": "db45e7fa-04e6-4846-953b-b20b8d2fc7cf",
+              "origin": "replacement",
+              "object_count": 1
+            }
+          ],
+          "total": 2,
+          "page": 1,
+          "page_size": 20
+        },
+        "revision": {
+          "version": 1,
+          "coordinate_system": {
+            "units": "m",
+            "up_axis": "y"
+          },
+          "objects": [
+            {
+              "object_id": "acceptance-campus",
+              "parent_id": null,
+              "object_type": "campus",
+              "name": "Deployment fixture",
+              "position": {
+                "x": 1.0,
+                "y": 0.0,
+                "z": 2.0
+              },
+              "rotation": {
+                "x": 0.0,
+                "y": 0.0,
+                "z": 0.0
+              },
+              "device_id": null,
+              "provenance": {
+                "source": "deployment-fixture",
+                "accuracy_m": null
+              }
+            }
+          ],
+          "revision": 1
+        }
+      }
+    },
+    "database_stop_readiness": {
+      "status": "passed",
+      "detail": "Actual PostgreSQL stop: /ready 503, /health 200; readiness and workers recovered"
+    },
+    "worker_stale_heartbeat": {
+      "status": "passed",
+      "detail": "Actual worker SIGSTOP produced stale-loop heartbeat with live stores; SIGCONT recovered"
+    },
+    "api_worker_restart": {
+      "status": "passed",
+      "detail": {
+        "report": {
+          "report_id": "04444c24-cf6c-4eff-8b10-637e4aebdae5",
+          "sha256": "ca538761508abef09c85ea11370e424c88767b28b6fe957915d48b6a69eece97",
+          "size_bytes": 3788,
+          "snapshot_sha256": "f8096f54db1a1109d485ca37515df2f3fbd3d9072041ad80370c92441722ef8d",
+          "format": "csv"
+        },
+        "simulation_id": "1f049dd8-7de3-40a2-9eb5-8061f48d6993",
+        "restarted_services": [
+          "api",
+          "network-outbox-worker",
+          "simulation-worker",
+          "report-worker",
+          "alert-worker",
+          "execution-worker",
+          "autonomy-worker"
+        ]
+      }
+    },
+    "lab_binding": {
+      "status": "blocked",
+      "detail": "Lab profile not requested"
+    },
+    "lab_congestion": {
+      "status": "blocked",
+      "detail": "Lab profile not requested"
+    },
+    "model_diagnostic": {
+      "status": "blocked",
+      "detail": "Frozen model diagnosis not requested"
+    },
+    "coordinated_encrypted_backup": {
+      "status": "passed",
+      "detail": {
+        "manifest_sha256": "e6c0eb2a12f773aa5c10392e2ada4f2779852646f167e859c164753d6d66fbf9",
+        "encrypted_volumes": 10,
+        "encrypted_bind_directories": 1,
+        "source_writers_stopped": true,
+        "neo4j_graph": {
+          "node_labels": [
+            {
+              "count": 9,
+              "identity": "Device"
+            },
+            {
+              "count": 9,
+              "identity": "DeviceEventRevision"
+            }
+          ],
+          "nodes": 18,
+          "relationship_types": [],
+          "relationships": 0,
+          "revision_tombstones": 0,
+          "revisions": 9,
+          "revisions_sha256": "f860f40c75e5898b6c732c996d21899c63151021e9155da3dc81d041da6df3a3"
+        }
+      }
+    },
+    "distinct_fresh_restore": {
+      "status": "passed",
+      "detail": {
+        "source_project": "nanfo-deploy-verify-02e7cb04db09404889a686265ff6ff93",
+        "target_project": "nanfo-deploy-verify-a254de4ccdd9411da6432931c69bd860",
+        "fresh_distinct_volumes": 10,
+        "neo4j_graph": {
+          "node_labels": [
+            {
+              "count": 9,
+              "identity": "Device"
+            },
+            {
+              "count": 9,
+              "identity": "DeviceEventRevision"
+            }
+          ],
+          "nodes": 18,
+          "relationship_types": [],
+          "relationships": 0,
+          "revision_tombstones": 0,
+          "revisions": 9,
+          "revisions_sha256": "f860f40c75e5898b6c732c996d21899c63151021e9155da3dc81d041da6df3a3"
+        }
+      }
+    },
+    "restore_image_schema": {
+      "status": "passed",
+      "detail": {
+        "exact_image_ids_os_architecture": true,
+        "schema": "0024",
+        "target_migrations_executed": false
+      }
+    },
+    "old_tokens_invalid": {
+      "status": "passed",
+      "detail": "Unexpired old access and refresh rejected; new login accepted"
+    },
+    "restored_report_bytes": {
+      "status": "passed",
+      "detail": {
+        "identical_downloads": 3,
+        "formats": [
+          "csv",
+          "pdf"
+        ]
+      }
+    },
+    "restored_spatial_assets": {
+      "status": "passed",
+      "detail": {
+        "asset_id": "679f7d51-1621-44a9-acb7-4bca91b39cc8",
+        "sha256": "58cbc1cdab6449017cc429d7b6b068b43b21050c7261d9577ac017d03cf80b0b",
+        "bytes": 61,
+        "registration_sha256": "ef4d34802ad008d88b647948325dc435152c57bd2511bc79d8ae4bffd8786ab5",
+        "history_revisions": 2
+      }
+    },
+    "restored_workflows": {
+      "status": "passed",
+      "detail": {
+        "simulation_checkpoint_identical": true,
+        "restart_workflow_survived": true,
+        "physical_workflows_identical": 0
+      }
+    },
+    "restored_telemetry": {
+      "status": "blocked",
+      "detail": "No actual measured telemetry existed; empty-to-empty is not survival proof"
+    },
+    "source_unchanged": {
+      "status": "passed",
+      "detail": "Verified"
+    },
+    "campaign": {
+      "status": "passed",
+      "detail": "Verified"
+    },
+    "cleanup": {
+      "status": "passed",
+      "detail": {
+        "containers_removed": 22,
+        "volumes_removed": 20,
+        "networks_removed": 4
+      }
+    }
+  },
+  "core_passed": true,
+  "all_green": false,
+  "step15_complete": false,
+  "counts": {
+    "passed": 26,
+    "failed": 0,
+    "blocked": 4,
+    "pending": 0
+  },
+  "live_authorized": true,
+  "agents_idle_attested": true,
+  "failure": null,
+  "evidence_directory": "/tmp/opencode/nanfo-deploy-verify-ha7l2qmw/evidence",
+  "live_requested_lab": false,
+  "live_requested_model": false
+}

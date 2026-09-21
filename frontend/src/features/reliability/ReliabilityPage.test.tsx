@@ -1,11 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ReliabilityPage } from "@/features/reliability/ReliabilityPage";
 import { useAuthStore } from "@/shared/state/auth-store";
 import { operatorProfile } from "@/test/profile";
 import { useLiveStore } from "@/features/realtime/store";
 import { useUiStore } from "@/shared/state/ui-store";
+import { useWorkspaceStore } from "@/shared/state/workspace-store";
 
 const mockUseTelemetryHealth = vi.fn();
 const mockUseAlertsQuery = vi.fn();
@@ -38,6 +39,7 @@ function queryResult<T>(data: T, refetch = vi.fn()) {
 describe("ReliabilityPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    useWorkspaceStore.setState({ organizationId: "org-1", workspaceId: "workspace-1", networkId: "network-1" });
 
     useAuthStore.setState({
       profile: { ...operatorProfile, roles: ["Admin"] },
@@ -175,8 +177,7 @@ describe("ReliabilityPage", () => {
     expect(screen.getByText("telemetry_runtime_adapter_recovery_window")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Ack" }));
-    expect(screen.queryByText("telemetry_runtime_adapter_slo_threshold_breach")).not.toBeInTheDocument();
-    expect(screen.getByText("telemetry_runtime_adapter_recovery_window")).toBeInTheDocument();
+    expect(mockUseAlertsQuery).toHaveBeenLastCalledWith("token-1", expect.objectContaining({ status: "acknowledged", workspaceId: "workspace-1", networkId: "network-1" }), true);
   });
 
   it("calls acknowledge and resolve actions", async () => {
@@ -188,6 +189,34 @@ describe("ReliabilityPage", () => {
 
     await user.click(screen.getAllByRole("button", { name: "Resolve" })[0]);
     expect(mockResolveMutateAsync).toHaveBeenCalledWith("00000000-0000-0000-0000-000000000101");
+  });
+
+  it("submits search/source/severity and resets filters on scope change but not token rotation", async () => {
+    const user = userEvent.setup();
+    render(<ReliabilityPage />);
+    await user.type(screen.getByLabelText("Filter alerts"), " older active ");
+    await user.type(screen.getByLabelText("Source", { exact: true }), "telemetry");
+    await user.type(screen.getByLabelText("Severity", { exact: true }), "warning");
+    expect(mockUseAlertsQuery).toHaveBeenLastCalledWith("token-1", expect.not.objectContaining({ search: "older active" }), true);
+    await user.click(screen.getByRole("button", { name: "Apply alert filters" }));
+    await user.click(screen.getByRole("button", { name: "Active" }));
+    expect(mockUseAlertsQuery).toHaveBeenLastCalledWith("token-1", expect.objectContaining({ search: "older active", source: "telemetry", severity: "warning", status: "active" }), true);
+    act(() => useAuthStore.setState({ accessToken: "token-2" }));
+    expect(screen.getByLabelText("Filter alerts")).toHaveValue(" older active ");
+    act(() => useWorkspaceStore.setState({ networkId: "network-2" }));
+    expect(screen.getByLabelText("Filter alerts")).toHaveValue("");
+    expect(screen.getByRole("button", { name: "All" })).toHaveAttribute("aria-pressed", "true");
+    expect(mockUseAlertsQuery).toHaveBeenLastCalledWith("token-2", { status: undefined, limit: 200, workspaceId: "workspace-1", networkId: "network-2" }, true);
+    expect(screen.getByText(/Counts are not global totals/)).toBeInTheDocument();
+    expect(screen.getAllByText(/Origin: source telemetry/)).toHaveLength(2);
+  });
+
+  it("requires a workspace instead of silently showing all authorized alerts", () => {
+    useWorkspaceStore.setState({ workspaceId: null, networkId: null });
+    render(<ReliabilityPage />);
+    expect(screen.getByText("Select a workspace")).toBeInTheDocument();
+    expect(mockUseAlertsQuery).toHaveBeenLastCalledWith("token-1", expect.anything(), false);
+    expect(screen.queryByText("telemetry_runtime_adapter_slo_threshold_breach")).not.toBeInTheDocument();
   });
 
   it("renders unavailable ingest lag without coercing null to zero", () => {

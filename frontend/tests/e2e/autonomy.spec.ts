@@ -36,8 +36,9 @@ test("autonomy is non-actuating by default; mobile stop requires a scoped acknow
     await route.fulfill({ json: envelope(data) });
   });
   await loginFromUi(page);
-  await expect(page.getByText("edge-1")).toBeVisible();
+  await expect(page.getByText("edge-1", { exact: true })).toBeVisible();
   await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByRole("button", { name: "Toggle navigation" }).click();
   await page.getByRole("link", { name: /^Autonomy/ }).click();
   await expect(page.getByTestId("autonomy-mode")).toHaveText("monitor");
   await expect(page.getByLabel("Requested mode")).toHaveValue("monitor");
@@ -106,7 +107,7 @@ test("pending PUT cannot clear newer stop; conflict refreshes without retry unti
     await route.fulfill({ json: envelope(data) });
   });
   await loginFromUi(page);
-  await expect(page.getByText("edge-1")).toBeVisible();
+  await expect(page.getByText("edge-1", { exact: true })).toBeVisible();
   await page.getByRole("link", { name: /^Autonomy/ }).click();
   await expect(page.getByRole("button", { name: "Apply configuration" })).toBeEnabled();
   await page.getByLabel("Requested mode").selectOption("recommend");
@@ -145,7 +146,7 @@ test("autonomous gate denial preserves confirmed recommendation mode and never a
       errors: { code: "AUTONOMY_NOT_READY", message: "qualified_checkpoint_unavailable, calibrated_safety_unavailable" } } });
   });
   await loginFromUi(page);
-  await expect(page.getByText("edge-1")).toBeVisible();
+  await expect(page.getByText("edge-1", { exact: true })).toBeVisible();
   await page.keyboard.press("g");
   await page.keyboard.press("n");
   await expect(page).toHaveURL(/\/ops\/autonomy$/);
@@ -178,7 +179,7 @@ test("read-only autonomy permits status and durable polling but no mutations", a
     await route.fulfill({ json: envelope(autonomyFixture({ decisions: decisionAvailable ? [decisionFixture()] : [] })) });
   });
   await loginFromUi(page);
-  await expect(page.getByText("edge-1")).toBeVisible();
+  await expect(page.getByText("edge-1", { exact: true })).toBeVisible();
   await page.getByRole("link", { name: /^Autonomy/ }).click();
   await expect(page.getByTestId("autonomy-mode")).toHaveText("monitor");
   await expect(page.getByRole("button", { name: "Apply configuration" })).toBeDisabled();
