@@ -2,6 +2,44 @@
 
 Lightweight chronological notes for decisions that do not require a full ADR.
 
+## 2026-09-21: ADR027 Current Status and Evidence Authority
+
+Use `ReviewClosure-Completion.md` as the seven-workstream master matrix and the top
+of `CurrentSprint.md` as the active remaining checklist. Old Post-VS8/Post-VS16/VS
+checklists and dated logs preserve historical scope; their checked boxes do not
+certify present production, plugin-sandbox or research qualification. Current
+schema is0029; accepted images/source manifests are in `ReviewClosure-Deployment.md`,
+not identified by the unchanged base commit alone.
+
+Record local source tests, fixture browser70/70, actual full-stack5/5 and core
+deployment28pass/0fail/5blocked as distinct scopes. Keep historical credential
+exposure unresolved after71 private-preserved/active-tree removals. Exact dependency
+exceptions expire2026-10-21 and remain vulnerabilities/coverage gaps, despite npm0.
+Actual017 supersedes the preparation-only status:4/4 smokes,67/68 matrix outcomes
+completed/1 invalid, all20 fault outcomes completed; the overall result remains
+failed. Preserve original frozen source/results and null invalid metrics. Reproduced
+atomic-replacement race repair in active emulation and frozen018 offline gates
+(115backend/3historical skips,34receiver,2STOP passed) do not establish fresh live
+acceptance. Independent018 review `61ae01cc…` accepted the repair, reconfirmed017
+failure and found count-only1342 falsely reserved. Active extractor corrected with
+60 passing tests;996/1000 true/preregistered values reserved,4 available/36 required,
+deficit32 still blocks a fresh plan. Preserve genuine reservations and
+the train/validation/test split; no seed reuse, silent domain widening or completion claim.
+
+Clean upgraded PG254pass/12skip plus exact real-Redis12pass covers all266 selected
+cases after development Lua dependency repair; nginx24pass/0skip resolves its fixture
+blocker. Remote CI remains unverified. `ReviewClosureEvidence` now provides durable
+credential-free receipts/source drift and separate private local backup/key retention.
+Latest c8rorfzd core refresh is accepted28pass/0fail/5blocked at backend `a2bf67af…`/
+source `f7105617…`, with new public refresh/retention receipts and private durable
+backup/key/result preservation. Subsequent source-code drift is only the experimental
+verifier scanner/test (`9e46d086…` verifier): core serving behavior unchanged, but
+no entire-current-tree byte-parity claim. Exact hashes and drift are in deployment
+handoff. Final portable441 JUnit/zero skips/11 explicit deselections and original
+AI463 passed reaffirm local scopes, not remote CI or experimental qualification.
+Physical RF, intended-user observations and independent training repetitions require
+genuine evidence. Large refactors and broader features remain separately scoped work.
+
 ## 2026-09-20: ADR026 Integrated Repair Decisions
 
 User explicitly approved executing the whole audit plan in parallel. ADR026 defines

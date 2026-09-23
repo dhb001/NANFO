@@ -13,6 +13,7 @@ import json
 import os
 from pathlib import Path
 import random
+import re
 import shutil
 import stat
 import subprocess
@@ -84,14 +85,6 @@ def freeze_runtime(output):
             stream.write(content)
             stream.flush()
             os.fsync(stream.fileno())
-    review = Path("/tmp/opencode/test_adr025_integrated_review.py")
-    if review.exists():
-        content=review.read_bytes()
-        target=output/"backend/tests/frozen_independent_review.py"
-        target.parent.mkdir(mode=0o700,parents=True,exist_ok=True)
-        with target.open("xb") as stream:
-            stream.write(content)
-        pins[str(target.relative_to(output))]=hashlib.sha256(content).hexdigest()
     interpreter = ai_interpreter().absolute()
     marker = dict(version="nanfo.experimental-frozen-runtime/v1", source_origin=str(ROOT),
         created_ns=time.time_ns(), files=pins, ai_interpreter=dict(path=str(interpreter),sha256=digest(interpreter)),
@@ -178,20 +171,104 @@ def campaign_slot():
         os.close(fd)
 
 
+SEED_SCALARS = {"seed", "current_seed", "consumed_seed", "model_seed", "order_seed", "policy_order_seed"}
+SEED_ARRAYS = {"seeds", "reserved_seeds", "used_seeds", "selected_seeds", "training_seeds",
+    "train_seeds", "validation_seeds", "calibration_seeds", "test_seeds", "nominal_seeds",
+    "fault_seeds", "smoke_seeds"}
+SEED_COUNTS = {"reserved_seed_count", "seed_count", "paired_seed_count", "paired_seeds",
+    "paired_seeds_per_direction", "seed_inventory_documents"}
+SEED_CONTAINERS = {"prior_seed_audit", "prior_seed_evidence", "prior_train_seed_inventory",
+                   "paired_seed_comparisons"}
+SEED_TEXT = {"old_final_seeds", "seed_choice", "reject_new_seed_reservations"}
+SEED_FLAGS = {"repeat_seed", "seeds_unused_within_audited_roots"}
+# Independent018 provenance correction for missing temporary INVENTORIES only.
+# Actual plan/run rows (including missing originals) are never covered by this list.
+COUNT_ONLY_ORIGIN = "002d31c17281857c118c414d6c93c47e1ca5b083e661abf8cca3778316e5d800"
+REVIEWED_COUNT_INVENTORIES = dict(zip(range(1, 10), (
+    "b4ad08557fd6e2f48bbed6a2c83c230d205cd014e1cb18e02982e5457cae325c",
+    "4336c36a7e71321d9fc08a0e7ae409cbac9c1db0a8f0f429ee8122413a9680f3",
+    "861e04022a95da786145e01d4bc741bd5d2b60ab32e754db64aa2ad88818e5a2",
+    "829c8877c89eadbd160ae27526407909242ceb86870dc1db83ecedff3e21ef03",
+    "13ec84b807132f483dd8a84bb958516458b1d6e81a7eefe21601b642abae3f42",
+    "9c2e09a4aabcfcaeb8eed21ef056871b98f67d03d63edfca8ff9df956096d154",
+    "83e909c8d4423042c0f79d955245f417da0ec212864791dc5682845f4a2b25a7",
+    "f122a1ac7b50018fb72fbbcf730460f60166cb6c40a9ac02ef4bbb8e237ed26d",
+    "93a59da13f194782c894b013e065aa9a4a8dd270ebcb916602c7b380d1458597",
+), strict=True))
+
+
+def _legacy_seed_values(value, key=""):
+    """Only for verifying historical inventory derivations; never new extraction."""
+    if isinstance(value, dict):
+        return set().union(*(_legacy_seed_values(child, name) for name, child in value.items()))
+    if isinstance(value, list):
+        return set().union(*(_legacy_seed_values(child, key) for child in value))
+    return {value} if type(value) is int and "seed" in key.lower() and 0 <= value < 2**31 else set()
+
+
 def seed_values(value, key=""):
+    """Explicit reservation fields; unknown seed-bearing shapes fail closed."""
+    def valid(v):
+        return type(v) is int and 0 <= v < 2**31
+    if key in SEED_SCALARS:
+        if key == "model_seed" and value is None:
+            return set()
+        if not valid(value):
+            raise ValueError("seed_scalar_invalid:" + key)
+        return {value}
+    if key in SEED_ARRAYS:
+        if not isinstance(value, list) or not all(valid(v) for v in value):
+            raise ValueError("seed_array_invalid:" + key)
+        return set(value)
+    if key in SEED_COUNTS:
+        if type(value) is not int or value < 0:
+            raise ValueError("seed_count_invalid:" + key)
+        return set()
+    if key in SEED_TEXT and isinstance(value, str) or key in SEED_FLAGS and type(value) is bool:
+        return set()
+    if key in {"seed_audit_sha256"} and isinstance(value, str) and re.fullmatch(r"[a-f0-9]{64}", value):
+        return set()
+    if key == "seed_inventory_origins" and isinstance(value, list) and all(isinstance(v, str) for v in value):
+        return set()
+    if key == "seed_audit" and isinstance(value, dict) and set(value) == {"path", "sha256", "size_bytes"}:
+        if isinstance(value["path"], str) and re.fullmatch(r"[a-f0-9]{64}", value["sha256"]) and type(value["size_bytes"]) is int:
+            return set()
+    # File-hash maps, not episode records. Validate their exact reference shape.
+    if "/" in key or key == "seed-audit.json":
+        if isinstance(value, str) and re.fullmatch(r"[a-f0-9]{64}", value):
+            return set()
+        if isinstance(value, dict) and set(value) in ({"sha256", "bytes"}, {"sha256", "size_bytes"}):
+            if re.fullmatch(r"[a-f0-9]{64}", value["sha256"]):
+                return set()
+    if key == "seed_namespaces":
+        if not isinstance(value, dict) or set(value) != {"train", "validation", "test"}:
+            raise ValueError("seed_domain_invalid")
+        # Named split declarations describe possible values, not consumption.
+        if not all(isinstance(v, (list, dict, str)) for v in value.values()):
+            raise ValueError("seed_domain_invalid")
+        return set()
+    if key == "seed_start":
+        if not valid(value):
+            raise ValueError("seed_domain_invalid")
+        return set()  # schedule entries/training_seeds carry actual reservations
+    if "seed" in key.lower() and key not in SEED_CONTAINERS:
+        raise ValueError("ambiguous_seed_field:" + key)
     if isinstance(value, dict):
         return set().union(*(seed_values(child, name) for name, child in value.items()))
     if isinstance(value, list):
-        return set().union(*(seed_values(child, key) for child in value))
-    return {value} if type(value) is int and "seed" in key.lower() and 0 <= value < 2**31 else set()
+        return set().union(*(seed_values(child) for child in value))
+    return set()
 
 
 def history_roots():
     """Include unsuccessful/temp campaigns, not just the preserved winning report."""
     marker = ROOT/"frozen-runtime.json"
     roots = ([Path(p) for p in read(marker)["seed_inventory_origins"]] if marker.exists() else
-             [ROOT / "ai-engine/artifacts", ROOT / "emulation/output",
-             ROOT / "docs/project/CompletionProgram"])
+              [ROOT / "ai-engine/artifacts", ROOT / "emulation/output",
+              ROOT / "docs/project/CompletionProgram"])
+    origin = Path(read(marker)["source_origin"]) if marker.exists() else ROOT
+    roots.extend(path for path in sorted(origin.glob("nanfo-experimental-campaign-*"))
+                 if path.is_dir() and not path.is_symlink())
     for path in sorted(Path("/tmp/opencode").iterdir()):
         if path.name.startswith(("nanfo-adr024-evaluation-", "nanfo-live-acceptance-",
                                  "nanfo-experimental-campaign-", "nanfo-adr025-", "native-driver-")):
@@ -209,12 +286,17 @@ def reject_new_seed_reservations(output, plan):
     current = audit_seeds([root for root in history_roots() if root.resolve() != output.resolve()])
     selected = {row["seed"] for row in plan["trials"] + plan["faults"] + plan.get("smoke", [])}
     for row in current["documents"]:
+        # Private campaigns may live beneath the inventoried ignored artifact root.
+        # Their own reservation is expected; every other new reservation still denies.
+        if Path(row["path"]).is_relative_to(output.resolve()):
+            continue
         if known.get(row["path"]) != row["sha256"] and selected.intersection(row["seeds"]):
             raise ValueError("new_conflicting_operational_seed_reservation")
 
 
 def audit_seeds(roots):
     reserved, documents, seen, exclusions = set(), [], set(), []
+    payloads, by_hash, legacy_by_hash = {}, {}, {}
     for root in roots:
         if not root.exists():
             raise ValueError("seed_audit_root_missing:" + str(root))
@@ -244,24 +326,87 @@ def audit_seeds(roots):
             if identity in seen:
                 continue
             seen.add(identity)
-            found = set()
+            values = []
             if path.suffix == ".ptz":
                 with zipfile.ZipFile(path) as bundle:
                     for name in bundle.namelist():
                         if name.endswith(".json"):
-                            found.update(seed_values(json.loads(bundle.read(name))))
+                            values.append(json.loads(bundle.read(name)))
             else:
                 with path.open("rb") as stream:
                     if path.suffix == ".jsonl":
                         for line in stream:
                             if line.strip():
-                                found.update(seed_values(json.loads(line)))
+                                values.append(json.loads(line))
                     else:
-                        found.update(seed_values(json.load(stream)))
-            reserved.update(found)
-            documents.append(dict(path=str(identity), sha256=digest(path), seeds=sorted(found)))
+                        values.append(json.load(stream))
+            pin = digest(path)
+            if pin not in payloads:
+                legacy_by_hash[pin] = set().union(*(_legacy_seed_values(v) for v in values))
+                payloads[pin] = [v if isinstance(v, dict) and v.get("version") == 1
+                    and {"documents", "reserved_seeds"} <= v.keys() else seed_values(v) for v in values]
+            by_hash.setdefault(pin, []).append(str(identity))
+            documents.append(dict(path=str(identity), sha256=pin, seeds=[]))
+    corrected, visiting, corrections = {}, set(), []
+
+    def extract(pin):
+        if pin in corrected:
+            return corrected[pin]
+        if pin in visiting:
+            raise ValueError("seed_inventory_provenance_cycle")
+        visiting.add(pin)
+        result = set()
+        for value in payloads[pin]:
+            if isinstance(value, set):
+                result.update(value)
+                continue
+            claims = seed_values(value["reserved_seeds"], "reserved_seeds")
+            rows_union, rebuilt = set(), set()
+            for row in value["documents"]:
+                if not isinstance(row, dict) or set(row) != {"path", "sha256", "seeds"}:
+                    raise ValueError("seed_inventory_row_invalid")
+                declared = seed_values(row["seeds"], "seeds")
+                rows_union.update(declared)
+                target = row["sha256"]
+                # Missing originals remain reserved. Exact-byte copies can establish
+                # provenance even when their historical absolute path was relocated.
+                if target in payloads:
+                    legacy = legacy_by_hash[target]
+                    actual = extract(target)
+                    if declared == legacy:
+                        removed = declared - actual
+                        if removed:
+                            corrections.append(dict(inventory_sha256=pin, referenced_path=row["path"],
+                                referenced_sha256=target, verified_paths=by_hash[target],
+                                removed_metadata_values=sorted(removed)))
+                        rebuilt.update(actual)
+                    else:
+                        # An additional explicit inventory assertion cannot be erased
+                        # merely because today's extractor does not explain it.
+                        rebuilt.update(declared | actual)
+                else:
+                    reviewed = any(row["path"] == f"/tmp/opencode/nanfo-experimental-campaign-{n:03d}/seed-audit.json"
+                                   and target == expected for n, expected in REVIEWED_COUNT_INVENTORIES.items())
+                    if reviewed and COUNT_ONLY_ORIGIN in payloads and 1342 not in extract(COUNT_ONLY_ORIGIN):
+                        corrections.append(dict(inventory_sha256=pin, referenced_path=row["path"],
+                            referenced_sha256=target, origin_sha256=COUNT_ONLY_ORIGIN,
+                            origin_field="reserved_seed_count", removed_metadata_values=[1342],
+                            basis="independent018 hash-addressed count-only provenance correction"))
+                        rebuilt.update(declared - {1342})
+                    else:
+                        rebuilt.update(declared)
+            result.update(rebuilt | (claims - rows_union))
+            result.update(seed_values({k:v for k,v in value.items() if k not in {"documents", "reserved_seeds"}}))
+        visiting.remove(pin)
+        corrected[pin] = result
+        return result
+
+    for row in documents:
+        found = extract(row["sha256"])
+        row["seeds"] = sorted(found)
+        reserved.update(found)
     return dict(version=1, roots=[str(p) for p in roots], documents=documents, exclusions=exclusions,
-                reserved_seeds=sorted(reserved))
+                reserved_seeds=sorted(reserved), provenance_corrections=corrections)
 
 
 def model_identity(root):
@@ -315,6 +460,8 @@ def source_pins():
              ROOT / "backend/scripts/frozen_model_diagnostic.py",
              ROOT / "backend/poetry.lock",
              ROOT / "backend/tests/unit/test_experimental_campaign.py",
+             ROOT / "backend/tests/unit/test_experimental_review_closure.py",
+             ROOT / "backend/tests/unit/test_experimental_independent_stop.py",
              ROOT / "backend/tests/unit/test_experimental_lab.py",
              ROOT / "backend/tests/unit/test_experimental_lab_adapter.py",
              ROOT / "backend/tests/unit/test_experimental_simulation.py",
@@ -1241,7 +1388,8 @@ class OwnedReceiver:
             if not task.done():
                 task.cancel()
                 await asyncio.gather(task, return_exceptions=True)
-        if request["operation"] not in ("status", "heartbeat"):
+        if request["operation"] != "status" and (
+                request["operation"] != "heartbeat" or response.get("status") != "ok"):
             path = self.directory / ("wire-" + request["request_id"] + ".json")
             if path.exists():
                 raise ValueError("operator_execute_request_replayed")
@@ -1424,10 +1572,16 @@ async def joined_case(directory, plan, case, sessions, redis, actor):
         # not age the first observation. Every comparator shares the same registry.
         from app.modules.autonomy.model_provider import FrozenModelProvider
         qualifier = FrozenModelProvider(registry, redis)
-        await qualifier.qualify(CHECKPOINT)
-        if _QUALIFICATION_TASKS:
-            await asyncio.gather(*list(_QUALIFICATION_TASKS))
-        qualification = await qualifier.qualify(CHECKPOINT)
+        qualification_clock = dict(started_wall_ns=time.time_ns(), started_monotonic_ns=time.monotonic_ns(),
+            registry_installed_at=template["installed_at"], registry_expires_at=template["expires_at"])
+        try:
+            await qualifier.qualify(CHECKPOINT)
+            if _QUALIFICATION_TASKS:
+                await asyncio.gather(*list(_QUALIFICATION_TASKS))
+            qualification = await qualifier.qualify(CHECKPOINT)
+        finally:
+            write(directory / "qualification-clock.json", qualification_clock | dict(
+                finished_wall_ns=time.time_ns(), finished_monotonic_ns=time.monotonic_ns()))
         write(directory / "qualification.json", qualification.model_dump(mode="json"))
         if not qualification.qualified:
             raise ValueError("qualified_frozen_runtime_unavailable")
@@ -1551,7 +1705,8 @@ def assemble_case(root, case, attempt):
     """References point to actual retained returns; no synthetic success receipts."""
     directory = root / case["case_id"]
     row = {**case, "status": attempt["status"], "outcome": "unavailable"}
-    for key, filename in (("auth", "auth.json"), ("operator_policy", "operator-policy.json"),
+    for key, filename in (("attempt", "attempt.json"), ("qualification", "qualification.json"),
+                          ("auth", "auth.json"), ("operator_policy", "operator-policy.json"),
                           ("journal", "journal.json"), ("native_journal", "native-journal.json"),
                           ("bootstrap", "bootstrap.json"), ("intervention", "intervention.json"),
                           ("native_authority", "campaign-authority.json"),
@@ -1592,6 +1747,8 @@ def assemble_case(root, case, attempt):
     if read(root/"plan.json").get("outcome_protocol") == OUTCOME_PROTOCOL and "fault" not in case:
         from scripts.audit_experimental_lab import classify_nominal
         try:
+            if "operator_policy" not in row:
+                raise ValueError("preacquisition_failed:" + attempt.get("reason", "operator_policy_unavailable"))
             classification=classify_nominal(root,row)
             row.update(outcome=classification["outcome"], status="completed" if classification["protocol_complete"] else "failed")
             write(directory/"outcome-audit.json",classification)
@@ -1790,10 +1947,10 @@ def offline_gates(output):
     """Executable source/test admission; no Docker run, service startup or traffic."""
     output.mkdir(mode=0o700, exist_ok=False)
     before = source_pins()
-    review = (ROOT/"backend/tests/frozen_independent_review.py" if (ROOT/"frozen-runtime.json").exists()
-              else Path("/tmp/opencode/test_adr025_integrated_review.py"))
+    review = ROOT / "backend/tests/unit/test_experimental_independent_stop.py"
     commands = [
         [sys.executable, "-m", "pytest", "tests/unit/test_experimental_campaign.py",
+         "tests/unit/test_experimental_review_closure.py",
          "tests/unit/test_experimental_lab.py", "tests/unit/test_experimental_lab_adapter.py",
          "tests/unit/test_experimental_simulation.py", "--no-cov", "-q"],
         [sys.executable, "-m", "ruff", "check", "--isolated", "scripts/verify_experimental_lab.py",

@@ -1,0 +1,9 @@
+{
+  "lane": "ai-upstream",
+  "raw_advisory_rows": 8,
+  "distinct_package_advisory_pairs": 8,
+  "affected_packages": 1,
+  "accepted_pairs": 8,
+  "coverage_gaps": [],
+  "errors": []
+}

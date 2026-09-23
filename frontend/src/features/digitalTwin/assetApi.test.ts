@@ -1,7 +1,16 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { upsertCampusModelAssets } from "@/features/networks/api";
+import { listCampusModelAssets, upsertCampusModelAssets } from "@/features/networks/api";
 
 afterEach(() => vi.unstubAllGlobals());
+it("requests only bounded metadata pages and forwards cancellation", async () => {
+  const data = { items: [{ campus_model_asset_id: "asset" }], total: 41, page: 3, page_size: 20 };
+  const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ success: true, data, meta: {}, errors: null })));
+  vi.stubGlobal("fetch", fetch);
+  const controller = new AbortController();
+  expect((await listCampusModelAssets("test-token", "n", 3, 20, controller.signal)).data).toEqual(data);
+  expect(fetch).toHaveBeenCalledWith(expect.stringContaining("/campus/model-assets?include_data=false&page=3&page_size=20"), expect.objectContaining({ signal: controller.signal }));
+  expect(fetch).toHaveBeenCalledTimes(1);
+});
 it("preserves registration omission vs explicit clearing in the existing asset POST", async () => {
   const fetch = vi.fn().mockImplementation(async () => new Response(JSON.stringify({ success: true, data: { items: [], total: 0 }, meta: {}, errors: null })));
   vi.stubGlobal("fetch", fetch);

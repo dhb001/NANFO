@@ -8,6 +8,7 @@ import re
 import stat
 import tempfile
 import uuid
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -53,25 +54,106 @@ def decode(raw, limit=REQUEST_LIMIT):
                       parse_constant=lambda _: require(False, "nonfinite_json"))
 
 
+class ProtectedReadError(ValueError):
+    """Finite metadata only; never exception paths or protected file contents."""
+
+    def __init__(self, reason, role, stage, attempt, opened=None, current=None):
+        super().__init__(reason)
+        def metadata(info):
+            return None if info is None else dict(device=info.st_dev, inode=info.st_ino,
+                mode=stat.S_IMODE(info.st_mode), regular=stat.S_ISREG(info.st_mode),
+                uid=info.st_uid, links=info.st_nlink)
+        self.diagnostic = dict(reason=reason, file_role=role, stage=stage, attempt=attempt,
+                               opened=metadata(opened), current=metadata(current))
+
+
+def _identity(info):
+    return info.st_dev, info.st_ino
+
+
+def _private_regular(info, *, unlinked=False):
+    return (stat.S_ISREG(info.st_mode) and not info.st_mode & 0o077
+            and info.st_uid == os.geteuid() and info.st_nlink in ((0, 1) if unlinked else (1,)))
+
+
+@contextmanager
+def _protected_parent(path):
+    """Anchor every component with no-follow directory descriptors, including retries."""
+    descriptors, bindings = [], []
+    try:
+        fd = os.open("/", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        descriptors.append(fd)
+        for name in path.parts[1:-1]:
+            child = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+            descriptors.append(child)
+            bindings.append((fd, name, child))
+            fd = child
+
+        def validate():
+            for directory in descriptors:
+                info = os.fstat(directory)
+                require(info.st_uid in (0, os.geteuid()), "foreign_directory_owner")
+                require(not info.st_mode & 0o022 or (bool(info.st_mode & stat.S_ISVTX)
+                        and info.st_uid == 0), "writable_ancestor")
+            leaf = os.fstat(fd)
+            require(leaf.st_uid == os.geteuid() and not leaf.st_mode & 0o077,
+                    "private_receiver_directory_required")
+            for parent, name, child in bindings:
+                current = os.stat(name, dir_fd=parent, follow_symlinks=False)
+                require(stat.S_ISDIR(current.st_mode) and _identity(current) == _identity(os.fstat(child)),
+                        "protected_directory_changed")
+        validate()
+        yield fd, validate
+    finally:
+        for descriptor in reversed(descriptors):
+            os.close(descriptor)
+
+
 def protected_read(path, limit=REQUEST_LIMIT):
     path = Path(path)
-    require(path.is_absolute(), "absolute_path_required")
-    for parent in (path.parent, *path.parents):
-        info = parent.lstat()
-        require(stat.S_ISDIR(info.st_mode), "symlink_directory")
-        require(not info.st_mode & 0o022 or bool(info.st_mode & stat.S_ISVTX),
-                "writable_ancestor")
-    fd = os.open(str(path), os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    role = path.name if path.name in {"authority.json", "bootstrap-admission.json", "policy.json",
+        "receiver-policy.json", "controller-binding.json", "checkpoint-response.json"} else "other"
+    stage, attempt, opened, current = "path", 0, None, None
     try:
-        info = os.fstat(fd)
-        require(stat.S_ISREG(info.st_mode) and not info.st_mode & 0o077
-                and info.st_uid == os.geteuid() and info.st_nlink == 1,
-                "protected_regular_owner_file_required")
-        raw = os.read(fd, limit + 1)
-        require(len(raw) <= limit, "file_too_large")
-        return raw
-    finally:
-        os.close(fd)
+        require(path.is_absolute() and ".." not in path.parts, "absolute_path_required")
+        with _protected_parent(path) as (parent, validate):
+            for index in range(3):
+                attempt = index + 1
+                opened = current = None
+                stage = "open"
+                fd = os.open(path.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent)
+                try:
+                    stage = "fd_metadata"
+                    opened = os.fstat(fd)
+                    require(_private_regular(opened, unlinked=True), "protected_regular_owner_file_required")
+                    # Never consume an unlinked inode, even one created by our publisher.
+                    raw = os.read(fd, limit + 1) if opened.st_nlink == 1 else None
+                    after = os.fstat(fd)
+                    require(_private_regular(after, unlinked=True), "protected_regular_owner_file_required")
+                    stage = "path_metadata"
+                    current = os.stat(path.name, dir_fd=parent, follow_symlinks=False)
+                    require(_private_regular(current), "protected_regular_owner_file_required")
+                    validate()
+                    if _identity(current) != _identity(after):
+                        # Only a safely owned old inode unlinked by replacement can retry.
+                        after = os.fstat(fd)
+                        require(_private_regular(after, unlinked=True), "protected_regular_owner_file_required")
+                        require(after.st_nlink == 0, "protected_file_identity_changed")
+                        continue
+                    require(opened.st_nlink == after.st_nlink == 1 and raw is not None,
+                            "protected_regular_owner_file_required")
+                    require((opened.st_size, opened.st_mtime_ns, opened.st_ctime_ns) ==
+                            (after.st_size, after.st_mtime_ns, after.st_ctime_ns) ==
+                            (current.st_size, current.st_mtime_ns, current.st_ctime_ns),
+                            "protected_file_changed_in_place")
+                    require(len(raw) <= limit, "file_too_large")
+                    return raw
+                finally:
+                    os.close(fd)
+            raise ValueError("protected_replacement_retry_exhausted")
+    except (ValueError, OSError) as exc:
+        reason = str(exc) if isinstance(exc, ValueError) else "protected_path_unavailable"
+        raise ProtectedReadError(reason, role, stage, attempt, opened, current) from None
 
 
 def atomic_write(path, value):

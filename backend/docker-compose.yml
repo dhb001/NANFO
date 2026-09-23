@@ -1,3 +1,8 @@
+# The sample intentionally cannot start. Use ../scripts/dev-start.sh to generate
+# private local credentials, or provision backend/.env before starting manually.
+x-required-credentials:
+  JWT_SECRET_KEY: ${JWT_SECRET_KEY:?Generate local credentials with scripts/dev-start.sh}
+
 services:
   postgres:
     image: postgres:16-alpine
@@ -5,10 +10,10 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-nanfo}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-nanfo_dev_secret}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Generate local credentials with scripts/dev-start.sh}
       POSTGRES_DB: ${POSTGRES_DB:-nanfo}
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -22,16 +27,16 @@ services:
     container_name: nanfo_neo4j
     restart: unless-stopped
     environment:
-      NEO4J_AUTH: ${NEO4J_USER:-neo4j}/${NEO4J_PASSWORD:-nanfo_dev_secret}
+      NEO4J_AUTH: ${NEO4J_USER:-neo4j}/${NEO4J_PASSWORD:?Generate local credentials with scripts/dev-start.sh}
       NEO4J_PLUGINS: '["apoc"]'
       NEO4J_dbms_security_procedures_unrestricted: "apoc.*"
     ports:
-      - "7474:7474"
-      - "7687:7687"
+      - "127.0.0.1:7474:7474"
+      - "127.0.0.1:7687:7687"
     volumes:
       - neo4j_data:/data
     healthcheck:
-      test: ["CMD", "neo4j", "status"]
+      test: ["CMD", "wget", "--quiet", "--spider", "http://127.0.0.1:7474/"]
       interval: 10s
       timeout: 10s
       retries: 10
@@ -40,13 +45,13 @@ services:
     image: redis:7-alpine
     container_name: nanfo_redis
     restart: unless-stopped
-    command: redis-server --requirepass ${REDIS_PASSWORD:-nanfo_dev_secret}
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:?Generate local credentials with scripts/dev-start.sh}"]
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     volumes:
       - redis_data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-nanfo_dev_secret}", "ping"]
+      test: ["CMD", "redis-cli", "--no-auth-warning", "-a", "${REDIS_PASSWORD:?Generate local credentials with scripts/dev-start.sh}", "ping"]
       interval: 5s
       timeout: 5s
       retries: 10

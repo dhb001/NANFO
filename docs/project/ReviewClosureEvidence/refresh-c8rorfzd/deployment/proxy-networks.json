@@ -1,0 +1,10 @@
+{
+  "nanfo-deploy-verify-d6f19c7615c44d0e9229171d00e4dfee": {
+    "NANFO_PROXY_SUBNET": "10.42.191.0/24",
+    "NANFO_PROXY_GATEWAY_IP": "10.42.191.254"
+  },
+  "nanfo-deploy-verify-a27324122dad479fa8c00bf7a89bc506": {
+    "NANFO_PROXY_SUBNET": "10.42.192.0/24",
+    "NANFO_PROXY_GATEWAY_IP": "10.42.192.254"
+  }
+}

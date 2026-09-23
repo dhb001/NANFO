@@ -24,10 +24,20 @@ function fixture(): SpatialSceneSnapshot {
 // Inspect the actual R3F WebGL scene, not a second test-only renderer/model.
 async function rendered(page: Page) {
   return page.evaluate(async () => {
-    const path = "/node_modules/.vite/deps/@react-three_fiber.js";
-    const { _roots } = await import(/* @vite-ignore */ path);
-    const root = _roots.get(document.querySelector("canvas"));
-    if (!root) return { shapes: [], deviceScreen: [0, 0], camera: [] };
+    // ESM identity includes Vite's version query. An unversioned import creates
+    // another R3F registry instead of inspecting the module that owns this Canvas.
+    const modules = [...new Set(performance.getEntriesByType("resource").map((entry) => entry.name)
+      .filter((name) => new URL(name).pathname === "/node_modules/.vite/deps/@react-three_fiber.js"))];
+    if (modules.length !== 1) throw new Error(`Expected one loaded R3F module, found ${modules.length}.`);
+    const { _roots } = await import(/* @vite-ignore */ modules[0]);
+    // Canvas DOM visibility precedes its asynchronous R3F root registration.
+    const deadline = performance.now() + 5000;
+    let root = _roots.get(document.querySelector("canvas"));
+    while (!root && performance.now() < deadline) {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      root = _roots.get(document.querySelector("canvas"));
+    }
+    if (!root) throw new Error("The loaded R3F module does not own the visible Canvas.");
     const state = root.store.getState();
     const shapes: { id: string; size: number[]; world: number[]; opacity: number; clipping: number }[] = [];
     state.scene.traverse((mesh: { name: string; geometry?: { parameters: { width: number; height: number; depth: number } }; matrixWorld: { elements: number[] }; material: { opacity: number; clippingPlanes: unknown[] } }) => {

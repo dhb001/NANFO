@@ -93,6 +93,7 @@ class ExperimentalController:
             await self.authority.check(self.policy)
             active(self.policy)
             if utcnow() >= deadline:
+                await self._checkpoint_state(request_id=request_id, fresh_frame=fresh_frame)
                 raise ValueError("experimental_checkpoint_elapsed_during_authority")
             # Identity above can block while STOP commits. Finish with one bounded
             # serialized decision: lock current control, flush, current DB authority,
@@ -101,6 +102,7 @@ class ExperimentalController:
                 deadline = await self._checkpoint_state(request_id=request_id,
                     fresh_frame=fresh_frame, final_authority=True)
             if utcnow() >= deadline:
+                await self._checkpoint_state(request_id=request_id, fresh_frame=fresh_frame)
                 raise ValueError("experimental_checkpoint_elapsed_during_commit")
 
     async def _checkpoint_state(self, *, recovery=False, request_id=None, fresh_frame=False, final_authority=False):
@@ -154,6 +156,9 @@ class ExperimentalController:
                     raise ValueError("experimental_stop_latched")
                 repo.owned(resource, run, self.token)
                 active(p)
+                if pending is not None and pending.command is not None:
+                    if utcnow() >= ActionCommand.model_validate(pending.command).expires_at:
+                        raise ValueError("experimental_action_expired")
                 if utcnow() >= deadline:
                     raise ValueError("experimental_checkpoint_elapsed_during_authority")
             return deadline

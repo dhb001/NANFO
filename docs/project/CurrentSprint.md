@@ -1,6 +1,68 @@
 # Current Sprint State
 
-## ADR026 Parallel Audit Repair — Integrated (2026-09-20)
+## Current — ADR027 Repository Review Consolidation (2026-09-21)
+
+- Authoritative seven-workstream status: [ReviewClosure-Completion](ReviewClosure-Completion.md).
+  Current schema **0029**; base commit `3f9f1f1` plus uncommitted ADR027 integration.
+  Exact accepted frozen source/image identities are in the deployment handoff.
+- Latest parent-observed backend **3,949 passed/317 skipped**; frontend **615 tests/
+  98 files**, lint/types/build/perf passed at **394.28/410.16 KiB**. Assets owner's
+  final full browser suite **70/70, zero retries**; actual production full-stack
+  **5/5, zero skips/retries**. These are distinct acceptance scopes.
+- Core0029 install/cold encrypted11-volume backup/fresh restore **28 passed/0 failed/
+  5 blocked**, plus **253 deployment tests**; real-Redis retention **27 passed**.
+  Latest refresh **c8rorfzd accepted**, backend `a2bf67af…`, source `f7105617…`;
+  exact identities in `ReviewClosure-Deployment.md`. Subsequently only experimental
+  verifier seed scanner/test source changed (`9e46d086…` verifier). Core behavior
+  unchanged, but no entire-current-tree byte-parity claim. Optional gates remain.
+- Clean upgraded PostgreSQL **254 passed/12 skipped** plus exact real-Redis subset
+  **12 passed/0 skipped** covers all **266 selected** cases. Development fakeredis
+  Lua/lupa declaration and clean-CI EVAL checks fixed; nginx gate **24 passed/0 skipped**.
+- Credential-free [durable bundle](ReviewClosureEvidence/README.md) is ready, with
+  `refresh-c8rorfzd` and `retention-c8rorfzd` receipts. New private encrypted backup/
+  key/original result are separately preserved locally; off-host escrow remains open.
+- Final portable **441 JUnit cases/zero skips/11 explicit deselections**; original
+  AI environment **463 passed**, reaffirmed. Remote CI is not established by these runs.
+- **71 credentials** privately preserved and removed from the active tree; history/
+  index exposure remains unresolved. npm audit **0**; exact frozen/unpatched Python
+  exceptions expire **2026-10-21** and are not fixes.
+- Actual **017 FAILED**:4/4 smokes,67/68 matrix outcomes completed/1 invalid
+  (`path1-1564-qualified`, `protected_regular_owner_file_required`); all20 fault
+  outcomes completed. Frozen source/original model unchanged. Atomic-replacement
+  race reproduced and repaired only in active emulation with protected bounded reopen.
+- Frozen018 gates **115 backend passed/3 historical skips;34 receiver and2 STOP
+  passed**; independent018 review accepted the protected-read fix and reconfirmed017
+  failure. Scanner falsely reserved count1342; active extractor corrected,60 tests
+  passed. **996/1000 true/preregistered reservations,4 available/36 required,deficit32**
+  still blocks a fresh plan. No plan/admission/live pass or split change. Physical RF,
+  intended-user study and repeated training remain open.
+
+## Remaining Work Master Checklist (Current Authority — ADR027)
+
+- [ ] Resolve historical credential exposure/non-reuse/revocation and explicitly
+  authorized history remediation; configure required remote hygiene checks (item1).
+- [ ] Execute required remote CI, provision the private historical-evidence lane,
+  resolve exact dependency exceptions before expiry, and audit successor images (item3).
+- [ ] Adopt opt-in stream retention with protected archives/backups, capacity
+  monitoring and representative load evidence; retain pending/DLQ safety (item4).
+- [ ] Arrange off-host escrow for accepted c8rorfzd, qualify optional release/recovery
+  scopes and rehearse any separately authorized0027/0028 upgrade (item5).
+- [ ] Resolve the independently confirmed32-value operational-domain deficit through
+  explicit reviewed protocol direction. Preserve genuine reservations and the
+  train/validation/test split; fresh acquisition/admission and measured acceptance
+  remain blocked, not complete (item6).
+- [ ] Collect genuine research evidence: proactive workloads/timing, independent
+  training and safeguards comparison, intended-user study, complete recovery and
+  physical RF only for the broader RF claim (item6; `ReviewClosure-Research.md`).
+- [ ] Address scoped observability/maintainability and repository access/licensing
+  decisions when authorized; broader feature expansion remains deferred (items2/7).
+
+The matrix records delivered repairs and accepted scopes alongside these open
+obligations. All older sections below are dated historical checkpoints. The archived
+Post-VS8/Post-VS16 plans and checked VS checklist do not establish current production
+readiness, sandboxed plugin execution, or scientific/physical qualification.
+
+## Historical — ADR026 Parallel Audit Repair — Integrated (2026-09-20)
 
 - A01–A17 and requested inventory/admin/history/guided-Twin workflows implemented.
   Completion matrix and limitations: `AuditRepair-Completion.md`; approved contracts
@@ -688,7 +750,11 @@
 - Latest frontend full-gate evidence (2026-08-14): `npm run lint` PASS, `npm run typecheck` PASS, `npm run test` PASS (`9 files, 25 tests`), `npm run test:e2e` PASS (`8/8`), `npm run build` PASS, `npm run perf:bundle` PASS.
 - E2E stability follow-up applied before gate rerun: selector strictness hardening in VS2/VS7 specs and query-tolerant network session mocks for tenancy/workspace flows (`frontend/tests/e2e/vs2-telemetry.spec.ts`, `frontend/tests/e2e/vs7-branch-compare.spec.ts`, `frontend/tests/e2e/support/session.ts`).
 
-## Post-VS8 Plan (Authoritative Remaining VS Plan)
+## Post-VS8 Plan (Archived Slice Plan — Superseded as Remaining-Work Authority)
+
+Historical scope and closure record. Use the current ADR027 checklist at the top
+and `ReviewClosure-Completion.md` for remaining work; end-state wording below is
+not a claim of current whole-platform acceptance.
 
 ### End-State (After Final Planned Slice)
 - All documented PRD surfaces are delivered for Intent/Hypervisor, deferred Topology analysis, Alerts, Plugins, and Reporting.
@@ -876,7 +942,10 @@
 - [x] Step 2: Publish ordered follow-on optimization + deferred external load-tooling expansion plan (assumptions, risks, and validation matrix) in `docs/project/OptimizationContinuityPlan-VS16.md` and align continuity docs (`Roadmap.md`, `Milestones.md`).
 - [x] Closure Gate: Final VS16 backend validation pass and tracking finalization (`poetry run ruff check tests/integration/test_telemetry_synthetic_load.py` ✅, `poetry run pytest tests/integration/test_telemetry_synthetic_load.py -q` `1 passed` ✅, `poetry run pytest tests -q` `456 passed` ✅; frontend gates not required because no frontend files changed in VS16).
 
-## Post-VS16 Plan (Authoritative Remaining VS Plan)
+## Post-VS16 Plan (Archived Slice Plan — Superseded as Remaining-Work Authority)
+
+Historical optimization scope only. Current remaining work is recorded at the top
+and in `ReviewClosure-Completion.md`.
 
 ### End-State (After Final Planned Optimization Slice)
 - External load-tooling execution is governed, reproducible, and regression-repeatable across backend/frontend quality gates.
@@ -945,7 +1014,12 @@
 - [x] Step 2: Finalize optimization continuity tracking docs (`CurrentSprint.md`, `DevelopmentJournal.md`, `DecisionLog.md`, `Roadmap.md`, `Milestones.md`) and document explicit deferred carryover risks for the next roadmap phase.
 - [x] Closure Gate: Final VS20 validation + tracking finalization (`poetry run pytest tests -q` `489 passed` ✅; frontend full gate not required because no frontend files were touched in VS20 closure scope).
 
-## Remaining Work Master Checklist (Authoritative, Ordered, Non-Overlapping)
+## Archived VS8–VS20 Closure Checklist (Not Current Remaining-Work Authority)
+
+These checkmarks preserve the original slice record. In particular, the old plugin
+“sandbox” and M10 “production readiness” labels do not establish an executable plugin
+sandbox or present operational/scientific acceptance. Current plugins are a metadata
+registry; use the ADR027 matrix and current checklist above for outstanding scope.
 
 - [x] VS8 closure complete (frontend parity workstream + final closure tracking evidence recorded).
 - [x] VS9 closure complete (hypervisor execution + rollback baseline with terminal intent lifecycle outcomes).

@@ -1,0 +1,9 @@
+{
+  "lane": "backend",
+  "raw_advisory_rows": 2,
+  "distinct_package_advisory_pairs": 1,
+  "affected_packages": 1,
+  "accepted_pairs": 1,
+  "coverage_gaps": [],
+  "errors": []
+}

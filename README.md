@@ -10,24 +10,47 @@ NANFO (Network AI & Neural Fabric Orchestrator) is a modular-monolith platform f
 
 This repository contains both backend and frontend code, plus architecture, API, and project-tracking documentation.
 
-## Start On Localhost (Quick Start)
+## Start On Localhost (API/UI Development)
+
+For the complete supervised runtime, start with
+[`deploy/README.md` — Fresh Install](deploy/README.md#fresh-install) and the
+[current0029 acceptance handoff](docs/project/ReviewClosure-Deployment.md).
+That path provisions the API, frontend gateway, **six core workers** (simulation,
+report, alert, execution, autonomy and network outbox), private stores and persistent
+storage. Optional fleet and stream-retention operations have separate configuration.
+
+The commands below start development stores and API/UI processes. Async workflows
+also require their workers. Model uploads need a private persistent
+`NETWORK_ASSET_ROOT`; reports need `REPORTS_STORAGE_PATH`, shared with the report
+worker. Provision service-UID-owned0700 directories outside web roots; see
+[Assets](docs/project/CompletionProgram/Assets.md) and
+[report setup](backend/app/modules/report/README.md). Prefer the supervised path
+for end-to-end use.
 
 From repository root:
 
 ```bash
 ./scripts/dev-start.sh
-cp backend/.env.example backend/.env
-cp frontend/.env.example frontend/.env
-cd backend && poetry install && poetry run alembic -c alembic/alembic.ini upgrade head
-poetry run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+cd backend
+poetry install
+poetry run alembic -c alembic/alembic.ini upgrade head
+# Create the local bootstrap user below before logging in.
+poetry run uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
-In a second terminal:
+`dev-start.sh` generates `backend/.env` with four independent secrets and mode0600
+only when absent, preserves existing files, and waits for healthy loopback-bound
+stores. **Keep that generated file; do not overwrite it with `.env.example`.**
+Existing initialized volumes require their matching credentials. A copied sample
+has empty secrets and must be populated privately before startup.
+
+In a second terminal, from the repository root:
 
 ```bash
 cd frontend
-npm install
-npm run dev -- --host 0.0.0.0 --port 5173
+test -e .env || cp .env.example .env
+npm ci
+npm run dev -- --host 127.0.0.1 --port 5173
 ```
 
 Open:
@@ -37,30 +60,57 @@ Open:
 
 Note: You must create a bootstrap user first (see "Create a Local Bootstrap User" in this README) because there is no public registration endpoint.
 
-## Current Status
+## Current Status — 21 September 2026
 
-- Current implementation is at schema **0027**, with six core workers and optional
-  fleet/retention profiles. Distributed API serving is explicitly configurable.
-- Canonical spatial editing/history, persisted model registration, protected binary
-  assets, real SNMPv3 collection, RF artifact overlays and operator AI memory/review
-  are delivered under ADR021/022. ADR023 adds dimensioned geometry, distributed
-  realtime, actual evidence-safe archival retention, packaged fleet collection,
-  conditional live providers and separate governed execution/receiver software.
-- Corrected isolated core deployment and encrypted backup/fresh restore passed:
-  **29 cases passed, 0 failed, 4 capability cases blocked** in the corrected
-  distributed release; packaged fleet passed6/6. Physical RF and autonomous safety
-  qualification require authentic external measurements and matching runtime evidence.
-- ADR024 recovered and freshly qualified the matchingv4 model runtime without
-  changing model tensors; actual live recommendations and42 scoped native manual
-  driver cases passed. Joined calibrated autonomy and physical RF remain unqualified.
-  Evidence: [`QualificationEvidence.md`](docs/project/CompletionProgram/QualificationEvidence.md).
-- Whole-vision completion remains open. Current capabilities, tests, deployment
-  prerequisites and remaining implementation are in
-  [`docs/project/CompletionProgram/README.md`](docs/project/CompletionProgram/README.md).
-- Use [`deploy/README.md`](deploy/README.md) for the supervised package. API-only
-  development does not start the simulation/report/alert/execution/autonomy/outbox
-  workers. Model uploads require the private persistent `NETWORK_ASSET_ROOT` described
-  in [`Assets.md`](docs/project/CompletionProgram/Assets.md).
+Current authority: [seven-workstream review matrix](docs/project/ReviewClosure-Completion.md)
+and [remaining checklist](docs/project/CurrentSprint.md). Source is the ADR027
+integration worktree over `3f9f1f1`; accepted releases have separately pinned source
+manifests/images, not a new committed release identity.
+
+- Schema **0029**, six core workers. Canonical spatial editing/history, persisted
+  registration/protected assets, SNMPv3/fleet collection, configured RF overlays,
+  distributed realtime and non-actuating AI review/memory are delivered within the
+  [completion-program scope](docs/project/CompletionProgram/README.md).
+- Latest parent-observed backend **3,949 passed/317 skipped**; frontend **615 tests/
+  98 files**, lint/types/build/perf passed (**394.28/410.16 KiB**). Final fixture
+  browser suite **70/70, no retries**; actual production-build full-stack **5/5**.
+- Latest core0029 **c8rorfzd accepted28 passed/0 failed/5 blocked**, including
+  encrypted11-volume backup/fresh restore;253 deployment tests passed. Backend
+  image `a2bf67af…`, source aggregate `f7105617…`; exact identities below. Subsequent
+  source-code changes are only experimental seed-scanner tooling/test (`9e46d086…`
+  verifier), not core serving behavior. The current tree is not byte-identical to
+  the accepted image. Distributed/lab/model/measured-telemetry scopes remain blocked.
+  [Exact evidence](docs/project/ReviewClosure-Deployment.md),
+  [durable credential-free bundle](docs/project/ReviewClosureEvidence/README.md).
+  New private backup/key/result preservation and public refresh/retention receipts
+  are complete locally; off-host escrow remains open.
+- Clean upgraded PostgreSQL **254 passed/12 skipped**, followed by the exact
+  real-Redis subset **12 passed/0 skipped**: all **266 selected** cases covered.
+  Development `fakeredis` Lua/lupa dependencies and clean-CI EVAL checks are fixed;
+  repaired nginx header/proxy gate **24 passed/0 skipped**. Remote CI remains unverified.
+- Final portable gate: **441 JUnit cases, zero skips,11 explicit deselections**.
+  Original AI environment **463 passed**, reaffirmed; no new training implied.
+- Asset restore/metadata pagination, request identity, setup/proxy and route recovery
+  repairs are delivered. Opt-in archive-before-delete stream retention passed
+  **27 real-Redis cases**; operator scheduling/capacity obligations remain.
+- **71 receiver credentials** were preserved privately and removed from the active
+  tree; historical exposure remains unresolved. npm audit **0**; exact Python/frozen
+  runtime exceptions expire **2026-10-21** and are not fixes. Remote CI is not claimed.
+- ADR024 qualified the rebuiltv4 bounded benchmark and fresh recommendations with
+  unchanged tensors. Actual **017 remains FAILED**:4/4 smokes,67/68 matrix outcomes
+  completed,1 invalid measurement (`path1-1564-qualified`,
+  `protected_regular_owner_file_required`); all20 fault outcomes completed. Its
+  frozen source/original model are unchanged. Active emulation's reproduced atomic-
+  replacement race is repaired with protected bounded reopen; frozen018 offline
+  gates passed115 backend/3 historical skips,34 receiver and2 STOP checks.
+- Independent018 review **accepted the protected-read repair** and reconfirmed017
+  failure. It found `reserved_seed_count:1342` falsely treated as a reservation;
+  active extractor correction passed60 tests. **Fresh campaign blocked:**996/1000
+  genuine/preregistered train-operational values reserved,4 available/36 required,
+  deficit32. No018 plan/live acceptance, seed reuse or split change.
+  [Experimental status](docs/project/CompletionProgram/ExperimentalAcceptance.md).
+  Physical RF, intended-user study, independent repeated training and calibrated
+  autonomy remain evidence obligations; the experiment is not complete.
 
 ## What Is Implemented
 
@@ -74,8 +124,8 @@ High-level delivered capabilities:
 - Alerts lifecycle (`list`, `ack`, `resolve`) with realtime updates
 - Simulation lifecycle (`start`, `pause`, `branch`, `detail`, `compare`)
 - Intent validation/execution/detail flows with explainability metadata
-- Plugin registry lifecycle with safety checks (install, enable, disable)
-- Reporting async generation and status retrieval
+- Metadata-only plugin registry lifecycle (install, enable, disable, uninstall)
+- Worker-generated CSV/PDF reports, history and authenticated verified downloads
 - Audit log query surface
 
 Frontend operator routes are delivered under `/ops/*` (overview, tenancy, topology analysis, telemetry, reliability, plugins, reports, digital twin, simulation, intent, audit).
@@ -148,7 +198,7 @@ OpenAPI docs:
 
 Install these first:
 
-- Docker (with compose support)
+- Docker with Compose supporting `up --wait --wait-timeout`
 - Python 3.12+
 - Poetry
 - Node.js 20+ and npm
@@ -163,12 +213,15 @@ From repository root:
 ./scripts/dev-start.sh
 ```
 
-This starts PostgreSQL, Neo4j, and Redis using `backend/docker-compose.yml`.
+This starts PostgreSQL, Neo4j, and Redis using `backend/docker-compose.yml`, binds
+published store ports to loopback and waits for health (default180s;
+`NANFO_DEV_WAIT_SECONDS` accepts1–3600). It generates a private `backend/.env` only
+when absent. Existing volumes require the original matching credentials. Setup
+success means healthy stores; API and workers are separate processes.
 
 ### 2) Configure and Install Backend
 
 ```bash
-cp backend/.env.example backend/.env
 cd backend
 poetry install
 poetry run alembic -c alembic/alembic.ini upgrade head
@@ -176,7 +229,13 @@ poetry run alembic -c alembic/alembic.ini upgrade head
 
 Notes:
 
-- `backend/.env` is required by the backend app and Alembic.
+- Keep the generated `backend/.env`; it is used by the app and Alembic. Never copy
+  the empty-secret sample over it. Privately correct an existing invalid env before
+  rerunning setup; the helper does not replace it.
+- `upgrade head` is for the owned development database and currently reaches0029.
+  Supervised0027/0028 installations need the separately reviewed upgrade procedure
+  in [the deployment handoff](docs/project/ReviewClosure-Deployment.md); cold restore
+  uses identical images/schema and does not migrate.
 - Keep secrets local; do not commit `.env`.
 
 ### 3) Create a Local Bootstrap User (Required)
@@ -188,13 +247,14 @@ Run this from `backend/`:
 ```bash
 poetry run python - <<'PY'
 import asyncio
+from getpass import getpass
 
 from app.core.security import hash_password
 from app.db.postgres import AsyncSessionLocal
 from app.modules.identity.repository import UserRepository
 
 EMAIL = "admin@example.com"
-PASSWORD = "admin123"
+PASSWORD = getpass("New local bootstrap password: ")
 DISPLAY_NAME = "Local Admin"
 ROLE = "Admin"
 
@@ -230,14 +290,16 @@ asyncio.run(main())
 PY
 ```
 
-You can change `EMAIL`, `PASSWORD`, and `ROLE` in the snippet.
+Set `EMAIL` and `ROLE` for the local account; enter its password at the private
+prompt. For an existing email this deliberately resets its password and adds the
+selected role.
 
 ### 4) Run Backend API
 
 From `backend/`:
 
 ```bash
-poetry run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+poetry run uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
 Health check:
@@ -251,10 +313,10 @@ curl http://127.0.0.1:8000/health
 In a new terminal:
 
 ```bash
-cp frontend/.env.example frontend/.env
 cd frontend
-npm install
-npm run dev -- --host 0.0.0.0 --port 5173
+test -e .env || cp .env.example .env
+npm ci
+npm run dev -- --host 127.0.0.1 --port 5173
 ```
 
 Open:
@@ -299,7 +361,10 @@ npm run build
 npm run perf:bundle
 ```
 
-Project note: repo-wide backend Ruff baseline currently has known legacy debt tracked in sprint docs; scoped lint gates for touched files are used in active slices.
+The earlier repository-wide Ruff debt label is obsolete; the review baseline passed
+full backend lint. Current run counts and exact execution scopes are recorded in
+[ReviewClosure-Completion](docs/project/ReviewClosure-Completion.md). Real production
+browser acceptance has a separate [full-stack runner](docs/project/ReviewClosure-Fullstack.md).
 
 ### Troubleshooting
 
@@ -316,7 +381,9 @@ Project note: repo-wide backend Ruff baseline currently has known legacy debt tr
 
 Yes, with one important caveat: you must bootstrap a user first because there is no self-service registration endpoint yet.
 
-After infra start, migration, and user bootstrap, the app is runnable locally for development and feature validation.
+After infra start, migration, and user bootstrap, the API/UI are runnable for
+development. Use the supervised package for all six workers and private persistent
+storage needed by end-to-end asynchronous workflows.
 
 ## Is It an MVP?
 
@@ -335,6 +402,7 @@ the explicit implementation and acceptance gaps in the completion-program regist
 Use these as source-of-truth references:
 
 - Product/sprint state: `docs/project/CurrentSprint.md`
+- Current review/acceptance matrix: `docs/project/ReviewClosure-Completion.md`
 - Delivery journal: `docs/project/DevelopmentJournal.md`
 - Architecture: `docs/architecture/`
 - API standards/contracts: `docs/api/`

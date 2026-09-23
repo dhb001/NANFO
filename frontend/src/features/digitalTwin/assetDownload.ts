@@ -29,7 +29,7 @@ export async function downloadModelBytes(asset: CampusModelAssetRecord, signal?:
   }
   const length = response!.headers.get("Content-Length");
   const etag = response!.headers.get("ETag");
-  if (response!.headers.get("Content-Type")?.split(";")[0] !== asset.model_mime_type || (length !== null && Number(length) !== asset.model_size_bytes) || (etag !== null && etag !== `"${asset.model_sha256}"`)) {
+  if (response!.headers.get("Content-Type")?.split(";")[0] !== "application/octet-stream" || (length !== null && Number(length) !== asset.model_size_bytes) || (etag !== null && etag !== `"sha256:${asset.model_sha256}"`)) {
     await response!.body?.cancel(); throw new Error("Asset headers changed. Reload metadata.");
   }
   const reader = response!.body?.getReader(); if (!reader) throw new Error("Empty asset response.");

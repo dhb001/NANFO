@@ -1,0 +1,1 @@
+{"backup_directory":"ai-engine/artifacts/adr027-review-backup-dr_i6gb8","binds":1,"ciphertext_hashes_manifest_hmac_gcm_tags_and_tar_validated":true,"command":"deploy/backup_restore.py verify","off_host_escrow":false,"originals_retained":true,"separate_key_directory":"ai-engine/artifacts/adr027-review-key-dr_i6gb8","status":"authenticated","volumes":11}

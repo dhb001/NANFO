@@ -21,6 +21,7 @@ from starlette.concurrency import run_in_threadpool
 
 from app.core.config import get_settings
 from app.core.logging import get_logger
+from app.core.request_context import normalize_request_id
 from app.core.security import (
     create_access_token,
     create_refresh_token,
@@ -109,6 +110,10 @@ class AuthService:
         Authentication.md §6 AC: 401 must not indicate whether email or password was wrong.
         All outcomes are appended to audit_logs.
         """
+        correlation_id = normalize_request_id(correlation_id)
+        audit_correlation_id, audit_metadata = normalize_audit_correlation(
+            correlation_id, {"ip_address": ip_address},
+        )
         settings = get_settings()
 
         # ── Rate limiting (Authentication.md §5) ──────────────────────────────
@@ -132,8 +137,8 @@ class AuthService:
                 event_type="auth.user.login_failed",
                 actor_id=None,
                 org_id=None,
-                correlation_id=uuid.UUID(correlation_id),
-                metadata={"reason": "rate_limited", "ip_address": ip_address},
+                correlation_id=audit_correlation_id,
+                metadata={**audit_metadata, "reason": "rate_limited"},
             )
             await self._db.commit()
             raise HTTPException(
@@ -155,8 +160,8 @@ class AuthService:
                 event_type="auth.user.login_failed",
                 actor_id=user.user_id if user else None,
                 org_id=None,
-                correlation_id=uuid.UUID(correlation_id),
-                metadata={"reason": "invalid_credentials", "ip_address": ip_address},
+                correlation_id=audit_correlation_id,
+                metadata={**audit_metadata, "reason": "invalid_credentials"},
             )
             await self._db.commit()
             try:
@@ -198,8 +203,8 @@ class AuthService:
             event_type="auth.user.logged_in",
             actor_id=user.user_id,
             org_id=None,
-            correlation_id=uuid.UUID(correlation_id),
-            metadata={"ip_address": ip_address},
+            correlation_id=audit_correlation_id,
+            metadata=audit_metadata,
         )
         await self._db.commit()
 
@@ -229,14 +234,16 @@ class AuthService:
 
     async def logout(self, jti: str, exp: int, user_id: str, correlation_id: str, sid: str) -> None:
         """Revoke every access/refresh token associated with the login session."""
+        correlation_id = normalize_request_id(correlation_id)
+        audit_correlation_id, audit_metadata = normalize_audit_correlation(correlation_id, {"jti": jti})
         await self._sessions.revoke(sid)
 
         # Audit log
         await self._audit_repo.append(
             event_type="auth.user.logged_out",
             actor_id=uuid.UUID(user_id),
-            correlation_id=uuid.UUID(correlation_id),
-            metadata={"jti": jti},
+            correlation_id=audit_correlation_id,
+            metadata=audit_metadata,
         )
         await self._db.commit()
 
@@ -259,6 +266,9 @@ class AuthService:
     async def refresh(self, refresh_token: str, correlation_id: str) -> TokenPair:
         """Consume a refresh token once; reuse revokes its entire session family."""
         from jose import JWTError
+
+        correlation_id = normalize_request_id(correlation_id)
+        audit_correlation_id, audit_metadata = normalize_audit_correlation(correlation_id, {})
         try:
             payload = decode_token(refresh_token, token_type="refresh")
         except JWTError:
@@ -294,7 +304,8 @@ class AuthService:
         await self._audit_repo.append(
             event_type="auth.token.refreshed",
             actor_id=user.user_id,
-            correlation_id=uuid.UUID(correlation_id),
+            correlation_id=audit_correlation_id,
+            metadata=audit_metadata,
         )
         await self._db.commit()
         try:

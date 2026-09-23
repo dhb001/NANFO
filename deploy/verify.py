@@ -29,8 +29,10 @@ from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_ope
 
 try:
     from deploy.schema_contract import CURRENT_SCHEMA
+    from deploy.manage import allocate_proxy_networks
 except ModuleNotFoundError:
     from schema_contract import CURRENT_SCHEMA
+    from manage import allocate_proxy_networks
 
 ROOT = Path(__file__).resolve().parents[1]
 PROJECT_PATTERN = re.compile(r"nanfo-deploy-verify-[0-9a-f]{32}\Z")
@@ -1644,6 +1646,10 @@ def parse_args(argv=None):
         help="Attest packaging/backup/model/lab agents have finished; not a process detector",
     )
     parser.add_argument(
+        "--detect-source-drift", action="store_true",
+        help="Authorize concurrent authors with quiet/build/final source gates; any drift invalidates acceptance",
+    )
+    parser.add_argument(
         "--lab",
         action="store_true",
         help="Require optional disconnected package lab; necessary for Step15 completion",
@@ -1674,9 +1680,9 @@ def parse_args(argv=None):
     args = parser.parse_args(argv)
     if args.distributed and args.model:
         parser.error("Historical diagnostic campaign is singleton; use explicit live-AI overlays for distributed provider acceptance")
-    if not args.live or not args.agents_idle:
+    if not args.live or not (args.agents_idle or args.detect_source_drift):
         parser.error(
-            "Live execution requires BOTH --live and --agents-idle; parent authorization required"
+            "Live execution requires --live and --agents-idle or --detect-source-drift; parent authorization required"
         )
     images = (args.backend_image, args.frontend_image, args.neo4j_image)
     if args.reuse_build_record:
@@ -1879,7 +1885,7 @@ def referenced_build(args, registry):
     }
 
 
-def source_fingerprint():
+def source_manifest():
     paths = []
     for directory in ("deploy", "backend", "frontend", "emulation"):
         output = (
@@ -1904,7 +1910,11 @@ def source_fingerprint():
         if path.is_file() and not path.is_symlink():
             with path.open("rb") as stream:
                 result[name] = hashlib.file_digest(stream, "sha256").hexdigest()
-    return digest(result)
+    return result
+
+
+def source_fingerprint():
+    return digest(source_manifest())
 
 
 def runtime_source(path):
@@ -2547,7 +2557,9 @@ def verify_live(args, directory, matrix, registry):
             matrix.block("model_diagnostic", "Optional model diagnosis not requested")
     if not parity:
         return
-    source_hash = source_fingerprint()
+    manifest = source_manifest()
+    source_hash = digest(manifest)
+    private_write(directory / "evidence" / "source-manifest.json", manifest)
     time.sleep(20)
     check(
         source_fingerprint() == source_hash,
@@ -2589,6 +2601,11 @@ def verify_live(args, directory, matrix, registry):
     if args.distributed:
         files.append(ROOT / "deploy/compose.distributed.yaml")
     stacks = [Stack(project, files, env.copy(), registry) for project in projects]
+    for stack, proxy in zip(stacks, allocate_proxy_networks(2), strict=True):
+        stack.env.update(proxy)
+    private_write(directory / "proxy-networks.json", {stack.project: {
+        key: stack.env[key] for key in ("NANFO_PROXY_SUBNET", "NANFO_PROXY_GATEWAY_IP")
+    } for stack in stacks})
     source, target = stacks
     restore_dir = directory / "restore"
     restore_dir.mkdir(mode=0o700)
@@ -2962,7 +2979,8 @@ def main(argv=None):
     result = matrix.result(final=True)
     result.update(
         live_authorized=True,
-        agents_idle_attested=True,
+        agents_idle_attested=args.agents_idle,
+        concurrent_source_drift_detection=args.detect_source_drift,
         failure=failure,
         evidence_directory=str(evidence),
         live_requested_lab=args.lab,

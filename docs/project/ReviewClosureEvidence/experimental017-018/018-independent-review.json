@@ -1,0 +1,120 @@
+{
+  "version": "nanfo.independent-prelaunch-review/v1",
+  "campaign": "018",
+  "verdict": "blocked_by_insufficient_fresh_operational_values_after_correcting_one_scanner_false_positive",
+  "authorization_granted": false,
+  "launch_performed": false,
+  "code_modified": false,
+  "splits_or_plan_reservations_modified": false,
+  "reference_only": true,
+  "references": {
+    "frozen_manifest": {
+      "path": "ai-engine/artifacts/adr025-runtime-adr027-preparation-018/frozen-runtime.json",
+      "sha256": "18d051b0d513302bfbfc6b23f8b697b884b68bb9026f38260b314354992d89d3"
+    },
+    "offline_gates": {
+      "path": "ai-engine/artifacts/adr025-runtime-adr027-preparation-018-gates/offline-gates.json",
+      "sha256": "5c6accadb7d7881cee56c1adce6eb9eef251e01ed4239752de17b1b4a14e22fb"
+    },
+    "preparation_blocked": {
+      "path": "ai-engine/artifacts/nanfo-experimental-campaign-018-review/preparation-blocked.json",
+      "sha256": "a6ae413c9af3c6c970a3845eee715d8235bba0a145fc1e96c30290a198fc8960"
+    },
+    "false_positive_origin": {
+      "path": "ai-engine/artifacts/adr024-qualified-001/review/adr024-independent-runtime-review-final-002.json",
+      "sha256": "002d31c17281857c118c414d6c93c47e1ca5b083e661abf8cca3778316e5d800"
+    },
+    "historical_inventory": {
+      "path": "ai-engine/artifacts/nanfo-experimental-campaign-017/seed-audit.json",
+      "sha256": "c87ec06f26883ac299e9920b49412a0587686f4ea7854f3ef8c0efb961894bc6"
+    },
+    "campaign017_manifest": {
+      "path": "ai-engine/artifacts/nanfo-experimental-campaign-017/campaign-evidence.json",
+      "sha256": "df9956f5fe62d27a6b65212a4f6729e59dd6f48ee4434c3c996b75d1e0da2b1e"
+    },
+    "campaign017_result": {
+      "path": "ai-engine/artifacts/nanfo-experimental-campaign-017/result.json",
+      "sha256": "4228c1b82f1d3228f29aa9c862a293830bd1dbcb6fbf903b3e5c15406b19217a"
+    },
+    "campaign017_diagnostic": {
+      "path": "ai-engine/artifacts/nanfo-experimental-campaign-017-review/postrun-diagnostic.json",
+      "sha256": "02768c58b2729e1b22e3446ff32baf587f9ba3a271e68d21a1fddbc23be68b4d"
+    },
+    "campaign017_failed_frame": {
+      "path": "ai-engine/artifacts/nanfo-experimental-campaign-017/path1-1564-qualified/raw-frames/17d64bfcf42f94ec4989395955f079967b61a99e53dd4b0f4325e87f849a4f35.json",
+      "sha256": "17d64bfcf42f94ec4989395955f079967b61a99e53dd4b0f4325e87f849a4f35"
+    }
+  },
+  "findings": [
+    {
+      "priority": "P2",
+      "title": "Scanner mistakes a diagnostic count for an operational reservation",
+      "source": "backend/scripts/verify_experimental_lab.py:173-178,215-263 in exact frozen018",
+      "origin_line": "referenced false_positive_origin:95",
+      "reproduction": "seed_values({\"reserved_seed_count\":1342}) returns {1342}. This is a cardinality in an old review, not an episode, plan selection or domain specification.",
+      "propagation": "The original review and byte-identical copies enter inventories; subsequent reserved_seeds arrays preserve the false positive. Filtering only new review files cannot correct the inherited claim.",
+      "correction_required": "Use typed provenance-aware extraction and an explicit hash/path/field-supported correction of this count-only origin. Preserve actual run and preregistered plan reservations, including removed temporary campaigns evidenced by retained inventories. Do not drop all inventories or all review documents.",
+      "launch_effect": "Correcting this one false positive still cannot supply the required complete fresh matrix."
+    },
+    {
+      "priority": "preparation_blocker",
+      "title": "Approved domain remains insufficient for the required full campaign",
+      "source": "backend/scripts/verify_experimental_lab.py:504-519 in exact frozen018",
+      "verification": "Current scanner independently returned997 occupied values out of1000. Independent provenance reconstruction supports996 actual or preregistered reservations without relying on domain/spec declarations. Four values remain after correcting the count-only false positive, while the full campaign requires36 distinct values.",
+      "remaining_values_reference": "One count-only value is identified by false_positive_origin:95; the other three are the final three integers before the explicit adr014 training reservation begins. No selections or new reservation arrays are published here.",
+      "conclusion": "No legitimate pool large enough for the approved full campaign was found. The deficit is32 even after correction. Unrun but preregistered attempts remain reserved; missing historical raw paths do not erase their retained reservation evidence."
+    }
+  ],
+  "reservation_reconstruction": {
+    "domain_cardinality": 1000,
+    "scanner_occupied_count": 997,
+    "independently_supported_count": 996,
+    "count_only_false_positive_count": 1,
+    "corrected_available_count": 4,
+    "required_distinct_count": 36,
+    "deficit": 32,
+    "provenance": "Explicit adr014 training/calibration; adr015 training schedules; two-hour training schedules; retained hash-addressed experimental001-009 and014-016 plan inventories; actual017 plan; earlier live-acceptance plan references; adr013 pilot/train/calibration records; measured training summaries; adr024 live episodes.",
+    "domain_spec_expansion_used_as_proof": false,
+    "true_reservations_discarded": false
+  },
+  "protected_read_review": {
+    "security_verdict": "No verified ownership/security regression in reviewed fix",
+    "bounded_retries": "At most three attempts, only for a different current private regular inode after the old descriptor is proven unlinked. Bytes read from a replaced inode are discarded; an already-unlinked descriptor is not read.",
+    "ownership": "Every ancestor is descriptor-walked without following symlinks; root/current-UID ownership and nonwritable ancestry are checked, with only root-owned sticky ancestor exception. Leaf directory is current-UID private. File UID, private permissions, regular type and link count are checked before/after reads and against current path.",
+    "fail_closed": "Symlink, hardlink, foreign owner, permissive mode, FIFO/directory, in-place modification, parent replacement, missing path and exhausted replacement churn reject. STOP/expiry/current authority are rechecked after protected reads. No authorization fallback added.",
+    "diagnostics": "Only fixed role/stage/reason and inode ownership metadata are retained; no contents or arbitrary paths. Receiver preserves first protected-read failure alongside first STOP cause.",
+    "historical_causality_limit": "The017 failed frame proves protected_regular_owner_file_required with truncation. Its historical records lack failing pathname/fstat metadata; atomic replacement is independently reproducible but not retrospectively proven to be that frame's exact cause."
+  },
+  "verification": {
+    "supplied_manifest_and_gate_hashes_match": true,
+    "frozen_payload_files": 1818,
+    "all_payload_hashes_verified_before_and_after_tests": true,
+    "gate_source_map_matches_manifest": true,
+    "active_three_changed_files_match_frozen018": true,
+    "original_model_files_unchanged": true,
+    "backend_tests_passed": 117,
+    "backend_historical014_artifact_skips": 3,
+    "receiver_runtime_tests_passed": 34,
+    "independent017_diagnose_executed": true,
+    "independent017_audit_result": "ValueError:campaign_blocked_or_incomplete",
+    "new018_plan_exists": false
+  },
+  "campaign017_outcome": {
+    "matrix_denominator": 68,
+    "completed": 67,
+    "failed": 1,
+    "nominal_kept_then_restored": 34,
+    "nominal_performance_rejected_then_restored": 13,
+    "nominal_measurement_invalid": 1,
+    "fault_predispatch_rejected": 2,
+    "fault_restored": 18,
+    "separate_smoke_completed": 4,
+    "failed_case": "path1-1564-qualified",
+    "failed_frame": "truncated=true, terminated=false, error=protected_regular_owner_file_required",
+    "failed_case_recovery": "core restored/released and native restored; recovery does not validate the measurement",
+    "cleanup_evidence": "retained campaign cleanup reports removed=true and no unresolved resources; postrun verification records72 owned labs removed",
+    "overall_pass": false,
+    "qualification_claim": false
+  },
+  "conclusion": "The bounded protected-read repair and frozen offline gates pass review. The claim997 is one too high because of a real scanner bug, not broad domain-spec expansion. The corrected996 still blocks a new full approved-domain campaign. No launch, model qualification, changes to splits, selection or erasure of reservations follows from this review."
+}

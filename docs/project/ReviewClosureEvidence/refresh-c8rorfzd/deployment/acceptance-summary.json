@@ -1,0 +1,242 @@
+{
+  "run": "c8rorfzd",
+  "frozen_source": "/tmp/opencode/review0029-source-ckohdgb8",
+  "counts": {
+    "passed": 28,
+    "failed": 0,
+    "blocked": 5,
+    "pending": 0
+  },
+  "core_passed": true,
+  "all_green": false,
+  "step15_complete": false,
+  "cases": {
+    "locked_container_build": {
+      "status": "passed",
+      "detail": {
+        "source_sha256": "f7105617ee9cad1ae51e2f223761885c9223ee22d4d586a08ff36a5f87e89d05",
+        "images": {
+          "alert-worker": {
+            "id": "sha256:a2bf67af00b76980beec822f9c7f1fcb0e6d4ef2e1e6461b169b9b3ff3397b39",
+            "os": "linux",
+            "architecture": "amd64"
+          },
+          "api": {
+            "id": "sha256:a2bf67af00b76980beec822f9c7f1fcb0e6d4ef2e1e6461b169b9b3ff3397b39",
+            "os": "linux",
+            "architecture": "amd64"
+          },
+          "autonomy-worker": {
+            "id": "sha256:a2bf67af00b76980beec822f9c7f1fcb0e6d4ef2e1e6461b169b9b3ff3397b39",
+            "os": "linux",
+            "architecture": "amd64"
+          },
+          "execution-worker": {
+            "id": "sha256:a2bf67af00b76980beec822f9c7f1fcb0e6d4ef2e1e6461b169b9b3ff3397b39",
+            "os": "linux",
+            "architecture": "amd64"
+          },
+          "gateway": {
+            "id": "sha256:2e6f019d5807e7a4f97cd2d82d9a62c4349a68e5c2b2ed0493a8eb206119657d",
+            "os": "linux",
+            "architecture": "amd64"
+          },
+          "initialize": {
+            "id": "sha256:a2bf67af00b76980beec822f9c7f1fcb0e6d4ef2e1e6461b169b9b3ff3397b39",
+            "os": "linux",
+            "architecture": "amd64"
+          },
+          "maintenance": {
+            "id": "sha256:a2bf67af00b76980beec822f9c7f1fcb0e6d4ef2e1e6461b169b9b3ff3397b39",
+            "os": "linux",
+            "architecture": "amd64"
+          },
+          "neo4j": {
+            "id": "sha256:1005d99b218a5a1eac3baf07c080e1d6d6a345af736785d6fbe307e2b0825185",
+            "os": "linux",
+            "architecture": "amd64"
+          },
+          "network-outbox-worker": {
+            "id": "sha256:a2bf67af00b76980beec822f9c7f1fcb0e6d4ef2e1e6461b169b9b3ff3397b39",
+            "os": "linux",
+            "architecture": "amd64"
+          },
+          "postgres": {
+            "id": "sha256:f3bd19c606e442c3d7bdfa8002e03fe260a1023351e0ea4598032022b68dd6e3",
+            "os": "linux",
+            "architecture": "amd64"
+          },
+          "redis": {
+            "id": "sha256:90e7a336d044f1abc9e9dbc05d65566850896d11453bbd1dd0fb7e5059f0e8fb",
+            "os": "linux",
+            "architecture": "amd64"
+          },
+          "report-worker": {
+            "id": "sha256:a2bf67af00b76980beec822f9c7f1fcb0e6d4ef2e1e6461b169b9b3ff3397b39",
+            "os": "linux",
+            "architecture": "amd64"
+          },
+          "simulation-worker": {
+            "id": "sha256:a2bf67af00b76980beec822f9c7f1fcb0e6d4ef2e1e6461b169b9b3ff3397b39",
+            "os": "linux",
+            "architecture": "amd64"
+          },
+          "telemetry-retention": {
+            "id": "sha256:a2bf67af00b76980beec822f9c7f1fcb0e6d4ef2e1e6461b169b9b3ff3397b39",
+            "os": "linux",
+            "architecture": "amd64"
+          },
+          "volume-init": {
+            "id": "sha256:a2bf67af00b76980beec822f9c7f1fcb0e6d4ef2e1e6461b169b9b3ff3397b39",
+            "os": "linux",
+            "architecture": "amd64"
+          }
+        },
+        "host_application_packages_used": false,
+        "build_cache": "allowed; locked install stages required by Dockerfiles"
+      }
+    },
+    "installed_source_parity": {
+      "status": "passed",
+      "detail": {
+        "files": 377,
+        "matched": true
+      }
+    },
+    "migration_0029": {
+      "status": "passed",
+      "detail": "0029"
+    },
+    "coordinated_encrypted_backup": {
+      "status": "passed",
+      "detail": {
+        "manifest_sha256": "6363dd09efaa29957c237182f0018412e7d2dec43ea21acfa884e5c789bed9a3",
+        "encrypted_volumes": 11,
+        "encrypted_bind_directories": 1,
+        "source_writers_stopped": true,
+        "neo4j_graph": {
+          "node_labels": [
+            {
+              "count": 9,
+              "identity": "Device"
+            },
+            {
+              "count": 9,
+              "identity": "DeviceEventRevision"
+            }
+          ],
+          "nodes": 18,
+          "relationship_types": [],
+          "relationships": 0,
+          "revision_tombstones": 0,
+          "revisions": 9,
+          "revisions_sha256": "5cb4b6a253422f4fd916ab0d5088e3807209a1ad8bfe4d2ff1b2f8d3109a968c"
+        }
+      }
+    },
+    "distinct_fresh_restore": {
+      "status": "passed",
+      "detail": {
+        "source_project": "nanfo-deploy-verify-d6f19c7615c44d0e9229171d00e4dfee",
+        "target_project": "nanfo-deploy-verify-a27324122dad479fa8c00bf7a89bc506",
+        "fresh_distinct_volumes": 11,
+        "neo4j_graph": {
+          "node_labels": [
+            {
+              "count": 9,
+              "identity": "Device"
+            },
+            {
+              "count": 9,
+              "identity": "DeviceEventRevision"
+            }
+          ],
+          "nodes": 18,
+          "relationship_types": [],
+          "relationships": 0,
+          "revision_tombstones": 0,
+          "revisions": 9,
+          "revisions_sha256": "5cb4b6a253422f4fd916ab0d5088e3807209a1ad8bfe4d2ff1b2f8d3109a968c"
+        }
+      }
+    },
+    "restore_image_schema": {
+      "status": "passed",
+      "detail": {
+        "exact_image_ids_os_architecture": true,
+        "schema": "0029",
+        "target_migrations_executed": false
+      }
+    },
+    "restored_report_bytes": {
+      "status": "passed",
+      "detail": {
+        "identical_downloads": 3,
+        "formats": [
+          "csv",
+          "pdf"
+        ]
+      }
+    },
+    "restored_spatial_assets": {
+      "status": "passed",
+      "detail": {
+        "asset_id": "2c623ed1-c812-4192-9ddd-748131867fc2",
+        "sha256": "58cbc1cdab6449017cc429d7b6b068b43b21050c7261d9577ac017d03cf80b0b",
+        "bytes": 61,
+        "registration_sha256": "ef4d34802ad008d88b647948325dc435152c57bd2511bc79d8ae4bffd8786ab5",
+        "history_revisions": 2
+      }
+    },
+    "restored_workflows": {
+      "status": "passed",
+      "detail": {
+        "simulation_checkpoint_identical": true,
+        "restart_workflow_survived": true,
+        "physical_workflows_identical": 0
+      }
+    },
+    "restored_archive_bytes": {
+      "status": "passed",
+      "detail": {
+        "archive_bytes": 578,
+        "archive_sha256": "0e944f494ea5286c87fc4b00e8a8457f6841223478dba0eb0942278d1f8419ae",
+        "historical_retained": true,
+        "provenance": "synthetic_deployment_fixture_not_measured",
+        "released_pin_retained": true,
+        "row_restored": true,
+        "tombstone_replay_rejected": true
+      }
+    },
+    "cleanup": {
+      "status": "passed",
+      "detail": {
+        "containers_removed": 22,
+        "volumes_removed": 22,
+        "networks_removed": 6
+      }
+    }
+  },
+  "blocked_cases": {
+    "distributed_failover": {
+      "status": "blocked",
+      "detail": "Optional distributed composition not requested"
+    },
+    "lab_binding": {
+      "status": "blocked",
+      "detail": "Lab profile not requested"
+    },
+    "lab_congestion": {
+      "status": "blocked",
+      "detail": "Lab profile not requested"
+    },
+    "model_diagnostic": {
+      "status": "blocked",
+      "detail": "Frozen model diagnosis not requested"
+    },
+    "restored_telemetry": {
+      "status": "blocked",
+      "detail": "No actual measured telemetry existed; empty-to-empty is not survival proof"
+    }
+  }
+}

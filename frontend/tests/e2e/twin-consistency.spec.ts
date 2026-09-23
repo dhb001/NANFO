@@ -31,10 +31,11 @@ test("valid GLB persistence and explicit restore validate hash, retain groups, a
   const bytes = validGlb();
   let record = { campus_model_asset_id: "asset", network_id: network, model_file_name: "saved.glb", model_mime_type: "model/gltf-binary", model_data_base64: bytes.toString("base64"), model_size_bytes: bytes.length,
     model_sha256: createHash("sha256").update(bytes).digest("hex"), mapping_by_device_id: { [device]: "campus/building/f1" }, source: "session_import", created_at: "2026-09-10T00:00:00Z", updated_at: "2026-09-10T00:00:00Z" };
-  await page.route("**/campus/model-assets", async (route) => {
+  await page.route(/\/campus\/model-assets(?:\?.*)?$/, async (route) => {
     if (route.request().method() === "POST") record = { ...record, ...route.request().postDataJSON() };
-    await route.fulfill({ json: envelope({ items: [record], total: 1 }) });
+    await route.fulfill({ json: envelope({ items: [{ ...record, model_data_base64: undefined }], total: 1, page: 1, page_size: 20 }) });
   });
+  await page.route("**/campus-model-assets/asset/download", (route) => route.fulfill({ body: bytes, contentType: "application/octet-stream", headers: { ETag: `"sha256:${record.model_sha256}"`, "Content-Length": String(bytes.length) } }));
   const unrelated = { group_key: "other-campus", name: "Other campus", group_type: "custom" };
   let groups = [unrelated];
   await page.route("**/device-groups", async (route) => {

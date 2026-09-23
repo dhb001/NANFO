@@ -1,0 +1,12 @@
+{
+  "body": "{\"asset\":{\"version\":\"2.0\"},\"scenes\":[{}],\"scene\":0}",
+  "sha256": "b54dce7413495b82ca8d920d2d68f5095b87d0558453edb8235458b7345d06bb",
+  "headers": {
+    "content-type": "application/octet-stream",
+    "content-length": "51",
+    "etag": "\"sha256:b54dce7413495b82ca8d920d2d68f5095b87d0558453edb8235458b7345d06bb\"",
+    "cache-control": "private, no-store",
+    "x-content-type-options": "nosniff",
+    "content-disposition": "attachment; filename=\"00000000-0000-0000-0000-000000000901.bin\""
+  }
+}

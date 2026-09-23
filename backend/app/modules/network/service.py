@@ -669,6 +669,9 @@ class CampusModelAssetService:
         actor_user_id: str,
         requested_workspace_id: uuid.UUID | None = None,
         claim_org_id: uuid.UUID | None = None,
+        include_data: bool = True,
+        page: int = 1,
+        page_size: int = 20,
     ) -> CampusModelAssetListResponse:
         await self._assert_network_workspace_access(
             network_id=network_id,
@@ -677,13 +680,20 @@ class CampusModelAssetService:
             claim_org_id=claim_org_id,
         )
 
-        rows = await self._repo.list_for_network(network_id)
-        from app.modules.network.asset_io import asset_response
+        from app.modules.network.asset_io import asset_response, download_path
+        from app.modules.network.schemas import CampusModelAssetResponse
 
-        response = CampusModelAssetListResponse(
-            items=[await asset_response(self._asset_store, row) for row in rows],
-            total=len(rows),
-        )
+        if include_data:
+            rows = await self._repo.list_for_network(network_id)
+            response = CampusModelAssetListResponse(
+                items=[await asset_response(self._asset_store, row) for row in rows], total=len(rows),
+            )
+        else:
+            rows, total = await self._repo.list_metadata_for_network(network_id, page=page, page_size=page_size)
+            items = [CampusModelAssetResponse.model_validate(row) for row in rows]
+            for item in items:
+                item.download_path = download_path(item)
+            response = CampusModelAssetListResponse(items=items, total=total, page=page, page_size=page_size)
         self._db.expire_all()
         await self._assert_network_workspace_access(
             network_id=network_id, actor_user_id=actor_user_id,

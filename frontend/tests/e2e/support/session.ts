@@ -1534,4 +1534,9 @@ export async function loginFromUi(page: Page): Promise<void> {
   await page.getByLabel("Password").fill("change-me");
   await page.getByRole("button", { name: "Sign In" }).click();
   await expect(page).toHaveURL(/\/ops\/overview$/);
+  // The URL changes before the lazy overview and its org -> workspace -> network
+  // queries finish. Leaving early unmounts the effects that establish scope.
+  await expect(page.getByRole("combobox", { name: "Organization", exact: true })).toHaveValue(/\S+/);
+  await expect(page.getByRole("combobox", { name: "Workspace", exact: true })).toHaveValue(/\S+/);
+  await expect(page.locator("button.network-choice[aria-pressed='true']")).toHaveCount(1);
 }

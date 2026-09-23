@@ -11,7 +11,6 @@ Provides reusable dependencies:
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime
 from typing import Annotated
 
 import redis.asyncio as aioredis
@@ -20,6 +19,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
+from app.core.request_context import RequestMeta, request_context
 from app.db.postgres import AsyncSessionLocal
 from app.db.redis import get_redis_client
 from app.modules.identity.service import AuthService
@@ -46,23 +46,12 @@ async def get_redis():  # type: ignore[misc]
 
 # ── Request metadata ──────────────────────────────────────────────────────────
 
-class RequestMeta:
-    """Holds request_id and timestamp for envelope construction."""
-
-    def __init__(self, request_id: str, timestamp: str, request: Request):
-        self.request_id = request_id
-        self.timestamp = timestamp
-        self.request = request
-
-
 async def get_request_meta(request: Request) -> RequestMeta:
-    """Return (or generate) request_id and a UTC ISO8601 timestamp.
-
-    If the upstream gateway already set X-Request-ID, use it; otherwise generate.
-    """
-    request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
-    timestamp = datetime.now(UTC).isoformat()
-    return RequestMeta(request_id=request_id, timestamp=timestamp, request=request)
+    """Reuse middleware metadata, including when mounted in a standalone router."""
+    meta = request_context(request)
+    if request.state.request_id_error is not None:
+        raise request.state.request_id_error
+    return meta
 
 
 # ── JWT / Auth ────────────────────────────────────────────────────────────────

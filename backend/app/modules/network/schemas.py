@@ -15,7 +15,7 @@ from ipaddress import ip_address, ip_network
 from math import isfinite
 from typing import Annotated
 
-from pydantic import AfterValidator, BaseModel, Field, StringConstraints, field_validator, model_validator
+from pydantic import AfterValidator, BaseModel, Field, StringConstraints, field_validator, model_serializer, model_validator
 
 from app.modules.network.registration import AssetRegistration
 from app.modules.network.asset_mapping import normalize_asset_device_mapping
@@ -317,7 +317,7 @@ class CampusModelAssetResponse(BaseModel):
     network_id: uuid.UUID
     model_file_name: str
     model_mime_type: str
-    model_data_base64: str
+    model_data_base64: str | None = None
     model_sha256: str
     model_size_bytes: int
     mapping_by_device_id: dict[str, str]
@@ -327,10 +327,27 @@ class CampusModelAssetResponse(BaseModel):
 
     model_config = {"from_attributes": True}
 
+    @model_serializer(mode="wrap")
+    def serialize_asset(self, handler):
+        values = handler(self)
+        if self.model_data_base64 is None:
+            values.pop("model_data_base64", None)
+        return values
+
 
 class CampusModelAssetListResponse(BaseModel):
     items: list[CampusModelAssetResponse]
     total: int
+    page: int | None = None
+    page_size: int | None = None
+
+    @model_serializer(mode="wrap")
+    def serialize_list(self, handler):
+        values = handler(self)
+        if self.page is None:
+            values.pop("page", None)
+            values.pop("page_size", None)
+        return values
 
 
 class UpsertDeviceGroupInput(BaseModel):

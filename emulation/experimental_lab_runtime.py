@@ -222,15 +222,35 @@ class GuardedRuntime:
                 "readback": self.routing.readback(), "completed_at": time.time(),
                 "clock_monotonic": time.monotonic(), "clock_wall": time.time()}
 
-    def restore(self):
+    def restore(self, timeout_seconds=0):
         require(self.baseline is not None, "baseline_unavailable")
         self.restoring = True
         began = time.monotonic()
         try:
             # change() alone is insufficient after partial apply: its cached action
             # may still name the baseline. close() verifies/removes exact owned state.
-            self.routing.close()
-            readback = self.original_readback()
+            deadline = began + timeout_seconds
+            while True:
+                try:
+                    self.routing.close()
+                    readback = self.original_readback()
+                    matches = (readback["tables"] == self.baseline["tables"] and
+                        all(readback["paths"][k]["nodes"] == v["nodes"]
+                            for k, v in self.baseline["paths"].items()))
+                    if matches:
+                        break
+                except RuntimeError as exc:
+                    # The frozen close removes owned rows BEFORE checking FRR.
+                    # An outage can temporarily prevent that read-only traversal.
+                    # Never retry a mutation/foreign-state/unknown error here.
+                    if str(exc) not in {
+                        "Original FRR forwarding not restored",
+                        "Missing or ambiguous kernel next hop", "Kernel forwarding loop",
+                    }:
+                        raise
+                require(not self.routing.owned, "recovery_owned_state_unresolved")
+                require(time.monotonic() < deadline, "original_forwarding_not_restored")
+                time.sleep(min(.1, max(0, deadline - time.monotonic())))
             # Preserve full raw readback, compare stable forwarding identity. Kernel
             # cache/expiry metadata is not configured forwarding state.
             require(readback["tables"] == self.baseline["tables"] and

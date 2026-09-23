@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import json
 import math
+import re
 from pathlib import Path
 import statistics
 import sys
@@ -333,6 +334,54 @@ def raw_performance(frame, policy):
                 step_index=raw["step_index"],action=action,raw_sha256=canonical(frame))
 
 
+def audit_rejection(root, captured, records, journal, native, failures):
+    """A bad window cannot conceal an unrelated controller/recovery failure."""
+    controller = read(artifact(root, captured["controller"]))
+    errors = controller.get("exception", [])
+    require(controller.get("status") == "failed" and controller.get("error_type") == "ValueError"
+            and errors and all(e.get("type") == "ValueError" and e.get("message") in {
+                "experimental_receiver_uncertain_or_rejected", "experimental_verification_threshold_failed",
+            } for e in errors), "unexplained_rejection_control_failure")
+    prepared = records["prepared"]
+    request_id = str(prepared.command.request_id)
+    rows = [r for r in journal["receipts"] if r.get("request_id") == request_id]
+    phases = [r["kind"] for r in rows]
+    offset = 0
+    for phase in ("prepared", "dispatching", "interrupted", "recovering", "restored"):
+        require(phase in phases[offset:], "rejection_phase_missing:" + phase)
+        offset = phases.index(phase, offset) + 1
+    require(any(r["kind"] == "restored" and r["payload"] == records["recovery"].model_dump(mode="json")
+                for r in rows), "rejection_recovery_not_durable")
+    failed = failures[0]
+    if all(e.get("message") == "experimental_verification_threshold_failed" for e in errors):
+        verified = [r for r in rows if r["kind"] == "verified"
+                    and canonical(r["payload"].get("provenance", {}).get("frame")) == failed["raw_sha256"]]
+        require(len(verified) == 1 and verified[0]["payload"].get("action_sha256") == canonical(
+            prepared.model_dump(mode="json")) and phases.index("verified") < phases.index("interrupted"),
+            "core_failed_window_enforcement_unbound")
+        return
+    matched = []
+    for path in (root / captured["case_id"]).glob("wire-*.json"):
+        wire = read(path)
+        req, response = wire["request"], wire["response"]
+        ev = response.get("evidence", {})
+        frame = ev.get("failed_frame")
+        if frame is None or canonical(frame) != failed["raw_sha256"]:
+            continue
+        retained = native["receipts"].get(req["request_id"], {})
+        require(retained.get("request_sha256") == canonical(req) and retained.get("response") == response,
+                "failed_window_receipt_not_durable")
+        require(response["request_id"] == req["request_id"] and response["status"] == "rejected"
+                and response["policy_sha256"] == req["policy_sha256"] == native["policy_sha256"]
+                and response["fence"] == req["fence"]
+                and req["operation"] in ("execute", "verify")
+                and (req["operation"] != "execute" or req["request_id"] == request_id)
+                and ev.get("reason") == ("measured_verification_failed" if req["operation"] == "execute"
+                                         else "hold_measurement_failed"), "failed_window_not_enforced")
+        matched.append(req["request_id"])
+    require(len(matched) == 1, "failed_window_enforcement_unbound")
+
+
 def classify_nominal(root, captured):
     """V2 protocol completion is distinct from candidate performance success."""
     from app.modules.autonomy.experimental.schemas import ExperimentalPolicy
@@ -377,10 +426,8 @@ def classify_nominal(root, captured):
         require(frame["response"]["data"]["episode_id"]==str(records["frame"].snapshot.run_id),"retained_frame_episode_mismatch")
         windows.append(result)
     failures=[w for w in windows if not w["passed"]]
-    reasons={r["response"]["evidence"].get("reason") for r in native["receipts"].values()}
     if failures:
-        require(bool(reasons & {"measured_verification_failed","hold_measurement_failed"})
-                or any(r["kind"]=="verified" for r in journal["receipts"]),"threshold_failure_not_enforced")
+        audit_rejection(root, captured, records, journal, native, failures)
         return dict(outcome="performance_rejected_then_restored",protocol_complete=True,candidate_passed=False,
                     metrics=failures[0]["metrics"],windows=windows)
     controller=read(artifact(root,captured["controller"]))
@@ -610,16 +657,105 @@ def audit(root):
                 independent_signoff=False)
 
 
+def diagnose(root):
+    """Read-only, all-case diagnostics, deliberately never an acceptance verdict."""
+    root = Path(root)
+    plan, manifest = read(root / "plan.json"), read(root / "campaign-evidence.json")
+    captured = {r["case_id"]: r for r in manifest["cases"]}
+    reports = []
+    for declared in plan["trials"] + plan["faults"]:
+        name = declared["case_id"]
+        row = captured.get(name, {})
+        report = dict(case_id=name, recorded_status=row.get("status", "missing"),
+                      recorded_outcome=row.get("outcome"), findings=[], windows=[])
+        reports.append(report)
+        def check(stage, function):
+            try:
+                return function()
+            except (ValueError, KeyError, OSError, TypeError, IndexError) as exc:
+                # Do not publish arbitrary exception strings or artifact payloads.
+                reason = str(exc)
+                report["findings"].append(dict(stage=stage, error_type=type(exc).__name__,
+                    reason=reason if isinstance(exc, ValueError) and re.fullmatch(r"[a-z_]+(?::[a-z_]+)?", reason)
+                    else "evidence_unavailable_or_invalid"))
+                return None
+        for key, ref in row.items():
+            if isinstance(ref, dict) and "path" in ref and "sha256" in ref:
+                check("reference:" + key, lambda ref=ref: artifact(root, ref))
+        if not row:
+            report["findings"].append(dict(stage="case_missing", error_type="MissingEvidence"))
+            continue
+        controller = check("controller", lambda: read(artifact(root, row["controller"]))) if "controller" in row else None
+        if controller:
+            report["controller_errors"] = [e["message"] for e in controller.get("exception", [])
+                if re.fullmatch(r"experimental_[a-z_]+", e.get("message", ""))]
+        if "fault" not in declared:
+            classification = check("nominal_classification", lambda: classify_nominal(root, row))
+            if classification:
+                report["diagnostic_outcome"] = classification["outcome"]
+        if "operator_policy" not in row:
+            report["findings"].append(dict(stage="preacquisition_policy_missing", error_type="MissingEvidence"))
+            # Older campaigns did not reference these setup failures in their manifest.
+            # Read only the fixed local filenames and report their byte identity.
+            for filename in ("attempt.json", "qualification.json", "registry.json"):
+                path = root / name / filename
+                ref = dict(path=str(path.relative_to(root)), sha256=check("setup_hash", lambda: file_hash(path)))
+                value = check("setup:" + filename, lambda: read(artifact(root, ref)))
+                if value:
+                    report[filename] = dict(sha256=ref["sha256"], reasons=[r for r in value.get("reasons", [])
+                        if re.fullmatch(r"live_[a-z_]+", r)],
+                        installed_at=value.get("installed_at"), expires_at=value.get("expires_at"))
+            continue
+        from app.modules.autonomy.experimental.schemas import ExperimentalPolicy
+        policy = check("policy", lambda: ExperimentalPolicy.model_validate(read(artifact(root, row["operator_policy"]))))
+        native = check("native", lambda: read(artifact(root, row["native_journal"])))
+        journal = check("journal", lambda: read(artifact(root, row["journal"])))
+        if journal:
+            report["core_released"] = journal.get("run", {}).get("released", False)
+            report["core_phase"] = journal.get("run", {}).get("phase")
+            check("durable_recovery", lambda: require(report["core_released"] is True
+                and report["core_phase"] == "restored", "durable_recovery_unresolved"))
+        if policy and declared.get("fault") != "delayed-data":
+            check("joined_chain", lambda: audit_chain(root, row["chain"], policy, positive=False))
+        if native:
+            report["native_phase"] = native["phase"]
+            check("native_restoration", lambda: native_restoration(native, read(artifact(root, row["bootstrap"]))["baseline"]))
+        inventory = check("raw_inventory", lambda: read(artifact(root, row["raw_frames"])))
+        if inventory is not None and native:
+            check("raw_inventory_complete", lambda: require(
+                [r["canonical_sha256"] for r in inventory] == native["runtime"]["frame_hashes"], "missing_frames"))
+            for ref in inventory:
+                frame = check("raw_frame", lambda ref=ref: read(artifact(root / name, ref)))
+                if frame is None:
+                    continue
+                check("raw_canonical_hash", lambda: require(canonical(frame) == ref["canonical_sha256"], "changed"))
+                data = frame["response"].get("data", {})
+                window = dict(sha256=ref["canonical_sha256"], step_index=data.get("step_index"),
+                    complete=data.get("evidence", {}).get("measurement_complete", False),
+                    truncated=data.get("truncated"), metrics=None)
+                if policy:
+                    performance = check("window:" + ref["canonical_sha256"], lambda: raw_performance(frame, policy))
+                    if performance:
+                        window.update(metrics=performance["metrics"], checks=performance["checks"])
+                report["windows"].append(window)
+    return dict(status="diagnostic_only", acceptance=False, calibrated=False,
+                plan_sha256=file_hash(root / "plan.json"), cases=reports,
+                recorded_failed=sum(r["recorded_status"] != "completed" for r in reports))
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("root", type=Path)
     parser.add_argument("--output", type=Path)
+    parser.add_argument("--diagnose", action="store_true", help="report every case offline; never certify acceptance")
     args = parser.parse_args()
     try:
-        result = audit(args.root)
+        result = diagnose(args.root) if args.diagnose else audit(args.root)
     except (ValueError, KeyError, OSError, TypeError) as exc:
         result = dict(status="failed", reason=type(exc).__name__ + ":" + str(exc), calibrated=False)
     if args.output:
+        if args.diagnose:
+            require(not args.output.resolve().is_relative_to(args.root.resolve()), "diagnostic_output_must_be_outside_evidence")
         from scripts.verify_experimental_lab import write
         write(args.output, result)
     print(json.dumps(result, indent=2, sort_keys=True, allow_nan=False))

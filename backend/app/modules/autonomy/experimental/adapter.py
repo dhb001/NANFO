@@ -97,6 +97,13 @@ class ExperimentalLabAdapter:
                 or not isinstance(response["evidence"], dict)):
             raise ValueError("experimental_receiver_response_binding_invalid")
         if response["status"] != "ok":
+            # Only the authenticated first STOP cause can identify receiver expiry.
+            # Generic rejection (including a poor/incomplete window) stays failure.
+            cause = response["evidence"].get("stop_cause") or {}
+            if (operation == "heartbeat" and cause.get("reason") == "watchdog:action_expired"
+                    and getattr(self, "action_expires_at", None) is not None
+                    and time.time() >= self.action_expires_at):
+                raise ValueError("experimental_action_expired")
             raise ValueError("experimental_receiver_uncertain_or_rejected")
         return response["evidence"]
 
@@ -222,6 +229,7 @@ class ExperimentalLabAdapter:
 
     async def execute(self, action, checkpoint):
         command = action.command
+        self.action_expires_at = command.expires_at.timestamp()
         evidence = await self._guarded("execute", checkpoint, action=int(command.route.action_id[-1]),
             request_id=command.request_id, expiry=command.expires_at.timestamp(),
             duration=min(self.receiver_policy["max_duration_seconds"],

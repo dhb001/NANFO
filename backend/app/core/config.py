@@ -142,6 +142,27 @@ class Settings(BaseSettings):
     REPORTS_MIN_FREE_BYTES: int = Field(default=67108864, ge=1048576, le=1099511627776)
     REPORTS_LEASE_SECONDS: int = Field(default=120, ge=30, le=300)
 
+    @model_validator(mode="after")
+    def validate_deployed_credentials(self):
+        # Execution mode also describes test fixtures/adapter selection. Only the
+        # application environment determines whether development secrets are legal.
+        if self.APP_ENV.strip().lower() in {"development", "dev", "test", "testing"}:
+            return self
+        for name in ("POSTGRES_PASSWORD", "NEO4J_PASSWORD", "REDIS_PASSWORD", "JWT_SECRET_KEY"):
+            value = getattr(self, name)
+            normalized = value.strip().lower().replace("-", "_").replace(" ", "_")
+            minimum = 32 if name == "JWT_SECRET_KEY" else 16
+            if (
+                len(value) < minimum
+                or not value.strip()
+                or "change_me" in normalized
+                or "changeme" in normalized
+                or normalized in {"nanfo_dev_secret", "nanfo_test", "test_secret_key_32_chars_minimum!"}
+                or any(ord(char) < 32 or ord(char) == 127 for char in value)
+            ):
+                raise ValueError(f"{name} must be a non-placeholder secret of at least {minimum} characters")
+        return self
+
     def realtime_fanout_settings(self):
         from app.events.fanout_contract import FanoutSettings
 

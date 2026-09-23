@@ -1,0 +1,59 @@
+{
+  "blockers": [
+    "real_redis_not_exercised"
+  ],
+  "cleanup": {
+    "children_reaped": true,
+    "graceful": true,
+    "owned_pids": [
+      762304
+    ],
+    "postgres_log_reader_reaped": true,
+    "postgres_port_closed": true,
+    "private_tree_removed": true,
+    "redis_port_closed": true
+  },
+  "counts": {
+    "errors": 0,
+    "failed": 0,
+    "passed": 254,
+    "skipped": 12,
+    "total": 266
+  },
+  "failed_cases": [],
+  "postgres_diagnostics": {
+    "codes": {},
+    "exit_code_before_cleanup": null,
+    "private_tail_bytes": 3012,
+    "tmp_free_bytes": 5390012416
+  },
+  "pytest_exit": 0,
+  "redis": "not_requested",
+  "redis_version": null,
+  "status": "partial",
+  "tests": [
+    "tests/integration/test_intent_execution_postgres.py",
+    "tests/integration/test_report_postgres.py",
+    "tests/integration/test_autonomy_postgres.py",
+    "tests/integration/test_autonomy_operator_postgres.py",
+    "tests/integration/test_simulation_postgres.py",
+    "tests/integration/test_alert_postgres.py",
+    "tests/integration/test_plugin_postgres.py",
+    "tests/integration/test_network_outbox_postgres.py",
+    "tests/integration/test_spatial_postgres.py",
+    "tests/integration/test_asset_postgres.py",
+    "tests/integration/test_telemetry_lifecycle_postgres.py",
+    "tests/integration/test_retention_complete_postgres.py",
+    "tests/integration/test_fleet_postgres.py",
+    "tests/integration/test_autonomous_execution_postgres.py",
+    "tests/integration/test_experimental_lab_postgres.py",
+    "tests/integration/test_network_inventory_postgres.py",
+    "tests/integration/test_identity_audit_repair_postgres.py",
+    "tests/integration/test_alert_scope_postgres.py",
+    "tests/integration/test_workflow_history_postgres.py",
+    "tests/integration/test_telemetry_history_sql.py",
+    "tests/integration/test_login_rate_limit_redis.py",
+    "scripts/test_audit_role_profiles.py",
+    "scripts/test_audit_http_smoke.py"
+  ]
+}

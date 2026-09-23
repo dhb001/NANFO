@@ -35,7 +35,7 @@ describe("persisted model validation", () => {
     const record = await asset();
     for (const change of [
       { model_sha256: "0".repeat(64) }, { model_size_bytes: MAX_MODEL_BYTES + 1 },
-      { model_size_bytes: record.model_size_bytes - 1 }, { model_data_base64: "!".repeat(record.model_data_base64.length) },
+      { model_size_bytes: record.model_size_bytes - 1 }, { model_data_base64: "!".repeat(record.model_data_base64!.length) },
       { model_mime_type: "text/html" }, { mapping_by_device_id: { foreign: "campus" } }, { network_id: "foreign" },
     ]) await expect(decodePersistedModel({ ...record, ...change }, "n", new Set(["d"]))).rejects.toThrow();
   });

@@ -1,6 +1,52 @@
 # ADR025 joined experimental acceptance campaign
 
-## Current continuation: diagnosis, outcome-v2 and executable source isolation (NO LAUNCH)
+## Current —017 failed;018 repair independently accepted, fresh plan blocked (2026-09-21)
+
+Authority: [experimental owner handoff](../ReviewClosure-Experimental.md) and
+[master matrix](../ReviewClosure-Completion.md). Earlier preparation/no-launch
+sections below are historical records, not the current campaign status.
+
+- **Actual authorized017:** unchanged frozen016 source and original model/runtime
+  identities; **4/4 smokes completed,67/68 matrix outcomes completed,1 invalid
+  measurement**. All **20 fault outcomes completed** (18 restored,2 predispatch
+  rejected). Nominal outcomes:34 kept/restored,13 complete performance rejections/
+  restored,1 invalid. The full auditor and result remain **FAILED**; completion is
+  not evidence that every candidate improved performance.
+- Invalid case **`path1-1564-qualified`**, verify step3:
+  `protected_regular_owner_file_required`, truncated/incomplete measurement. Earlier
+  steps passed; core/native restored and core released. Missing aggregate metrics
+  remain null. This is not action expiry or measured bad performance.
+- An atomic-publication race was reproduced against frozen016: replacement between
+  open and fstat leaves the safe old inode with zero links. The exact live
+  interleaving is unproven because the frame lacks pathname/fstat metadata.
+  Active emulation now uses protected bounded reopen (at most3 attempts), discarding
+  old bytes and revalidating owner/mode/no-follow/link/path bindings and current
+  authority/STOP. Frozen016 and campaign017 bytes remain unchanged; no same-plan retry.
+- **Frozen018 gates:**115 backend passed/3 historical014-only skips,34 receiver/runtime
+  passed,2 STOP probes passed; Ruff clean. These are offline checks, not fresh measured
+  acceptance. [Independent018 review](../ReviewClosureEvidence/experimental017-018/018-independent-review.json),
+  SHA256 `61ae01ccca57b5607566791ebd8dc811c25b84af57b0dbdcc7530c493087cd80`,
+  accepted the bounded protected-read repair and independently reconfirmed017 failure.
+- Reviewer found `reserved_seed_count:1342` was a diagnostic cardinality falsely
+  treated as a reservation. Active typed/provenance extractor correction passed
+  **60 campaign tests**; genuine/preregistered and missing-plan reservations remain.
+- **Fresh018 plan BLOCKED:** corrected **996 of1000** permitted train-operational
+  values in1000–1999 reserved;**4 available,36 required,deficit32**. No fresh output:
+  no plan hash, new reservations, admission or launch. Preserve failed reservations
+  and the train/validation/test split. Any domain decision requires explicit reviewed
+  direction; do not silently reuse values, widen the domain or declare completion.
+- Latest core0029 refresh **c8rorfzd accepted28pass/0fail/5blocked**, backend
+  `a2bf67af…`, accepted source `f7105617…`. Subsequent source changes are only the
+  experimental verifier scanner/test (`9e46d086…` verifier), not core behavior;
+  current tree is not entirely byte-identical to the accepted image. Core acceptance
+  does not qualify experimental actuation or authorize a new protocol/domain.
+  [Durable credential-free evidence](../ReviewClosureEvidence/README.md) preserves
+  the new refresh/retention records and earlier deployment/browser receipts.
+
+Physical RF, intended-user study, independent repeated training, proactive/stability
+evaluation and full recovery remain [research evidence obligations](../ReviewClosure-Research.md).
+
+## Historical continuation: diagnosis, outcome-v2 and executable source isolation (NO LAUNCH)
 
 Parent instructed investigation/preparation only pending wrapper/core and retention0029
 fixes. Campaign009 and all previous plans, thresholds, frames and reported results

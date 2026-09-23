@@ -180,6 +180,11 @@ services:
       start_period: 30s
   api:
     <<: *application
+    # Only nginx's exact address on the isolated proxy network is trusted.
+    environment:
+      <<: *environment
+      FORWARDED_ALLOW_IPS: ${NANFO_PROXY_GATEWAY_IP:-172.30.27.2}
+    networks: [private, proxy]
     volumes:
       - runtime_secrets:/run/secrets:ro
       - reports:/var/lib/nanfo/reports:ro
@@ -310,7 +315,10 @@ services:
     security_opt: [no-new-privileges:true]
     tmpfs: ["/tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777"]
     ports: ["127.0.0.1:${NANFO_HTTP_PORT:-8787}:8080"]
-    networks: [private, gateway]
+    networks:
+      proxy:
+        ipv4_address: ${NANFO_PROXY_GATEWAY_IP:-172.30.27.2}
+      gateway: {}
     depends_on: {api: {condition: service_healthy}}
     restart: unless-stopped
     mem_limit: 128m
@@ -325,6 +333,13 @@ services:
 
 networks:
   private: {internal: true}
+  # Configure a distinct unused subnet/address pair for concurrent deployments.
+  # No stores/workers or published API ports belong to this boundary.
+  proxy:
+    internal: true
+    ipam:
+      config:
+        - subnet: ${NANFO_PROXY_SUBNET:-172.30.27.0/24}
   gateway: {}
 volumes:
   postgres_data: {}

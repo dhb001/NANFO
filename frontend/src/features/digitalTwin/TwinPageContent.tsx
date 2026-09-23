@@ -41,11 +41,12 @@ import {
 import { useUiStore } from "@/shared/state/ui-store";
 import type { MeasuredPathSegment } from "./measuredPathMapping";
 import { hasPermission } from "@/features/auth/permissions";
+import { useSessionScope } from "@/features/auth/sessionScope";
 import { useSpatialScene } from "./spatialHooks";
 import { applySpatialScene } from "./spatialScene";
 import { SpatialScenePanel } from "./SpatialScenePanel";
 import { ModelRegistrationControls } from "./ModelRegistration";
-import type { AssetRegistration } from "@/shared/types/network";
+import type { AssetRegistration, CampusModelAssetRecord } from "@/shared/types/network";
 import { registrationTransform, validateRegistration } from "./modelRegistration";
 import { RFImportPanel, type RFImportState } from "./RFImportPanel";
 import { TwinScene } from "./TwinScene";
@@ -167,6 +168,9 @@ export function TwinPageContent() {
   const [showCustomGroups, setShowCustomGroups] = useState(false);
   const [openedCustomGroups, setOpenedCustomGroups] = useState(false);
   const [selectedAssetId, setSelectedAssetId] = useState("");
+  const [assetPage, setAssetPage] = useState(1);
+  const [retainedAsset, setRetainedAsset] = useState<{ asset: CampusModelAssetRecord; page: number } | null>(null);
+  const assetScope = useSessionScope();
   const pushToast = useUiStore((state) => state.pushToast);
 
   const graphQuery = useTopologyGraph(token, networkId);
@@ -221,7 +225,7 @@ export function TwinPageContent() {
   const sceneObjectAvailability = useLiveStore((state) => state.sceneObjectAvailability);
   const updateSpatialRefMutation = useUpdateDeviceSpatialRef(token, networkId);
   const campusBuildingsQuery = useCampusBuildings(token, networkId);
-  const campusModelAssetsQuery = useCampusModelAssets(token, networkId);
+  const campusModelAssetsQuery = useCampusModelAssets(token, networkId, assetPage, 20);
   const deviceGroupsQuery = useDeviceGroups(token, networkId);
   const upsertCampusBuildingsMutation = useUpsertCampusBuildings(token, networkId);
   const upsertCampusModelAssetsMutation = useUpsertCampusModelAssets(token, networkId);
@@ -300,7 +304,17 @@ export function TwinPageContent() {
     return typeof raw === "string" && raw.trim() ? raw.trim() : null;
   }, [baseGraph?.nodes, selectedNodeId]);
 
-  const selectedPersistedModelAsset = campusModelAssetsQuery.data?.items.find((item) => item.campus_model_asset_id === selectedAssetId);
+  const selectedPersistedModelAsset = campusModelAssetsQuery.data?.items.find((item) => item.campus_model_asset_id === selectedAssetId)
+    ?? (retainedAsset?.asset.campus_model_asset_id === selectedAssetId ? retainedAsset.asset : undefined);
+  const visibleAssets = campusModelAssetsQuery.data?.items ?? [];
+  const selectableAssets = selectedPersistedModelAsset && !visibleAssets.some((item) => item.campus_model_asset_id === selectedAssetId)
+    ? [selectedPersistedModelAsset, ...visibleAssets] : visibleAssets;
+  const selectAsset = (id: string) => {
+    setSelectedAssetId(id);
+    const asset = visibleAssets.find((item) => item.campus_model_asset_id === id);
+    if (asset) setRetainedAsset({ asset, page: assetPage });
+    else if (!id) setRetainedAsset(null);
+  };
 
   const graphNodes = useMemo(() => {
     return (baseGraph?.nodes ?? []).map((node) => ({
@@ -676,15 +690,21 @@ export function TwinPageContent() {
     setIsImporting(true);
     setImportError(null);
     try {
-      const [assets, graph] = await Promise.all([campusModelAssetsQuery.refetch(), graphQuery.refetch()]);
+      const sourcePage = visibleAssets.some((item) => item.campus_model_asset_id === selectedAssetId) ? assetPage : retainedAsset?.page ?? assetPage;
+      const [assets, graph] = await Promise.all([
+        sourcePage === assetPage ? campusModelAssetsQuery.refetch() : campusModelAssetsQuery.readPage(sourcePage).then((data) => ({ data, isError: false })),
+        graphQuery.refetch(),
+      ]);
+      assetScope.assertCurrent();
       if (!mounted.current || operation !== modelOperation.current || useLiveStore.getState().epoch !== epoch) return;
       if (assets.isError || graph.isError || !graph.data || graph.data.nextCursor) throw new Error("Restore requires a fresh, complete topology and persisted asset read.");
       const asset = assets.data?.items.find((item) => item.campus_model_asset_id === selectedPersistedModelAsset.campus_model_asset_id);
       if (!asset) throw new Error("Persisted model is no longer available. Refresh and try again.");
       const ids = new Set(graph.data.data.nodes.filter((node) => !Object.hasOwn(useLiveStore.getState().topologyTombstones, node.device_id)).map((node) => node.device_id));
-      const bytes = asset.storage_backend === "local_cas" ? await downloadModelBytes(asset) : undefined;
+      const bytes = asset.storage_backend === "local_cas" || !asset.model_data_base64 ? await downloadModelBytes(asset) : undefined;
       const file = await decodePersistedModel(asset, networkId, ids, bytes);
       const restoredRegistration = validateRegistration(asset.registration);
+      assetScope.assertCurrent();
       if (!mounted.current || operation !== modelOperation.current || useLiveStore.getState().epoch !== epoch) return;
       if (useLiveStore.getState().topologyRevision !== revision) throw new Error("Topology changed during restore. Reconcile and try again.");
       const mapping = { ...asset.mapping_by_device_id };
@@ -943,6 +963,12 @@ export function TwinPageContent() {
                 {campusModelAssetsQuery.isError ? <p role="alert">Model asset list unavailable. Reload to retry.</p> : null}
                 {campusModelAssetsQuery.data?.total === 0 ? <p>No persisted model assets.</p> : null}
                 <Button tone="ghost" disabled={campusModelAssetsQuery.isFetching || isImporting} onClick={() => void campusModelAssetsQuery.refetch()}>Reload model assets</Button>
+                <nav aria-label="Model asset pages">
+                  <Button tone="ghost" disabled={assetPage === 1 || campusModelAssetsQuery.isFetching || isImporting} onClick={() => setAssetPage((page) => page - 1)}>Previous asset page</Button>
+                  <span role="status">Asset page {assetPage} · {campusModelAssetsQuery.data?.total ?? 0} assets</span>
+                  <Button tone="ghost" disabled={!campusModelAssetsQuery.data || assetPage * 20 >= campusModelAssetsQuery.data.total || campusModelAssetsQuery.isFetching || isImporting} onClick={() => setAssetPage((page) => page + 1)}>Next asset page</Button>
+                </nav>
+                {campusModelAssetsQuery.data && !visibleAssets.length && campusModelAssetsQuery.data.total > 0 ? <p>No assets on this page. Use Previous asset page.</p> : null}
                 <p>Available persisted assets; new saves retain earlier assets. Restore changes only the local view.</p>
                 {selectedPersistedModelAsset ? (
                   <div className="mono" style={{ color: "var(--ink-3)", fontSize: "0.74rem" }}>
@@ -1046,7 +1072,7 @@ export function TwinPageContent() {
         </QueryState>
       </Panel>
 
-      <TwinLifecycleControls networkId={networkId} assets={campusModelAssetsQuery.data?.items ?? []} selectedId={selectedAssetId} onSelect={setSelectedAssetId}
+      <TwinLifecycleControls networkId={networkId} assets={selectableAssets} selectedId={selectedAssetId} onSelect={selectAsset}
         disabled={isImporting || isPersistingModelAsset || isPersistingCampus || isPersistingDeviceGroups}
         onReload={async () => {
           const results = await Promise.all([campusModelAssetsQuery.refetch(), campusBuildingsQuery.refetch(), deviceGroupsQuery.refetch()]);
@@ -1054,6 +1080,7 @@ export function TwinPageContent() {
         }}
         onRetired={(id) => {
           setSelectedAssetId((current) => current === id ? "" : current);
+          setRetainedAsset((current) => current?.asset.campus_model_asset_id === id ? null : current);
           if (restoredAsset.current?.id !== id || restoredAsset.current.operation !== modelOperation.current || registration?.saved === false) return;
           restoredAsset.current = null; modelOperation.current += 1;
           setImportedModelUrl(null); setCurrentModelFile(null); setModelFileName(null); setImportSummary(null); setRegistration(null);

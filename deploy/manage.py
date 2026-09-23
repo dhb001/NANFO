@@ -2,6 +2,7 @@
 
 import argparse
 import hashlib
+import ipaddress
 import json
 import os
 import re
@@ -57,6 +58,43 @@ SECRET_NAMES = [
 
 def run(command, *, capture=False):
     return subprocess.run(command, check=True, text=True, capture_output=capture)
+
+
+def allocate_proxy_networks(count=1):
+    """Select private /24s outside Docker pools and host routes, without mutation.
+
+    Allocate source and restore together: neither network exists at selection time.
+    Docker still arbitrates concurrent external allocations at network creation.
+    """
+    if not 1 <= count <= 16:
+        raise ValueError("Proxy allocation count must be between 1 and 16")
+    ids = run(["docker", "network", "ls", "-q"], capture=True).stdout.split()
+    networks = json.loads(run(["docker", "network", "inspect", *ids], capture=True).stdout) if ids else []
+    routes = json.loads(run(["ip", "-j", "-4", "route", "show", "table", "all"], capture=True).stdout)
+    occupied = [
+        ipaddress.ip_network(item["Subnet"], strict=False)
+        for network in networks for item in (network.get("IPAM", {}).get("Config") or [])
+        if item.get("Subnet")
+    ]
+    occupied += [ipaddress.ip_network(row["dst"], strict=False) for row in routes
+                 if row.get("dst") and row["dst"] != "default"]
+    pools = [ipaddress.ip_network(value) for value in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")]
+    result = []
+    for pool in pools:
+        size = pool.num_addresses // 256
+        start = secrets.randbelow(size)
+        for offset in range(size):
+            subnet = ipaddress.ip_network((int(pool.network_address) + ((start + offset) % size) * 256, 24))
+            if any(subnet.version == used.version and subnet.overlaps(used) for used in occupied):
+                continue
+            occupied.append(subnet)
+            # APIs attach before nginx and Docker dynamically assigns from .2.
+            # The proxy boundary has only nginx and one/two APIs; use its last
+            # usable address so first-free allocation cannot consume nginx's IP.
+            result.append({"NANFO_PROXY_SUBNET": str(subnet), "NANFO_PROXY_GATEWAY_IP": str(subnet.broadcast_address - 1)})
+            if len(result) == count:
+                return result
+    raise ValueError("No unused private proxy subnet; review host routes and Docker pools")
 
 
 def compose(state, *args, capture=False):
@@ -147,6 +185,7 @@ def generate(state, project, port, email):
         )
         if existing.returncode == 0:
             raise ValueError("Target volume already exists")
+    proxy = allocate_proxy_networks()[0]
     state.mkdir(mode=0o700)
     for name in ("secrets", "binding", "models", "model-registry"):
         (state / name).mkdir(mode=0o700)
@@ -160,6 +199,7 @@ def generate(state, project, port, email):
         with os.fdopen(fd, "w") as output:
             output.write(secrets.token_hex(32) + "\n")
     config = {
+        **proxy,
         "NANFO_PROJECT": project,
         "NANFO_STATE_DIR": str(state),
         "NANFO_HTTP_PORT": str(port),

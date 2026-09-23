@@ -33,6 +33,56 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  stream-retention:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      POETRY_VIRTUALENVS_IN_PROJECT: 'true'
+      REDIS_IMAGE: redis:7.4.5-bookworm@sha256:90e7a336d044f1abc9e9dbc05d65566850896d11453bbd1dd0fb7e5059f0e8fb
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.12.14'
+      - name: Install locked backend environment
+        run: |
+          python -m pip install poetry==2.4.1
+          poetry check --lock
+          poetry sync --with dev --no-root --no-interaction
+      - name: Provide exact Redis image to owned disposable fixture
+        run: |
+          mkdir -p /tmp/opencode
+          docker pull "$REDIS_IMAGE"
+          image_id="$(docker image inspect --format '{{.Id}}' "$REDIS_IMAGE")"
+          [[ "$image_id" =~ ^sha256:[0-9a-f]{64}$ ]]
+          printf 'STREAM_RETENTION_TEST_IMAGE=%s\n' "$image_id" >> "$GITHUB_ENV"
+      - name: Real Redis retention races, archive recovery and bounded capacity
+        run: >-
+          poetry run pytest tests/integration/test_stream_retention_redis.py
+          --no-cov -q --junitxml=stream-retention-results.xml
+      - name: Require all retention cases executed with zero skips
+        run: |
+          python - <<'PY'
+          import xml.etree.ElementTree as ET
+
+          cases = ET.parse('stream-retention-results.xml').getroot().findall('.//testcase')
+          assert len(cases) >= 27, f'Expected at least27 retention cases, got {len(cases)}'
+          for tag in ('skipped', 'failure', 'error'):
+              assert not any(case.find(tag) is not None for case in cases), f'Retention lane recorded {tag}'
+          print(f'{len(cases)} actual Redis retention cases passed; zero skips')
+          PY
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: stream-retention-results
+          path: backend/stream-retention-results.xml
+          retention-days: 7
+
   database-contracts:
     if: ${{ github.event_name != 'workflow_dispatch' || inputs.run_database_tests }}
     runs-on: ubuntu-24.04
@@ -93,6 +143,8 @@ jobs:
           finally:
               connection.close()
           PY
+      - name: Verify declared fakeredis Lua support before database contracts
+        run: poetry run python ../scripts/check_fakeredis_lua.py
       - name: Disposable-schema migrations, transactions, recovery and Redis gates
         env:
           # Public fixture credentials, usable only for this disposable runner service.

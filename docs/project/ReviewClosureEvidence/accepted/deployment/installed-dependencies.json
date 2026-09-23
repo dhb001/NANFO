@@ -1,0 +1,1 @@
+{"image_id":"sha256:1926d2061253890120a1220c44a80b178e82c9a2789ccdbb9607a07515e6bdc3","observed_utc":"2026-09-21T16:28:00.001686+00:00","packages":{"cryptography":"50.0.0","fastapi":"0.135.4","pydantic":"2.13.4","starlette":"1.6.0","uvicorn":"0.32.1"},"read_only_network_none":true,"scope":"Read-only installed accepted API image; development environments are separate."}

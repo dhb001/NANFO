@@ -1,0 +1,80 @@
+{
+  "runtime_source_sha256": "f7105617ee9cad1ae51e2f223761885c9223ee22d4d586a08ff36a5f87e89d05",
+  "current_runtime_source_sha256": "f7105617ee9cad1ae51e2f223761885c9223ee22d4d586a08ff36a5f87e89d05",
+  "runtime_source_files": 725,
+  "runtime_added_paths": [],
+  "runtime_removed_paths": [],
+  "full_frozen_files": 1129,
+  "full_frozen_changed_paths": [
+    "ai-engine/README.md"
+  ],
+  "sha256": {
+    "backend/poetry.lock": "f97fc09b91ebc80360feb2045b86b1a9471ad9d956e36f91c4648d6ee752bcae",
+    "backend/pyproject.toml": "841bed1abe1b2e755394f8393146fe42ea296d9320560e877bea475f7af5cec6",
+    "frontend/package-lock.json": "f4ee0f7d31f9e71af29f4d1d2812e2e53b59d74e5a2f5f55845414cbf8766acb",
+    "frontend/package.json": "30a1c49e326b19c41103b4c134641439a8456428323394a73573740d6a2dd3e5",
+    "ai-engine/uv.lock": "fb98d58d60838c69a0fab2a8c908b2023c7c351acdfc3c886be59ee6aa2560b1",
+    "deploy/manage.py": "fe784665ab33777efc2e5bc6558da1786be1d5455022c95040f3bced18fbddb1",
+    "deploy/verify.py": "e003d9b2a81a7e10c310ae80899878bd99336697b8ddc2b73a52df9675361a60",
+    "deploy/backup_restore.py": "ac23ce7498c254d13ec05b1976aa423880b1e721a9038cce824dbaf98d2cc452",
+    "deploy/compose.yaml": "64aa7cbac67f0e30d2a17e1963947d2a35074e16413e38fde981a7916c0a6a29",
+    "emulation/experimental_lab_contract.py": "e0c308e589baaf8eda78444d1ed22d3420f95d51343b488101e5f9e5caea74a9",
+    "emulation/experimental_lab_receiver.py": "f58895c1bcb1c0a517dab64b1cc25ee8bc29353ae0778a15de476500e5628a73",
+    "backend/scripts/verify_experimental_lab.py": "5c60fc2710942110580bcca92e0c5cd948677d902ca901b3ba9739c7353de19d",
+    "freeze-manifest.json": "150f15ce849681fc7986f2a486503394b255c22cbaf5f91009e112bb78010a9b"
+  },
+  "evidence_sha256": {
+    "evidence/result.json": "aea363391faff9d85de241c7459ccc0dd79eb82b1bc5bec3bbc9cb7ad8cb742c",
+    "evidence/source-manifest.json": "ee231988815c4e6fae6f793577efe2f03f2c0160b7f62e9a290e08067d13698f",
+    "backup/manifest.json": "6363dd09efaa29957c237182f0018412e7d2dec43ea21acfa884e5c789bed9a3",
+    "build-backend.log": "a95f5bf55cd551ca7e246333fc3f1dfa6e351f24dfb95fcf14fb43c20622c1eb",
+    "build-frontend.log": "5677d38db3d0b3d62188740fc6a46e84a5396a0cd02d4afb08b2e346a293683a",
+    "build-neo4j.log": "d63d6393fbcc495e10656c71d905c37015f9ec739d1767eceb96567137ffedb1"
+  },
+  "images": {
+    "api": {
+      "id": "sha256:a2bf67af00b76980beec822f9c7f1fcb0e6d4ef2e1e6461b169b9b3ff3397b39",
+      "os": "linux",
+      "architecture": "amd64"
+    },
+    "gateway": {
+      "id": "sha256:2e6f019d5807e7a4f97cd2d82d9a62c4349a68e5c2b2ed0493a8eb206119657d",
+      "os": "linux",
+      "architecture": "amd64"
+    },
+    "neo4j": {
+      "id": "sha256:1005d99b218a5a1eac3baf07c080e1d6d6a345af736785d6fbe307e2b0825185",
+      "os": "linux",
+      "architecture": "amd64"
+    },
+    "postgres": {
+      "id": "sha256:f3bd19c606e442c3d7bdfa8002e03fe260a1023351e0ea4598032022b68dd6e3",
+      "os": "linux",
+      "architecture": "amd64"
+    },
+    "redis": {
+      "id": "sha256:90e7a336d044f1abc9e9dbc05d65566850896d11453bbd1dd0fb7e5059f0e8fb",
+      "os": "linux",
+      "architecture": "amd64"
+    }
+  },
+  "cleanup_remaining": {
+    "nanfo-deploy-verify-d6f19c7615c44d0e9229171d00e4dfee": {
+      "container": [],
+      "volume": [],
+      "network": []
+    },
+    "nanfo-deploy-verify-a27324122dad479fa8c00bf7a89bc506": {
+      "container": [],
+      "volume": [],
+      "network": []
+    }
+  },
+  "installed_backend_dependencies": {
+    "fastapi": "0.135.4",
+    "starlette": "1.6.0",
+    "pydantic": "2.13.4",
+    "cryptography": "50.0.0",
+    "uvicorn": "0.32.1"
+  }
+}

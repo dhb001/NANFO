@@ -47,12 +47,20 @@ def gateway(tmp_path_factory):
     config = config.replace("/dev/stdout", str(root / "access.log"))
     config = config.replace("listen 8080", f"listen 127.0.0.1:{port}")
     config = config.replace("/usr/share/nginx/html", str(root))
-    config = config.replace("http://api:8000", f"http://127.0.0.1:{upstream.server_port}")
+    # Keep the production proxy_pass/header directives. Only substitute service
+    # discovery: host nginx must not depend on Docker DNS or newer `resolve` support.
+    upstream_path = root / "nginx-upstream.conf"
+    upstream_path.write_text(
+        f"upstream nanfo_api {{ server 127.0.0.1:{upstream.server_port}; }}\n"
+    )
+    upstream_include = "include /etc/nginx/nginx-upstream.conf;"
+    assert upstream_include in config, "Update fixture for the production upstream include"
+    config = config.replace(upstream_include, f'include "{upstream_path}";')
     path = root / "nginx.conf"
     path.write_text(config)
     process = None
     try:
-        subprocess.run([nginx, "-t", "-c", str(path), "-p", str(root)], check=True, capture_output=True)
+        subprocess.run([nginx, "-t", "-c", str(path), "-p", str(root)], check=True, capture_output=True, timeout=5)
         process = subprocess.Popen([nginx, "-c", str(path), "-p", str(root), "-g", "daemon off;"])
         with httpx.Client(base_url=f"http://127.0.0.1:{port}", trust_env=False) as client:
             for _ in range(100):
@@ -66,12 +74,18 @@ def gateway(tmp_path_factory):
                 pytest.fail("temporary nginx did not start")
             yield client
     finally:
-        if process is not None:
-            process.terminate()
-            process.wait(timeout=5)
-        upstream.shutdown()
-        upstream.server_close()
-        thread.join(timeout=5)
+        try:
+            if process is not None:
+                process.terminate()
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait(timeout=5)
+        finally:
+            upstream.shutdown()
+            upstream.server_close()
+            thread.join(timeout=5)
 
 
 @pytest.mark.parametrize("path,status", [

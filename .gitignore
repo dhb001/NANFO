@@ -35,6 +35,14 @@ dist/
 .env.*
 !.env.example
 
+# Generated campaign authentication material (including extensionless files).
+# Historical exact bytes belong only in the ignored ai-engine/artifacts store.
+receiver-token
+receiver-token.*
+receiver_token
+receiver_token.*
+nanfo-experimental-campaign-*/**/*private-admission*
+
 # --- Jupyter ---
 .ipynb_checkpoints/
 

@@ -1,6 +1,51 @@
 # Measured Routing PPO
 
-## Current ADR013 V3
+## Current status — 21 September 2026
+
+The current repository review register is
+[ReviewClosure-Completion](../docs/project/ReviewClosure-Completion.md).
+Historical v1/v2/v3 sections below retain their original commands/results; they
+are not current runtime admission or instructions to rerun an old campaign.
+
+- ADR024 recovered exactv4 sources and qualified a truthfully rebound checkpoint
+  against the rebuilt image with **unchanged tensors**: five policies,12 paired
+  held-out seeds,300 measured windows/240 decisions. Actual fresh feed/inference
+  produced four durable, non-actuating recommendations from six frames.
+  [Evidence and identities](../docs/project/CompletionProgram/QualificationEvidence.md),
+  [independent scope review](../docs/project/CompletionProgram/QualificationReview.md).
+- This is bounded stationary campus-small-v4 evidence, not independent repeated
+  training, proactive timing, topology generalization or calibrated production
+  autonomy. Current/defaultv5 cannot inheritv4 qualification. AI interpreter,
+  runtime/source/image and checkpoint identities must match their qualification.
+- Actual joined **017 remains FAILED**:4/4 smokes,67/68 matrix outcomes completed,
+  one invalid measurement (`path1-1564-qualified`, `protected_regular_owner_file_required`);
+  all20 fault outcomes completed. It used unchanged frozen016 source/original model;
+  all historical014/017 outcomes remain intact. Completion includes rejection and
+  restoration, not universal candidate improvement.
+- The atomic-replacement protected-read race was reproduced offline and repaired
+  only in active emulation using protected bounded reopen. Frozen018 gates passed
+  **115 backend/3 historical skips,34 receiver,2 STOP**; exact live interleaving is
+  unproven. Independent018 review accepted the repair and reconfirmed017 failure.
+- Reviewer found count-only `reserved_seed_count:1342` falsely reserved; active
+  extractor corrected with60 passing tests. **Fresh plan blocked:**996/1000 genuine/
+  preregistered train-operational values (1000–1999) reserved,4 available/36 required,
+  deficit32. No018 plan/admission/launch; preserve genuine reservations
+  and train/validation/test split. No experiment-complete claim or implicit domain
+  widening. [Experimental status](../docs/project/CompletionProgram/ExperimentalAcceptance.md).
+  Core c8rorfzd accepted28pass/0fail/5blocked at backend `a2bf67af…`/source `f7105617…`;
+  later verifier scanner/test drift (`9e46d086…` verifier) changes host tooling, not
+  core behavior. No whole-tree parity or live experimental qualification follows.
+  [Durable refresh/retention evidence](../docs/project/ReviewClosureEvidence/README.md).
+- Original AI environment **463 tests passed**, reaffirmed. Final portable gate
+  **441 JUnit cases/zero skips/11 explicit deselections** is a separate software scope.
+- AI development pytest was upgraded; frozen runtime/weights were preserved. The
+  exact CPU Torch audit coverage gap and upstream/frozen-runtime advisories have
+  exact exceptions expiring **2026-10-21**, not security fixes. Follow the separately
+  versioned successor plan in [Dependencies](../docs/project/ReviewClosure-Dependencies.md).
+- Physical RF, intended-user study, independent repeated training, proactive/stability
+  evaluation and complete recovery remain [research evidence obligations](../docs/project/ReviewClosure-Research.md).
+
+## Historical ADR013 V3 checkpoint
 
 Post-campaign review corrected seed/workload evidence validation and clarified
 receiver-cutoff delivery deficit. See [ADR013-REVIEW-CORRECTIONS.md](ADR013-REVIEW-CORRECTIONS.md)
@@ -24,7 +69,7 @@ Standalone operator-only ADR-011 experiment. CPU PyTorch is separate from the
 Mininet/Ryu environment. No backend, frontend, production inference endpoint,
 autonomous worker, or Step 9 safety filter is installed here.
 
-## Two-Hour Supervisor
+## Historical Two-Hour Supervisor
 
 See [SUPERVISOR.md](SUPERVISOR.md) for the explicit operator-only two-hour
 `python -m nanfo_routing.supervisor run|status|stop|cleanup` CLI, frozen seed plan,
@@ -33,7 +78,7 @@ ID/label-owned containers, and parent-owned systemd command. Implementation does
 not launch it. Evaluation additionally accepts `constant0`/`constant1` and explicit
 `--split train` calibration, which reports never label as held out.
 
-## Contract V2 Review
+## Historical Contract V2 Review
 
 The current client contract and checkpoint manifest are **version 2**, incompatible
 with the earlier 47-input smoke checkpoint. Wire envelopes remain version 1, matching

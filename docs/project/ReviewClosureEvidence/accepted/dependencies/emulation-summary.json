@@ -1,0 +1,9 @@
+{
+  "lane": "emulation",
+  "raw_advisory_rows": 48,
+  "distinct_package_advisory_pairs": 26,
+  "affected_packages": 8,
+  "accepted_pairs": 26,
+  "coverage_gaps": [],
+  "errors": []
+}

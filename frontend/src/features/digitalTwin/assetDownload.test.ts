@@ -3,12 +3,18 @@ import { downloadModelBytes } from "./assetDownload";
 import { useAuthStore } from "@/shared/state/auth-store";
 import { useWorkspaceStore } from "@/shared/state/workspace-store";
 import type { CampusModelAssetRecord } from "@/shared/types/network";
+import { webcrypto } from "node:crypto";
+import fixture from "@/test/fixtures/asset-download.json";
+import { decodePersistedModel } from "./modelAsset";
+
+const refresh = vi.hoisted(() => vi.fn());
+vi.mock("@/features/auth/session", () => ({ refreshSession: refresh }));
 
 const asset = { network_id: "n", campus_model_asset_id: "a", model_size_bytes: 3, model_sha256: "a".repeat(64), model_mime_type: "model/gltf-binary", download_path: "https://untrusted.invalid/" } as CampusModelAssetRecord;
 describe("protected model binary download", () => {
   beforeEach(() => { useAuthStore.setState({ accessToken: "token", endingSession: false }); useWorkspaceStore.setState({ networkId: "n" }); });
   afterEach(() => vi.unstubAllGlobals());
-  const response = (bytes = [1, 2, 3]) => new Response(new Uint8Array(bytes), { headers: { "Content-Type": "model/gltf-binary", "ETag": `"${asset.model_sha256}"` } });
+  const response = (bytes = [1, 2, 3]) => new Response(new Uint8Array(bytes), { headers: { "Content-Type": "application/octet-stream", "ETag": `"sha256:${asset.model_sha256}"` } });
   it("uses authorized identity URL, bounds bytes, ignores server path", async () => {
     const fetch = vi.fn().mockResolvedValue(response()); vi.stubGlobal("fetch", fetch);
     expect(await downloadModelBytes(asset)).toEqual(new Uint8Array([1, 2, 3]));
@@ -23,5 +29,33 @@ describe("protected model binary download", () => {
     await expect(downloadModelBytes(asset)).rejects.toMatchObject({ status: 403 });
     fetch.mockImplementation(async () => { useWorkspaceStore.setState({ networkId: "other" }); return response(); });
     await expect(downloadModelBytes(asset)).rejects.toThrow("context changed");
+  });
+  it("consumes the actual backend-header fixture and verifies SHA, size and local MIME", async () => {
+    vi.stubGlobal("crypto", webcrypto);
+    const metadata = { ...asset, model_file_name: "campus.gltf", model_mime_type: "model/gltf+json", model_size_bytes: 51, model_sha256: fixture.sha256, mapping_by_device_id: {} };
+    const fetch = vi.fn().mockImplementation(() => Promise.resolve(new Response(fixture.body, { headers: fixture.headers })));
+    vi.stubGlobal("fetch", fetch);
+    const bytes = await downloadModelBytes(metadata);
+    expect((await decodePersistedModel(metadata, "n", new Set(), bytes)).size).toBe(51);
+    fetch.mockImplementation(() => Promise.resolve(new Response(fixture.body.replace("2.0", "2.1"), { headers: fixture.headers })));
+    await expect(decodePersistedModel(metadata, "n", new Set(), await downloadModelBytes(metadata))).rejects.toThrow("SHA-256");
+    fetch.mockImplementation(() => Promise.resolve(new Response(fixture.body.slice(1), { headers: fixture.headers })));
+    await expect(downloadModelBytes(metadata)).rejects.toThrow("length mismatch");
+    await expect(decodePersistedModel({ ...metadata, model_mime_type: "text/html" }, "n", new Set(), bytes)).rejects.toThrow("MIME");
+  });
+  it.each<Record<string, string>>([{ "Content-Type": "model/gltf-binary" }, { ETag: `"${asset.model_sha256}"` }, { ETag: `W/"sha256:${asset.model_sha256}"` }, { "Content-Length": "4" }])("rejects non-contract headers %j", async (headers) => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(new Uint8Array([1, 2, 3]), { headers: { "Content-Type": "application/octet-stream", ETag: `"sha256:${asset.model_sha256}"`, ...headers } })));
+    await expect(downloadModelBytes(asset)).rejects.toThrow("headers changed");
+  });
+  it("retries once with a rotated token and rejects a session change during refresh", async () => {
+    const fetch = vi.fn().mockResolvedValueOnce(new Response(null, { status: 401 })).mockResolvedValueOnce(response());
+    vi.stubGlobal("fetch", fetch);
+    refresh.mockImplementation(async () => { useAuthStore.setState({ accessToken: "rotated" }); return true; });
+    await expect(downloadModelBytes(asset)).resolves.toEqual(new Uint8Array([1, 2, 3]));
+    expect(fetch.mock.calls[1][1].headers.Authorization).toBe("Bearer rotated");
+    fetch.mockResolvedValueOnce(new Response(null, { status: 401 }));
+    refresh.mockImplementation(async () => { useAuthStore.setState({ generation: useAuthStore.getState().generation + 1 }); return true; });
+    await expect(downloadModelBytes(asset)).rejects.toThrow("context changed");
+    expect(fetch).toHaveBeenCalledTimes(3);
   });
 });

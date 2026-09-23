@@ -1,0 +1,15 @@
+{
+  "lane": "ai",
+  "raw_advisory_rows": 0,
+  "distinct_package_advisory_pairs": 0,
+  "affected_packages": 0,
+  "accepted_pairs": 0,
+  "coverage_gaps": [
+    [
+      "torch",
+      "2.8.0+cpu",
+      "Dependency not found on PyPI and could not be audited: torch (2.8.0+cpu)"
+    ]
+  ],
+  "errors": []
+}

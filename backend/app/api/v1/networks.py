@@ -286,6 +286,9 @@ async def list_campus_model_assets(
     meta: Annotated[RequestMeta, Depends(get_request_meta)],
     db: Annotated[AsyncSession, Depends(get_db)],
     redis: Annotated[aioredis.Redis, Depends(get_redis)],
+    include_data: bool = True,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
 ):
     started = time.monotonic()
     requested_workspace_id = enforce_workspace_scope(claims=claims, workspace_id=None)
@@ -294,6 +297,9 @@ async def list_campus_model_assets(
         actor_user_id=claims.user_id,
         requested_workspace_id=requested_workspace_id,
         claim_org_id=get_claim_org_scope(claims=claims),
+        include_data=include_data,
+        page=page,
+        page_size=page_size,
     )
     return success_response(result, meta.request_id, started, meta.timestamp)
 

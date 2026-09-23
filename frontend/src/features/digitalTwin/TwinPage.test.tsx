@@ -289,6 +289,66 @@ describe("TwinPage", () => {
     confirm.mockRestore();
   }, 15_000);
 
+  it("retains an off-page selection across paging and token rotation, then refreshes its source page before binary restore", async () => {
+    const user = userEvent.setup();
+    mockUseTopologyGraph.mockReturnValue(queryResult({ data: { nodes: [{ device_id: "d", hostname: "edge", device_type: "switch", status: "active" }], edges: [] }, nextCursor: null }));
+    mockUseTopologyNode.mockReturnValue(queryResult(null));
+    const json = '{"asset":{"version":"2.0"},"scenes":[{}],"scene":0}';
+    const record = { campus_model_asset_id: "older", network_id: useWorkspaceStore.getState().networkId, model_file_name: "older.gltf", model_mime_type: "model/gltf+json",
+      storage_backend: "inline", model_size_bytes: new TextEncoder().encode(json).length, model_sha256: "0".repeat(64), mapping_by_device_id: {}, updated_at: "2026-09-10T00:00:00Z" };
+    const first = { items: [record], total: 21, page: 1, page_size: 20 };
+    const readPage = vi.fn().mockResolvedValue(first);
+    mockUseCampusModelAssets.mockImplementation((_token, _network, page) => ({ ...queryResult(page === 1 ? first : { items: [{ ...record, campus_model_asset_id: "newer", model_file_name: "newer.gltf" }], total: 21, page: 2, page_size: 20 }), readPage }));
+    const fetch = vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response(json, { headers: { "Content-Type": "application/octet-stream", ETag: `"sha256:${record.model_sha256}"` } }));
+    cryptoSubtleDigestMock.mockResolvedValue(new Uint8Array(32).buffer);
+    const previousCreate = URL.createObjectURL, previousRevoke = URL.revokeObjectURL;
+    URL.createObjectURL = vi.fn().mockReturnValue("blob:paged"); URL.revokeObjectURL = vi.fn();
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    const { unmount } = render(<TwinPage />);
+    await waitForTwinScene();
+    await user.selectOptions(screen.getByLabelText("Persisted model asset"), "older");
+    await user.click(screen.getByRole("button", { name: "Next asset page" }));
+    expect(screen.getByLabelText("Persisted model asset")).toHaveValue("older");
+    expect(screen.getByRole("button", { name: "Next asset page" })).toBeDisabled();
+    act(() => useAuthStore.setState({ accessToken: "rotated" }));
+    expect(screen.getByLabelText("Persisted model asset")).toHaveValue("older");
+    await user.click(screen.getByRole("button", { name: "Reload model assets" }));
+    expect(screen.getByLabelText("Persisted model asset")).toHaveValue("older");
+    await user.click(screen.getByRole("button", { name: "Restore Persisted Model" }));
+    await waitFor(() => expect(URL.createObjectURL).toHaveBeenCalledTimes(1));
+    expect(readPage).toHaveBeenCalledWith(1);
+    expect(fetch).toHaveBeenCalledWith(expect.stringContaining("/campus-model-assets/older/download"), expect.objectContaining({ headers: { Authorization: "Bearer rotated" } }));
+    readPage.mockResolvedValue({ ...first, items: [] });
+    await user.click(screen.getByRole("button", { name: "Restore Persisted Model" }));
+    expect(await screen.findByText("Persisted model is no longer available. Refresh and try again.")).toBeInTheDocument();
+    expect(fetch).toHaveBeenCalledTimes(1);
+    act(() => useWorkspaceStore.getState().setNetworkId("other"));
+    expect(screen.getByLabelText("Persisted model asset")).toHaveValue("");
+    expect(screen.getByRole("button", { name: "Previous asset page" })).toBeDisabled();
+    unmount(); fetch.mockRestore(); confirm.mockRestore(); URL.createObjectURL = previousCreate; URL.revokeObjectURL = previousRevoke;
+  });
+
+  it("discards a metadata restore that finishes after a context switch", async () => {
+    const user = userEvent.setup();
+    mockUseTopologyGraph.mockReturnValue(queryResult({ data: { nodes: [{ device_id: "d", hostname: "edge", device_type: "switch", status: "active" }], edges: [] }, nextCursor: null }));
+    mockUseTopologyNode.mockReturnValue(queryResult(null));
+    const record = { campus_model_asset_id: "old", network_id: useWorkspaceStore.getState().networkId, model_file_name: "old.gltf" };
+    let resolve!: (value: unknown) => void;
+    const pending = new Promise((done) => { resolve = done; });
+    mockUseCampusModelAssets.mockReturnValue({ ...queryResult({ items: [record], total: 1 }), refetch: vi.fn().mockReturnValue(pending) });
+    const fetch = vi.spyOn(globalThis, "fetch");
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    render(<TwinPage />); await waitForTwinScene();
+    await user.selectOptions(screen.getByLabelText("Persisted model asset"), "old");
+    await user.click(screen.getByRole("button", { name: "Restore Persisted Model" }));
+    act(() => useWorkspaceStore.getState().setNetworkId("other"));
+    await act(async () => resolve({ data: { items: [record], total: 1 }, isError: false }));
+    expect(fetch).not.toHaveBeenCalled();
+    expect(screen.getByLabelText("Persisted model asset")).toHaveValue("");
+    expect(screen.getByText("model idle", { exact: true })).toBeInTheDocument();
+    fetch.mockRestore(); confirm.mockRestore();
+  });
+
   it("retains scene drafts over credential rotation and resets them on a scope change", async () => {
     spatialMocks.data = { version: 1, revision: 1, coordinate_system: { units: "m", up_axis: "y" }, objects: [] };
     mockUseTopologyGraph.mockReturnValue(queryResult({ data: { nodes: [], edges: [] } }));

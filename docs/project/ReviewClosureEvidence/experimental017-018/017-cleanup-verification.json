@@ -1,0 +1,25 @@
+{
+  "campaign_cleanup": {
+    "private_services": {
+      "children_reaped": true,
+      "graceful": true,
+      "owned_container_removed": true,
+      "owned_pids": [
+        772121
+      ],
+      "owned_volume_removed": true,
+      "postgres_port_closed": true,
+      "private_tree_removed": true,
+      "redis_graceful_stop": true,
+      "redis_port_closed": true
+    },
+    "removed": true,
+    "unresolved_resources": []
+  },
+  "campaign_lock_reacquired_after_exit": true,
+  "frozen_manifest_sha256": "d35bf39e2d2bcf94b9b21e3e6731d8779af738d2375672770861e64456c52d4f",
+  "owned_lab_count": 72,
+  "preexisting_containers_still_running": true,
+  "remaining_owned_containers": [],
+  "remaining_owned_volumes": []
+}

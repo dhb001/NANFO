@@ -91,15 +91,16 @@ test("registration controls require explicit valid local transforms and reset on
   const errors = await fixtures(page, scene());
   let asset: Record<string, unknown> | null = null;
   let downloads = 0;
-  await page.route("**/campus/model-assets", async (route) => {
+  await page.route(/\/campus\/model-assets(?:\?.*)?$/, async (route) => {
     if (route.request().method() === "POST") asset = { ...route.request().postDataJSON(), campus_model_asset_id: "saved-asset", network_id: "00000000-0000-0000-0000-000000000333", storage_backend: "local_cas", created_at: "2026-09-20T00:00:00Z", updated_at: "2026-09-20T00:00:00Z" };
-    await route.fulfill({ json: envelope({ items: asset ? [asset] : [], total: asset ? 1 : 0 }) });
+    const metadata = asset ? { ...asset, model_data_base64: undefined } : null;
+    await route.fulfill({ json: envelope({ items: metadata ? [metadata] : [], total: asset ? 1 : 0, page: 1, page_size: 20 }) });
   });
   await page.route("**/campus-model-assets/saved-asset/download", async (route) => {
     downloads++;
     expect(route.request().headers().authorization).toContain("Bearer ");
     const bytes = Buffer.from(asset!.model_data_base64 as string, "base64");
-    await route.fulfill({ body: bytes, contentType: "model/gltf+json", headers: { ETag: `"${createHash("sha256").update(bytes).digest("hex")}"` } });
+    await route.fulfill({ body: bytes, contentType: "application/octet-stream", headers: { ETag: `"sha256:${createHash("sha256").update(bytes).digest("hex")}"`, "Content-Length": String(bytes.length) } });
   });
   await openTwin(page);
   // A valid self-contained glTF, not a claim about a live asset service.

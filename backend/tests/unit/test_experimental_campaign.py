@@ -11,6 +11,83 @@ from scripts import audit_experimental_lab as auditor
 from scripts import verify_experimental_lab as runner
 
 
+def test_typed_seed_fields_exclude_counts_hashes_domains_not_reservations():
+    assert runner.seed_values({"reserved_seed_count": 1342}) == set()
+    assert runner.seed_values({"seed_count": 1342, "paired_seeds": 1342,
+        "seed_audit_sha256": "a" * 64,
+        "seed_namespaces": {"train": [1000, 1999], "validation": [2000, 2999], "test": [3000, 3999]}}) == set()
+    assert runner.seed_values({"request": {"seed": 1342}, "reserved_seed_count": 1342,
+        "training_seeds": [1100], "plan": {"reserved_seeds": [1200]}}) == {1100, 1200, 1342}
+    for value in ({"mystery_seed": 1342}, {"seeds": [True]}, {"seed": "1342"},
+                  {"reserved_seed_count": [1342]}):
+        with pytest.raises(ValueError):
+            runner.seed_values(value)
+
+
+def test_inventory_transitive_correction_requires_exact_provenance_and_keeps_plans(tmp_path):
+    origin = tmp_path / "review.json"
+    pin = runner.write(origin, {"reserved_seed_count": 1342, "seeds": [3003]})
+    one = dict(version=1, documents=[dict(path="/old/review.json", sha256=pin, seeds=[1342, 3003])],
+               reserved_seeds=[1342, 3003])
+    first = tmp_path / "audit1.json"
+    first_hash = runner.write(first, one)
+    runner.write(tmp_path / "audit2.json", dict(version=1,
+        documents=[dict(path="/old/audit1.json", sha256=first_hash, seeds=[1342, 3003])], reserved_seeds=[1342, 3003]))
+    result = runner.audit_seeds([tmp_path])
+    assert result["reserved_seeds"] == [3003]
+    assert len(result["provenance_corrections"]) == 2
+    # Missing original plan still constitutes a reservation, even for the same value.
+    runner.write(tmp_path / "audit3.json", dict(version=1,
+        documents=[dict(path="/missing/plan.json", sha256="f"*64, seeds=[1342])], reserved_seeds=[1342]))
+    assert runner.audit_seeds([tmp_path])["reserved_seeds"] == [1342, 3003]
+
+
+def test_unexplained_inventory_assertions_cannot_be_erased(tmp_path):
+    pin = runner.write(tmp_path / "review.json", {"reserved_seed_count": 1342})
+    runner.write(tmp_path / "inventory.json", dict(version=1,
+        documents=[dict(path="review.json", sha256=pin, seeds=[1342, 1450])],
+        reserved_seeds=[1342, 1450, 1460]))
+    assert runner.audit_seeds([tmp_path])["reserved_seeds"] == [1342, 1450, 1460]
+
+
+def test_unknown_or_changed_missing_inventory_not_covered_by_reviewed_correction(tmp_path):
+    runner.write(tmp_path / "inventory.json", dict(version=1,
+        documents=[dict(path="/tmp/opencode/nanfo-experimental-campaign-001/seed-audit.json",
+                        sha256="a"*64, seeds=[1342, 1100])], reserved_seeds=[1342, 1100]))
+    assert runner.audit_seeds([tmp_path])["reserved_seeds"] == [1100, 1342]
+
+
+def test_reviewed_missing_inventory_correction_needs_origin_and_never_erases_plan(tmp_path, monkeypatch):
+    origin = tmp_path / "origin.json"
+    pin = runner.write(origin, {"reserved_seed_count": 1342, "seeds": [3003]})
+    monkeypatch.setattr(runner, "COUNT_ONLY_ORIGIN", pin)
+    runner.write(tmp_path / "inventory.json", dict(version=1,
+        documents=[dict(path="/tmp/opencode/nanfo-experimental-campaign-001/seed-audit.json",
+                        sha256=runner.REVIEWED_COUNT_INVENTORIES[1], seeds=[1342, 1100])],
+        reserved_seeds=[1342, 1100]))
+    assert runner.audit_seeds([tmp_path])["reserved_seeds"] == [1100, 3003]
+    origin.unlink()
+    assert runner.audit_seeds([tmp_path])["reserved_seeds"] == [1100, 1342]
+    runner.write(origin, {"reserved_seed_count": 1342, "seeds": [3003]})
+    runner.write(tmp_path / "true-plan.json", {"reserved_seeds": [1342]})
+    assert runner.audit_seeds([tmp_path])["reserved_seeds"] == [1100, 1342, 3003]
+
+
+def test_all_retained_historical_plan_assertions_remain_reserved():
+    if not (runner.ROOT / "nanfo-experimental-campaign-014/seed-audit.json").exists():
+        pytest.skip("historical inventory absent from executable snapshot")
+    inventory = runner.read(runner.ROOT / "nanfo-experimental-campaign-014/seed-audit.json")
+    plans = [row for row in inventory["documents"] if "/nanfo-experimental-campaign-" in row["path"]
+             and row["path"].endswith("/plan.json")]
+    assert plans
+    for row in plans:
+        assert runner.seed_values(row) == set(row["seeds"])
+    for name in ("015", "016", "017"):
+        plan = runner.read(runner.ROOT / f"ai-engine/artifacts/nanfo-experimental-campaign-{name}/plan.json")
+        selected = {row["seed"] for row in plan["trials"] + plan["faults"] + plan["smoke"]}
+        assert selected <= runner.seed_values(plan)
+
+
 def test_seed_inventory_includes_failures_jsonl_and_checkpoint_manifest(tmp_path):
     runner.write(tmp_path / "failed.json", {"status": "failed", "reserved_seeds": [1100]})
     (tmp_path / "rows.jsonl").write_text(json.dumps({"request": {"seed": 1101}}) + "\n")
@@ -655,6 +732,33 @@ def test_complete_denominator_contains_rejection_outcomes_and_nulls():
     fixed0=result[0]
     assert fixed0["expected_pairs"]==2 and fixed0["available_pairs"]==1 and fixed0["mean_delta"] is None
     assert fixed0["pairs"][0]["baseline_outcome"]=="simulation_rejected"
+
+
+def test_history_inventory_includes_relocated_campaigns_from_frozen_origin(tmp_path, monkeypatch):
+    origin = tmp_path / "workspace"
+    origin.mkdir()
+    prior = origin / "nanfo-experimental-campaign-014"
+    prior.mkdir()
+    runner.write(prior / "plan.json", {"reserved_seeds": [1425, 1460]})
+    frozen = tmp_path / "frozen"
+    frozen.mkdir()
+    runner.write(frozen / "frozen-runtime.json", {"source_origin": str(origin), "seed_inventory_origins": []})
+    monkeypatch.setattr(runner, "ROOT", frozen)
+    assert prior in runner.history_roots()
+    assert set(runner.audit_seeds([prior])["reserved_seeds"]) == {1425, 1460}
+
+
+def test_nested_private_plan_excludes_only_its_own_reservation(tmp_path, monkeypatch):
+    output = tmp_path / "campaign"
+    output.mkdir()
+    runner.write(output / "seed-audit.json", {"documents": []})
+    plan = {"trials": [{"seed": 1500}], "faults": [], "smoke": []}
+    runner.write(output / "plan.json", plan)
+    monkeypatch.setattr(runner, "history_roots", lambda: [tmp_path])
+    runner.reject_new_seed_reservations(output, plan)
+    runner.write(tmp_path / "other-plan.json", {"seed": 1500})
+    with pytest.raises(ValueError, match="new_conflicting_operational_seed_reservation"):
+        runner.reject_new_seed_reservations(output, plan)
 
 
 def test_poor_performance_is_measured_rejection_not_invalid_measurement():

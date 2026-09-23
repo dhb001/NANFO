@@ -1,5 +1,68 @@
 # Development Journal
 
+## [2026-09-21] - Final Core Refresh, Independent018 Review and Corrected Recount
+
+- Latest core **c8rorfzd accepted28pass/0fail/5blocked**, backend image `a2bf67af…`,
+  runtime source `f7105617…`; full hashes in `ReviewClosure-Deployment.md`. New private
+  backup/key/original result durably preserved; credential-free public evidence in
+  `ReviewClosureEvidence/refresh-c8rorfzd/` and `retention-c8rorfzd/`.
+- After acceptance, only experimental verifier seed scanner/test source changed
+  (`9e46d086…` verifier). Core serving behavior unchanged; whole current tree is not
+  byte-identical to accepted image. Added explicit deployment host-tooling drift note.
+- Independent018 review `61ae01cc…` accepted protected bounded reopen and reconfirmed
+  **017 failed:67/68 matrix outcomes +4/4 smokes**, all20 fault outcomes completed.
+  It identified `reserved_seed_count:1342` as a false reservation; active extractor
+  corrected with60 passing tests. Correct count **996/1000**,4 available/36 required,
+  deficit32: fresh campaign still blocked, no split/reservation/protocol change.
+- Parent reaffirmed final portable **441 JUnit/zero skips/11 explicit deselections**
+  and original AI **463 passed**. PG254pass/12skip plus realRedis12pass covers all266;
+  nginx24pass/0skip remains accepted. Counts are distinct/overlapping scopes.
+- External protocol direction, human/physical evidence, remote CI, authorized history
+  remediation and off-host escrow remain open. Documentation-only; frozen result,
+  source, manifest and academic ODT bytes unchanged by this task.
+
+## [2026-09-21] - Historical017/018 Follow-up (Superseded by Final Correction Above)
+
+- Updated master/current docs and `CompletionProgram/ExperimentalAcceptance.md`
+  from preparation status to actual017: **4/4 smokes,67/68 matrix outcomes completed,
+  1 invalid measurement**, all20 fault outcomes completed. Case
+  `path1-1564-qualified` retains `protected_regular_owner_file_required`; full auditor
+  and result remain failed. Original frozen source/model/evidence unchanged.
+- Owner reproduced atomic-replacement protected-read race offline and repaired active
+  emulation with protected bounded reopen. Exact live interleaving remains unproven.
+  Frozen018 gates **115 backend passed/3 historical skips,34 receiver,2 STOP passed**;
+  review was pending at that checkpoint. Its preliminary reservation count is
+  superseded by the independently corrected996/4/deficit32 record above.
+  No018 plan/admission/launch, seed reuse, split change or experiment-complete claim.
+- Clean upgraded PostgreSQL **254 passed/12 skipped** plus exact real-Redis subset
+  **12 passed/0 skipped** covers all266 selected cases. Development fakeredis Lua/lupa
+  and clean-CI EVAL declaration/checks repaired; nginx headers/proxy **24 passed/0 skipped**.
+- Credential-free `ReviewClosureEvidence` bundle ready; accepted older receipts and
+  source drift preserved, encrypted backup/key separately retained locally. Latest-
+  source deployment refresh was then pending; c8rorfzd acceptance above supersedes
+  that status. Local retention is not off-host escrow.
+- Documentation-only follow-up; physical/human/repeated-training obligations remain.
+  No source, historical experiment or academic ODT/PDF changes by this task.
+
+## [2026-09-21] - Historical Initial ADR027 R11 Documentation Consolidation
+
+- Read all ten current `ReviewClosure-*` owner handoffs and consolidated the seven
+  recommended workstreams in `ReviewClosure-Completion.md`. Updated owned onboarding,
+  current-status, issue/debt and role notes; old VS authority lists are now explicitly
+  archived. Schema0029 and exact frozen deployment evidence supersede old0027 labels.
+- Parent-observed latest backend **3,939 passed/317 skipped**; frontend **615 tests/
+  98 files**, lint/types/build/perf pass **394.28 KiB**. Assets owner reports **70/70
+  browser, no retries**; real full-stack **5/5** and core0029 **28 pass/0 fail/5 blocked**
+  are separate executed scopes. Deployment tests **253 pass**; retention **27 real-Redis
+  pass**. These runs were not repeated by the documentation task.
+- Recorded **71 credentials** privately preserved/active-tree removed with historical
+  exposure unresolved. npm audit0 and exact expiring Python exceptions are distinct;
+  exceptions do not repair frozen dependencies. Remote required CI remains unverified.
+- At this earlier checkpoint,016 was prepared pending review/admission; this status
+  is superseded by actual017 and blocked018 above.014's failed record and RF, usability, repeated-
+  training and other research evidence obligations remain explicit. This consolidation
+  edits documentation only; the single academic ODT/PDF remains unchanged.
+
 ## [2026-09-20] - ADR026 Parallel Audit Repairs and Integration
 
 - Seven user-authorized parallel workstreams completed audit fixes and missing

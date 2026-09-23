@@ -1,0 +1,8 @@
+{
+  "original_sha256": "aea363391faff9d85de241c7459ccc0dd79eb82b1bc5bec3bbc9cb7ad8cb742c",
+  "original_bytes": 17643,
+  "projected_sha256": "0891b130a3af1df84d6b8d38c9f053133c7caca8e93ae5b0d1245316d59c098b",
+  "projection": "deploy.release_manifest.project_result",
+  "previous_accepted_result_sha256": "df4ea858a9a7669cd7f0cce8ae211a041c8f782cb47f6f36fb2ed08b8c67d357",
+  "previous_accepted_bundle_unchanged": true
+}

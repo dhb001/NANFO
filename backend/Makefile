@@ -1,18 +1,18 @@
-.PHONY: up down migrate test lint
+.PHONY: up down migrate migrate-down dev test test-unit test-integration lint
 
 # ── Infrastructure ────────────────────────────────────────────────────────────
 up:
-	docker compose up -d
+	../scripts/dev-start.sh
 
 down:
 	docker compose down
 
 # ── Database ─────────────────────────────────────────────────────────────────
 migrate:
-	alembic upgrade head
+	alembic -c alembic/alembic.ini upgrade head
 
 migrate-down:
-	alembic downgrade -1
+	alembic -c alembic/alembic.ini downgrade -1
 
 # ── Development ───────────────────────────────────────────────────────────────
 dev:

@@ -187,7 +187,7 @@ export interface CampusModelAssetRecord {
   network_id: string;
   model_file_name: string;
   model_mime_type: string;
-  model_data_base64: string;
+  model_data_base64?: string | null;
   model_sha256: string;
   model_size_bytes: number;
   mapping_by_device_id: Record<string, string>;
@@ -199,6 +199,8 @@ export interface CampusModelAssetRecord {
 export interface CampusModelAssetList {
   items: CampusModelAssetRecord[];
   total: number;
+  page?: number;
+  page_size?: number;
 }
 
 export interface UpsertCampusModelAssetInput {

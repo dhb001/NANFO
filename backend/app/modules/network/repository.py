@@ -374,6 +374,21 @@ class CampusModelAssetRepository:
         )
         return list(result.scalars().all())
 
+    async def list_metadata_for_network(self, network_id: uuid.UUID, *, page: int, page_size: int):
+        if page < 1 or not 1 <= page_size <= 100:
+            raise ValueError("Asset page must be positive and page_size between 1 and 100")
+        table = CampusModelAssetRecord.__table__
+        scope = (table.c.network_id == network_id, table.c.deleted_at.is_(None))
+        total = await self._db.scalar(select(func.count()).select_from(table).where(*scope))
+        # Explicit projection avoids loading even legacy inline bodies into the identity map.
+        columns = [column for column in table.c if column.name != "model_data_base64"]
+        result = await self._db.execute(
+            select(*columns).where(*scope)
+            .order_by(table.c.created_at.asc(), table.c.campus_model_asset_id.asc())
+            .offset((page - 1) * page_size).limit(page_size)
+        )
+        return list(result.mappings().all()), total
+
     async def get_latest_for_network(self, network_id: uuid.UUID) -> CampusModelAssetRecord | None:
         result = await self._db.execute(
             select(CampusModelAssetRecord)

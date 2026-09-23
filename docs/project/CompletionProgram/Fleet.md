@@ -87,10 +87,11 @@ pending spool. Removed manifest devices are not read or replayed; their pending 
 remain inert until explicitly re-enrolled, then freshness is checked.
 
 The actor must have `read:telemetry`, `read:topology`, **`write:config`**, current
-write-capable workspace/org membership, and an active matching device/IP. Current
-Identity implementation gives the global `Operator` role only read permissions;
-provision a genuinely permitted identity (current seeded `Admin`), rather than
-assuming the role name grants collection authority. Owner checks use the existing
+write-capable workspace/org membership, and an active matching device/IP. Under
+ADR026, current Identity maps global `Operator` to `read:topology`, `read:telemetry`,
+`write:config` and `execute:rollback`; the earlier read-only description is obsolete.
+An Operator still needs the actual current membership, scope and binding checks;
+the role name alone does not grant fleet authority. Owner checks use the existing
 Identity/Network public services in fresh sessions.
 
 ## Parent integration / health / dependencies
@@ -164,7 +165,7 @@ capacity: absent derived utilization is valid and is not filled with invented ra
 This validates local collector runtime, not physical firmware/capacity, production
 scale, downstream full-stack consumption or independent hardware fidelity.
 
-Initial live gate correctly failed with the seeded read-only global Operator role;
+The historical ADR023 initial live gate failed with its then-read-only Operator role;
 fixture provisioning was corrected to a write-authorized identity and rerun. Private
 agent processes are reaped and secret/state directories removed by test cleanup.
 

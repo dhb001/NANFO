@@ -20,6 +20,7 @@ from app.modules.network.asset_backfill import migrate_batch
 from app.modules.network.asset_settings import AssetSettings
 from app.modules.network.asset_storage import AssetIntegrityError, LocalAssetStore
 from app.modules.network.models import CampusModelAssetRecord, Network
+from app.modules.network.repository import CampusModelAssetRepository
 from app.modules.network.service import CampusModelAssetService
 from app.modules.organization.models import Organization, OrgMember, Workspace
 from tests.asset_support import ACTOR_ID, NETWORK_ID, ORG_ID, WORKSPACE_ID, registration, request, row
@@ -79,6 +80,31 @@ async def upload(database, **changes):
             network_id=NETWORK_ID, actor_id=str(ACTOR_ID), req=request(**changes),
         )
         return result.items[0]
+
+
+async def test_metadata_paging_scoped_ordered_without_inline_or_cas_reads(database):
+    sessions, store, _ = database
+    timestamp = row().created_at
+    foreign_network = uuid.uuid4()
+    async with sessions() as db:
+        db.add(Network(network_id=foreign_network, workspace_id=WORKSPACE_ID, name="Other"))
+        await db.flush()
+        for i in reversed(range(23)):
+            db.add(row(campus_model_asset_id=uuid.UUID(int=i + 1), created_at=timestamp,
+                       storage_backend="local_cas" if i % 2 else "inline",
+                       model_data_base64=None if i % 2 else request().model_data_base64))
+        db.add(row(network_id=foreign_network, created_at=timestamp))
+        db.add(row(deleted_at=timestamp, created_at=timestamp))
+        await db.commit()
+    async with sessions() as db:
+        svc = CampusModelAssetService(db, None, asset_store=store)
+        pages = [await svc.list_assets(network_id=NETWORK_ID, actor_user_id=str(ACTOR_ID), include_data=False,
+                                      page=page, page_size=10) for page in (1, 2, 3, 4)]
+        assert [len(page.items) for page in pages] == [10, 10, 3, 0]
+        assert all(page.total == 23 for page in pages)
+        assert [item.campus_model_asset_id.int for page in pages for item in page.items] == list(range(1, 24))
+        assert all("model_data_base64" not in item.model_dump() for page in pages for item in page.items)
+        assert len((await CampusModelAssetRepository(db).list_metadata_for_network(NETWORK_ID, page=1, page_size=100))[0]) == 23
 
 
 async def test_persist_reload_registration_and_immutable_identity(database):

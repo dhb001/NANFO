@@ -1,10 +1,56 @@
-# NANFO completion program — current six-workstream status
+# NANFO completion program — capability and evidence register
 
-**2026-09-20: ADR024 resolves the rebuilt-runtime model qualification and verifies
-fresh continuous recommendations plus native manual-driver operations. Joined
-calibrated autonomous execution and physical RF qualification remain unestablished.**
+## Current — ADR027 review consolidation (2026-09-21)
 
-## ADR024 latest measured results
+Current authority: [seven-workstream matrix](../ReviewClosure-Completion.md) and
+[remaining checklist](../CurrentSprint.md). Current schema is **0029** (0025 retention,
+0026 fleet,0027 Autonomy state/execution,0028 experimental ownership and0029 telemetry
+coverage invalidation/reconciliation). These migrations do not confer execution
+authority. Historical0027/0028 images require matching tooling; any upgrade is a
+separately reviewed procedure, while cold restore uses identical images/schema.
+
+- Parent-observed integrated backend **3,939 passed/317 skipped**; frontend **615
+  tests/98 files**, lint/types/build/perf pass **394.28/410.16 KiB**. Final assets-owner
+  fixture browser **70/70, no retries**; actual production full-stack **5/5**.
+- Accepted source-matched core0029 install/11-volume cold encrypted backup/fresh
+  restore **28 passed/0 failed/5 blocked**, with **253 deployment tests**. Exact
+  images/manifests and optional blocked scopes: [Deployment](../ReviewClosure-Deployment.md).
+  Latest **c8rorfzd accepted**, backend `a2bf67af…`, runtime source `f7105617…`.
+  Subsequent source changes are only experimental verifier scanner/test (`9e46d086…`
+  verifier), not core serving behavior; no whole-tree byte-parity claim. The
+  [durable credential-free bundle](../ReviewClosureEvidence/README.md) retains
+  new refresh/retention receipts, with new backup/key/result preserved privately locally.
+  Historical0027 distributed/fleet results below are not new0029 optional acceptance.
+- Clean upgraded PostgreSQL **254 passed/12 skipped** plus real-Redis **12 passed/
+  0 skipped** covers all266 selected cases. Development fakeredis Lua/lupa and clean-CI
+  EVAL checks fixed; nginx headers/proxy **24 passed/0 skipped**. Remote CI unverified.
+- Final portable **441 JUnit/zero skips/11 explicit deselections**; original AI
+  environment **463 passed**, reaffirmed. These are not research qualification.
+- Bounded metadata-only asset pages and verified selected downloads are delivered;
+  opt-in domain-stream retention passed **27 real-Redis cases**. Scheduling/capacity,
+  pending/DLQ growth and archive backup remain operator obligations.
+- **71 credentials** privately preserved and removed from active files; historical
+  exposure unresolved. npm0; exact expiring frozen/unpatched exceptions remain
+  [open security obligations](../ReviewClosure-Dependencies.md).
+- Actual **017 FAILED**:4/4 smokes,67/68 matrix outcomes completed/1 invalid
+  (`path1-1564-qualified`, `protected_regular_owner_file_required`); all20 fault
+  outcomes completed. Original frozen source/model unchanged. Active atomic-replace
+  read race reproduced/repaired with protected bounded reopen; frozen018 gates
+  **115 backend passed/3 historical skips,34 receiver passed,2 STOP passed**.
+- Independent018 review accepted the protected-read fix and reconfirmed017 failure.
+  Count-only1342 was falsely reserved; active extractor corrected with60 passing tests.
+  Fresh plan **BLOCKED**:996/1000 genuine/preregistered train-operational reservations,
+  4 available/36 required,deficit32. No018 plan/live acceptance,
+  seed reuse or split change. [Experimental status](ExperimentalAcceptance.md).
+  Physical RF, intended-user study and repeated training remain
+  [evidence obligations](../ReviewClosure-Research.md); experiment completion is open.
+
+The six-area matrix and dated gates below preserve ADR021–024 capability context.
+Their “current”, “final” and remaining-sequence wording applies to those historical
+checkpoints only; use ADR027 above for present release and review status. This
+register does not authorize broader feature expansion or calibrated production autonomy.
+
+## Historical ADR024 measured results — 2026-09-20
 
 - Exactv4 sources recovered; original model/tensors preserved. A new deployment
   checkpoint truthfully binds rebuilt image954462… and independently passed the
@@ -49,7 +95,8 @@ above supersede its earlier runtime-mismatch/fresh-acquisition blockers.
 Authority: [ADR023](../../adr/ADR-023-operational-twin-runtime.md), continuing
 [ADR021](../../adr/ADR-021-measured-twin-completion-program.md) and
 [ADR022](../../adr/ADR-022-spatial-assets-history-and-data-lifecycle.md).
-Schema head is **0027**:0025 retention,0026 fleet,0027 Autonomy state/execution.
+The historical ADR023 schema checkpoint was **0027**:0025 retention,0026 fleet,
+0027 Autonomy state/execution. Current source targets **0029**, as recorded above.
 This register distinguishes source implementation, local measured acceptance and
 external physical qualification.
 
@@ -64,7 +111,7 @@ external physical qualification.
 | **5. Continuous qualified observation/inference** | **Delivered and actual fresh service acceptance passed.** Recoveredv4/rebound unchanged tensors passed a fresh five-policy qualification; six real frames produced four independently reconstructed recommendation-only decisions. Freshness/disconnect/RBAC were tested through real stores and current providers. [ContinuousAI](ContinuousAI.md). | Production deployment still needs an admitted ongoing feed, protected scope/expiry configuration and the exact qualified image; lab instances were cleaned up. New runtime versions require their own qualification. No actuation authority follows from prediction quality. |
 | **6. Governed execution/recovery** | **Concrete safety/receiver and installed journal-client composition delivered.**0027 frames/journal/fences, independently bound plans/delay, commit-before-I/O, fresh receiver authority, readback/compensation. API/worker use protected configured safety/journal clients; only separate receiver runs drivers. Confidential signed health receipts gate readiness. OVS/FRR drivers and acquisition/check/register/serve/exact-recover tooling exist. Real PostgreSQL uses fake device boundaries. [AutonomousExecution](AutonomousExecution.md). | **No authentic calibrated installation:** complete causal attribution, enforced arrival/service/error/delay guarantees, independently accepted runtime mappings, aligned model/safety frames and baseline are needed. Frozenv4/currentv5 mismatch remains. No privileged native autonomous dispatch or physical qualification is claimed. |
 
-## 2. Verification checkpoint and review status
+## 2. Historical ADR023/024 verification checkpoint and review status
 
 These are owning-handoff/parent results, not tests rerun by this documentation task.
 Scoped counts overlap and must not be summed into aggregate totals.
@@ -127,7 +174,7 @@ Missing evidence is explicit:
   baseline history and protected installation. Current native acquisition tooling
   alone is not a completed controlled FRR transition campaign.
 
-## 4. Actionable remaining sequence
+## 4. Historical ADR024 remaining sequence (Current Authority Linked Above)
 
 1. **Release/deployment:** use the final source-matched image pins and configured
    optional profiles. Core/distributed restore and packaged fleet are accepted;

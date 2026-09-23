@@ -9,7 +9,8 @@ from pydantic import ValidationError
 from sqlalchemy.exc import IntegrityError
 
 from app.core.config import get_settings
-from app.modules.identity.service import AuthService
+from app.core.request_context import normalize_request_id
+from app.modules.identity.service import AuthService, normalize_audit_correlation
 from app.modules.network.service import NetworkService
 from app.modules.organization.service import WorkspaceService
 from app.modules.report.artifacts import ArtifactStore, canonical, digest, valid_receipt
@@ -100,6 +101,9 @@ class ReportService:
         correlation_id,
         requested_by_user_id,
     ):
+        correlation_id, correlation_metadata = normalize_audit_correlation(
+            normalize_request_id(correlation_id), {},
+        )
         await self.authorize_generation(workspace_id, network_id, requested_by_user_id)
         try:
             req = GenerateReportRequest.model_validate(
@@ -190,6 +194,8 @@ class ReportService:
                 snapshot = await ReportSources(self._db, self._redis).snapshot(
                     req, requested_by_user_id
                 )
+                if correlation_metadata:
+                    snapshot = {**snapshot, "metadata": {**snapshot.get("metadata", {}), **correlation_metadata}}
                 snapshot_size = len(canonical(snapshot))
         except TimeoutError:
             raise HTTPException(
@@ -238,7 +244,7 @@ class ReportService:
             requested_at=now,
             created_at=now,
             updated_at=now,
-            correlation_id=uuid.UUID(correlation_id),
+            correlation_id=correlation_id,
             idempotency_key=idempotency_key,
         )
         self._db.add(record)

@@ -5,6 +5,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import stat
 import subprocess
 import sys
 import tempfile
@@ -77,6 +78,45 @@ def fixture(authority=lambda: None, persist=lambda: None):
 
 
 class RuntimeTests(unittest.TestCase):
+    def test_link_outage_recovery_waits_readonly_for_original_forwarding(self):
+        runtime, rules, routes, commands = fixture()
+        baseline = runtime.capture_baseline()
+        runtime.routing.change(1)
+        original_path = runtime.network.routePath
+        unavailable = [True]
+
+        before = len(commands)
+        with patch("emulation.experimental_lab_runtime.time.sleep", side_effect=lambda _: unavailable.clear()):
+            # Preserve a simple boolean after the first failed readback.
+            def recovered(*args):
+                if not runtime.routing.owned and unavailable:
+                    raise RuntimeError("Missing or ambiguous kernel next hop")
+                return original_path(*args)
+            runtime.network.routePath = recovered
+            restored = runtime.restore(timeout_seconds=1)
+        self.assertEqual(restored["readback"], baseline)
+        self.assertFalse(rules or routes)
+        mutations = [args for _, args in commands[before:] if args[:2] in (["ip", "rule"], ["ip", "route"])]
+        self.assertEqual(len(mutations), 12)
+        self.assertTrue(all(args[2] == "del" for args in mutations))
+
+    def test_permanent_outage_and_foreign_state_never_become_restored(self):
+        runtime, rules, _, _ = fixture()
+        runtime.capture_baseline()
+        runtime.routing.change(1)
+        runtime.network.routePath = Mock(side_effect=RuntimeError("Missing or ambiguous kernel next hop"))
+        with self.assertRaisesRegex(ValueError, "original_forwarding_not_restored"):
+            runtime.restore()
+        self.assertFalse(rules)
+        runtime, rules, _, _ = fixture()
+        runtime.capture_baseline()
+        runtime.routing.change(1)
+        rules["access1", 19110]["fwmark"] = "0x123"
+        with patch("emulation.experimental_lab_runtime.time.sleep") as sleep:
+            with self.assertRaisesRegex(ValueError, "foreign"):
+                runtime.restore(timeout_seconds=1)
+            sleep.assert_not_called()
+
     def test_original_frozen_bytes_and_path_equivalence(self):
         self.assertEqual(hashlib.sha256((FROZEN / "matched.py").read_bytes()).hexdigest(),
                          "da13903064be198d52485a06593528d6d11d313bb2f4202e9137c5b1f9bb18fc")
@@ -307,7 +347,241 @@ assert not runtime.routing.owned
                        check=True, capture_output=True, timeout=20)
 
 
+class ProtectedReadTests(unittest.TestCase):
+    def run_race(self, effect, *, when="open", repeat=False):
+        from emulation import experimental_lab_contract as contract
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "authority.json"
+            atomic_write(path, {"authorized": True, "fence": 1})
+            real_open, real_read = os.open, os.read
+            descriptors, hits = set(), []
+            def change(fd):
+                if repeat or not hits:
+                    hits.append(fd)
+                    effect(path, fd, len(hits))
+            def opening(name, flags, *args, **kwargs):
+                fd = real_open(name, flags, *args, **kwargs)
+                if name == path.name and flags & os.O_NONBLOCK:
+                    descriptors.add(fd)
+                    if when == "open":
+                        change(fd)
+                return fd
+            def reading(fd, size):
+                raw = real_read(fd, size)
+                if fd in descriptors and when == "read":
+                    change(fd)
+                return raw
+            with patch.object(contract.os, "open", side_effect=opening), patch.object(contract.os, "read", side_effect=reading):
+                return contract.decode(contract.protected_read(path)), hits
+
+    def test_atomic_replace_after_open_and_during_read_returns_only_new_bytes(self):
+        for when in ("open", "read"):
+            with self.subTest(when=when):
+                def replace(path, fd, count):
+                    atomic_write(path, {"authorized": False, "fence": 2})
+                    self.assertEqual(os.fstat(fd).st_nlink, 0)
+                result, hits = self.run_race(replace, when=when)
+                self.assertEqual(result, {"authorized": False, "fence": 2})
+                self.assertEqual(len(hits), 1)
+
+    def test_replacement_churn_is_bounded_and_missing_path_never_retried(self):
+        hits = []
+        def replace(path, fd, count):
+            hits.append(count)
+            atomic_write(path, {"fence": count + 1})
+        with self.assertRaisesRegex(ValueError, "replacement_retry_exhausted"):
+            self.run_race(replace, repeat=True)
+        self.assertEqual(hits, [1, 2, 3])
+        with self.assertRaisesRegex(ValueError, "protected_path_unavailable"):
+            self.run_race(lambda path, *_: path.unlink())
+
+    def test_hostile_replacements_fail_closed(self):
+        for kind in ("symlink", "hardlink", "permissions", "directory", "fifo", "old-permissions"):
+            with self.subTest(kind=kind):
+                def hostile(path, fd, count, kind=kind):
+                    target = path.with_name("private-secret-name")
+                    atomic_write(target, {"secret": "do-not-disclose"})
+                    if kind == "old-permissions":
+                        os.fchmod(fd, 0o644)
+                        atomic_write(path, {"fence": 2})
+                        return
+                    path.unlink()
+                    if kind == "symlink":
+                        path.symlink_to(target)
+                    elif kind == "hardlink":
+                        os.link(target, path)
+                    elif kind == "permissions":
+                        atomic_write(path, {"secret": "do-not-disclose"})
+                        path.chmod(0o644)
+                    elif kind == "directory":
+                        path.mkdir()
+                    else:
+                        os.mkfifo(path, 0o600)
+                with self.assertRaises(ValueError) as caught:
+                    self.run_race(hostile)
+                text = str(caught.exception) + json.dumps(caught.exception.diagnostic)
+                self.assertNotIn("do-not-disclose", text)
+                self.assertNotIn("private-secret-name", text)
+
+    def test_foreign_owner_existing_links_symlinks_and_ancestors_denied(self):
+        from emulation import experimental_lab_contract as contract
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = root / "authority.json"
+            atomic_write(path, {"secret": "hidden"})
+            with patch.object(contract.os, "geteuid", return_value=os.geteuid() + 1), self.assertRaises(ValueError):
+                contract.protected_read(path)
+            link = root / "link"
+            os.link(path, link)
+            with self.assertRaisesRegex(ValueError, "protected_regular"):
+                contract.protected_read(path)
+            link.unlink()
+            link.symlink_to(path)
+            with self.assertRaisesRegex(ValueError, "protected_path_unavailable"):
+                contract.protected_read(link)
+            link.unlink()
+            link.symlink_to(root, target_is_directory=True)
+            with self.assertRaises(ValueError):
+                contract.protected_read(link / "authority.json")
+            root.chmod(0o755)
+            with self.assertRaisesRegex(ValueError, "private_receiver_directory"):
+                contract.protected_read(path)
+
+    def test_inplace_content_change_denied(self):
+        def mutate(path, *_):
+            path.write_bytes(b'{"fence":999999}')
+        with self.assertRaisesRegex(ValueError, "changed_in_place"):
+            self.run_race(mutate, when="read")
+
+    def test_parent_path_swap_is_not_a_file_replacement_retry(self):
+        from emulation import experimental_lab_contract as contract
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory) / "private"
+            parent.mkdir(mode=0o700)
+            path = parent / "authority.json"
+            atomic_write(path, {"authorized": True})
+            real = os.read
+            swapped = []
+            def reading(fd, size):
+                raw = real(fd, size)
+                if not swapped:
+                    swapped.append(True)
+                    parent.rename(parent.with_name("old"))
+                    parent.mkdir(mode=0o700)
+                    atomic_write(path, {"authorized": True})
+                return raw
+            with patch.object(contract.os, "read", side_effect=reading), self.assertRaisesRegex(
+                    ValueError, "protected_directory_changed"):
+                contract.protected_read(path)
+
+    def test_foreign_file_owner_fails_even_with_safe_parent(self):
+        from emulation import experimental_lab_contract as contract
+        real = os.fstat
+        def foreign(fd):
+            info = real(fd)
+            if stat.S_ISREG(info.st_mode):
+                fields = list(info)
+                fields[4] = os.geteuid() + 1
+                return os.stat_result(fields)
+            return info
+        with patch.object(contract.os, "fstat", side_effect=foreign), self.assertRaisesRegex(
+                ValueError, "protected_regular_owner_file_required"):
+            self.run_race(lambda *_: None)
+
+    def test_replacement_between_final_fd_check_and_path_stat_reopens(self):
+        from emulation import experimental_lab_contract as contract
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "authority.json"
+            atomic_write(path, {"authorized": True})
+            real = os.stat
+            replaced = []
+            def lookup(name, *args, **kwargs):
+                if name == path.name and kwargs.get("dir_fd") is not None and not replaced:
+                    replaced.append(True)
+                    atomic_write(path, {"authorized": False})
+                return real(name, *args, **kwargs)
+            with patch.object(contract.os, "stat", side_effect=lookup):
+                self.assertEqual(contract.decode(contract.protected_read(path)), {"authorized": False})
+
+
 class ContractTests(unittest.TestCase):
+    def test_authority_failure_metadata_survives_original_error_and_stop(self):
+        with tempfile.TemporaryDirectory() as root:
+            receiver, _, _, _ = self.receiver(Path(root))
+            try:
+                receiver.phase = "holding"
+                path = Path(root) / "authority.json"
+                atomic_write(path, {"secret": "never-retain-this"})
+                path.chmod(0o644)
+                with self.assertRaisesRegex(ValueError, "protected_regular"):
+                    receiver.authority()
+                receiver.latch_stop("operator_or_controller", "later-stop")
+                receiver.persist()
+                journal = json.loads(receiver.journal_path.read_bytes())
+                diagnostic = journal["protected_read_failure"]
+                self.assertEqual(diagnostic["file_role"], "authority.json")
+                self.assertEqual(diagnostic["opened"]["mode"], 0o644)
+                self.assertNotIn("never-retain-this", json.dumps(journal))
+                reply = receiver.handle(canonical(self.wire(receiver, "heartbeat")))
+                self.assertEqual(reply["evidence"]["protected_read_failure"], diagnostic)
+            finally:
+                os.close(receiver.claim)
+
+    def test_replaced_revoked_authority_and_stop_during_retry_never_admitted(self):
+        from emulation import experimental_lab_contract as contract
+        for stop in (False, True):
+            with self.subTest(stop=stop), tempfile.TemporaryDirectory() as root:
+                receiver, _, _, _ = self.receiver(Path(root))
+                try:
+                    receiver.phase = "holding"
+                    path = Path(root) / "authority.json"
+                    grant = dict(policy_sha256=receiver.policy_hash, fence=2,
+                                 expires_at=time.time() + 9, authorized=True)
+                    atomic_write(path, grant)
+                    real = os.open
+                    changed = []
+                    def opening(name, flags, *args, real=real, changed=changed,
+                                path=path, grant=grant, stop=stop, receiver=receiver, **kwargs):
+                        fd = real(name, flags, *args, **kwargs)
+                        if name == "authority.json" and flags & os.O_NONBLOCK and not changed:
+                            changed.append(True)
+                            atomic_write(path, {**grant, "authorized": False})
+                            if stop:
+                                receiver.latch_stop("test-stop", "stop")
+                        return fd
+                    with patch.object(contract.os, "open", side_effect=opening), self.assertRaisesRegex(
+                            ValueError, "authority_changed|current_actor_authority"):
+                        receiver.authority()
+                finally:
+                    os.close(receiver.claim)
+    def test_first_stop_cause_survives_secondary_stop_and_bound_heartbeat(self):
+        with tempfile.TemporaryDirectory() as root:
+            receiver, _, _, _ = self.receiver(Path(root))
+            try:
+                receiver.latch_stop("watchdog:current_actor_authority_unavailable", "receiver")
+                first = (Path(root) / "STOP").read_bytes()
+                receiver.latch_stop("operator_or_controller", "second")
+                receiver.persist()
+                reply = receiver.handle(canonical(self.wire(receiver, "heartbeat")))
+                self.assertEqual((Path(root) / "STOP").read_bytes(), first)
+                self.assertEqual(reply["evidence"]["stop_cause"], json.loads(first))
+                self.assertEqual(json.loads(receiver.journal_path.read_bytes())["stop_cause"], json.loads(first))
+            finally:
+                os.close(receiver.claim)
+
+    def test_recovery_response_agrees_with_successful_exception_cleanup(self):
+        with tempfile.TemporaryDirectory() as root:
+            receiver, _, _, _ = self.receiver(Path(root))
+            try:
+                receiver.runtime.capture_baseline()
+                real = receiver.runtime.restore
+                receiver.runtime.restore = Mock(side_effect=[RuntimeError("transient readback"), real()])
+                reply = receiver.handle(canonical(self.wire(receiver, "recover")))
+                self.assertEqual(reply["status"], "ok")
+                self.assertTrue(reply["evidence"]["restoration"]["original_forwarding_verified"])
+            finally:
+                os.close(receiver.claim)
+
     def receiver(self, directory, receiver_class=Receiver):
         policy = dict(version=POLICY_VERSION, image_id=IMAGE, source_sha256=SOURCE, model_sha256=MODEL,
             container_id="c" * 64, owner_label="test-owner", seed=9001, scenario="path0",
@@ -577,6 +851,7 @@ class ContractTests(unittest.TestCase):
         # real original matched action and readback run against offline kernel fixture.
         receiver = Receiver.__new__(Receiver)
         receiver.runtime = runtime
+        receiver.policy = {"heartbeat_seconds": 10}
         receiver.lock = threading.RLock()
         receiver.shutdown = threading.Event()
         receiver.active_until = time.time() - 1

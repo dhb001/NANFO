@@ -41,8 +41,16 @@ test("guided object, paged custom membership and chosen asset retirement use exa
   });
   const bytes = Buffer.from(JSON.stringify({ asset: { version: "2.0" }, scene: 0, scenes: [{ nodes: [0] }], nodes: [{ name: "root" }] }));
   const model = { network_id: networkId, model_mime_type: "model/gltf+json", model_data_base64: bytes.toString("base64"), model_size_bytes: bytes.length, model_sha256: createHash("sha256").update(bytes).digest("hex"), mapping_by_device_id: {}, source: "browser-fixture", created_at: "2026-09-20T00:00:00Z", updated_at: "2026-09-20T00:00:00Z" };
-  let assets = [{ ...model, campus_model_asset_id: "older", model_file_name: "older.gltf" }, { ...model, campus_model_asset_id: "newer", model_file_name: "newer.gltf" }];
-  await page.route("**/campus/model-assets", (route) => route.fulfill({ json: envelope({ items: assets, total: assets.length }) }));
+  let assets = [{ ...model, campus_model_asset_id: "older", model_file_name: "older.gltf" }, { ...model, campus_model_asset_id: "newer", model_file_name: "newer.gltf" },
+    ...Array.from({ length: 19 }, (_, i) => ({ ...model, campus_model_asset_id: `extra-${i}`, model_file_name: `extra-${i}.gltf` }))];
+  const assetReads: number[] = [];
+  await page.route("**/campus/model-assets?**", (route) => {
+    const params = new URL(route.request().url()).searchParams;
+    expect(params.get("include_data")).toBe("false"); expect(params.get("page_size")).toBe("20");
+    const pageNumber = Number(params.get("page")); assetReads.push(pageNumber);
+    return route.fulfill({ json: envelope({ items: assets.slice((pageNumber - 1) * 20, pageNumber * 20).map((asset) => ({ ...asset, model_data_base64: undefined })), total: assets.length, page: pageNumber, page_size: 20 }) });
+  });
+  await page.route("**/campus-model-assets/*/download", (route) => route.fulfill({ body: bytes, contentType: "application/octet-stream", headers: { ETag: `"sha256:${model.model_sha256}"`, "Content-Length": String(bytes.length) } }));
   const deletes: string[] = [];
   await page.route("**/campus/model-assets/*", (route) => {
     expect(route.request().method()).toBe("DELETE"); expect(route.request().postData()).toBeNull();
@@ -77,9 +85,13 @@ test("guided object, paged custom membership and chosen asset retirement use exa
   expect(groupWrites).toEqual([{ replace_existing: false, groups: [{ group_key: "survey-ops", name: "Survey operations", group_type: "custom", description: null, selector: {}, device_ids: [devices[20].device_id] }] }]);
 
   await page.getByRole("combobox", { name: "Persisted model asset", exact: true }).selectOption("older");
+  await page.getByRole("button", { name: "Next asset page" }).click();
+  await expect(page.getByText("Asset page 2 · 21 assets", { exact: true })).toBeVisible();
+  await expect(page.getByRole("combobox", { name: "Persisted model asset", exact: true })).toHaveValue("older");
   expect(deletes).toEqual([]);
   await page.getByRole("button", { name: "Restore Persisted Model", exact: true }).click();
   await expect(page.getByText("model ready", { exact: true })).toBeVisible();
+  expect(assetReads.at(-1)).toBe(1);
   await page.getByLabel("Campus model file", { exact: true }).setInputFiles({ name: "unrelated.gltf", mimeType: "model/gltf+json", buffer: bytes });
   await expect(page.getByText("model ready", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Retire selected asset" }).click();
@@ -87,6 +99,7 @@ test("guided object, paged custom membership and chosen asset retirement use exa
   expect(deletes).toEqual(["older"]);
   await expect(page.getByText("model ready", { exact: true })).toBeVisible();
   await expect(page.getByRole("combobox", { name: "Persisted model asset", exact: true })).toHaveValue("");
+  await page.getByRole("button", { name: "Previous asset page" }).click();
   await page.getByRole("combobox", { name: "Persisted model asset", exact: true }).selectOption("newer");
   await page.getByRole("button", { name: "Restore Persisted Model", exact: true }).click();
   await expect(page.getByText("model ready", { exact: true })).toBeVisible();

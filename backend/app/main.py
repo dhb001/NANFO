@@ -46,6 +46,7 @@ from app.api.v1.telemetry_paths import router as telemetry_paths_router
 from app.api.v1.topology import router as topology_router
 from app.core.config import get_settings
 from app.core.logging import configure_logging, get_logger
+from app.core.request_context import RequestContextMiddleware, error_meta
 from app.db.neo4j import close_neo4j, get_neo4j_driver, init_neo4j
 from app.db.postgres import AsyncSessionLocal
 from app.db.redis import close_redis, get_redis_client, init_redis
@@ -422,7 +423,7 @@ async def jwt_error_handler(request: Request, exc: JWTError):
         content={
             "success": False,
             "data": None,
-            "meta": {"request_id": request.headers.get("X-Request-ID", ""), "timestamp": "", "execution_mode": get_settings().EXECUTION_MODE},
+            "meta": error_meta(request),
             "errors": {"code": "AUTH_TOKEN_INVALID", "message": "Invalid or expired token."},
         },
     )
@@ -481,27 +482,63 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
         content={
             "success": False,
             "data": None,
-            "meta": {"request_id": request.headers.get("X-Request-ID", ""), "timestamp": "", "execution_mode": get_settings().EXECUTION_MODE},
+            "meta": error_meta(request),
             "errors": {"code": code, "message": message},
         },
     )
 
 
+# Reviewed static public guidance from Telemetry, Report and Organization schemas.
+# Exact type/message lookup only: never prefix-match, interpolate ctx/input/loc,
+# or return an arbitrary validator's text. New messages need explicit review here.
+_SAFE_VALIDATION_MESSAGES = {
+    ("value_error", f"Value error, {message}"): f"Value error, {message}"
+    for message in (
+        "start_time must be before end_time (exclusive)",
+        "aggregation requires a metric",
+        "flow_* aggregation is unavailable: snapshot v1 has no durable flow match identity; use raw history",
+        "aggregation requires start_time, end_time and bucket_seconds",
+        "aggregation time range must not exceed seven days",
+        "bucket_seconds requires aggregation",
+        "cursor mode requires raw history and page=1",
+        "cursor requires pagination=cursor",
+        "date_range must be increasing and at most 31 days; end is exclusive",
+        "date_range cannot extend into the future",
+        "duplicate source IDs",
+        "simulation_ids require a simulation or summary report",
+        "intent_ids require an intent or summary report",
+        "metric requires a telemetry or summary report",
+        "alert filters require an alerts or summary report",
+        "Supply at least one field; name cannot be null.",
+        "Slug must be 3-63 characters, lowercase alphanumeric and hyphens only, and must not start or end with a hyphen.",
+    )
+}
+
+
+def _safe_validation_message(exc: RequestValidationError) -> str:
+    errors = exc.errors()
+    first = errors[0] if errors else None
+    if isinstance(first, dict):
+        error_type, message = first.get("type"), first.get("msg")
+        if isinstance(error_type, str) and isinstance(message, str):
+            return _SAFE_VALIDATION_MESSAGES.get((error_type, message), "Request validation failed.")
+    return "Request validation failed."
+
+
 @app.exception_handler(RequestValidationError)
 async def request_validation_exception_handler(request: Request, exc: RequestValidationError):
     """Return canonical validation error envelope for body/query/path validation failures."""
-    first_error = exc.errors()[0] if exc.errors() else None
-    message = first_error.get("msg") if isinstance(first_error, dict) else None
+    # Validator messages/context can interpolate raw passwords, tokens or payloads.
     return JSONResponse(
         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
         headers=_error_response_headers(request),
         content={
             "success": False,
             "data": None,
-            "meta": {"request_id": request.headers.get("X-Request-ID", ""), "timestamp": "", "execution_mode": get_settings().EXECUTION_MODE},
+            "meta": error_meta(request),
             "errors": {
                 "code": "VALIDATION_ERROR",
-                "message": str(message or "Request validation failed."),
+                "message": _safe_validation_message(exc),
             },
         },
     )
@@ -510,17 +547,23 @@ async def request_validation_exception_handler(request: Request, exc: RequestVal
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception):
     """Return 500 without leaking internal trace details (security.md: 'never leak raw internal traces')."""
-    logger.error("unhandled_exception", path=request.url.path, error_type=type(exc).__name__)
+    meta = error_meta(request)
+    logger.error("unhandled_exception", path=request.url.path, error_type=type(exc).__name__,
+                 request_id=meta["request_id"], request_timestamp=meta["timestamp"])
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         headers=_error_response_headers(request),
         content={
             "success": False,
             "data": None,
-            "meta": {"request_id": request.headers.get("X-Request-ID", ""), "timestamp": "", "execution_mode": get_settings().EXECUTION_MODE},
+            "meta": meta,
             "errors": {"code": "INTERNAL_ERROR", "message": "An unexpected error occurred."},
         },
     )
+
+
+app.add_middleware(RequestContextMiddleware, http_error_handler=http_exception_handler,
+                   error_handler=unhandled_exception_handler)
 
 
 # ── Mount routers ─────────────────────────────────────────────────────────────

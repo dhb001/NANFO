@@ -158,3 +158,15 @@ async def test_retirement_denials_and_rollback(service, case):
         assert error.value.status_code == (404 if case == "missing" else 403)
         service._db.commit.assert_not_awaited()
     service._db.rollback.assert_awaited_once()
+
+
+async def test_metadata_empty_page_and_final_authority_recheck(service):
+    service._repo.list_metadata_for_network.return_value = ([], 41)
+    result = await service.list_assets(network_id=NETWORK_ID, actor_user_id=str(ACTOR_ID),
+                                       include_data=False, page=4, page_size=20)
+    assert result.model_dump() == {"items": [], "total": 41, "page": 4, "page_size": 20}
+    service._repo.list_for_network.assert_not_awaited()
+    service._workspace_svc.assert_workspace_membership.side_effect = [SimpleNamespace(org_id=ORG_ID), HTTPException(403, "revoked")]
+    with pytest.raises(HTTPException) as error:
+        await service.list_assets(network_id=NETWORK_ID, actor_user_id=str(ACTOR_ID), include_data=False)
+    assert error.value.status_code == 403

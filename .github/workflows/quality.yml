@@ -36,6 +36,8 @@ jobs:
           poetry check --lock
           poetry sync --with dev --no-root --no-interaction
           poetry run python -m pip check
+      - name: Verify declared fakeredis Lua support in the clean locked environment
+        run: poetry run python ../scripts/check_fakeredis_lua.py
       - name: Backend lint
         run: poetry run ruff check app tests scripts
       - name: Disposable audit runner isolation and evidence regressions
@@ -72,21 +74,49 @@ jobs:
           --deselect=tests/unit/test_passive_observer.py::test_confined_candidate_validates_original_nonterminal_frame
           --deselect=tests/unit/test_passive_observer.py::test_idle_bridge_never_publishes_existing_history_or_dispatches
           --deselect=tests/unit/test_passive_observer.py::test_bridge_validates_before_atomic_publish_and_invalidates_on_disconnect
-      - name: ADR021 offline release-manifest unit tests
-        env:
-          PYTHONPATH: ..
-        run: poetry run python -m unittest discover -s ../deploy/tests -p test_release_manifest.py -v
+      - name: Full portable deployment, emulation and root-script regressions
+        run: poetry run python ../scripts/run_portable_tests.py --junitxml=portable-results.xml
       - name: Install local gateway test binary
         run: sudo apt-get update && sudo apt-get install --no-install-recommends -y nginx
+      - name: Real nginx authentication proxy boundary
+        run: >-
+          poetry run pytest --no-cov -q --junitxml=proxy-results.xml
+          tests/unit/test_proxy_boundary.py::test_real_nginx_two_login_clients_and_untrusted_spoof
+      - name: Require executed real nginx regression with zero skips
+        run: |
+          python - <<'PY'
+          import xml.etree.ElementTree as ET
+
+          cases = ET.parse('proxy-results.xml').getroot().findall('.//testcase')
+          required = 'test_real_nginx_two_login_clients_and_untrusted_spoof'
+          assert any(case.get('name') == required for case in cases), 'Real nginx proxy case missing'
+          for tag in ('skipped', 'failure', 'error'):
+              assert not any(case.find(tag) is not None for case in cases), f'Gateway lane recorded {tag}'
+          print(f'{len(cases)} gateway/proxy cases passed; zero skips')
+          PY
       - name: Gateway response headers
         env:
           NANFO_TEST_NGINX: '1'
-        run: poetry run pytest tests/integration/test_gateway_headers.py --no-cov -q
+        run: poetry run pytest tests/integration/test_gateway_headers.py --no-cov -q --junitxml=gateway-results.xml
+      - name: Require executed gateway header cases with zero skips
+        run: |
+          python - <<'PY'
+          import xml.etree.ElementTree as ET
+
+          cases = ET.parse('gateway-results.xml').getroot().findall('.//testcase')
+          assert len(cases) >= 6, 'Gateway header cases missing'
+          for tag in ('skipped', 'failure', 'error'):
+              assert not any(case.find(tag) is not None for case in cases), f'Gateway lane recorded {tag}'
+          PY
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with:
           name: backend-quality-results
-          path: backend/quality-results.xml
+          path: |
+            backend/quality-results.xml
+            backend/portable-results.xml
+            backend/gateway-results.xml
+            backend/proxy-results.xml
           retention-days: 7
 
   ai:

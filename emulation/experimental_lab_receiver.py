@@ -16,6 +16,7 @@ try:
     from .experimental_lab_contract import (
         RESPONSE_LIMIT,
         VERSION,
+        ProtectedReadError,
         Request,
         atomic_write,
         canonical,
@@ -32,6 +33,7 @@ except ImportError:
     from experimental_lab_contract import (
         RESPONSE_LIMIT,
         VERSION,
+        ProtectedReadError,
         Request,
         atomic_write,
         canonical,
@@ -56,6 +58,9 @@ class Receiver:
         require(len(self.token) == 64, "invalid_receiver_token")
         self.lock = threading.RLock()
         self.lease_lock = threading.Lock()
+        self.stop_lock = threading.Lock()
+        self.stop_cause = None
+        self.protected_read_failure = None
         self.lease_fence = 0
         self.shutdown = threading.Event()
         self.stopped = False
@@ -83,6 +88,8 @@ class Receiver:
             require(prior["policy_sha256"] == policy_hash, "journal_policy_mismatch")
             self.fence, self.receipts = prior["fence"], prior["receipts"]
             self.stopped = prior["stopped"]
+            self.stop_cause = prior.get("stop_cause")
+            self.protected_read_failure = prior.get("protected_read_failure")
             # Original Mininet object is not reconstructible after receiver death.
             # Never bind a fresh graph to an old journal and claim recovery.
             require(prior["phase"] in ("ready", "restored") and not prior["runtime"]["owned"],
@@ -96,6 +103,8 @@ class Receiver:
                 atomic_write(path, frame)
         atomic_write(self.journal_path, {"version": VERSION, "policy_sha256": self.policy_hash,
             "phase": self.phase, "fence": self.fence, "stopped": self.stopped,
+            "stop_cause": self.stop_cause,
+            "protected_read_failure": self.protected_read_failure,
             "current": None if self.current is None else self.current.public(),
             "active_until": self.active_until, "receipts": self.receipts,
             "runtime": self.runtime.state(), "restoration": self.restoration,
@@ -148,12 +157,25 @@ class Receiver:
         self.persist()
 
     def latch_stop(self, reason, request_id):
-        self.stopped = True
-        self.abort.set()
-        atomic_write(self.directory / "STOP", {"request_id": request_id, "reason": reason,
-                                               "latched_monotonic": time.monotonic()})
+        with self.stop_lock:
+            self.stopped = True
+            self.abort.set()
+            if self.stop_cause is None:
+                self.stop_cause = {"request_id": request_id, "reason": reason,
+                    "latched_monotonic": time.monotonic(), "latched_wall": time.time()}
+                atomic_write(self.directory / "STOP", self.stop_cause)
 
     def authority(self):
+        try:
+            return self._authority()
+        except ProtectedReadError as exc:
+            with self.stop_lock:
+                if self.protected_read_failure is None:
+                    self.protected_read_failure = {**exc.diagnostic,
+                        "observed_monotonic": time.monotonic(), "observed_wall": time.time()}
+            raise
+
+    def _authority(self):
         # A protected file is the receiver's current external authority lease.
         # Controller owning Identity must refresh it after checking current actor.
         require(not self.stopped and not (self.directory / "STOP").exists(), "stopped")
@@ -202,7 +224,8 @@ class Receiver:
         self.phase = "restoring"
         self.persist()
         try:
-            self.restoration = {"reason": reason, **self.runtime.restore()}
+            self.restoration = {"reason": reason, **self.runtime.restore(
+                timeout_seconds=self.policy["heartbeat_seconds"])}
             self.phase = "restored"
             self.active_until = None
             return self.restoration
@@ -218,10 +241,17 @@ class Receiver:
                 continue
             try:
                 self.authority()
-            except (ValueError, OSError, RuntimeError):
+            except (ValueError, OSError, RuntimeError) as exc:
                 # STOP is immediate and is seen by the per-mutation wrapper even
                 # while a measurement owns the work lock. Only owner does recovery.
-                self.latch_stop("watchdog", "receiver")
+                allowed = {"stopped", "experiment_expired", "controller_disconnected",
+                    "current_actor_authority_unavailable", "authority_changed_during_read",
+                    "request_expired", "action_expired", "held_measurement_expired",
+                    "bootstrap_authority_changed_during_read", "bootstrap_not_admitted",
+                    "bootstrap_request_expired", "bootstrap_action_expired", "policy_changed"}
+                reason = ("protected_read_failed" if isinstance(exc, ProtectedReadError) else
+                    str(exc) if isinstance(exc, ValueError) and str(exc) in allowed else "authority_unavailable")
+                self.latch_stop("watchdog:" + reason, "receiver")
                 with self.lock:
                     if self.active_until is not None:
                         with contextlib.suppress(Exception):
@@ -239,7 +269,9 @@ class Receiver:
                 raise
             return snapshot({"version": VERSION, "request_id": req.request_id, "fence": req.fence,
                 "policy_sha256": self.policy_hash, "status": "rejected",
-                "evidence": {"reason": "heartbeat_denied", "stopped": self.stopped}})
+                "evidence": {"reason": "heartbeat_denied", "stopped": self.stopped,
+                             "protected_read_failure": self.protected_read_failure,
+                             "stop_cause": self.stop_cause}})
 
     def _handle(self, raw):
         req = Request.parse(raw)
@@ -304,11 +336,15 @@ class Receiver:
                 if self.runtime.baseline is not None and req.operation not in ("status",):
                     try:
                         evidence["restoration"] = self.restore("operation_failure")
+                        if req.operation in ("restore", "recover"):
+                            status = "ok"
                     except Exception:
                         status = "uncertain"
             response = {"version": VERSION, "request_id": req.request_id, "fence": req.fence,
                 "policy_sha256": self.policy_hash, "status": status,
                 "evidence": {**evidence, "phase": self.phase, "stopped": self.stopped,
+                    "stop_cause": self.stop_cause,
+                    "protected_read_failure": self.protected_read_failure,
                     "wrapper_sha256": wrapper_digest(), "action_paths": self.runtime.state(),
                     "duration_seconds": time.monotonic() - began}}
             self.receipts[req.request_id]["response"] = snapshot(response)
@@ -412,7 +448,7 @@ def serve(receiver, socket_path):
                 connection.sendall(payload)
         except (OSError, ValueError):
             # Receipt remains durable; lost connection triggers receiver recovery.
-            receiver.stopped = True
+            receiver.latch_stop("response_transport_failed", "receiver")
         finally:
             slots.release()
 

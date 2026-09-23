@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useSessionScope } from "@/features/auth/sessionScope";
 import {
   createDevice,
   createNetwork,
@@ -198,15 +199,20 @@ export function useUpsertCampusBuildings(token: string | null, networkId: string
   });
 }
 
-export function useCampusModelAssets(token: string | null, networkId: string | null) {
-  return useQuery({
-    queryKey: ["campus-model-assets", token, networkId],
-    queryFn: async () => {
-      const response = await listCampusModelAssets(token as string, networkId as string);
-      return response.data;
+export function useCampusModelAssets(token: string | null, networkId: string | null, page = 1, pageSize = 20) {
+  const scope = useSessionScope();
+  const readPage = async (targetPage: number, signal?: AbortSignal) => {
+    const response = await scope.read((credential) => listCampusModelAssets(credential, networkId as string, targetPage, pageSize, signal), signal);
+    return response.data;
+  };
+  const query = useQuery({
+    queryKey: ["campus-model-assets", scope.key, scope.authority, networkId, page, pageSize],
+    queryFn: async ({ signal }) => {
+      return readPage(page, signal);
     },
     enabled: Boolean(token && networkId),
   });
+  return { ...query, readPage };
 }
 
 export function useUpsertCampusModelAssets(token: string | null, networkId: string | null) {
@@ -220,7 +226,7 @@ export function useUpsertCampusModelAssets(token: string | null, networkId: stri
       return response.data;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["campus-model-assets", token, networkId] });
+      queryClient.invalidateQueries({ queryKey: ["campus-model-assets"] });
     },
   });
 }

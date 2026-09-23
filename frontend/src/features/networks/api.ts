@@ -94,9 +94,9 @@ export function upsertCampusBuildings(
   });
 }
 
-export function listCampusModelAssets(token: string, networkId: string) {
-  return apiRequest<CampusModelAssetList>(`/api/v1/networks/${networkId}/campus/model-assets`, {
-    token,
+export function listCampusModelAssets(token: string, networkId: string, page = 1, pageSize = 20, signal?: AbortSignal) {
+  return apiRequest<CampusModelAssetList>(`/api/v1/networks/${encodeURIComponent(networkId)}/campus/model-assets?include_data=false&page=${page}&page_size=${pageSize}`, {
+    token, signal,
   });
 }
 
