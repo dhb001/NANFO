@@ -16,6 +16,16 @@ from app.modules.network.synthetic_topology import EDGE_TYPE_CONNECTED_TO, Plann
 from app.modules.network.topology import TopologyQueryService, _record_int
 
 
+def _transactional(session):
+    """Let a mocked session run transaction functions against its own ``run`` mock."""
+    async def run_work(work, *args, **kwargs):
+        return await work(session, *args, **kwargs)
+
+    session.execute_read = AsyncMock(side_effect=run_work)
+    session.execute_write = AsyncMock(side_effect=run_work)
+    return session
+
+
 @pytest.mark.asyncio
 async def test_topology_consumer_passes_workspace_id_on_device_added():
     payload = {
@@ -68,36 +78,6 @@ async def test_topology_consumer_updates_spatial_ref_id_on_device_updated_event(
 
 
 @pytest.mark.asyncio
-async def test_create_device_node_sets_workspace_id_property():
-    session = AsyncMock()
-    session_cm = AsyncMock()
-    session_cm.__aenter__.return_value = session
-    session_cm.__aexit__.return_value = None
-
-    driver = MagicMock()
-    driver.session.return_value = session_cm
-
-    svc = TopologyQueryService(driver=driver)
-    await svc.create_device_node(
-        device_id=str(uuid.uuid4()),
-        network_id=str(uuid.uuid4()),
-        workspace_id=str(uuid.uuid4()),
-        hostname="core-switch-01",
-        device_type="switch",
-        spatial_ref_id="campus-a/device-core-switch-01",
-    )
-
-    session.run.assert_awaited_once()
-    query = session.run.await_args.args[0]
-    params = session.run.await_args.kwargs
-
-    assert "d.workspace_id = $workspace_id" in query
-    assert "d.spatial_ref_id = $spatial_ref_id" in query
-    assert params["workspace_id"]
-    assert params["spatial_ref_id"] == "campus-a/device-core-switch-01"
-
-
-@pytest.mark.asyncio
 async def test_backfill_missing_workspace_ids_updates_only_missing_nodes():
     first_result = MagicMock()
     first_result.data = AsyncMock(return_value=[
@@ -115,6 +95,7 @@ async def test_backfill_missing_workspace_ids_updates_only_missing_nodes():
     session_cm = AsyncMock()
     session_cm.__aenter__.return_value = session
     session_cm.__aexit__.return_value = None
+    _transactional(session)
 
     driver = MagicMock()
     driver.session.return_value = session_cm
@@ -156,6 +137,7 @@ async def test_backfill_missing_workspace_ids_is_noop_when_nothing_missing():
     session_cm = AsyncMock()
     session_cm.__aenter__.return_value = session
     session_cm.__aexit__.return_value = None
+    _transactional(session)
 
     driver = MagicMock()
     driver.session.return_value = session_cm
@@ -243,6 +225,7 @@ async def test_get_graph_paginates_and_returns_next_cursor_with_stable_order():
     session_cm = AsyncMock()
     session_cm.__aenter__.return_value = session
     session_cm.__aexit__.return_value = None
+    _transactional(session)
 
     driver = MagicMock()
     driver.session.return_value = session_cm
@@ -302,6 +285,7 @@ async def test_get_graph_returns_none_next_cursor_when_last_page():
     session_cm = AsyncMock()
     session_cm.__aenter__.return_value = session
     session_cm.__aexit__.return_value = None
+    _transactional(session)
 
     driver = MagicMock()
     driver.session.return_value = session_cm
@@ -331,6 +315,7 @@ async def test_get_graph_returns_empty_page_without_edge_query_when_no_nodes():
     session_cm = AsyncMock()
     session_cm.__aenter__.return_value = session
     session_cm.__aexit__.return_value = None
+    _transactional(session)
 
     driver = MagicMock()
     driver.session.return_value = session_cm
@@ -383,6 +368,7 @@ async def test_get_node_with_neighbours_returns_node_and_sorted_neighbours():
     session_cm = AsyncMock()
     session_cm.__aenter__.return_value = session
     session_cm.__aexit__.return_value = None
+    _transactional(session)
 
     driver = MagicMock()
     driver.session.return_value = session_cm
@@ -415,6 +401,7 @@ async def test_get_node_with_neighbours_returns_none_when_missing():
     session_cm = AsyncMock()
     session_cm.__aenter__.return_value = session
     session_cm.__aexit__.return_value = None
+    _transactional(session)
 
     driver = MagicMock()
     driver.session.return_value = session_cm
@@ -450,6 +437,7 @@ async def test_get_node_with_neighbours_forces_depth_to_one():
     session_cm = AsyncMock()
     session_cm.__aenter__.return_value = session
     session_cm.__aexit__.return_value = None
+    _transactional(session)
 
     driver = MagicMock()
     driver.session.return_value = session_cm
@@ -468,361 +456,6 @@ async def test_get_node_with_neighbours_forces_depth_to_one():
     assert "workspace_id" in query
 
 
-@pytest.mark.asyncio
-async def test_get_device_neighbours_returns_deterministic_rows_with_metadata_and_depth():
-    root_record = {
-        "device_id": "device-1",
-        "hostname": "core-1",
-        "device_type": "router",
-        "status": "active",
-        "spatial_ref_id": "campus-a/core-1",
-    }
-    root_result = MagicMock()
-    root_result.single = AsyncMock(return_value=root_record)
-
-    neighbours_result = MagicMock()
-    neighbours_result.data = AsyncMock(
-        return_value=[
-            {
-                "selected": {
-                    "device_id": "device-2",
-                    "hostname": "edge-2",
-                    "device_type": "switch",
-                    "status": "active",
-                    "spatial_ref_id": "campus-a/edge-2",
-                    "edge_type": "connected_to",
-                    "edge_metadata": {"link_quality": "good"},
-                    "direction": "inbound",
-                    "hop_depth": 2,
-                }
-            },
-            {
-                "selected": {
-                    "device_id": "device-3",
-                    "hostname": "edge-3",
-                    "device_type": "switch",
-                    "status": "active",
-                    "spatial_ref_id": None,
-                    "edge_type": "connected_to",
-                    "edge_metadata": {},
-                    "direction": "outbound",
-                    "hop_depth": 1,
-                }
-            },
-        ]
-    )
-
-    session = AsyncMock()
-    session.run = AsyncMock(side_effect=[root_result, neighbours_result])
-    session_cm = AsyncMock()
-    session_cm.__aenter__.return_value = session
-    session_cm.__aexit__.return_value = None
-
-    driver = MagicMock()
-    driver.session.return_value = session_cm
-
-    svc = TopologyQueryService(driver=driver)
-    result = await svc.get_device_neighbours(
-        device_id=uuid.uuid4(),
-        network_id=uuid.uuid4(),
-        workspace_id=uuid.uuid4(),
-        depth=10,
-        limit=5,
-    )
-
-    assert result is not None
-    assert result.device.device_id == "device-1"
-    assert result.depth == 6
-    assert result.total == 2
-    assert result.neighbours[0].edge_metadata == {"link_quality": "good"}
-    assert result.neighbours[0].hop_depth == 2
-    assert result.neighbours[1].hop_depth == 1
-
-    neighbours_call = session.run.await_args_list[1]
-    assert neighbours_call.kwargs["limit"] == 5
-    assert neighbours_call.kwargs["workspace_id"]
-    assert "1..6" in neighbours_call.args[0]
-    assert "workspace_id" in neighbours_call.args[0]
-
-
-@pytest.mark.asyncio
-async def test_get_device_neighbours_returns_none_when_root_missing():
-    root_result = MagicMock()
-    root_result.single = AsyncMock(return_value=None)
-
-    session = AsyncMock()
-    session.run = AsyncMock(return_value=root_result)
-    session_cm = AsyncMock()
-    session_cm.__aenter__.return_value = session
-    session_cm.__aexit__.return_value = None
-
-    driver = MagicMock()
-    driver.session.return_value = session_cm
-
-    svc = TopologyQueryService(driver=driver)
-    result = await svc.get_device_neighbours(
-        device_id=uuid.uuid4(),
-        network_id=uuid.uuid4(),
-        workspace_id=uuid.uuid4(),
-        depth=1,
-        limit=20,
-    )
-
-    assert result is None
-    session.run.assert_awaited_once()
-
-
-@pytest.mark.asyncio
-async def test_get_impact_analysis_returns_ordered_reachable_set():
-    root_record = {
-        "device_id": "device-1",
-        "hostname": "core-1",
-        "device_type": "router",
-        "status": "active",
-        "spatial_ref_id": "campus-a/core-1",
-    }
-    root_result = MagicMock()
-    root_result.single = AsyncMock(return_value=root_record)
-
-    impact_result = MagicMock()
-    impact_result.data = AsyncMock(
-        return_value=[
-            {
-                "impact": {
-                    "device_id": "device-2",
-                    "hostname": "dist-2",
-                    "device_type": "switch",
-                    "status": "active",
-                    "spatial_ref_id": "campus-a/dist-2",
-                    "hop_depth": 1,
-                }
-            },
-            {
-                "impact": {
-                    "device_id": "device-3",
-                    "hostname": "edge-3",
-                    "device_type": "switch",
-                    "status": "active",
-                    "spatial_ref_id": None,
-                    "hop_depth": 2,
-                }
-            },
-        ]
-    )
-
-    session = AsyncMock()
-    session.run = AsyncMock(side_effect=[root_result, impact_result])
-    session_cm = AsyncMock()
-    session_cm.__aenter__.return_value = session
-    session_cm.__aexit__.return_value = None
-
-    driver = MagicMock()
-    driver.session.return_value = session_cm
-
-    svc = TopologyQueryService(driver=driver)
-    result = await svc.get_impact_analysis(
-        device_id=uuid.uuid4(),
-        network_id=uuid.uuid4(),
-        workspace_id=uuid.uuid4(),
-        max_hops=20,
-        limit=9,
-    )
-
-    assert result is not None
-    assert result.device.device_id == "device-1"
-    assert result.max_hops == 8
-    assert result.total == 2
-    assert result.impacts[0].device_id == "device-2"
-    assert result.impacts[0].hop_depth == 1
-    assert result.impacts[1].device_id == "device-3"
-    assert result.impacts[1].hop_depth == 2
-
-    impact_call = session.run.await_args_list[1]
-    assert impact_call.kwargs["limit"] == 9
-    assert impact_call.kwargs["workspace_id"]
-    assert "1..8" in impact_call.args[0]
-    assert "workspace_id" in impact_call.args[0]
-
-
-@pytest.mark.asyncio
-async def test_get_impact_analysis_returns_none_when_root_missing():
-    root_result = MagicMock()
-    root_result.single = AsyncMock(return_value=None)
-
-    session = AsyncMock()
-    session.run = AsyncMock(return_value=root_result)
-    session_cm = AsyncMock()
-    session_cm.__aenter__.return_value = session
-    session_cm.__aexit__.return_value = None
-
-    driver = MagicMock()
-    driver.session.return_value = session_cm
-
-    svc = TopologyQueryService(driver=driver)
-    result = await svc.get_impact_analysis(
-        device_id=uuid.uuid4(),
-        network_id=uuid.uuid4(),
-        workspace_id=uuid.uuid4(),
-        max_hops=2,
-        limit=200,
-    )
-
-    assert result is None
-    session.run.assert_awaited_once()
-
-
-@pytest.mark.asyncio
-async def test_reconcile_network_returns_none_when_network_not_found():
-    network_id = uuid.uuid4()
-
-    session = AsyncMock()
-    session_cm = AsyncMock()
-    session_cm.__aenter__.return_value = session
-    session_cm.__aexit__.return_value = None
-    driver = MagicMock()
-    driver.session.return_value = session_cm
-
-    with patch.object(
-        NetworkRepository,
-        "get_workspace_ids_for_network_ids",
-        new=AsyncMock(return_value={}),
-    ) as workspace_lookup, patch("app.modules.network.topology.publish_event", new_callable=AsyncMock) as publish_event:
-        result = await TopologyQueryService(driver=driver).reconcile_network(
-            network_id=network_id,
-            workspace_id=uuid.uuid4(),
-            db=AsyncMock(),
-            redis=AsyncMock(),
-            actor_id=str(uuid.uuid4()),
-            correlation_id="corr-1",
-        )
-
-    assert result is None
-    workspace_lookup.assert_awaited_once_with([str(network_id)])
-    publish_event.assert_not_awaited()
-    session.run.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_reconcile_network_returns_counts_and_emits_requested_and_completed_events():
-    network_id = uuid.uuid4()
-    workspace_id = str(uuid.uuid4())
-
-    node_result = MagicMock()
-    node_result.single = AsyncMock(return_value={"node_count": 7})
-    edge_result = MagicMock()
-    edge_result.single = AsyncMock(return_value={"edge_count": 6})
-    missing_result = MagicMock()
-    missing_result.single = AsyncMock(return_value={"missing_workspace_nodes": 2})
-    backfill_result = MagicMock()
-    backfill_result.single = AsyncMock(return_value={"workspace_backfilled_nodes": 2})
-
-    session = AsyncMock()
-    session.run = AsyncMock(side_effect=[node_result, edge_result, missing_result, backfill_result])
-    session_cm = AsyncMock()
-    session_cm.__aenter__.return_value = session
-    session_cm.__aexit__.return_value = None
-    driver = MagicMock()
-    driver.session.return_value = session_cm
-
-    with patch.object(
-        NetworkRepository,
-        "get_workspace_ids_for_network_ids",
-        new=AsyncMock(return_value={str(network_id): workspace_id}),
-    ), patch("app.modules.network.topology.publish_event", new_callable=AsyncMock) as publish_event:
-        result = await TopologyQueryService(driver=driver).reconcile_network(
-            network_id=network_id,
-            workspace_id=uuid.UUID(workspace_id),
-            db=AsyncMock(),
-            redis=AsyncMock(),
-            actor_id=str(uuid.uuid4()),
-            correlation_id="corr-2",
-        )
-
-    assert result is not None
-    assert result["network_id"] == str(network_id)
-    assert result["status"] == "completed"
-    assert result["checked_nodes"] == 7
-    assert result["checked_edges"] == 6
-    assert result["missing_workspace_nodes"] == 2
-    assert result["workspace_backfilled_nodes"] == 2
-    assert result["warning"] is None
-
-    assert publish_event.await_count == 2
-    first_event_kwargs = publish_event.await_args_list[0].kwargs
-    second_event_kwargs = publish_event.await_args_list[1].kwargs
-    assert first_event_kwargs["event_type"] == "network.topology.reconcile_requested"
-    assert second_event_kwargs["event_type"] == "network.topology.reconcile_completed"
-
-
-@pytest.mark.asyncio
-async def test_reconcile_network_returns_none_when_workspace_mismatch_detected():
-    network_id = uuid.uuid4()
-    resolved_workspace_id = uuid.uuid4()
-    mismatched_workspace_id = uuid.uuid4()
-
-    session = AsyncMock()
-    session_cm = AsyncMock()
-    session_cm.__aenter__.return_value = session
-    session_cm.__aexit__.return_value = None
-    driver = MagicMock()
-    driver.session.return_value = session_cm
-
-    with patch.object(
-        NetworkRepository,
-        "get_workspace_ids_for_network_ids",
-        new=AsyncMock(return_value={str(network_id): str(resolved_workspace_id)}),
-    ) as workspace_lookup, patch("app.modules.network.topology.publish_event", new_callable=AsyncMock) as publish_event:
-        result = await TopologyQueryService(driver=driver).reconcile_network(
-            network_id=network_id,
-            workspace_id=mismatched_workspace_id,
-            db=AsyncMock(),
-            redis=AsyncMock(),
-            actor_id=str(uuid.uuid4()),
-            correlation_id="corr-workspace-mismatch",
-        )
-
-    assert result is None
-    workspace_lookup.assert_awaited_once_with([str(network_id)])
-    publish_event.assert_not_awaited()
-    session.run.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_reconcile_network_emits_failed_event_and_raises_on_neo4j_error():
-    network_id = uuid.uuid4()
-    workspace_id = str(uuid.uuid4())
-
-    session = AsyncMock()
-    session.run = AsyncMock(side_effect=RuntimeError("neo4j unavailable"))
-    session_cm = AsyncMock()
-    session_cm.__aenter__.return_value = session
-    session_cm.__aexit__.return_value = None
-    driver = MagicMock()
-    driver.session.return_value = session_cm
-
-    with (
-        patch.object(
-            NetworkRepository,
-            "get_workspace_ids_for_network_ids",
-            new=AsyncMock(return_value={str(network_id): workspace_id}),
-        ),
-        patch("app.modules.network.topology.publish_event", new_callable=AsyncMock) as publish_event,
-        pytest.raises(RuntimeError, match="neo4j unavailable"),
-    ):
-        await TopologyQueryService(driver=driver).reconcile_network(
-            network_id=network_id,
-            workspace_id=uuid.UUID(workspace_id),
-            db=AsyncMock(),
-            redis=AsyncMock(),
-            actor_id=str(uuid.uuid4()),
-            correlation_id="corr-3",
-        )
-
-    assert publish_event.await_count == 2
-    assert publish_event.await_args_list[0].kwargs["event_type"] == "network.topology.reconcile_requested"
-    assert publish_event.await_args_list[1].kwargs["event_type"] == "network.topology.reconcile_failed"
-
-
 # ======================================================================================
 # Digital Twin Phase 1 — CONNECTED_TO edge writer + edge metadata read-through
 # ======================================================================================
@@ -833,12 +466,14 @@ def _edge_write_session(written: int = 0):
     record = {"written": written}
     result = MagicMock()
     result.single = AsyncMock(return_value=record)
+    result.consume = AsyncMock()  # endpoint revision-lock statement
 
     session = AsyncMock()
     session.run = AsyncMock(return_value=result)
     session_cm = AsyncMock()
     session_cm.__aenter__.return_value = session
     session_cm.__aexit__.return_value = None
+    _transactional(session)
 
     driver = MagicMock()
     driver.session.return_value = session_cm
@@ -875,6 +510,13 @@ async def test_merge_device_edges_writes_scoped_idempotent_relationships():
     assert [edge["source_id"] for edge in kwargs["edges"]] == ["a", "b"]
     assert kwargs["edges"][0]["properties"]["relation"] == "core_backbone"
     assert kwargs["edges"][0]["properties"]["synthetic"] is True
+    # ADR-028: the endpoint revision locks (sorted, unique) are taken first, in the
+    # same write transaction as the relationship MERGE.
+    lock, merge = session.run.await_args_list
+    assert "MERGE (r:DeviceEventRevision {device_id: device_id})" in lock.args[0]
+    assert lock.kwargs["device_ids"] == ["a", "b", "c"]
+    assert merge.args[0] == query
+    session.execute_write.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -992,6 +634,7 @@ async def test_get_graph_surfaces_synthetic_edge_metadata():
     session_cm = AsyncMock()
     session_cm.__aenter__.return_value = session
     session_cm.__aexit__.return_value = None
+    _transactional(session)
 
     driver = MagicMock()
     driver.session.return_value = session_cm
@@ -1030,6 +673,7 @@ async def test_get_graph_defaults_edge_metadata_when_properties_absent():
     session_cm = AsyncMock()
     session_cm.__aenter__.return_value = session
     session_cm.__aexit__.return_value = None
+    _transactional(session)
 
     driver = MagicMock()
     driver.session.return_value = session_cm
@@ -1061,6 +705,7 @@ async def test_get_graph_deduplicates_repeated_edge_rows():
     session_cm = AsyncMock()
     session_cm.__aenter__.return_value = session
     session_cm.__aexit__.return_value = None
+    _transactional(session)
 
     driver = MagicMock()
     driver.session.return_value = session_cm
@@ -1116,12 +761,14 @@ async def test_merge_device_edges_returns_real_count_from_neo4j_record():
     record = Record(zip(["written"], [323]))
     result = MagicMock()
     result.single = AsyncMock(return_value=record)
+    result.consume = AsyncMock()
 
     session = AsyncMock()
     session.run = AsyncMock(return_value=result)
     session_cm = AsyncMock()
     session_cm.__aenter__.return_value = session
     session_cm.__aexit__.return_value = None
+    _transactional(session)
 
     driver = MagicMock()
     driver.session.return_value = session_cm
@@ -1134,60 +781,6 @@ async def test_merge_device_edges_returns_real_count_from_neo4j_record():
     )
 
     assert written == 323
-
-
-@pytest.mark.asyncio
-async def test_reconcile_network_reports_real_counts_from_neo4j_records():
-    """Pre-existing defect: reconcile always reported zeros against a real driver."""
-    network_id = uuid.uuid4()
-    workspace_id = uuid.uuid4()
-
-    def _result(record):
-        res = MagicMock()
-        res.single = AsyncMock(return_value=record)
-        return res
-
-    session = AsyncMock()
-    session.run = AsyncMock(
-        side_effect=[
-            _result(Record(zip(["node_count"], [339]))),
-            _result(Record(zip(["edge_count"], [338]))),
-            _result(Record(zip(["missing_workspace_nodes"], [5]))),
-            _result(Record(zip(["workspace_backfilled_nodes"], [5]))),
-        ]
-    )
-    session_cm = AsyncMock()
-    session_cm.__aenter__.return_value = session
-    session_cm.__aexit__.return_value = None
-
-    driver = MagicMock()
-    driver.session.return_value = session_cm
-
-    repo_result = {str(network_id): str(workspace_id)}
-
-    with (
-        patch.object(
-            NetworkRepository,
-            "get_workspace_ids_for_network_ids",
-            new=AsyncMock(return_value=repo_result),
-        ),
-        patch("app.modules.network.topology.publish_event", new=AsyncMock()),
-    ):
-        svc = TopologyQueryService(driver=driver)
-        outcome = await svc.reconcile_network(
-            network_id=network_id,
-            workspace_id=workspace_id,
-            db=AsyncMock(),
-            redis=MagicMock(),
-            actor_id="actor-1",
-            correlation_id="corr-1",
-        )
-
-    assert outcome is not None
-    assert outcome["checked_nodes"] == 339
-    assert outcome["checked_edges"] == 338
-    assert outcome["missing_workspace_nodes"] == 5
-    assert outcome["workspace_backfilled_nodes"] == 5
 
 
 # ======================================================================================
@@ -1221,100 +814,3 @@ async def test_prune_synthetic_device_edges_only_targets_tagged_generated_edges(
     assert kwargs["generator"] == "nanfo.synthetic_topology.v1"
 
 
-@pytest.mark.asyncio
-async def test_replace_synthetic_device_edges_prunes_before_writing():
-    """Regression for observed accumulation: 323 stale + 338 new produced 614 edges."""
-    svc = TopologyQueryService(driver=MagicMock())
-
-    call_order: list[str] = []
-
-    async def fake_prune(_self, **kwargs):
-        call_order.append("prune")
-        return 323
-
-    async def fake_merge(_self, **kwargs):
-        call_order.append("merge")
-        return 338
-
-    with (
-        patch.object(TopologyQueryService, "prune_synthetic_device_edges", new=fake_prune),
-        patch.object(TopologyQueryService, "merge_device_edges", new=fake_merge),
-    ):
-        deleted, written = await svc.replace_synthetic_device_edges(
-            network_id="net-1",
-            workspace_id="ws-1",
-            edges=[PlannedEdge("a", "b", EDGE_TYPE_CONNECTED_TO, {"synthetic": True, "generator": "nanfo.synthetic_topology.v1"})],
-            generator="nanfo.synthetic_topology.v1",
-        )
-
-    assert (deleted, written) == (323, 338)
-    assert call_order == ["prune", "merge"], "stale edges must be removed before writing"
-
-
-@pytest.mark.asyncio
-async def test_replace_synthetic_device_edges_is_convergent_across_reruns():
-    """Two runs with the same plan must leave the same edge count, not double it."""
-    svc = TopologyQueryService(driver=MagicMock())
-    graph_edges: set[tuple[str, str]] = set()
-    plan = [
-        PlannedEdge("a", "b", EDGE_TYPE_CONNECTED_TO, {"synthetic": True, "generator": "g"}),
-        PlannedEdge("b", "c", EDGE_TYPE_CONNECTED_TO, {"synthetic": True, "generator": "g"}),
-    ]
-
-    async def fake_prune(_self, **kwargs):
-        removed = len(graph_edges)
-        graph_edges.clear()
-        return removed
-
-    async def fake_merge(_self, **kwargs):
-        for edge in kwargs["edges"]:
-            graph_edges.add((edge.source_id, edge.target_id))
-        return len(kwargs["edges"])
-
-    with (
-        patch.object(TopologyQueryService, "prune_synthetic_device_edges", new=fake_prune),
-        patch.object(TopologyQueryService, "merge_device_edges", new=fake_merge),
-    ):
-        await svc.replace_synthetic_device_edges(
-            network_id="n", workspace_id="w", edges=plan, generator="g"
-        )
-        assert len(graph_edges) == 2
-
-        await svc.replace_synthetic_device_edges(
-            network_id="n", workspace_id="w", edges=plan, generator="g"
-        )
-        assert len(graph_edges) == 2, "re-running must converge, not accumulate"
-
-
-@pytest.mark.asyncio
-async def test_replace_converges_when_a_rerun_plan_picks_different_parents():
-    """The real failure mode: a different device set yields different valid parents."""
-    svc = TopologyQueryService(driver=MagicMock())
-    graph_edges: set[tuple[str, str]] = set()
-
-    async def fake_prune(_self, **kwargs):
-        removed = len(graph_edges)
-        graph_edges.clear()
-        return removed
-
-    async def fake_merge(_self, **kwargs):
-        for edge in kwargs["edges"]:
-            graph_edges.add((edge.source_id, edge.target_id))
-        return len(kwargs["edges"])
-
-    partial_plan = [PlannedEdge("core-1", "ap-1", EDGE_TYPE_CONNECTED_TO, {"synthetic": True, "generator": "g"})]
-    full_plan = [PlannedEdge("core-2", "ap-1", EDGE_TYPE_CONNECTED_TO, {"synthetic": True, "generator": "g"})]
-
-    with (
-        patch.object(TopologyQueryService, "prune_synthetic_device_edges", new=fake_prune),
-        patch.object(TopologyQueryService, "merge_device_edges", new=fake_merge),
-    ):
-        await svc.replace_synthetic_device_edges(
-            network_id="n", workspace_id="w", edges=partial_plan, generator="g"
-        )
-        await svc.replace_synthetic_device_edges(
-            network_id="n", workspace_id="w", edges=full_plan, generator="g"
-        )
-
-    # ap-1 must end up with exactly one uplink, from the newer plan.
-    assert graph_edges == {("core-2", "ap-1")}

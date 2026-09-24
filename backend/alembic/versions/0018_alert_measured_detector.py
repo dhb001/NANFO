@@ -59,6 +59,12 @@ def upgrade():
 
 
 def downgrade():
+    # alert_history is the immutable (trigger-protected) lifecycle journal (ADR-028).
+    if op.get_context().as_sql:
+        raise RuntimeError("Downgrade below 0018 must run online (not --sql): it must first verify that "
+                           "no immutable alert history would be dropped")
+    if op.get_bind().scalar(sa.text("SELECT EXISTS (SELECT 1 FROM alert_history)")):
+        raise RuntimeError("Downgrade below 0018 refused: immutable alert history exists")
     op.drop_table("alert_consumed_events")
     op.drop_table("alert_outbox")
     op.drop_table("alert_history")

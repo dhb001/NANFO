@@ -9,6 +9,7 @@ from fastapi import HTTPException
 from pydantic import TypeAdapter
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.correlation import normalize_audit_correlation
 from app.modules.identity.service import append_audit_log
 from app.modules.network.service import NetworkService
 from app.modules.network.spatial_repository import SpatialSceneRepository
@@ -27,13 +28,6 @@ def _conflict(code: str, message: str) -> HTTPException:
     return HTTPException(status_code=409, detail={"code": code, "message": message})
 
 
-def _correlation_uuid(value: str) -> uuid.UUID:
-    try:
-        return uuid.UUID(value)
-    except ValueError:
-        return uuid.uuid5(uuid.NAMESPACE_URL, value)
-
-
 class SpatialSceneService:
     def __init__(self, db: AsyncSession, redis: aioredis.Redis):
         self._db = db
@@ -44,7 +38,7 @@ class SpatialSceneService:
         self, *, network_id: uuid.UUID, actor_user_id: str,
         requested_workspace_id: uuid.UUID | None = None, claim_org_id: uuid.UUID | None = None,
     ) -> SpatialSceneDocument:
-        await self._network.assert_network_workspace_access(
+        await self._network.authorize_network(
             network_id=network_id, actor_user_id=actor_user_id,
             requested_workspace_id=requested_workspace_id, claim_org_id=claim_org_id,
         )
@@ -56,7 +50,7 @@ class SpatialSceneService:
     ) -> SpatialHistoryList:
         query = SpatialHistoryQuery(page=page, page_size=page_size)
         self._db.expire_all()
-        await self._network.assert_network_workspace_access(
+        await self._network.authorize_network(
             network_id=network_id, actor_user_id=actor_user_id,
             requested_workspace_id=requested_workspace_id, claim_org_id=claim_org_id,
         )
@@ -68,7 +62,7 @@ class SpatialSceneService:
     ) -> SpatialSceneDocument:
         revision = TypeAdapter(Revision).validate_python(revision)
         self._db.expire_all()
-        await self._network.assert_network_workspace_access(
+        await self._network.authorize_network(
             network_id=network_id, actor_user_id=actor_user_id,
             requested_workspace_id=requested_workspace_id, claim_org_id=claim_org_id,
         )
@@ -93,11 +87,11 @@ class SpatialSceneService:
                 "code": "SPATIAL_GEOMETRY_INVALID",
                 "message": "Geometry exceeds supported world bounds or numerical resolution.",
             }) from exc
+        access = {"network_id": network_id, "actor_user_id": actor_user_id, "require_write": True,
+                  "requested_workspace_id": requested_workspace_id, "claim_org_id": claim_org_id}
         try:
-            await self._network.assert_network_workspace_access(
-                network_id=network_id, actor_user_id=actor_user_id, require_write=True,
-                requested_workspace_id=requested_workspace_id, claim_org_id=claim_org_id,
-            )
+            # Authorize before requesting any owner lock (ADR-028).
+            await self._network.authorize_network(**access)
             if not await self._repo.lock_active_network(network_id):
                 raise HTTPException(status_code=404, detail="Network not found.")
             if req.expected_revision == MAX_REVISION:
@@ -118,21 +112,19 @@ class SpatialSceneService:
             # check. READ COMMITTED queries must reload any retained ORM identities
             # so a membership downgrade during a lock wait cannot authorize a write.
             self._db.expire_all()
-            network = await self._network.assert_network_workspace_access(
-                network_id=network_id, actor_user_id=actor_user_id, require_write=True,
-                requested_workspace_id=requested_workspace_id, claim_org_id=claim_org_id,
-            )
+            grant = await self._network.authorize_network(**access)
             if not await self._repo.replace(network_id, req.expected_revision, scene):
                 raise _conflict("SPATIAL_REVISION_CONFLICT", "Scene changed; fetch it and reconcile before retrying.")
             await self._repo.append_revision(network_id, result.revision, scene, uuid.UUID(actor_user_id))
+            audit_correlation, metadata = normalize_audit_correlation(correlation_id, {
+                "network_id": str(network_id), "workspace_id": str(grant.workspace_id),
+                "previous_revision": req.expected_revision, "revision": result.revision,
+                "object_count": len(scene["objects"]), "scene_sha256": digest,
+            })
             await append_audit_log(
                 db=self._db, event_type="network.spatial_scene.replaced", actor_id=uuid.UUID(actor_user_id),
                 resource_type="network_spatial_scene", resource_id=network_id,
-                correlation_id=_correlation_uuid(correlation_id), metadata={
-                    "network_id": str(network_id), "workspace_id": str(network.workspace_id),
-                    "previous_revision": req.expected_revision, "revision": result.revision,
-                    "object_count": len(scene["objects"]), "scene_sha256": digest,
-                },
+                correlation_id=audit_correlation, metadata=metadata, org_id=grant.org_id,
             )
             await self._db.commit()
             return result

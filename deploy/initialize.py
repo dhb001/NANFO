@@ -1,4 +1,8 @@
-"""Fresh deployment only: provision separate roles, migrate as owner, seed Identity."""
+"""Fresh deployment only: provision separate roles, migrate as owner, seed Identity.
+
+Role passwords are sent as client-computed SCRAM-SHA-256 verifiers; plaintext never
+appears in SQL text (server logs, pg_stat_statements) or process arguments.
+"""
 
 import asyncio
 import os
@@ -7,8 +11,16 @@ from pathlib import Path
 
 import psycopg2
 from psycopg2 import sql
+from psycopg2.extensions import encrypt_password
 
 from deploy.entrypoint import read_secret
+
+
+def scram_verifier(connection, role, password):
+    verifier = encrypt_password(password, role, connection, "scram-sha-256")
+    if not isinstance(verifier, str) or not verifier.startswith("SCRAM-SHA-256$") or password in verifier:
+        raise ValueError("SCRAM verifier unavailable")
+    return verifier
 
 
 async def seed_actor():
@@ -51,7 +63,7 @@ def main():
             cursor.execute(
                 sql.SQL(
                     "CREATE ROLE {} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION PASSWORD {}"
-                ).format(sql.Identifier(role), sql.Literal(password))
+                ).format(sql.Identifier(role), sql.Literal(scram_verifier(connection, role, password)))
             )
         cursor.execute("ALTER DATABASE nanfo OWNER TO nanfo_owner")
         cursor.execute("REVOKE ALL ON DATABASE nanfo FROM PUBLIC")

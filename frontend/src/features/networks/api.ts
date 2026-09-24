@@ -16,11 +16,9 @@ import {
   UpdateDeviceInput,
 } from "@/shared/types/network";
 
-export function listNetworks(token: string, workspaceId: string, page = 1, pageSize = 20) {
-  return apiRequest<NetworkList>(
-    `/api/v1/networks?workspace_id=${workspaceId}&page=${page}&page_size=${pageSize}`,
-    { token },
-  );
+export function listNetworks(token: string, workspaceId: string, page = 1, pageSize = 20, signal?: AbortSignal) {
+  const params = new URLSearchParams({ workspace_id: workspaceId, page: String(page), page_size: String(pageSize) });
+  return apiRequest<NetworkList>(`/api/v1/networks?${params}`, { token, signal });
 }
 
 export function createNetwork(token: string, body: CreateNetworkInput) {
@@ -31,10 +29,10 @@ export function createNetwork(token: string, body: CreateNetworkInput) {
   });
 }
 
-export function listDevices(token: string, networkId: string, page = 1, pageSize = 20) {
+export function listDevices(token: string, networkId: string, page = 1, pageSize = 20, signal?: AbortSignal) {
   return apiRequest<DeviceList>(
-    `/api/v1/networks/${networkId}/devices?page=${page}&page_size=${pageSize}`,
-    { token },
+    `/api/v1/networks/${encodeURIComponent(networkId)}/devices?page=${page}&page_size=${pageSize}`,
+    { token, signal },
   );
 }
 
@@ -70,9 +68,9 @@ export function updateDeviceSpatialRef(token: string, networkId: string, deviceI
   });
 }
 
-export function listCampusBuildings(token: string, networkId: string) {
-  return apiRequest<CampusBuildingList>(`/api/v1/networks/${networkId}/campus/buildings`, {
-    token,
+export function listCampusBuildings(token: string, networkId: string, signal?: AbortSignal) {
+  return apiRequest<CampusBuildingList>(`/api/v1/networks/${encodeURIComponent(networkId)}/campus/buildings`, {
+    token, signal,
   });
 }
 
@@ -115,12 +113,14 @@ export function upsertCampusModelAssets(token: string, networkId: string, input:
       replace_existing: input.replace_existing ?? true,
     },
     token,
+    // Model assets may be up to 12 MiB (C2 route limit): allow a slow uplink.
+    timeoutMs: 120_000,
   });
 }
 
-export function listDeviceGroups(token: string, networkId: string) {
-  return apiRequest<DeviceGroupList>(`/api/v1/networks/${networkId}/device-groups`, {
-    token,
+export function listDeviceGroups(token: string, networkId: string, signal?: AbortSignal) {
+  return apiRequest<DeviceGroupList>(`/api/v1/networks/${encodeURIComponent(networkId)}/device-groups`, {
+    token, signal,
   });
 }
 
@@ -143,6 +143,7 @@ export function upsertDeviceGroups(
         description: group.description ?? null,
         selector: group.selector ?? {},
         device_ids: group.device_ids ?? [],
+        ...(group.expected_updated_at ? { expected_updated_at: group.expected_updated_at } : {}),
       })),
     },
     token,

@@ -1,9 +1,21 @@
 export type SocketUpgradeRecovery = "conclusive" | "inconclusive";
 
+/**
+ * Error-frame codes the backend emits (ADR-028 C1). Client-side codes
+ * (`WS_ERROR`, `WS_CLIENT_ERROR`, `WS_MESSAGE_TOO_BIG`) describe local failures.
+ */
+export type WebSocketErrorCode =
+  | "WS_UNAUTHORIZED" | "WS_UNKNOWN_CHANNEL" | "WS_INVALID_FILTER" | "WS_FORBIDDEN"
+  | "WS_BACKPRESSURE" | "WS_UNAVAILABLE" | "WS_SUBSCRIBE_TIMEOUT" | "WS_CONNECTION_LIMIT"
+  | "WS_ERROR" | "WS_CLIENT_ERROR" | "WS_MESSAGE_TOO_BIG";
+
 export interface WebSocketErrorData {
-  code: "WS_UNAUTHORIZED" | "WS_UNKNOWN_CHANNEL" | "WS_BACKPRESSURE" | "WS_INVALID_FILTER" | string;
+  code: WebSocketErrorCode | (string & {});
   message: string;
 }
+
+/** Why a managed socket stopped without retrying on its own. */
+export type RealtimeHaltReason = "connection_limit" | "denied" | "client_error";
 
 export interface WebSocketEnvelope<T> {
   event: string;

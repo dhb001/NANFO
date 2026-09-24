@@ -7,11 +7,10 @@ from observed extrema. A reviewed, externally pinned guarantee is indispensable.
 from __future__ import annotations
 
 import math
-import hashlib
-import json
 from dataclasses import dataclass
 from fractions import Fraction
 
+from app.core.canonical import canonical_sha256
 from app.modules.autonomy.artifact_io import ArtifactStore, EvidenceError, parse_json
 from app.modules.autonomy.calibration_verification_models import (
     BoundGuarantee, CalibrationInstallation, CalibrationScope,
@@ -41,8 +40,7 @@ def backlog_reading_digest(reading: NetworkReading) -> str:
     payload = reading.model_dump(mode="json")
     for queue in payload["queues"]:
         queue.pop("native_backlog_evidence", None)
-    return hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":"),
-                                     allow_nan=False).encode()).hexdigest()
+    return canonical_sha256(payload)
 
 
 def _busy_period(reading, queue, sample_id, store, accepted):
@@ -253,12 +251,14 @@ def verify_network_campaign(campaign: ImportedCampaign, *, evidence_store=None,
 
 
 def _scope_equal(left: CalibrationScope, right: CalibrationScope) -> bool:
-    def canonical(scope):
+    # Order-insensitive identity comparison; deliberately NOT a canonical-JSON digest
+    # (ADR-028 C20 keeps divergent helpers explicitly named and local).
+    def order_insensitive_scope(scope):
         value = scope.model_dump()
         for key in ("egress_ids", "demand_ids", "action_ids"):
             value[key] = sorted(value[key])
         return value
-    return canonical(left) == canonical(right)
+    return order_insensitive_scope(left) == order_insensitive_scope(right)
 
 
 @dataclass(frozen=True)

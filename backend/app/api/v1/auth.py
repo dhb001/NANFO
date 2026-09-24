@@ -30,6 +30,10 @@ from app.modules.identity.service import AuthService
 router = APIRouter(prefix="/api/v1/auth", tags=["Authentication"])
 
 
+def _client_ip(request: Request) -> str:
+    return request.client.host if request.client else "unknown"
+
+
 @router.post("/login", response_model=APIResponse[TokenPair], status_code=status.HTTP_200_OK)
 async def login(
     req: LoginRequest,
@@ -39,12 +43,11 @@ async def login(
     redis: Annotated[object, Depends(get_redis)],
 ):
     started = time.monotonic()
-    ip = request.client.host if request.client else "unknown"
     svc = AuthService(db=db, redis=redis)
     result = await svc.login(
         email=req.email,
         password=req.password,
-        ip_address=ip,
+        ip_address=_client_ip(request),
         correlation_id=meta.request_id,
     )
     return success_response(result, meta.request_id, started, meta.timestamp)
@@ -66,13 +69,16 @@ async def logout(
 @router.post("/refresh", response_model=APIResponse[TokenPair], status_code=status.HTTP_200_OK)
 async def refresh(
     req: RefreshRequest,
+    request: Request,
     meta: Annotated[RequestMeta, Depends(get_request_meta)],
     db: Annotated[AsyncSession, Depends(get_db)],
     redis: Annotated[object, Depends(get_redis)],
 ):
     started = time.monotonic()
     svc = AuthService(db=db, redis=redis)
-    result = await svc.refresh(refresh_token=req.refresh_token, correlation_id=meta.request_id)
+    result = await svc.refresh(
+        refresh_token=req.refresh_token, correlation_id=meta.request_id, ip_address=_client_ip(request),
+    )
     return success_response(result, meta.request_id, started, meta.timestamp)
 
 
@@ -85,5 +91,6 @@ async def me(
 ):
     started = time.monotonic()
     svc = AuthService(db=db, redis=redis)
-    profile = await svc.get_profile(user_id=claims.user_id)
+    # Same request session as get_current_user: reuse its identity load (one user+roles read).
+    profile = await svc.get_profile(user_id=claims.user_id, reuse_request_identity=True)
     return success_response(profile, meta.request_id, started, meta.timestamp)

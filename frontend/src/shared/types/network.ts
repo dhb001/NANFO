@@ -242,4 +242,6 @@ export interface UpsertDeviceGroupInput {
   description?: string | null;
   selector?: Record<string, string>;
   device_ids?: string[];
+  /** Optimistic concurrency (ADR-028 C8): the `updated_at` last read; mismatch -> 409 DEVICE_GROUP_CONFLICT. */
+  expected_updated_at?: string | null;
 }

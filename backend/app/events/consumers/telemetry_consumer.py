@@ -1,6 +1,11 @@
-"""Telemetry event consumer stub.
+"""Telemetry event consumer.
 
-VS2 Step 6 scope: persist normalized telemetry ingestion events.
+Persists normalized telemetry ingestion events idempotently, then performs
+downstream work. Only failures *before* or *during* the owning commit are
+raised for retry/dead-lettering. Realtime WebSocket fanout after a successful
+commit is best-effort: it is logged with a fixed error code and counted as a
+dropped delta, and the persisted event is acknowledged (a retry could not
+re-persist it and would only dead-letter valid, durable telemetry).
 """
 
 from __future__ import annotations
@@ -11,6 +16,7 @@ from datetime import UTC, datetime
 
 from sqlalchemy.exc import SQLAlchemyError
 
+from app.core.correlation import correlation_uuid
 from app.core.logging import get_logger
 from app.db.postgres import AsyncSessionLocal
 from app.db.redis import get_redis_client
@@ -23,6 +29,8 @@ from app.websocket.manager import telemetry_ws_manager
 
 logger = get_logger(__name__)
 
+TELEMETRY_FANOUT_FAILED = "TELEMETRY_FANOUT_FAILED"
+
 _RUNTIME_TRANSITION_ALERT_EVENT_MAP: dict[str, str] = {
     "telemetry.collector.sustained_failure_activated": "alert.generated",
     "telemetry.collector.sustained_failure_recovered": "alert.resolved",
@@ -33,7 +41,8 @@ def _get_counter_service() -> TelemetryHealthCounterService | None:
     try:
         return TelemetryHealthCounterService(get_redis_client())
     except RuntimeError as exc:
-        logger.warning("telemetry_health_counter_unavailable", error=str(exc))
+        logger.warning("telemetry_health_counter_unavailable", error_code="TELEMETRY_COUNTERS_UNAVAILABLE",
+                       error_type=type(exc).__name__)
         return None
 
 
@@ -51,10 +60,11 @@ async def _safe_increment_counter(
     except Exception as exc:  # noqa: BLE001
         logger.warning(
             "telemetry_health_counter_increment_failed",
+            error_code="TELEMETRY_COUNTER_UPDATE_FAILED",
+            error_type=type(exc).__name__,
             counter_name=counter_name,
             event_id=event_id,
             correlation_id=correlation_id,
-            error=str(exc),
         )
 
 
@@ -83,8 +93,50 @@ async def _push_telemetry_delta(event: dict, payload: dict) -> None:
     )
 
 
+async def _best_effort_fanout(
+    event: dict,
+    payload: dict,
+    *,
+    counter_service: TelemetryHealthCounterService | None,
+    event_id: str,
+    correlation_id: str,
+    count_success: bool,
+) -> bool:
+    """Push the realtime delta; never propagate after the owning commit."""
+    try:
+        await _push_telemetry_delta(event, payload)
+    except Exception as exc:  # noqa: BLE001 - durable record already committed
+        logger.warning(
+            "telemetry_ws_fanout_failed",
+            error_code=TELEMETRY_FANOUT_FAILED,
+            error_type=type(exc).__name__,
+            event_id=event_id,
+            correlation_id=correlation_id,
+        )
+        await _safe_increment_counter(
+            counter_service.increment_dropped if counter_service else None,
+            counter_name="dropped_events",
+            event_id=event_id,
+            correlation_id=correlation_id,
+        )
+        return False
+    if count_success:
+        await _safe_increment_counter(
+            counter_service.increment_fanout if counter_service else None,
+            counter_name="fanout_events",
+            event_id=event_id,
+            correlation_id=correlation_id,
+        )
+    return True
+
+
 async def handle_telemetry_event(event: dict) -> None:
-    """Persist telemetry events with idempotent event-level semantics."""
+    """Persist telemetry events with idempotent event-level semantics.
+
+    Raised for retry/DLQ: invalid events (deterministic), database failures and
+    downstream alert-ingestion failures (recovered by the idempotent replay path).
+    Never raised: realtime fanout failures after the commit.
+    """
     payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
     counter_service = _get_counter_service()
     event_id = str(event.get("event_id", ""))
@@ -108,7 +160,6 @@ async def handle_telemetry_event(event: dict) -> None:
             persisted = await service.persist_event(event)
             if persisted:
                 await db.commit()
-                await handle_persisted_metric_event(event)
                 await _safe_increment_counter(
                     counter_service.increment_persisted if counter_service else None,
                     counter_name="persisted_events",
@@ -122,28 +173,11 @@ async def handle_telemetry_event(event: dict) -> None:
                     metric=payload.get("metric", ""),
                     device_id=payload.get("device_id", ""),
                 )
-                try:
-                    await _push_telemetry_delta(event, payload)
-                    await _safe_increment_counter(
-                        counter_service.increment_fanout if counter_service else None,
-                        counter_name="fanout_events",
-                        event_id=event_id,
-                        correlation_id=correlation_id,
-                    )
-                except Exception as exc:
-                    logger.warning(
-                        "telemetry_ws_fanout_failed",
-                        event_id=event_id,
-                        correlation_id=correlation_id,
-                        error=str(exc),
-                    )
-                    await _safe_increment_counter(
-                        counter_service.increment_dropped if counter_service else None,
-                        counter_name="dropped_events",
-                        event_id=event_id,
-                        correlation_id=correlation_id,
-                    )
-                    raise
+                await handle_persisted_metric_event(event)
+                await _best_effort_fanout(
+                    event, payload, counter_service=counter_service, event_id=event_id,
+                    correlation_id=correlation_id, count_success=True,
+                )
             else:
                 logger.info(
                     "telemetry_record_duplicate_skipped",
@@ -158,7 +192,10 @@ async def handle_telemetry_event(event: dict) -> None:
                 if replay.status == "active_conflict":
                     raise ValueError("Telemetry event identity conflicts with persisted record")
                 await handle_persisted_metric_event(replay.event)
-                await _push_telemetry_delta(replay.event, replay.event["payload"])
+                await _best_effort_fanout(
+                    replay.event, replay.event["payload"], counter_service=counter_service,
+                    event_id=event_id, correlation_id=correlation_id, count_success=False,
+                )
     except (ValueError, TypeError) as exc:
         await _safe_increment_counter(
             counter_service.increment_dropped if counter_service else None,
@@ -168,6 +205,8 @@ async def handle_telemetry_event(event: dict) -> None:
         )
         logger.warning(
             "telemetry_record_validation_failed",
+            error_code="TELEMETRY_EVENT_INVALID",
+            error_type=type(exc).__name__,
             event_id=event_id,
             correlation_id=correlation_id,
             error=str(exc),
@@ -176,18 +215,26 @@ async def handle_telemetry_event(event: dict) -> None:
     except SQLAlchemyError as exc:
         logger.warning(
             "telemetry_record_persist_failed",
+            error_code="TELEMETRY_PERSIST_FAILED",
+            error_type=type(exc).__name__,
             event_id=event_id,
             correlation_id=correlation_id,
-            error=str(exc),
         )
         raise
 
 
-def _coerce_correlation_id(value: object) -> str:
-    try:
-        return str(uuid.UUID(str(value)))
-    except (ValueError, TypeError, AttributeError):
-        return str(uuid.uuid4())
+def _coerce_correlation_id(value: object, *, fallback: str = "") -> str:
+    """Stable UUID via the shared ADR-028 mapping; opaque ids never become random.
+
+    A missing correlation falls back to the source event identity so retries of
+    the same transition always carry the same correlation.
+    """
+    if isinstance(value, uuid.UUID):
+        return str(value)
+    text = str(value).strip() if value is not None else ""
+    if not text and fallback:
+        text = f"telemetry-event:{fallback}"
+    return str(correlation_uuid(text or None))
 
 
 async def handle_telemetry_runtime_transition_event(event: dict) -> None:
@@ -200,18 +247,19 @@ async def handle_telemetry_runtime_transition_event(event: dict) -> None:
     payload_raw = event.get("payload")
     payload = payload_raw if isinstance(payload_raw, dict) else {}
     event_id = str(event.get("event_id", ""))
-    correlation_id = _coerce_correlation_id(event.get("correlation_id"))
+    correlation_id = _coerce_correlation_id(event.get("correlation_id"), fallback=event_id)
 
     try:
         redis = get_redis_client()
     except RuntimeError as exc:
         logger.warning(
             "telemetry_runtime_transition_alert_client_unavailable",
+            error_code="TELEMETRY_TRANSITION_ALERT_UNAVAILABLE",
+            error_type=type(exc).__name__,
             source_event_type=source_event_type,
             alert_event_type=alert_event_type,
             event_id=event_id,
             correlation_id=correlation_id,
-            error=str(exc),
         )
         raise
 
@@ -235,11 +283,12 @@ async def handle_telemetry_runtime_transition_event(event: dict) -> None:
     except Exception as exc:
         logger.warning(
             "telemetry_runtime_transition_alert_publish_failed",
+            error_code="TELEMETRY_TRANSITION_ALERT_PUBLISH_FAILED",
+            error_type=type(exc).__name__,
             source_event_type=source_event_type,
             alert_event_type=alert_event_type,
             event_id=event_id,
             correlation_id=correlation_id,
-            error=str(exc),
         )
         raise
 

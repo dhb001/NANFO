@@ -4,10 +4,6 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql as pg
 
 from alembic import op
-from app.modules.telemetry.pin_models import (  # noqa: F401 -- owning metadata
-    TelemetryEvidencePin,
-    TelemetryReferenceCoverage,
-)
 
 revision = "0024"
 down_revision = "0023"

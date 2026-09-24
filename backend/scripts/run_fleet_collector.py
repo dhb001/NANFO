@@ -1,4 +1,10 @@
-"""Explicit ADR023 worker; no collector is implicitly started in API processes."""
+"""Explicit ADR023 worker; no collector is implicitly started in API processes.
+
+The fleet worker also hosts the periodic runtime-adapter SLO evaluator (ADR-028
+C12) because API processes run no collector when ``TELEMETRY_FLEET_ENABLED``.
+Evaluation is window-gated and Redis-locked, so several fleet replicas and an API
+collector never double-evaluate. ``NANFO_TELEMETRY_SLO_ENABLED=false`` disables it.
+"""
 
 import argparse
 import asyncio
@@ -14,7 +20,8 @@ from app.core.logging import configure_logging
 from app.modules.telemetry.fleet import FleetWorker
 from app.modules.telemetry.fleet_config import FleetSettings
 from app.modules.telemetry.fleet_repository import FleetLock, FleetRepository
-from app.modules.telemetry.service import TelemetryIngestionService
+from app.modules.telemetry.ingestion import TelemetryIngestionService
+from app.modules.telemetry.slo.evaluator import TelemetrySLOEvaluator
 
 
 async def run(*, once: bool) -> int:
@@ -31,9 +38,11 @@ async def run(*, once: bool) -> int:
                            socket_connect_timeout=fleet.publish_timeout_seconds)
     try:
         repository = FleetRepository(sessions, lease_seconds=fleet.lease_seconds, timeout_seconds=fleet.db_timeout_seconds)
+        ingestion = TelemetryIngestionService(redis)
         worker = FleetWorker(settings=fleet, execution_mode=settings.EXECUTION_MODE, repository=repository,
                              locks=FleetLock(lock_engine, repository), sessions=sessions, redis=redis,
-                             ingestion=TelemetryIngestionService(redis))
+                             ingestion=ingestion,
+                             slo_evaluator=TelemetrySLOEvaluator(redis=redis, counter_service=ingestion.counter_service))
         if once:
             outcomes = await worker.run_once()
             print(json.dumps(await worker.health()))

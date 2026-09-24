@@ -1,12 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  CONGESTION_POLICY_VERSION,
   buildTwinSceneModel,
+  buildTwinTopology,
   deriveDeterministicPlacement,
   deriveDeviceCongestion,
-  mapCongestionSeverity,
   parseSpatialRefPath,
 } from "@/features/digitalTwin/sceneAdapter";
+import { BACKEND_DETECTOR_RULES, VISUAL_HEURISTIC_ID } from "@/features/digitalTwin/twinSeverity";
 
 describe("digital twin scene adapter", () => {
   beforeEach(() => vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-08-18T10:01:00Z")));
@@ -46,102 +46,92 @@ describe("digital twin scene adapter", () => {
     expect(first.z).toBeCloseTo(second.z, 10);
   });
 
-  it("maps congestion severity using deterministic thresholds", () => {
-    expect(mapCongestionSeverity(null)).toBe("neutral");
-    expect(mapCongestionSeverity(0.2)).toBe("low");
-    expect(mapCongestionSeverity(0.45)).toBe("medium");
-    expect(mapCongestionSeverity(0.88)).toBe("high");
+  const metric = (name: string, value: number, unit: string | null, extra: Record<string, unknown> = {}) => ({
+    event_id: `evt-${name}-${value}`,
+    device_id: "device-1",
+    network_id: "network-1",
+    workspace_id: "workspace-1",
+    metric: name,
+    value,
+    unit,
+    observed_at: "2026-08-18T10:00:30Z",
+    source: "emulation",
+    tags: {},
+    ...extra,
   });
 
-  it("derives neutral congestion when no recognized metrics exist", () => {
-    const congestion = deriveDeviceCongestion([
-      {
-        event_id: "evt-1",
-        device_id: "device-1",
-        network_id: "network-1",
-        workspace_id: "workspace-1",
-        metric: "temperature",
-        value: 56,
-        unit: "c",
-        observed_at: "2026-08-18T10:00:00Z",
-        source: "runtime",
-        tags: {},
-      },
-    ]);
+  it("mirrors the backend detector default thresholds and phase semantics exactly", () => {
+    // backend/app/modules/alert/detector.py: breach >= breach, recovery < recover.
+    const cases: Array<[string, string, number, number]> = [
+      ["link_utilization_percent", "%", 85, 70],
+      ["latency_ms", "ms", 100, 70],
+      ["packet_loss_percent", "%", 2, 1],
+      ["queue_backlog_packets", "packets", 80, 40],
+    ];
+    for (const [name, unit, breach, recover] of cases) {
+      expect(BACKEND_DETECTOR_RULES[name]).toMatchObject({ unit, breach, recover });
+      expect(deriveDeviceCongestion([metric(name, breach, unit)]).severity).toBe("high");
+      expect(deriveDeviceCongestion([metric(name, breach - 0.001, unit)]).severity).toBe("medium");
+      expect(deriveDeviceCongestion([metric(name, recover, unit)]).severity).toBe("medium");
+      expect(deriveDeviceCongestion([metric(name, recover - 0.001, unit)]).severity).toBe("low");
+      expect(deriveDeviceCongestion([metric(name, breach * 2, "other-unit")]).severity).toBe("neutral");
+    }
+    expect(Object.keys(BACKEND_DETECTOR_RULES).sort()).toEqual(["latency_ms", "link_utilization_percent", "packet_loss_percent", "queue_backlog_packets"]);
+  });
+
+  it("derives neutral congestion when no detector-covered metrics exist", () => {
+    const congestion = deriveDeviceCongestion([metric("temperature", 56, "c"), metric("cpu_usage", 99, "%")]);
 
     expect(congestion.severity).toBe("neutral");
-    expect(congestion.score).toBeNull();
     expect(congestion.metrics).toHaveLength(0);
-    expect(congestion.policyVersion).toBe(CONGESTION_POLICY_VERSION);
-    expect(congestion.primaryPolicyId).toBeNull();
+    expect(congestion.heuristic).toBe(VISUAL_HEURISTIC_ID);
+    expect(congestion.primaryMetric).toBeNull();
   });
 
-  it("derives high congestion from recognized telemetry metrics", () => {
-    const congestion = deriveDeviceCongestion([
-      {
-        event_id: "evt-1",
-        device_id: "device-1",
-        network_id: "network-1",
-        workspace_id: "workspace-1",
-        metric: "cpu_usage",
-        value: 82,
-        unit: "%",
-        observed_at: "2026-08-18T10:00:00Z",
-        source: "runtime",
-        tags: {},
-      },
-      {
-        event_id: "evt-2",
-        device_id: "device-1",
-        network_id: "network-1",
-        workspace_id: "workspace-1",
-        metric: "latency_ms",
-        value: 45,
-        unit: "ms",
-        observed_at: "2026-08-18T10:01:00Z",
-        source: "runtime",
-        tags: {},
-      },
-    ]);
+  it("colours from detector-covered metrics only and exposes the mirrored rule", () => {
+    const congestion = deriveDeviceCongestion([metric("cpu_usage", 82, "%"), { ...metric("latency_ms", 130, "ms"), observed_at: "2026-08-18T10:00:50Z" }]);
 
     expect(congestion.severity).toBe("high");
-    expect(congestion.score).not.toBeNull();
-    expect(congestion.metrics.length).toBeGreaterThan(0);
-    expect(congestion.primaryPolicyId).toBe("cpu_utilization_percent");
+    expect(congestion.primaryMetric).toBe("latency_ms");
+    expect(congestion.metrics).toHaveLength(1);
+    expect(congestion.metrics[0]).toMatchObject({ level: "above_breach", rule: { id: "latency", breach: 100, recover: 70 } });
+    expect(congestion).not.toHaveProperty("policyVersion");
+    expect(congestion).not.toHaveProperty("score");
   });
 
-  it("uses policy priority and tag hint with deterministic tie-breaking", () => {
+  it("ignores invented policy hints and substring metric names", () => {
     const congestion = deriveDeviceCongestion([
-      {
-        event_id: "evt-1",
-        device_id: "device-1",
-        network_id: "network-1",
-        workspace_id: "workspace-1",
-        metric: "custom-score",
-        value: 2,
-        unit: "%",
-        observed_at: "2026-08-18T10:00:00Z",
-        source: "runtime",
-        tags: { congestion_policy: "packet_loss_percent" },
-      },
-      {
-        event_id: "evt-2",
-        device_id: "device-1",
-        network_id: "network-1",
-        workspace_id: "workspace-1",
-        metric: "cpu_usage",
-        value: 95,
-        unit: "%",
-        observed_at: "2026-08-18T10:01:00Z",
-        source: "runtime",
-        tags: {},
-      },
+      metric("custom-score", 50, "%", { tags: { congestion_policy: "packet_loss_percent" } }),
+      metric("packet_loss", 50, "%"),
+      metric("interface_latency_ms_p99", 500, "ms"),
+      metric("packet_loss_percent", 0.5, "%"),
     ]);
 
-    expect(congestion.severity).toBe("high");
-    expect(congestion.primaryPolicyId).toBe("cpu_utilization_percent");
-    expect(congestion.metrics[0]?.policyId).toBe("cpu_utilization_percent");
-    expect(congestion.metrics[1]?.policyId).toBe("packet_loss_percent");
+    expect(congestion.severity).toBe("low");
+    expect(congestion.metrics.map((item) => item.metric)).toEqual(["packet_loss_percent"]);
+  });
+
+  it("orders current samples before stale ones and never colours from stale samples", () => {
+    const stale = { ...metric("packet_loss_percent", 9, "%"), observed_at: "2026-08-18T09:00:00Z" };
+    const current = metric("latency_ms", 80, "ms");
+    const congestion = deriveDeviceCongestion([stale, current]);
+    expect(congestion.severity).toBe("medium");
+    expect(congestion.metrics.map((item) => [item.metric, item.stale])).toEqual([["latency_ms", false], ["packet_loss_percent", true]]);
+    expect(deriveDeviceCongestion([stale]).severity).toBe("neutral");
+    expect(deriveDeviceCongestion([{ ...current, tags: { stale: true } }]).severity).toBe("neutral");
+  });
+
+  it("keeps persisted and session-only spatial references separate", () => {
+    const topology = buildTwinTopology({
+      baseNodes: [
+        { device_id: "a", hostname: "a", device_type: "switch", status: "active", spatial_ref_id: " campus/b1/f1/r1/a " },
+        { device_id: "b", hostname: "b", device_type: "switch", status: "active", spatial_ref_id: null },
+      ],
+      baseEdges: [], liveNodesByDeviceId: {}, importedSpatialRefByDeviceId: { b: "campus/b2/f1/r1/b" },
+    });
+    expect(topology.nodeById.a).toMatchObject({ spatialRefId: "campus/b1/f1/r1/a", persistedSpatialRefId: "campus/b1/f1/r1/a" });
+    expect(topology.nodeById.b).toMatchObject({ spatialRefId: "campus/b2/f1/r1/b", persistedSpatialRefId: null });
+    expect(topology.nodeById.a).not.toHaveProperty("congestion");
   });
 
   it("builds deterministic scene model with overlays", () => {
@@ -165,12 +155,12 @@ describe("digital twin scene adapter", () => {
       ],
       liveNodesByDeviceId: {},
       telemetryByDeviceMetric: {
-        "device-1:cpu_usage": {
+        "device-1:link_utilization_percent": {
           event_id: "evt-1",
           device_id: "device-1",
           network_id: "network-1",
           workspace_id: "workspace-1",
-          metric: "cpu_usage",
+          metric: "link_utilization_percent",
           value: 35,
           unit: "%",
           observed_at: "2026-08-18T10:00:00Z",
@@ -178,7 +168,7 @@ describe("digital twin scene adapter", () => {
           tags: {},
         },
       },
-      telemetryKeysNewestFirst: ["device-1:cpu_usage"],
+      telemetryKeysNewestFirst: ["device-1:link_utilization_percent"],
       sceneObjects: {
         "intent-1": {
           id: "intent-1",

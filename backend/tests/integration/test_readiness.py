@@ -202,3 +202,38 @@ async def test_fleet_diagnostics_do_not_claim_collector_health(ready_app):
     assert response.status_code == 200
     assert response.json()["data"]["capabilities"]["telemetry"] == "external_unverified"
     assert response.json()["data"]["realtime"]["collection_owner"] == "fleet"
+
+
+async def test_ready_meta_carries_request_identity(ready_app):
+    client, _, _, _ = ready_app
+    response = await client.get("/ready", headers={"X-Request-ID": "probe-17"})
+    meta = response.json()["meta"]
+    assert meta["request_id"] == "probe-17" and meta["timestamp"] and meta["execution_mode"]
+    generated = (await client.get("/ready")).json()["meta"]["request_id"]
+    assert generated and generated != "probe-17"
+
+
+async def test_dependency_probes_are_reused_briefly_but_local_state_is_fresh(ready_app, monkeypatch):
+    client, app, settings, checks = ready_app
+    clock = [100.0]
+    monkeypatch.setattr(readiness, "_clock", lambda: clock[0])
+    assert (await client.get("/ready")).status_code == 200
+    checks.return_value["redis"] = "unavailable"
+    clock[0] += 1.0  # inside API_READINESS_CACHE_SECONDS (1.5 s)
+    assert (await client.get("/ready")).status_code == 200
+    assert checks.await_count == 1
+    app.state.realtime_lease.verify.return_value = False  # process state is never cached
+    assert (await client.get("/ready")).status_code == 503
+    app.state.realtime_lease.verify.return_value = True
+    clock[0] += 1.0
+    response = await client.get("/ready")
+    assert response.status_code == 503 and response.json()["data"]["checks"]["redis"] == "unavailable"
+    assert checks.await_count == 2
+    assert settings.API_READINESS_CACHE_SECONDS <= 2
+
+
+async def test_ready_exposes_event_bus_counters_without_internals(ready_app):
+    client, _, _, _ = ready_app
+    realtime = (await client.get("/ready")).json()["data"]["realtime"]
+    assert set(realtime["event_bus"]) >= {"markers_written", "markers_reused", "dead_lettered", "left_pending"}
+    assert all(isinstance(value, int) for value in realtime["event_bus"].values())

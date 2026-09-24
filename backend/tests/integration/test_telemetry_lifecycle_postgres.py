@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 from sqlalchemy import func, select, text
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.schema import CreateTable
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
 from alembic.migration import MigrationContext
@@ -49,7 +50,8 @@ async def connection():
         async with engine.connect() as conn:
             await conn.execute(text(f'CREATE SCHEMA "{schema}"'))
             await conn.execute(text(f'SET search_path TO "{schema}"'))
-            await conn.run_sync(lambda sync: TelemetryRecord.__table__.create(sync))
+            # Table shape only: the model mirrors migration indexes, which 0024 must create itself.
+            await conn.run_sync(lambda sync: sync.execute(CreateTable(TelemetryRecord.__table__)))
             await conn.run_sync(lambda sync: migration(sync, "upgrade"))
             await conn.run_sync(lambda sync: TelemetryReconciliation.__table__.create(sync))
             await conn.commit()

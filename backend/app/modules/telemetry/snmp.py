@@ -12,7 +12,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Protocol
 
-from app.modules.telemetry.service import RuntimeTelemetryAdapter, TelemetryIngestionService
+from app.modules.telemetry.ingestion import TelemetryIngestionService
+from app.modules.telemetry.runtime.adapters import RuntimeTelemetryAdapter
 from app.modules.telemetry.snmp_config import InterfaceBinding, SNMPBinding, SNMPError
 from app.modules.telemetry.snmp_transport import IF_COLUMNS, InterfaceCounters
 
@@ -66,9 +67,11 @@ def counter_rates(current: Observation, previous: Observation | None, max_interv
 class MeasuredSNMPAdapter(RuntimeTelemetryAdapter):
     """One bounded device; pending batches replay stable IDs until acknowledged.
 
-    authorize must re-read the pinned binding and check current owner authority,
-    using a fresh session. Publication additionally checks write authority before
-    each sample. The in-memory checkpoint is deliberately not a durable outbox.
+    ``authorize`` is invoked before every external read and every publication.
+    With ``SNMPOwnerBoundary`` the first call of a batch is the full owner check;
+    later calls re-verify the pinned binding revision and actor liveness and reuse
+    a short, revision-keyed authority cache (ADR-028). The in-memory checkpoint is
+    deliberately not a durable outbox.
     """
 
     def __init__(self, *, binding: SNMPBinding, transport: CounterTransport,

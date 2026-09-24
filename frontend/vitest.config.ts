@@ -14,6 +14,8 @@ export default defineConfig({
     environment: "jsdom",
     setupFiles: "./src/test/setup.ts",
     css: true,
+    // Unit tests run against the production same-origin defaults, whatever a local .env says.
+    env: { VITE_API_BASE_URL: "", VITE_WS_BASE_URL: "" },
     exclude: ["tests/e2e/**", "tests/live/**", "tests/fullstack/**", "node_modules/**", "dist/**"],
   },
 });

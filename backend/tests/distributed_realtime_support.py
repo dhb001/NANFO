@@ -46,6 +46,8 @@ def run_api(sock, redis_url, prefix):
                 "digital-twin": digital_twin_ws_manager, "alerts": alerts_ws_manager}
     for manager in managers.values():
         manager._delivery_limits = DeliveryLimits(max_pending=4, timeout_seconds=0.2)
+        # Revocation assertions are immediate; the <=15 s cache is unit-tested (ADR-028 C1).
+        manager._auth_cache_seconds = 0
 
     class ReaderRedis:
         """Deterministic missed-read injection without stopping the API process."""

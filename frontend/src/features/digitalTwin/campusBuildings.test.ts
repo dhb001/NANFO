@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
+import { Box3, ExtrudeGeometry, Matrix4, Shape } from "three";
 import {
   buildBuildingByNodeIdIndex,
+  footprintShapePoint,
   deriveBuildingIdFromSpatialRef,
   deriveCampusBuildings,
   deriveSpatialBuildingScope,
@@ -22,13 +24,7 @@ function node(id: string, spatialRefId: string | null, x: number, y: number, z: 
     y,
     z,
     spatialRefId,
-    congestion: {
-      severity: "neutral",
-      score: null,
-      metrics: [],
-      policyVersion: "v2.0.0",
-      primaryPolicyId: null,
-    },
+    persistedSpatialRefId: spatialRefId,
   };
 }
 
@@ -156,5 +152,24 @@ describe("campusBuildings", () => {
     expect(baseFocus.target[2]).toBeCloseTo(building.z, 6);
     expect(floorFocus.target[1]).toBeGreaterThan(baseFocus.target[1]);
     expect(floorFocus.position[1]).toBeGreaterThan(baseFocus.position[1] - 0.0001);
+  });
+  it("extrudes footprints onto world x/z without mirroring", () => {
+    // Asymmetric footprint: all z in [2, 10], all x in [-1, 4].
+    const footprint: Array<[number, number]> = [[-1, 2], [4, 2], [0, 10]];
+    const shape = new Shape();
+    const points = footprint.map(footprintShapePoint);
+    shape.moveTo(...points[0]);
+    for (const point of points.slice(1)) shape.lineTo(...point);
+    shape.closePath();
+    const geometry = new ExtrudeGeometry(shape, { depth: 3, bevelEnabled: false, steps: 1 });
+    geometry.applyMatrix4(new Matrix4().makeRotationX(-Math.PI / 2));
+    const bounds = new Box3().setFromBufferAttribute(geometry.getAttribute("position") as never);
+    expect(bounds.min.z).toBeCloseTo(2);
+    expect(bounds.max.z).toBeCloseTo(10);
+    expect(bounds.min.x).toBeCloseTo(-1);
+    expect(bounds.max.x).toBeCloseTo(4);
+    expect(bounds.min.y).toBeCloseTo(0);
+    expect(bounds.max.y).toBeCloseTo(3);
+    geometry.dispose();
   });
 });

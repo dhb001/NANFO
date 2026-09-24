@@ -145,7 +145,7 @@ function SimulationPageContent() {
         </QueryState>
         <nav aria-label="Simulation history pagination">
           <Button disabled={historyPage <= 1 || history.isFetching} onClick={() => setHistoryPage(historyPage - 1)}>Previous simulations</Button>
-          <span> Page {historyPage} | {history.data?.total ?? "Unknown"} runs </span>
+          <span aria-live="polite"> Page {historyPage}{history.isPlaceholderData ? " (loading…)" : ""} | {history.data?.total ?? "Unknown"} runs </span>
           <Button disabled={!history.data || historyPage * history.data.page_size >= history.data.total || history.isFetching} onClick={() => setHistoryPage(historyPage + 1)}>Next simulations</Button>
         </nav>
       </Panel>

@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-import hashlib
-import json
 import uuid
 from datetime import UTC, datetime
 from typing import Annotated, Literal
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator, model_serializer, model_validator
 
+from app.core.canonical import canonical_json_bytes, canonical_sha256
 from app.modules.autonomy.safety import (
     DemandRoute,
     SafetyAction,
@@ -54,6 +53,12 @@ class OperationalSettings(Contract):
     decision_interval_seconds: int = Field(default=10, strict=True, ge=1, le=3600)
     min_route_hold_seconds: int = Field(default=3, strict=True, ge=3, le=3600)
     max_changes_per_minute: int = Field(default=10, strict=True, ge=1, le=10)
+    # C17: autonomous dispatch needs calibrated confidence >= min_confidence. The floor is
+    # the constitution's automatic-execution tier (aios.md §5); operators may only tighten it.
+    min_confidence: float = Field(default=0.95, strict=True, ge=0.95, le=1.0)
+    # Honoured only in the explicitly enabled experimental lab (NANFO_EXPERIMENTAL_LAB_ENABLED
+    # with EXECUTION_MODE=emulation); ignored everywhere else, never a production bypass.
+    allow_uncalibrated_confidence: bool = Field(default=False, strict=True)
 
 
 class TrainingSettings(Contract):
@@ -91,6 +96,8 @@ class ConfigurationResponse(Contract):
     training_status: Literal["not_requested", "retraining_required"]
     effective_training_status: Literal["model_owned_unavailable"] = "model_owned_unavailable"
     safety_merge: Literal["stricter_than_calibrated_policy"] = "stricter_than_calibrated_policy"
+    # C17: whether operational.allow_uncalibrated_confidence can take effect in this deployment.
+    allow_uncalibrated_confidence_honoured: bool = False
     history: list[ConfigurationRevisionResponse]
     history_limit: int = 100
 
@@ -197,11 +204,44 @@ class Observation(Contract):
     evidence: list[str] = Field(default_factory=list, max_length=100)
 
 
+#: Raw frozen-policy action probability (softmax output). It is a model output, never a
+#: calibrated confidence: C17 forbids labelling it calibrated.
+POLICY_PROBABILITY_METHOD = "policy_action_probability"
+UNCALIBRATED_ONLY_METHODS = frozenset({POLICY_PROBABILITY_METHOD})
+
+
+class Confidence(Contract):
+    """Typed confidence carried by every AI proposal (constitution §2, ADR-028 C17)."""
+
+    value: float = Field(strict=True, ge=0, le=1)
+    method: str = Field(min_length=1, max_length=128, pattern=r"^[a-z][a-z0-9_.:/-]{0,127}$")
+    calibrated: bool = Field(strict=True)
+    calibration_id: str | None = Field(default=None, min_length=1, max_length=200)
+
+    @model_validator(mode="after")
+    def honest_calibration(self):
+        if self.calibrated and self.method in UNCALIBRATED_ONLY_METHODS:
+            raise ValueError("raw_policy_probability_cannot_be_calibrated")
+        if self.calibrated != (self.calibration_id is not None):
+            raise ValueError("calibration_id_required_exactly_for_calibrated_confidence")
+        return self
+
+
 class Proposal(Contract):
     action_id: str = Field(min_length=1, max_length=128)
     checkpoint_sha256: SHA256
     observation_contract: str
     evidence: list[str] = Field(min_length=1, max_length=100)
+    # Mandatory for every new proposal (the worker never persists one without it); absent
+    # only in pre-C17 history, whose canonical digests must stay byte-identical.
+    confidence: Confidence | None = None
+
+    @model_serializer(mode="wrap")
+    def preserve_historical_identity(self, handler):
+        data = handler(self)
+        if self.confidence is None:
+            data.pop("confidence", None)
+        return data
 
 
 class SafetyAssessment(Contract):
@@ -263,11 +303,12 @@ class SafetyBinding(Contract):
 
 
 def canonical_json(value) -> str:
-    return json.dumps(value.model_dump(mode="json"), sort_keys=True, separators=(",", ":"), allow_nan=False)
+    """Strict canonical JSON text of a contract (ADR-028 C20; byte-identical to the historical encoding)."""
+    return canonical_json_bytes(value.model_dump(mode="json")).decode("ascii")
 
 
 def contract_digest(value) -> str:
-    return hashlib.sha256(canonical_json(value).encode("utf-8")).hexdigest()
+    return canonical_sha256(value.model_dump(mode="json"))
 
 
 class Qualification(Contract):
@@ -319,7 +360,40 @@ class Verification(Contract):
     reasons: list[str] = Field(default_factory=list, max_length=32)
 
 
-class DecisionResponse(Contract):
+#: Evidence token recording how many identical coalescible cycles one decision row stands for
+#: (ADR-028 fix 6; the row's updated_at is the last time such a cycle was seen).
+COALESCED_CYCLES_PREFIX = "coalesced_cycles:"
+
+
+def coalesced_cycles(evidence) -> int:
+    for item in evidence or ():
+        if isinstance(item, str) and item.startswith(COALESCED_CYCLES_PREFIX):
+            try:
+                return max(1, int(item.removeprefix(COALESCED_CYCLES_PREFIX)))
+            except ValueError:
+                return 1
+    return 1
+
+
+class _DecisionDerived(Contract):
+    """Additive derived fields shared by full and summary decision projections."""
+
+    #: C17 confidence of the persisted proposal (None for decisions without a proposal).
+    confidence: Confidence | None = None
+    repeat_count: int = Field(default=1, ge=1)
+    last_seen_at: AwareDatetime | None = None
+
+    @model_validator(mode="after")
+    def derive(self):
+        proposal = getattr(self, "proposal", None)
+        if self.confidence is None and proposal is not None:
+            self.confidence = proposal.confidence
+        self.repeat_count = coalesced_cycles(getattr(self, "evidence", ()))
+        self.last_seen_at = getattr(self, "updated_at", None)
+        return self
+
+
+class DecisionResponse(_DecisionDerived):
     decision_id: uuid.UUID
     network_id: uuid.UUID
     workspace_id: uuid.UUID
@@ -338,6 +412,109 @@ class DecisionResponse(Contract):
     authorization: ExecutionAuthorization | None = None
     created_at: AwareDatetime
     updated_at: AwareDatetime
+    projection: Literal["full"] = "full"
+
+
+class ObservationSummary(Contract):
+    """Observation without its sample payload (history lists never carry blobs)."""
+
+    network_id: uuid.UUID
+    workspace_id: uuid.UUID
+    provider_id: str
+    contract: str
+    observed_at: AwareDatetime | None
+    collected_at: AwareDatetime
+    age_seconds: float | None
+    fresh: bool
+    compatible: bool
+    reasons: list[str] = Field(default_factory=list, max_length=32)
+    evidence: list[str] = Field(default_factory=list, max_length=100)
+    #: Always empty in summaries (kept for client type compatibility); see sample_count.
+    samples: list[ObservationSample] = Field(default_factory=list, max_length=0)
+    sample_count: int = Field(default=0, ge=0)
+
+    @model_validator(mode="before")
+    @classmethod
+    def drop_samples(cls, data):
+        if isinstance(data, dict) and "samples" in data:
+            data = dict(data)
+            samples = data.pop("samples") or []
+            data.setdefault("sample_count", len(samples))
+        return data
+
+
+_BINDING_SUMMARY_KEYS = ("workspace_id", "observation_sha256", "proposal_sha256", "calibration_sha256",
+                         "selected_action_sha256", "evaluated_at_unix_seconds")
+
+
+class SafetyBindingSummary(Contract):
+    """Binding digests only; the bound provider inputs stay in the full decision."""
+
+    workspace_id: uuid.UUID
+    observation_sha256: SHA256
+    proposal_sha256: SHA256
+    calibration_sha256: SHA256
+    selected_action_sha256: SHA256
+    evaluated_at_unix_seconds: float
+
+    @model_validator(mode="before")
+    @classmethod
+    def digests_only(cls, data):
+        if isinstance(data, dict):
+            return {key: data[key] for key in _BINDING_SUMMARY_KEYS if key in data}
+        return data
+
+
+class SafetySummary(Contract):
+    admissible: bool
+    action_id: str | None = None
+    model_version: str
+    reasons: list[str] = Field(default_factory=list, max_length=32)
+    evidence: list[str] = Field(default_factory=list, max_length=100)
+    certificate: SafetyCertificate | None = None
+    binding: SafetyBindingSummary | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def drop_inputs(cls, data):
+        if isinstance(data, dict):
+            return {key: value for key, value in data.items() if key != "selected_action"}
+        return data
+
+
+class DecisionSummary(_DecisionDerived):
+    """Bounded list projection of a decision (ADR-028 fix 6); `last_decision` stays full."""
+
+    decision_id: uuid.UUID
+    network_id: uuid.UUID
+    workspace_id: uuid.UUID
+    actor_id: str
+    mode: Mode
+    control_revision: int
+    status: DecisionStatus
+    reasons: list[str]
+    checkpoint_sha256: SHA256 | None
+    observation: ObservationSummary | None
+    proposal: Proposal | None
+    safety: SafetySummary | None
+    evidence: list[str]
+    execution_id: uuid.UUID | None
+    verification: Verification | None
+    created_at: AwareDatetime
+    updated_at: AwareDatetime
+    projection: Literal["summary"] = "summary"
+
+
+class PendingApproval(Contract):
+    """C25 two-person switch: request awaiting a different approver's identical PUT."""
+
+    requested_by_user_id: str
+    mode: Mode
+    expected_revision: int
+    checkpoint_sha256: SHA256 | None
+    approval_expires_at: AwareDatetime | None
+    requested_at: AwareDatetime
+    expires_at: AwareDatetime
 
 
 class AutonomyResponse(Contract):
@@ -361,6 +538,7 @@ class AutonomyResponse(Contract):
     providers: ProviderStatuses
     last_observation: Observation | None
     last_decision: DecisionResponse | None
-    decisions: list[DecisionResponse] = Field(max_length=100)
+    decisions: list[DecisionSummary] = Field(max_length=100)
     history_limit: int
     updated_at: AwareDatetime | None
+    pending_approval: PendingApproval | None = None

@@ -1,11 +1,14 @@
 """Simulation-owned versioned lifecycle and execution evidence validation."""
 
+import asyncio
 import copy
 import uuid
+from collections import OrderedDict
 from datetime import UTC, datetime
 
 from fastapi import HTTPException
 
+from app.core.config import get_settings
 from app.modules.simulation.evaluator import (
     MODEL_VERSION,
     canonical_config,
@@ -15,6 +18,7 @@ from app.modules.simulation.evaluator import (
     validate_checkpoint,
 )
 from app.modules.simulation.models import Simulation, SimulationOutbox
+from app.modules.simulation.repository import event_payload, normalize_correlation
 from app.modules.simulation.schemas import ScenarioConfig
 from app.modules.telemetry.references import evidence_item, install_owner_guard, page_position, reference_page
 
@@ -65,35 +69,150 @@ def configured(record) -> bool:
     return isinstance(getattr(record, "scenario_config", None), dict)
 
 
-def verified_output(record) -> dict | None:
-    if not configured(record):
-        return None
+def _verify_values(scenario_config, input_sha256, checkpoint, run_output) -> dict | None:
+    """Pure whole-checkpoint re-verification (CPU bound; never call on the event loop)."""
     try:
-        config = ScenarioConfig.model_validate(record.scenario_config)
-        if record.input_sha256 != digest(canonical_config(config)):
+        config = ScenarioConfig.model_validate(scenario_config)
+        if input_sha256 != digest(canonical_config(config)):
             return None
-        result = output(config, record.checkpoint)
-        if result != record.run_output or result["model_version"] != MODEL_VERSION:
+        result = output(config, checkpoint)
+        if result != run_output or result["model_version"] != MODEL_VERSION:
             return None
         return result
     except (ValueError, TypeError, KeyError):
         return None
 
 
-def current_network_state_hash(*, binding, snapshot) -> str:
-    """Same canonical actual snapshot for evidence creation and predeploy checking.
+def verified_output(record) -> dict | None:
+    """Synchronous verification for worker threads and tests; request paths use the async form."""
+    if not configured(record):
+        return None
+    return _verify_values(record.scenario_config, record.input_sha256, record.checkpoint, record.run_output)
 
-    Exclude only observed_at; keep run identity and all measured values, including
-    counters and their timing. Sort object arrays, never ordered path arrays.
+
+# ADR-028: per-process cache of verified outputs keyed by the persisted revision and
+# stored digests. A revision's committed content is immutable (every lifecycle and
+# batch CAS increments it), so a hit never skips verification of new content.
+VERIFIED_OUTPUT_CACHE_SIZE = 64
+_VERIFIED_OUTPUTS: OrderedDict[tuple, dict | None] = OrderedDict()
+
+
+def _verification_key(record) -> tuple:
+    checkpoint = record.checkpoint if isinstance(record.checkpoint, dict) else {}
+    run_output = record.run_output if isinstance(record.run_output, dict) else {}
+    return (str(record.simulation_id), getattr(record, "revision", None), record.input_sha256,
+            checkpoint.get("checkpoint_sha256"), run_output.get("output_sha256"))
+
+
+async def verified_output_async(record) -> dict | None:
+    """Verify off the event loop (``asyncio.to_thread``); cached per (simulation, revision).
+
+    The returned mapping is shared by cache hits and must be treated as read-only.
     """
-    value = snapshot.model_dump(mode="json")
-    value.pop("observed_at", None)
-    for key, items in value.items():
+    if not configured(record):
+        return None
+    key = _verification_key(record)
+    if key in _VERIFIED_OUTPUTS:
+        _VERIFIED_OUTPUTS.move_to_end(key)
+        return _VERIFIED_OUTPUTS[key]
+    result = await asyncio.to_thread(_verify_values, record.scenario_config, record.input_sha256,
+                                     record.checkpoint, record.run_output)
+    _VERIFIED_OUTPUTS[key] = result
+    while len(_VERIFIED_OUTPUTS) > VERIFIED_OUTPUT_CACHE_SIZE:
+        _VERIFIED_OUTPUTS.popitem(last=False)
+    return result
+
+
+NETWORK_STATE_HASH_VERSION = 2
+# Measurements, counters and sampling metadata. They change every observation and
+# must not invalidate evidence bound to an unchanged topology/configuration.
+_VOLATILE_SNAPSHOT_FIELDS = frozenset({"observed_at", "sequence", "queues", "probes"})
+_VOLATILE_SWITCH_FIELDS = frozenset({"observed_at", "ports", "flows"})
+
+
+def _stable_switch(item):
+    if not isinstance(item, dict):
+        return item
+    stable = {key: value for key, value in item.items() if key not in _VOLATILE_SWITCH_FIELDS}
+    ports = item.get("ports")
+    if isinstance(ports, list):
+        # Port identity is topology; rx/tx counters and durations are measurements.
+        stable["ports"] = sorted(port["port_no"] for port in ports if isinstance(port, dict) and "port_no" in port)
+    return stable
+
+
+def stable_network_projection(snapshot_value: dict) -> dict:
+    """Stable topology/configuration projection of an actual lab observation.
+
+    Keeps version, topology and run identity, switch identities and port sets,
+    links and hosts. Drops every timestamp, sequence, port/flow counter, queue
+    backlog and probe measurement (reactive controller flow entries included).
+    Top-level object arrays are sorted by canonical digest; paths are not reordered.
+    """
+    value = {key: item for key, item in snapshot_value.items() if key not in _VOLATILE_SNAPSHOT_FIELDS}
+    if isinstance(value.get("switches"), list):
+        value["switches"] = [_stable_switch(item) for item in value["switches"]]
+    for key, items in list(value.items()):
         if isinstance(items, list) and all(isinstance(item, dict) for item in items):
-            value[key] = sorted(items, key=lambda item: digest(item))
-    return digest(
-        {"version": 1, "binding": binding.model_dump(mode="json"), "snapshot": value}
-    )
+            value[key] = sorted(items, key=digest)
+    return value
+
+
+def current_network_state_hash(*, binding, snapshot) -> str:
+    """Single owner of the execution-evidence network state digest (version 2).
+
+    Evidence creation (validate returns it), acceptance and pre-dispatch checks all
+    hash the current actual ``prepare_plan`` binding/snapshot through this helper.
+    """
+    return digest({
+        "version": NETWORK_STATE_HASH_VERSION,
+        "binding": binding.model_dump(mode="json"),
+        "topology": stable_network_projection(snapshot.model_dump(mode="json")),
+    })
+
+
+def policy_floors(settings=None) -> dict[str, float]:
+    """Server policy floors on execution evidence limits (ADR-028 C18).
+
+    Read with defaults until the platform settings declare them.
+    """
+    settings = settings or get_settings()
+    return {
+        "max_loss_pct": float(getattr(settings, "SIMULATION_POLICY_MAX_LOSS_PCT", 1.0)),
+        "max_latency_ms": float(getattr(settings, "SIMULATION_POLICY_MAX_LATENCY_MS", 1000.0)),
+        "min_throughput_mbps": float(getattr(settings, "SIMULATION_POLICY_MIN_THROUGHPUT_MBPS", 0.0)),
+    }
+
+
+def limits_respect_policy(limits, floors: dict[str, float]) -> bool:
+    """Operator limits may be stricter, never weaker, than the server floors."""
+    try:
+        return (float(limits["max_loss_pct"]) <= floors["max_loss_pct"]
+                and float(limits["max_latency_ms"]) <= floors["max_latency_ms"]
+                and float(limits["min_throughput_mbps"]) >= floors["min_throughput_mbps"])
+    except (KeyError, TypeError, ValueError):
+        return False
+
+
+def max_active_per_workspace(settings=None) -> int:
+    settings = settings or get_settings()
+    return int(getattr(settings, "SIMULATION_MAX_ACTIVE_PER_WORKSPACE", 8))
+
+
+async def enforce_active_quota(service, workspace_id) -> None:
+    """429 before a run becomes queued; the count is serialized per workspace."""
+    limit = max_active_per_workspace()
+    if await service._repo.active_count(workspace_id) >= limit:
+        raise HTTPException(429, detail={"code": "SIMULATION_QUOTA_EXCEEDED",
+            "message": f"Workspace already has {limit} queued or running simulations; retry after one finishes."},
+            headers={"Retry-After": "30"})
+
+
+def _validate_stored(scenario_config, input_sha256, checkpoint) -> None:
+    config = ScenarioConfig.model_validate(scenario_config)
+    if input_sha256 != digest(canonical_config(config)):
+        raise ValueError("Input changed")
+    validate_checkpoint(config, checkpoint)
 
 
 async def create_modeled(
@@ -107,6 +226,7 @@ async def create_modeled(
     parent=None,
 ):
     now, simulation_id = datetime.now(UTC), uuid.uuid4()
+    correlation, correlation_meta = normalize_correlation(correlation_id)
     inputs = canonical_config(config)
     checkpoint = initial_checkpoint(config)
     copied = False
@@ -123,10 +243,12 @@ async def create_modeled(
         and parent.input_sha256 == digest(inputs)
     ):
         try:
-            validate_checkpoint(config, parent.checkpoint)
+            await asyncio.to_thread(validate_checkpoint, config, parent.checkpoint)
         except ValueError as exc:
             raise HTTPException(409, detail="Parent checkpoint invalid.") from exc
         checkpoint, copied = copy.deepcopy(parent.checkpoint), True
+    if parent is None:
+        await enforce_active_quota(service, network.workspace_id)
     record = Simulation(
         simulation_id=simulation_id,
         parent_simulation_id=parent.simulation_id if parent else None,
@@ -157,7 +279,8 @@ async def create_modeled(
         run_output={},
         model_versions={"evaluator": MODEL_VERSION},
         audit_provenance={
-            "correlation_id": correlation_id,
+            "correlation_id": correlation,
+            **correlation_meta,
             "requested_by_user_id": actor_id,
             "checkpoint_copied": copied,
             "input_override_restarted": parent is not None and not copied,
@@ -190,16 +313,26 @@ async def create_modeled(
 
 async def transition_modeled(service, *, record, state, correlation_id):
     try:
-        config = ScenarioConfig.model_validate(record.scenario_config)
-        if record.input_sha256 != digest(canonical_config(config)):
-            raise ValueError("Input changed")
-        validate_checkpoint(config, record.checkpoint)
+        await asyncio.to_thread(_validate_stored, record.scenario_config, record.input_sha256, record.checkpoint)
     except ValueError as exc:
         raise HTTPException(409, detail="Simulation input/checkpoint invalid.") from exc
     if state == "queued" and record.state not in {"draft", "paused", "queued"}:
         raise HTTPException(409, detail="Simulation is not resumable.")
     if state == "paused" and record.state not in {"queued", "running", "paused"}:
         raise HTTPException(409, detail="Simulation is not pausable.")
+    if record.state == state:
+        # ADR-028: same-state requests are idempotent no-ops: no revision bump, no
+        # lease revocation, no commit and no duplicate lifecycle event.
+        correlation, correlation_meta = normalize_correlation(correlation_id)
+        payload = event_payload(record, correlation, request_id=correlation_meta.get("request_id"))
+        return payload if state == "paused" else {
+            "handoff": payload,
+            "queue_status": record.queue_status,
+            "stream_entry_id": record.stream_entry_id,
+            "warning": record.warning,
+        }
+    if state == "queued":
+        await enforce_active_quota(service, record.workspace_id)
     # Invalidate any in-progress batch. Its CAS cannot overwrite this pause/resume.
     record.state = record.status = state
     record.risk_gate = "required"
@@ -254,7 +387,23 @@ async def validate_execution_reference(
         actor_user_id=actor_id,
         require_write=True,
     )
-    result = verified_output(record)
+    floors = policy_floors()
+    if configured(record) and not limits_respect_policy(record.scenario_config.get("limits"), floors):
+        raise HTTPException(
+            409,
+            detail={
+                "code": "SIMULATION_POLICY_VIOLATION",
+                "message": (
+                    "Simulation limits are weaker than the server policy floors "
+                    f"(max_loss_pct<={floors['max_loss_pct']:g}, max_latency_ms<={floors['max_latency_ms']:g}, "
+                    f"min_throughput_mbps>={floors['min_throughput_mbps']:g})."
+                ),
+            },
+        )
+    # Security-critical: always a full re-verification (never the read cache), off-loop.
+    result = (await asyncio.to_thread(_verify_values, record.scenario_config, record.input_sha256,
+                                      record.checkpoint, record.run_output)
+              if configured(record) else None)
     now = datetime.now(UTC)
     binding = (
         record.scenario_config.get("action_binding") if configured(record) else None
@@ -300,4 +449,5 @@ async def validate_execution_reference(
         "source": "operator_configured_model",
         "validation_scope": "configured_model_admission_only",
         "physical_safety_authorized": False,
+        "policy_floors": floors,
     }

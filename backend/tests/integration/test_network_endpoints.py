@@ -95,9 +95,13 @@ def _patch_topology_scope_resolution():
     async def _resolve_device_scope(*, device_id, claims, db, redis):
         return uuid.uuid4(), uuid.uuid4()
 
+    async def _reconcile_scope(*, network_id, claims, db, redis):
+        return network_id, uuid.uuid4(), 17
+
     with (
         patch("app.api.v1.topology._resolve_network_scope", side_effect=_resolve_network_scope),
         patch("app.api.v1.topology._resolve_device_scope", side_effect=_resolve_device_scope),
+        patch("app.api.v1.topology._reconcile_scope", side_effect=_reconcile_scope),
     ):
         yield
 
@@ -265,7 +269,7 @@ class TestNetworkEndpointsAuth:
         headers = {"Authorization": f"Bearer {token}"}
 
         with patch(
-            "app.modules.network.service.OrgWorkspaceService.assert_workspace_membership",
+            "app.modules.organization.service.WorkspaceService.assert_workspace_membership",
             new_callable=AsyncMock,
             return_value=SimpleNamespace(workspace_id=token_workspace_id, org_id=uuid.uuid4()),
         ):
@@ -288,7 +292,7 @@ class TestNetworkEndpointsAuth:
         headers = {"Authorization": f"Bearer {token}"}
 
         with patch(
-            "app.modules.network.service.OrgWorkspaceService.assert_workspace_membership",
+            "app.modules.organization.service.WorkspaceService.assert_workspace_membership",
             new_callable=AsyncMock,
             return_value=SimpleNamespace(workspace_id=token_workspace_id, org_id=uuid.uuid4()),
         ):
@@ -1121,7 +1125,7 @@ class TestTopologyRouteSurface:
     def test_topology_reconcile_denied_on_unresolved_scope_returns_403(self, client, headers):
         with (
             patch(
-            "app.api.v1.topology._resolve_network_scope",
+            "app.api.v1.topology._reconcile_scope",
             side_effect=HTTPException(status_code=403, detail="Insufficient scope."),
             ),
             patch("app.api.v1.topology.get_neo4j_driver") as mock_driver,
@@ -1648,6 +1652,54 @@ class TestTopologyAnalysisEndpoints:
         assert call_kwargs["network_id"] == network_id
         assert isinstance(call_kwargs["correlation_id"], str)
         assert call_kwargs["actor_id"]
+        # The watermark read under the (already released) inventory lock is forwarded.
+        assert call_kwargs["watermark"] == 17
+        assert body["data"]["upserted_nodes"] == 0 and body["data"]["watermark_sequence"] == 0
+
+    def test_topology_reads_release_postgres_before_graph_io(self, session_auth):
+        from app.core.dependencies import get_db, get_redis
+
+        db = AsyncMock()
+        order = []
+        db.rollback.side_effect = lambda: order.append("release")
+
+        async def _db():
+            yield db
+
+        async def _redis():
+            yield session_auth.redis
+
+        async def graph(*args, **kwargs):
+            order.append("graph")
+            return TopologyGraphResponse(nodes=[], edges=[]), None
+
+        async def neighbours(*args, **kwargs):
+            order.append("graph")
+            return None
+
+        app.dependency_overrides[get_db] = _db
+        app.dependency_overrides[get_redis] = _redis
+        headers = {"Authorization": f"Bearer {_make_token()}"}
+        try:
+            client = TestClient(app, raise_server_exceptions=False)
+            with (
+                patch("app.modules.network.topology.TopologyQueryService.get_graph", side_effect=graph),
+                patch("app.modules.network.topology.TopologyQueryService.get_device_neighbours",
+                      side_effect=neighbours),
+                patch("app.api.v1.topology.get_neo4j_driver", return_value=AsyncMock()),
+            ):
+                assert client.get("/api/v1/topology/graph", params={"network_id": str(uuid.uuid4())},
+                                  headers=headers).status_code == 200
+                assert client.get(f"/api/v1/topology/device/{uuid.uuid4()}/neighbors",
+                                  headers=headers).status_code == 404
+        finally:
+            app.dependency_overrides.clear()
+        assert order == ["release", "graph", "release", "graph"]
+
+    @pytest.mark.parametrize("query", ["depth=0", "depth=7", "cursor=" + "x" * 129, "limit=501"])
+    def test_topology_graph_query_bounds(self, client, headers, query):
+        response = client.get(f"/api/v1/topology/graph?network_id={uuid.uuid4()}&{query}", headers=headers)
+        assert response.status_code == 422
 
     def test_topology_reconcile_endpoint_not_found_returns_404(self, client, headers):
         with (

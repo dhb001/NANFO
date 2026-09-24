@@ -1,85 +1,78 @@
 {
   "schema_version": 1,
-  "reviewed": "2026-09-21",
+  "reviewed": "2026-09-24",
   "exceptions": [
     {
       "lane": "ai-upstream", "package": "torch", "version": "2.8.0",
       "advisories": ["PYSEC-2025-193", "PYSEC-2025-194", "PYSEC-2025-195", "PYSEC-2025-203", "PYSEC-2025-204", "PYSEC-2025-206", "PYSEC-2026-139", "PYSEC-2026-2286"],
-      "owner": "AI qualification maintainer", "expires": "2026-10-21",
-      "rationale": "Supplemental upstream version query, NOT exact +cpu build certification. Frozen actor uses feed-forward tensor operations; no torch.jit.script, lstm_cell, unpack_sequence, linalg.lu, rot90 or pt2 loading path found in current AI source. Integer conversion input remains bounded by validated observations. weights_only unpickling is used and remains vulnerable to crafted checkpoints: only operator-owned hash-verified immutable checkpoints may reach the loader. Hash identity is not a sandbox if the trusted producer is compromised. No arbitrary uploaded checkpoint inference is authorized.",
-      "remediation": "Versioned successor CPU runtime >=2.13.0 (current highest advertised fix), reevaluate unpatched PYSEC-2026-139 applicability, audit exact wheel/SBOM, perform deterministic tensor/load/tamper and isolated inference regressions, then source/image/model-bound requalification. Do not alter historical environment or weights."
-    },
-    {
-      "lane": "backend", "package": "ecdsa", "version": "0.19.2",
-      "advisories": ["PYSEC-2026-1325"],
-      "owner": "Backend security maintainer", "expires": "2026-10-21",
-      "rationale": "CVE-2024-23342 / GHSA-wj6h-64fc-37mp has no upstream fix. python-jose transitively requires ecdsa. Default JWT signing is HS256; cryptography extra is installed. No NANFO direct SigningKey/ECDH use found. This exception is invalid for deployments using python-ecdsa signing or key generation; configuration must be reviewed before enabling EC algorithms.",
-      "remediation": "Replace python-jose with a maintained JWT implementation in an auth-contract change; exercise issuer, expiry, refresh/revocation and algorithm confusion regressions. See ReviewClosure-Dependencies.md."
+      "owner": "AI qualification maintainer", "expires": "2026-11-19",
+      "rationale": "Supplemental upstream version query, NOT exact +cpu build certification. torch 2.8.0+cpu is part of the frozen, qualified AI runtime identity, which ADR-028 section 1 forbids rewriting; upgrading in place would silently relabel historical results. Frozen actor uses feed-forward tensor operations; no torch.jit.script, lstm_cell, unpack_sequence, linalg.lu, rot90 or pt2 loading path found in current AI source. Integer conversion input remains bounded by validated observations. weights_only unpickling is used and remains vulnerable to crafted checkpoints: only operator-owned hash-verified immutable checkpoints may reach the loader. Hash identity is not a sandbox if the trusted producer is compromised. No arbitrary uploaded checkpoint inference is authorized. These constraints limit exposure; they do not patch the library.",
+      "remediation": "Successor plan (ADR-028 section 1): a versioned successor CPU runtime with torch >=2.13.0 (current highest advertised fix) delivered as a new runtime identity, never a relabel. Reevaluate unpatched PYSEC-2026-139 applicability, audit the exact wheel/SBOM, run deterministic tensor/load/tamper and isolated inference regressions, then source/image/model-bound requalification. Repeated training and qualification evidence are owner actions (ADR-028 section 5) and are not invented. Do not alter the historical environment or weights."
     },
     {
       "lane": "emulation", "package": "ryu", "version": "4.34",
       "advisories": ["PYSEC-2026-1876", "PYSEC-2026-1877", "PYSEC-2026-1878", "PYSEC-2026-1879", "PYSEC-2026-1880", "PYSEC-2026-1881", "PYSEC-2026-1882", "PYSEC-2026-1883", "PYSEC-2026-1884"],
-      "owner": "Emulation qualification maintainer", "expires": "2026-10-21",
-      "rationale": "Frozen historical runtime; upstream has no fixed release for these OpenFlow parser infinite loops. OpenFlow from lab OVS reaches the parser: malicious/compromised switches remain a real DoS risk. Exception applies only to isolated operator-owned emulation, never an untrusted switch or public controller service.",
-      "remediation": "Versioned successor controller/runtime and malformed-frame tests, then source/image-bound requalification; preserve historical bytes."
+      "owner": "Emulation qualification maintainer", "expires": "2026-10-29",
+      "rationale": "emulation/requirements.txt pins the frozen historical lab runtime that recorded campaign results depend on (ADR-028 section 1: not rewritten). Upstream has no fixed release for these OpenFlow parser infinite loops. OpenFlow from lab OVS reaches the parser: malicious/compromised switches remain a real DoS risk. ADR-028 C23 makes the successor lab the default and restricts the frozen privileged image to the explicit opt-in historical-reproduction overlay (deploy/compose.lab.frozen.yaml / NANFO_LAB_FROZEN=1). Exception applies only to isolated operator-owned emulation, never an untrusted switch or public controller service.",
+      "remediation": "Successor plan (ADR-028 section 1, C23): versioned successor controller/runtime on a supported base image with a hash-pinned successor lock (AI-Emulation workstream), malformed-frame tests, then source/image-bound requalification. Preserve historical bytes. Shortest expiry: the controller parser is the most exposed component."
     },
     {
       "lane": "emulation", "package": "eventlet", "version": "0.30.2",
       "advisories": ["PYSEC-2021-12", "PYSEC-2026-1307", "PYSEC-2026-1350", "PYSEC-2026-2472"],
-      "owner": "Emulation qualification maintainer", "expires": "2026-10-21",
-      "rationale": "Frozen Ryu requires ALREADY_HANDLED removed in later eventlet. WebSocket exhaustion, DNS interference and WSGI request smuggling remain unpatched here. No public WSGI/WebSocket listener is authorized; lab DNS and controller peers must remain isolated. PYSEC-2026-1307 and 2472 alias the same CVE but both exact feed IDs are reviewed.",
-      "remediation": "Successor runtime must remove legacy eventlet/Ryu coupling, exercise HTTP/WebSocket/DNS boundaries and requalify before promotion."
+      "owner": "Emulation qualification maintainer", "expires": "2026-10-29",
+      "rationale": "Frozen Ryu requires ALREADY_HANDLED removed in later eventlet. WebSocket exhaustion, DNS interference and WSGI request smuggling remain unpatched here. No public WSGI/WebSocket listener is authorized; lab DNS and controller peers must remain isolated. PYSEC-2026-1307 and 2472 alias the same CVE but both exact feed IDs are reviewed. Reachable only through the frozen opt-in overlay (ADR-028 C23).",
+      "remediation": "Successor plan (ADR-028 C23): the successor lock (AI-Emulation) removes the legacy eventlet/Ryu coupling; exercise HTTP/WebSocket/DNS boundaries and requalify before promotion."
     },
     {
       "lane": "emulation", "package": "dnspython", "version": "1.16.0",
       "advisories": ["PYSEC-2026-1307"],
-      "owner": "Emulation qualification maintainer", "expires": "2026-10-21",
-      "rationale": "Frozen eventlet DNS dependency is susceptible to TuDoor. Numeric lab addresses reduce routine DNS exposure; hostile network DNS remains a risk, not a proven unreachable path.",
-      "remediation": "Use dnspython >=2.6.1 in successor runtime with DNS regression and qualification."
+      "owner": "Emulation qualification maintainer", "expires": "2026-11-05",
+      "rationale": "Frozen eventlet DNS dependency is susceptible to TuDoor. Numeric lab addresses reduce routine DNS exposure; hostile network DNS remains a risk, not a proven unreachable path. Reachable only through the frozen opt-in overlay (ADR-028 C23).",
+      "remediation": "Successor plan (ADR-028 C23): dnspython >=2.6.1 in the successor lock (AI-Emulation) with DNS regression and qualification."
     },
     {
       "lane": "emulation", "package": "webob", "version": "1.8.9",
       "advisories": ["PYSEC-2026-251", "PYSEC-2026-3943"],
-      "owner": "Emulation qualification maintainer", "expires": "2026-10-21",
-      "rationale": "Frozen controller HTTP dependency; hostile Location targets can redirect off-host. No public redirect/SSO use is authorized in this operator-only lab. Do not expose Ryu web services to untrusted callers.",
-      "remediation": "WebOb >=1.8.11 in successor image; redirect/control-character tests and image requalification."
+      "owner": "Emulation qualification maintainer", "expires": "2026-11-05",
+      "rationale": "Frozen controller HTTP dependency; hostile Location targets can redirect off-host. No public redirect/SSO use is authorized in this operator-only lab. Do not expose Ryu web services to untrusted callers. Reachable only through the frozen opt-in overlay (ADR-028 C23).",
+      "remediation": "Successor plan (ADR-028 C23): WebOb >=1.8.11 (or no WebOb) in the successor lock (AI-Emulation); redirect/control-character tests and image requalification."
     },
     {
       "lane": "emulation", "package": "msgpack", "version": "1.0.8",
       "advisories": ["PYSEC-2026-3625"],
-      "owner": "Emulation qualification maintainer", "expires": "2026-10-21",
-      "rationale": "Streaming Unpacker reuse after errors can crash. NANFO emulation exchanges JSON, not an exposed MessagePack input endpoint; transitively installed Ryu code still requires review before new RPC use.",
-      "remediation": "msgpack >=1.2.1 in successor image and malformed-stream regression."
+      "owner": "Emulation qualification maintainer", "expires": "2026-11-12",
+      "rationale": "Streaming Unpacker reuse after errors can crash. NANFO emulation exchanges JSON, not an exposed MessagePack input endpoint; transitively installed Ryu code still requires review before new RPC use. Reachable only through the frozen opt-in overlay (ADR-028 C23).",
+      "remediation": "Successor plan (ADR-028 C23): msgpack >=1.2.1 (or no msgpack) in the successor lock (AI-Emulation) and a malformed-stream regression."
     },
     {
       "lane": "emulation", "package": "requests", "version": "2.31.0",
       "advisories": ["PYSEC-2026-1872", "PYSEC-2026-1873", "PYSEC-2026-2275"],
-      "owner": "Emulation qualification maintainer", "expires": "2026-10-21",
+      "owner": "Emulation qualification maintainer", "expires": "2026-11-12",
       "rationale": "Frozen client dependency retains TLS-session verification persistence, netrc disclosure and zipped-path temporary-file flaws. Lab destinations must be operator-controlled; no host netrc credentials or shared writable temp mounts. These constraints limit exposure and do not patch the library.",
-      "remediation": "requests >=2.33.0 in versioned successor; TLS, redirect, credential and temporary-file regressions."
+      "remediation": "Successor plan (ADR-028 C23): requests >=2.33.0 in the successor lock (AI-Emulation); TLS, redirect, credential and temporary-file regressions."
     },
     {
       "lane": "emulation", "package": "idna", "version": "3.7",
       "advisories": ["PYSEC-2026-215"],
-      "owner": "Emulation qualification maintainer", "expires": "2026-10-21",
+      "owner": "Emulation qualification maintainer", "expires": "2026-11-26",
       "rationale": "Oversized attacker-controlled Unicode hostnames can consume CPU. Operator-defined numeric lab endpoints reduce exposure; arbitrary remote URL inputs are outside the exception scope.",
-      "remediation": "idna >=3.15 in successor image with hostname-boundary tests."
+      "remediation": "Successor plan (ADR-028 C23): idna >=3.15 in the successor lock (AI-Emulation) with hostname-boundary tests."
     },
     {
       "lane": "emulation", "package": "urllib3", "version": "1.26.19",
       "advisories": ["PYSEC-2026-141", "PYSEC-2026-1994", "PYSEC-2026-1996", "PYSEC-2026-1998", "PYSEC-2026-1999"],
-      "owner": "Emulation qualification maintainer", "expires": "2026-10-21",
+      "owner": "Emulation qualification maintainer", "expires": "2026-11-26",
       "rationale": "Frozen HTTP dependency retains redirect/header leakage and response decompression DoS. Only controlled lab endpoints are authorized; malicious responses remain exploitable if that boundary fails. Do not use this runtime for arbitrary web fetching.",
-      "remediation": "urllib3 >=2.7.0 in successor image; bounded decompression and cross-origin redirect credential tests plus requalification."
+      "remediation": "Successor plan (ADR-028 C23): urllib3 >=2.7.0 in the successor lock (AI-Emulation); bounded decompression and cross-origin redirect credential tests plus requalification."
     }
   ],
   "coverage_gaps": [
     {
       "lane": "ai", "package": "torch", "version": "2.8.0+cpu",
       "reason": "Dependency not found on PyPI and could not be audited: torch (2.8.0+cpu)",
-      "owner": "AI qualification maintainer", "expires": "2026-10-21",
-      "rationale": "Exact CPU wheel comes from download.pytorch.org, absent from PyPI audit inventory. This is an explicit coverage failure, not a clean Torch result. No version normalization or blanket package ignore is permitted.",
-      "remediation": "The separate ai-upstream lane gates public torch 2.8.0 advisories but does not close this exact-build gap. Review exact CPU build/SBOM; any runtime change requires a new identity and requalification. Never load untrusted checkpoint/pickle inputs."
+      "owner": "AI qualification maintainer", "expires": "2026-12-03",
+      "rationale": "Exact CPU wheel comes from download.pytorch.org, absent from PyPI audit inventory. This is an explicit coverage failure, not a clean Torch result. No version normalization or blanket package ignore is permitted. The wheel is part of the frozen qualified AI runtime identity (ADR-028 section 1).",
+      "remediation": "The separate ai-upstream lane gates public torch 2.8.0 advisories but does not close this exact-build gap. Review the exact CPU build/SBOM; the successor AI runtime (ADR-028 section 1) requires a new identity and requalification. Never load untrusted checkpoint/pickle inputs."
     }
   ]
 }

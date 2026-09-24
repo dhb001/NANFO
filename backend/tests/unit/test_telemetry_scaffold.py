@@ -9,10 +9,10 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from app.modules.telemetry.service import (
-    GRPCRuntimeTelemetryAdapter,
+    DemoGRPCTelemetryAdapter,
+    DemoSNMPTelemetryAdapter,
     ProductionTelemetryAdapterStub,
     SeededRuntimeTelemetryAdapter,
-    SNMPRuntimeTelemetryAdapter,
     TelemetryCollectorRunner,
     TelemetryIngestionService,
     build_production_runtime_adapter,
@@ -50,7 +50,7 @@ async def test_telemetry_normalize_payload_coerces_types_and_defaults(fake_redis
 @pytest.mark.asyncio
 async def test_telemetry_ingest_publishes_expected_event(fake_redis):
     svc = TelemetryIngestionService(redis=fake_redis)
-    with patch("app.modules.telemetry.service.publish_event", new_callable=AsyncMock) as mock_publish:
+    with patch("app.modules.telemetry.ingestion.publish_event", new_callable=AsyncMock) as mock_publish:
         mock_publish.return_value = "1712425-0"
         entry_id = await svc.ingest(
             raw={
@@ -76,7 +76,7 @@ async def test_telemetry_ingest_publishes_expected_event(fake_redis):
 async def test_telemetry_ingest_ignores_counter_failures(fake_redis):
     svc = TelemetryIngestionService(redis=fake_redis)
     with (
-        patch("app.modules.telemetry.service.publish_event", new_callable=AsyncMock) as mock_publish,
+        patch("app.modules.telemetry.ingestion.publish_event", new_callable=AsyncMock) as mock_publish,
         patch.object(svc._counter_service, "increment_ingested", new_callable=AsyncMock) as mock_increment,
     ):
         mock_publish.return_value = "1712425-0"
@@ -170,7 +170,7 @@ def test_build_production_runtime_adapter_returns_snmp_mode_adapter():
         snmp_source="runtime_snmp",
     )
 
-    assert isinstance(adapter, SNMPRuntimeTelemetryAdapter)
+    assert isinstance(adapter, DemoSNMPTelemetryAdapter)
 
 
 def test_build_production_runtime_adapter_returns_grpc_mode_adapter():
@@ -190,11 +190,11 @@ def test_build_production_runtime_adapter_returns_grpc_mode_adapter():
         grpc_source="runtime_grpc",
     )
 
-    assert isinstance(adapter, GRPCRuntimeTelemetryAdapter)
+    assert isinstance(adapter, DemoGRPCTelemetryAdapter)
 
 
 def test_build_production_runtime_adapter_falls_back_to_stub_for_invalid_mode():
-    with patch("app.modules.telemetry.service.logger.warning") as mock_warning:
+    with patch("app.modules.telemetry.runtime.adapters.logger.warning") as mock_warning:
         adapter = build_production_runtime_adapter(
             mode="unknown",
             seeded_sample_key="site-1",
@@ -216,7 +216,7 @@ def test_build_production_runtime_adapter_falls_back_to_stub_for_invalid_mode():
 @pytest.mark.asyncio
 async def test_snmp_runtime_adapter_poll_emits_snmp_tags(fake_redis):
     _ = TelemetryIngestionService(redis=fake_redis)
-    adapter = SNMPRuntimeTelemetryAdapter(
+    adapter = DemoSNMPTelemetryAdapter(
         target="10.0.0.11",
         oid="1.3.6.1.2.1.31.1.1.1.6.1",
         sample_key="snmp-site-a",
@@ -249,7 +249,7 @@ async def test_snmp_runtime_adapter_poll_emits_snmp_tags(fake_redis):
 @pytest.mark.asyncio
 async def test_grpc_runtime_adapter_poll_emits_grpc_tags(fake_redis):
     _ = TelemetryIngestionService(redis=fake_redis)
-    adapter = GRPCRuntimeTelemetryAdapter(
+    adapter = DemoGRPCTelemetryAdapter(
         endpoint="collector.example:8443",
         method="Telemetry/Poll",
         sample_key="grpc-site-a",
@@ -888,7 +888,7 @@ async def test_runtime_loop_emits_transition_events_on_sustained_failure_and_rec
             "run_single_poll_with_retry",
             new=AsyncMock(side_effect=fake_run_single_poll_with_retry),
         ),
-        patch("app.modules.telemetry.service.publish_event", new_callable=AsyncMock) as mock_publish,
+        patch("app.modules.telemetry.runtime.runner.publish_event", new_callable=AsyncMock) as mock_publish,
     ):
         mock_publish.side_effect = ["111-0", "112-0"]
         await runner.start_runtime_loop(
@@ -935,7 +935,7 @@ async def test_runtime_loop_publish_failure_is_fail_open(fake_redis):
             new=AsyncMock(side_effect=fake_run_single_poll_with_retry),
         ),
         patch(
-            "app.modules.telemetry.service.publish_event",
+            "app.modules.telemetry.runtime.runner.publish_event",
             new=AsyncMock(side_effect=RuntimeError("redis publish failed")),
         ),
     ):
@@ -978,7 +978,7 @@ async def test_runtime_loop_does_not_reemit_activation_while_already_active(fake
             "run_single_poll_with_retry",
             new=AsyncMock(side_effect=fake_run_single_poll_with_retry),
         ),
-        patch("app.modules.telemetry.service.publish_event", new_callable=AsyncMock) as mock_publish,
+        patch("app.modules.telemetry.runtime.runner.publish_event", new_callable=AsyncMock) as mock_publish,
     ):
         mock_publish.return_value = "111-0"
         await runner.start_runtime_loop(

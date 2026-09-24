@@ -24,6 +24,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.core.config import Settings, get_settings
 from app.core.logging import configure_logging
+from app.core.schema_version import CURRENT_SCHEMA
 from app.core.security import hash_password
 from app.modules.identity.repository import UserRepository
 from app.modules.simulation.models import Simulation
@@ -32,8 +33,10 @@ from scripts.verify_execution import (
     VerificationError,
     check,
     external,
+    policy_limits,
     port,
     private_json,
+    run_bound_simulation,
     stop,
     until,
 )
@@ -192,7 +195,7 @@ async def verify(directory, artifact):
             "-c",
             "alembic/alembic.ini",
             "upgrade",
-            "0014",
+            CURRENT_SCHEMA,
             cwd=backend,
             env=env,
         )
@@ -216,7 +219,7 @@ async def verify(directory, artifact):
         async with sessions() as db:
             check(
                 await db.scalar(text("SELECT version_num FROM alembic_version"))
-                == "0014",
+                == CURRENT_SCHEMA,
                 "Migration mismatch",
             )
             user = await UserRepository(db).create(
@@ -358,6 +361,12 @@ async def verify(directory, artifact):
                 done["risk_gate"] == "passed" and done["run_output"]["loss_pct"] == 45,
                 "Analytic result mismatch",
             )
+            # Its own 100% loss limit passes the model, but is weaker than the server
+            # policy floors: this run is never execution evidence (ADR-028 C18).
+            check(
+                (done.get("execution_policy") or {}).get("limits_respect_policy") is False,
+                "Weak scenario limits reported as policy compliant",
+            )
             artifact["checks"]["modeled_output"] = done
             branch = await request(
                 "POST",
@@ -448,8 +457,18 @@ async def verify(directory, artifact):
                 json={"parent_simulation_id": sim_id, "scenario_name": "Forbidden"},
             )
             client.headers["Authorization"] = "Bearer " + token
+            # Execution evidence: a passing run whose limits respect the policy floors and
+            # whose scenario_config.action_binding is the intent binding verbatim (C18).
+            compliant = await run_bound_simulation(
+                client, network_id=network["network_id"], action_binding=binding,
+                limits=policy_limits(isolated), timeout=60,
+            )
+            evidence_id = compliant["simulation_id"]
+            artifact["checks"]["policy_compliant_evidence"] = {
+                "simulation_id": evidence_id, "execution_policy": compliant["execution_policy"],
+            }
             args = {
-                "simulation_id": uuid.UUID(sim_id),
+                "simulation_id": uuid.UUID(evidence_id),
                 "workspace_id": uuid.UUID(workspace["workspace_id"]),
                 "network_id": uuid.UUID(network["network_id"]),
                 "intent_id": uuid.UUID(binding["intent_id"]),
@@ -467,6 +486,19 @@ async def verify(directory, artifact):
                 )
             from fastapi import HTTPException
 
+            async with sessions() as db:
+                try:
+                    await SimulationStartService(
+                        db=db, redis=redis
+                    ).validate_execution_reference(**{**args, "simulation_id": uuid.UUID(sim_id)})
+                except HTTPException as error:
+                    check(
+                        error.status_code == 409 and isinstance(error.detail, dict)
+                        and error.detail.get("code") == "SIMULATION_POLICY_VIOLATION",
+                        "Weak-limit evidence wrong rejection",
+                    )
+                else:
+                    raise VerificationError("Weak-limit simulation accepted as execution evidence")
             for changes in (
                 {"plan_sha256": "c" * 64},
                 {"network_state_sha256": "d" * 64},
@@ -481,7 +513,7 @@ async def verify(directory, artifact):
                     else:
                         raise VerificationError("Changed action/current state accepted")
             async with sessions() as db:
-                row = await db.get(Simulation, uuid.UUID(sim_id))
+                row = await db.get(Simulation, uuid.UUID(evidence_id))
                 row.evidence_expires_at = datetime.now(UTC) - timedelta(seconds=1)
                 await db.commit()
             async with sessions() as db:
@@ -493,16 +525,21 @@ async def verify(directory, artifact):
                     check(error.status_code == 409, "Stale evidence wrong status")
                 else:
                     raise VerificationError("Stale evidence accepted")
-            await request(
+            # Even compliant model evidence never authorizes production execution.
+            rejected_execution = await request(
                 "POST",
                 "/api/v1/intents/execute",
                 expected=409,
                 json={
                     "workspace_id": workspace["workspace_id"],
                     "intent_id": binding["intent_id"],
-                    "simulation_id": sim_id,
+                    "simulation_id": evidence_id,
                     "manual_approval": True,
                 },
+            )
+            check(
+                rejected_execution["code"] == "SIMULATION_EVIDENCE_REJECTED",
+                "Production execution rejection code mismatch",
             )
             artifact["checks"]["action_binding_stale_and_production_rejection"] = True
             async with sessions() as db:

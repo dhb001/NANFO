@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import os
+import threading
+import time
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -21,7 +24,6 @@ from app.modules.autonomy.schemas import (
     SafetyAssessment,
     Verification,
 )
-from app.modules.intent.service import IntentExecutionService
 from app.modules.telemetry.service import TelemetryQueryService
 
 
@@ -79,12 +81,6 @@ class UnavailableRecovery:
     async def cancel(self, reference):
         return Verification(execution_id=reference.execution_id, status="uncertain",
                             reasons=["autonomous_recovery_unavailable", "operator_recovery_required"])
-
-
-class CancellationProvider(Protocol):
-    async def cancel(self, *, network_id: uuid.UUID, workspace_id: uuid.UUID,
-                     intent_id: uuid.UUID, execution_id: uuid.UUID, actor_id: str,
-                     permissions: list[str]) -> Verification: ...
 
 
 class TelemetryObserver:
@@ -158,46 +154,12 @@ class UnavailableExecutor:
                             reasons=["autonomous_executor_unavailable"])
 
 
-class IntentCancellation:
-    def __init__(self, sessions, redis):
-        self.sessions, self.redis = sessions, redis
-
-    async def cancel(self, *, network_id, workspace_id, intent_id, execution_id, actor_id, permissions):
-        async with self.sessions() as db:
-            service = IntentExecutionService(db=db, redis=self.redis)
-            detail = await service.get_intent_detail(workspace_id=workspace_id, intent_id=intent_id, user_id=actor_id)
-            provenance = detail.get("execution_provenance", {})
-            if (str(detail.get("network_id")) != str(network_id)
-                    or str(provenance.get("execution_id")) != str(execution_id)):
-                return Verification(execution_id=execution_id, status="uncertain",
-                                    reasons=["owned_execution_identity_mismatch"])
-            result = await service.execute_intent(
-                workspace_id=workspace_id, intent_id=intent_id, requested_by_user_id=actor_id,
-                requested_permissions=permissions, correlation_id=str(uuid.uuid4()),
-                idempotency_key=None, cancel=True,
-            )
-        provenance = result.get("execution_provenance", {})
-        if str(provenance.get("execution_id")) != str(execution_id):
-            return Verification(execution_id=execution_id, status="uncertain",
-                                reasons=["owned_execution_identity_mismatch"])
-        # Intent's durable worker alone asserts release after verified compensation
-        # or cancellation before dispatch possibility. Enqueue is not cancellation.
-        released = (provenance.get("phase") == "cancelled"
-                    and provenance.get("cancel_requested") is True
-                    and provenance.get("blocks_lab") is False)
-        return Verification(execution_id=execution_id, status="cancelled" if released else "pending",
-                            safe_to_release=released,
-                            evidence=[f"intent:{intent_id}:execution:{execution_id}"],
-                            reasons=[] if released else ["awaiting_verified_cancellation"])
-
-
 @dataclass(frozen=True)
 class Providers:
     observer: Observer
     model: ModelProvider
     safety: SafetyProvider
     executor: DurableExecutor
-    cancellation: CancellationProvider
     recovery: RecoveryProvider
 
     def statuses(self) -> ProviderStatuses:
@@ -206,6 +168,7 @@ class Providers:
 
 
 def installed_providers(sessions, redis) -> Providers:
+    """Fresh fail-closed provider composition (workers construct this once at startup)."""
     from app.modules.autonomy.live_settings import LiveSettings
 
     observer, model = TelemetryObserver(sessions), UnavailableModel()
@@ -221,4 +184,87 @@ def installed_providers(sessions, redis) -> Providers:
     if configured():
         from app.modules.autonomy.execution_client import installed_execution_clients
         safety, executor, recovery = installed_execution_clients(sessions, redis)
-    return Providers(observer, model, safety, executor, IntentCancellation(sessions, redis), recovery)
+    return Providers(observer, model, safety, executor, recovery)
+
+
+def stop_recovery(sessions) -> RecoveryProvider:
+    """STOP's cancellation path: exact persisted journal identity, never provider construction.
+
+    Marks only the owned autonomous journal row ``cancel_requested`` (the receiver compensates
+    under its own lock); it needs no installation, calibration, health key or Intent service.
+    """
+    from app.modules.autonomy.execution_settings import configured
+
+    if not configured():
+        return UnavailableRecovery()
+    from app.modules.autonomy.execution_client import JournalRecovery
+
+    return JournalRecovery(sessions)
+
+
+# ── Process-level provider cache (API requests; ADR-028 fix 1) ─────────────────
+# Building providers verifies protected installation evidence (seconds of file I/O and
+# hashing). Requests reuse one composition per (sessions, redis, configuration identity);
+# the identity is recomputed with cheap stat() calls so a changed configuration is
+# rebuilt, and a failed (blocked) composition is retried after a short interval.
+_BLOCKED_RETRY_SECONDS = 30.0
+_CACHE_LIMIT = 8
+_CACHE: dict[tuple[int, int], tuple[object, object, tuple, float, Providers, bool]] = {}
+_CACHE_LOCK = threading.Lock()
+
+
+def _stat_identity(path):
+    try:
+        info = os.stat(path)
+    except (OSError, TypeError, ValueError):
+        return None
+    return info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns
+
+
+def provider_identity() -> tuple:
+    from app.core.config import get_settings
+    from app.modules.autonomy.execution_settings import CONFIG_HASH, CONFIG_PATH
+    from app.modules.autonomy.health_secret import LEGACY_HMAC_ENV, PUBLIC_KEY_ENV
+    from app.modules.autonomy.live_settings import CONFIG_KEYS
+
+    names = (*CONFIG_KEYS, CONFIG_PATH, CONFIG_HASH, PUBLIC_KEY_ENV, LEGACY_HMAC_ENV)
+    values = tuple(os.environ.get(name) for name in names)
+    files = tuple(_stat_identity(os.environ.get(name)) for name in (CONFIG_PATH, PUBLIC_KEY_ENV, CONFIG_KEYS[0]))
+    return getattr(get_settings(), "EXECUTION_MODE", None), values, files
+
+
+def cached_providers(sessions, redis) -> Providers | None:
+    """Peek at the cache without constructing anything (safe on the event loop)."""
+    identity = provider_identity()
+    entry = _CACHE.get((id(sessions), id(redis)))
+    if entry is None:
+        return None
+    cached_sessions, cached_redis, cached_identity, created, providers, blocked = entry
+    if cached_sessions is not sessions or cached_redis is not redis or cached_identity != identity:
+        return None
+    if blocked and time.monotonic() - created > _BLOCKED_RETRY_SECONDS:
+        return None
+    return providers
+
+
+def shared_providers(sessions, redis) -> Providers:
+    """Cached composition; call from a worker thread (``asyncio.to_thread``) on a miss."""
+    cached = cached_providers(sessions, redis)
+    if cached is not None:
+        return cached
+    with _CACHE_LOCK:
+        cached = cached_providers(sessions, redis)
+        if cached is not None:
+            return cached
+        identity = provider_identity()
+        providers = installed_providers(sessions, redis)
+        if len(_CACHE) >= _CACHE_LIMIT:
+            _CACHE.pop(min(_CACHE, key=lambda key: _CACHE[key][3]))
+        _CACHE[(id(sessions), id(redis))] = (sessions, redis, identity, time.monotonic(), providers,
+                                             bool(getattr(providers.executor, "blocked", False)))
+        return providers
+
+
+def clear_provider_cache() -> None:
+    with _CACHE_LOCK:
+        _CACHE.clear()

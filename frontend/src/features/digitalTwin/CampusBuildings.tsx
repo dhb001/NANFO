@@ -6,6 +6,7 @@ import {
   type CampusBuilding,
   type CampusBuildingHighlightState,
   type CampusBuildingViewState,
+  footprintShapePoint,
   isCampusBuildingVisible,
   resolveCampusBuildingHighlight,
 } from "@/features/digitalTwin/campusBuildings";
@@ -63,7 +64,7 @@ function toFootprintShape(points: Array<[number, number]>): Shape {
   }
 
   const shape = new Shape();
-  const [first, ...rest] = points;
+  const [first, ...rest] = points.map(footprintShapePoint);
   shape.moveTo(first[0], first[1]);
   for (const point of rest) {
     shape.lineTo(point[0], point[1]);

@@ -19,12 +19,15 @@ async def migrate_batch(db, store, *, direction: str, limit: int, after: uuid.UU
         raise ValueError("direction must be to-cas/to-inline and limit must be 1..100")
     backend = "inline" if direction == "to-cas" else "local_cas"
     try:
-        rows = await CampusModelAssetRepository(db).migration_batch(backend=backend, limit=limit, after=after)
+        repository = CampusModelAssetRepository(db)
+        rows = await repository.migration_batch(backend=backend, limit=limit, after=after)
         last_id = None
         for row in rows:
             if direction == "to-cas":
                 data = decode_inline(row.model_data_base64, row.model_sha256, row.model_size_bytes)
-                await asyncio.to_thread(store.put, data, row.model_sha256, row.model_size_bytes)
+                # Fence publication against the unreferenced-object collector.
+                await repository.lock_digest(row.model_sha256)
+                await asyncio.to_thread(store.put, data, row.model_sha256, row.model_size_bytes, verified=True)
                 row.storage_backend = "local_cas"
                 row.model_data_base64 = None
             else:

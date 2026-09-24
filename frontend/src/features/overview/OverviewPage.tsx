@@ -33,7 +33,7 @@ function OverviewContent() {
   const networkId = useWorkspaceStore((s) => s.networkId);
   const [memberPage, setMemberPage] = useScopeState("overview-member-page", orgId, 1);
   const members = useOrgMembers(token, orgId, memberPage);
-  const authority = useOrgAuthority(token, orgId, members.data);
+  const authority = useOrgAuthority(token, orgId);
   const networks = useNetworks(token, workspaceId);
   const devices = useDevices(token, networkId);
   const [selectedNetwork] = useScopeState<Network | null>("inventory-network-selected", workspaceId, null);

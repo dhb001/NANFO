@@ -1,7 +1,18 @@
 """NANFO Backend — Audit log API router (/api/v1/audit/*).
 
-GET /api/v1/audit/logs — Admin-only (Q6 resolved: Admin role required).
-Returns paginated audit log entries (Identity module, Authentication.md §4).
+GET /api/v1/audit/logs — global Admin only (Q6 resolved: Admin role required).
+Returns paginated audit log entries through Identity's AuditQueryService
+(Authentication.md §4/§9, ADR-028 C7).
+
+Scopes:
+  * ``scope=org`` (default): one organization's events. Requires ``org_id`` (or
+    an org-scoped token) and current membership of that organization.
+  * ``scope=platform``: unscoped (``org_id IS NULL``) platform events such as
+    authentication. Global Admin with an unscoped token only.
+
+Optional token claims only narrow access. Audit rows carry no workspace
+attribution, so a workspace-scoped token cannot be narrowed to its workspace
+and is denied rather than shown the whole organization.
 """
 
 import time
@@ -23,15 +34,20 @@ from app.core.dependencies import (
     get_request_meta,
     require_roles,
 )
+from app.core.pagination import PageNumber
 from app.core.responses import APIResponse, success_response
-from app.modules.identity.repository import AuditLogRepository
-from app.modules.identity.schemas import AuditLogEntry
-from app.modules.organization.service import OrgService, WorkspaceService
+from app.modules.identity.audit import AuditQueryService
+from app.modules.identity.schemas import AuditLogPage, AuditScope
+from app.modules.organization.service import OrgService
 
 router = APIRouter(prefix="/api/v1/audit", tags=["Audit"])
 
 
-@router.get("/logs", response_model=APIResponse[dict], status_code=status.HTTP_200_OK)
+def _forbidden() -> HTTPException:
+    return HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions.")
+
+
+@router.get("/logs", response_model=APIResponse[AuditLogPage], status_code=status.HTTP_200_OK)
 async def list_audit_logs(
     # Q6 answer: Admin role only (design_package §6 Q6)
     claims: Annotated[TokenClaims, Depends(require_roles("Admin"))],
@@ -40,48 +56,38 @@ async def list_audit_logs(
     redis: Annotated[aioredis.Redis, Depends(get_redis)],
     actor_id: Annotated[uuid.UUID | None, Query()] = None,
     org_id: Annotated[uuid.UUID | None, Query()] = None,
-    resource_type: str | None = Query(default=None),
-    page: int = Query(default=1, ge=1),
+    resource_type: str | None = Query(default=None, max_length=100),
+    page: PageNumber = 1,
     page_size: int = Query(default=50, ge=1, le=200),
     search: str | None = Query(default=None, max_length=200),
+    scope: AuditScope = Query(default="org"),
 ):
     started = time.monotonic()
-    org_id = org_id or get_claim_org_scope(claims=claims)
-    if org_id is None:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions.")
-    enforce_org_scope(claims=claims, org_id=org_id)
-    await OrgService(db=db, redis=redis).get_org(org_id=org_id, user_id=claims.user_id)
-    workspace_id = get_claim_workspace_scope(claims=claims)
-    if workspace_id is not None:
-        await WorkspaceService(db=db, redis=redis).get_active_workspace(
-            workspace_id, user_id=claims.user_id, claim_org_id=org_id,
-        )
-    repo = AuditLogRepository(db)
-    entries, total = await repo.list_entries(
+    claim_org_id = get_claim_org_scope(claims=claims)
+    if get_claim_workspace_scope(claims=claims) is not None:
+        raise _forbidden()
+
+    if scope == "platform":
+        if claim_org_id is not None:
+            raise _forbidden()
+        if org_id is not None:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                                detail="org_id cannot be combined with scope=platform.")
+    else:
+        org_id = org_id or claim_org_id
+        if org_id is None:
+            raise _forbidden()
+        enforce_org_scope(claims=claims, org_id=org_id)
+        # Absent, deleted and foreign organizations are indistinguishable here (403).
+        await OrgService(db=db, redis=redis).require_membership(org_id=org_id, user_id=claims.user_id)
+
+    data = await AuditQueryService(db).list_logs(
+        scope=scope,
+        org_id=org_id if scope == "org" else None,
         actor_id=actor_id,
-        org_id=org_id,
         resource_type=resource_type,
         page=page,
         page_size=page_size,
         search=search,
     )
-    data = {
-        "items": [
-            AuditLogEntry(
-                log_id=e.log_id,
-                event_type=e.event_type,
-                actor_id=e.actor_id,
-                resource_type=e.resource_type,
-                resource_id=e.resource_id,
-                org_id=e.org_id,
-                correlation_id=e.correlation_id,
-                timestamp=e.timestamp,
-                metadata=e.metadata_,
-            ).model_dump()
-            for e in entries
-        ],
-        "total": total,
-        "page": page,
-        "page_size": page_size,
-    }
     return success_response(data, meta.request_id, started, meta.timestamp)

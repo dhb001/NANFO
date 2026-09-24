@@ -1,15 +1,15 @@
 import { describe, expect, it, vi } from "vitest";
 import { act, renderHook } from "@testing-library/react";
-import { useTwinLinks, useTwinNodes, useTwinSceneModel } from "@/features/digitalTwin/hooks";
+import { useTwinSceneModel } from "@/features/digitalTwin/hooks";
 import { useLiveStore } from "@/features/realtime/store";
-import { buildTwinSceneModel, type TwinNode } from "@/features/digitalTwin/sceneAdapter";
+import { buildTwinSceneModel } from "@/features/digitalTwin/sceneAdapter";
 import { topologyEdgeIdentity } from "@/features/topology/edgeIdentity";
 
 describe("digital twin hooks", () => {
   it("passes all store-retained resources through beyond 240 keys, even behind noisy flow history", () => {
     useLiveStore.getState().reset();
     const now = new Date().toISOString();
-    const metric = { event_id: "m", workspace_id: "w", network_id: "n", device_id: "quiet", metric: "packet_loss", value: 5, unit: "%", source: "plugin", observed_at: now, tags: {} };
+    const metric = { event_id: "m", workspace_id: "w", network_id: "n", device_id: "quiet", metric: "packet_loss_percent", value: 5, unit: "%", source: "plugin", observed_at: now, tags: {} };
     useLiveStore.getState().applyTelemetryDelta({ delta_type: "metric", metric });
     for (let i = 0; i < 15; i++) useLiveStore.getState().applyTelemetryDelta({ delta_type: "metric", metric: { ...metric, metric: `temperature${i}`, unit: "C", event_id: `extra${i}` } });
     const nodes = [{ device_id: "quiet", hostname: "quiet", device_type: "switch", status: "active", spatial_ref_id: null }];
@@ -31,7 +31,7 @@ describe("digital twin hooks", () => {
     useLiveStore.getState().reset();
     const base = [{ device_id: "d", hostname: "device", device_type: "switch", status: "active", spatial_ref_id: null }];
     useLiveStore.getState().applyTelemetryDelta({ delta_type: "metric", metric: {
-      event_id: "m", workspace_id: "w", network_id: "n", device_id: "d", metric: "cpu", value: 90, unit: "%", source: "plugin", observed_at: new Date().toISOString(), tags: { run_id: "r", port_no: 1 },
+      event_id: "m", workspace_id: "w", network_id: "n", device_id: "d", metric: "link_utilization_percent", value: 90, unit: "%", source: "plugin", observed_at: new Date().toISOString(), tags: { run_id: "r", port_no: 1 },
     } });
     const { result, unmount } = renderHook(() => useTwinSceneModel(base));
     expect(result.current.nodes[0].congestion.severity).toBe("high");
@@ -66,74 +66,41 @@ describe("digital twin hooks", () => {
       digitalTwinStatus: "closed",
     });
 
-    const { result } = renderHook(() =>
-      useTwinNodes([
-        {
-          device_id: "device-1",
-          hostname: "core-1",
-          device_type: "router",
-          status: "active",
-          spatial_ref_id: null,
-        },
-      ]),
-    );
+    const baseNodes = [
+      {
+        device_id: "device-1",
+        hostname: "core-1",
+        device_type: "router",
+        status: "active",
+        spatial_ref_id: null,
+      },
+    ];
+    const { result } = renderHook(() => useTwinSceneModel(baseNodes));
 
-    expect(result.current).toHaveLength(2);
-    expect(result.current.find((node) => node.id === "device-1")?.hostname).toBe("core-1");
-    expect(result.current.find((node) => node.id === "device-2")?.hostname).toBe("access-2-live");
-    expect(result.current.every((node) => typeof node.congestion.severity === "string")).toBe(true);
+    expect(result.current.nodes).toHaveLength(2);
+    expect(result.current.nodes.find((node) => node.id === "device-1")?.hostname).toBe("core-1");
+    expect(result.current.nodes.find((node) => node.id === "device-2")?.hostname).toBe("access-2-live");
+    expect(result.current.nodes.every((node) => typeof node.congestion.severity === "string")).toBe(true);
   });
 
   it("builds links only when source and target nodes exist", () => {
-    const nodes: TwinNode[] = [
-      {
-        id: "a",
-        hostname: "A",
-        type: "router",
-        status: "active",
-        x: 0,
-        y: 0,
-        z: 0,
-        spatialRefId: null,
-        congestion: {
-          severity: "neutral",
-          score: null,
-          metrics: [],
-          policyVersion: "v2.0.0",
-          primaryPolicyId: null,
-        },
-      },
-      {
-        id: "b",
-        hostname: "B",
-        type: "switch",
-        status: "active",
-        x: 1,
-        y: 0,
-        z: 1,
-        spatialRefId: null,
-        congestion: {
-          severity: "neutral",
-          score: null,
-          metrics: [],
-          policyVersion: "v2.0.0",
-          primaryPolicyId: null,
-        },
-      },
-    ];
-
-    const { result } = renderHook(() =>
-      useTwinLinks(nodes, [
+    const scene = buildTwinSceneModel({
+      baseNodes: [
+        { device_id: "a", hostname: "A", device_type: "router", status: "active", spatial_ref_id: null },
+        { device_id: "b", hostname: "B", device_type: "switch", status: "active", spatial_ref_id: null },
+      ],
+      baseEdges: [
         { source_id: "a", target_id: "b", edge_type: "connected_to", metadata: {} },
         { source_id: "a", target_id: "missing", edge_type: "connected_to", metadata: {} },
-      ]),
-    );
+      ],
+      liveNodesByDeviceId: {}, telemetryByDeviceMetric: {}, telemetryKeysNewestFirst: [], sceneObjects: {}, sceneObjectIdsNewestFirst: [],
+    });
 
-    expect(result.current).toHaveLength(1);
-    expect(result.current[0].edgeType).toBe("connected_to");
+    expect(scene.links).toHaveLength(1);
+    expect(scene.links[0].edgeType).toBe("connected_to");
   });
 
-  it("preserves parallel observed link IDs and metadata in both Twin builders", () => {
+  it("preserves parallel observed link IDs and metadata in the Twin builder", () => {
     const base = { source_id: "a", target_id: "b", edge_type: "connected_to" };
     const metadata = { observation_owner: "lab-a", edge_key: "link", source_port: 1, target_port: 2 };
     const distinct = [
@@ -150,13 +117,11 @@ describe("digital twin hooks", () => {
       baseNodes: ["a", "b"].map((id) => ({ device_id: id, hostname: id, device_type: "switch", status: "active", spatial_ref_id: null })),
       baseEdges: edges, liveNodesByDeviceId: {}, telemetryByDeviceMetric: {}, telemetryKeysNewestFirst: [], sceneObjects: {}, sceneObjectIdsNewestFirst: [],
     });
-    const { result } = renderHook(() => useTwinLinks(scene.nodes, edges));
-    for (const links of [scene.links, result.current]) {
-      expect(links).toHaveLength(7);
-      expect(new Set(links.map((link) => link.id)).size).toBe(7);
-      for (const edge of distinct) {
-        expect(links.find((link) => link.id === topologyEdgeIdentity(edge))?.metadata).toEqual(edge.metadata);
-      }
+    const links = scene.links;
+    expect(links).toHaveLength(7);
+    expect(new Set(links.map((link) => link.id)).size).toBe(7);
+    for (const edge of distinct) {
+      expect(links.find((link) => link.id === topologyEdgeIdentity(edge))?.metadata).toEqual(edge.metadata);
     }
   });
 

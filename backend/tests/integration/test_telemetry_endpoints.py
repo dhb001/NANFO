@@ -204,8 +204,37 @@ def test_aggregation_response_and_scoped_forwarding(client, headers):
     query.assert_awaited_once_with(
         network_id=network_id, workspace_id=workspace_id, metric="queue_backlog_bytes",
         aggregation="avg", bucket_seconds=60, start_time=datetime(2026, 9, 8, tzinfo=UTC),
-        end_time=datetime(2026, 9, 8, 1, tzinfo=UTC), page=2, page_size=1,
+        end_time=datetime(2026, 9, 8, 1, tzinfo=UTC), page=2, page_size=1, count_cap=10_000,
     )
+
+
+@pytest.mark.parametrize("path", ["/api/v1/telemetry/history", f"/api/v1/telemetry/device/{uuid.uuid4()}"])
+@pytest.mark.parametrize("page", ["0", "10001", "9223372036854775808"])
+def test_page_numbers_are_bounded_before_any_query(client, headers, path, page):
+    """ADR-028: unbounded pages overflowed OFFSET (HTTP 500) or forced deep scans."""
+    with (
+        patch("app.modules.telemetry.service.TelemetryQueryService.get_history", new_callable=AsyncMock) as history,
+        patch("app.modules.telemetry.service.TelemetryQueryService.get_device_history", new_callable=AsyncMock) as device,
+    ):
+        response = client.get(path, headers=headers, params={"page": page})
+    assert response.status_code == 422
+    assert response.json()["errors"]["code"] == "VALIDATION_ERROR"
+    history.assert_not_awaited()
+    device.assert_not_awaited()
+
+
+def test_capped_history_total_is_reported(client, headers):
+    workspace_id = uuid.uuid4()
+    with (
+        patch("app.api.v1.telemetry._resolve_history_scope", new=AsyncMock(return_value=(None, workspace_id))),
+        patch("app.modules.telemetry.repository.TelemetryRecordRepository.list_history",
+              new=AsyncMock(return_value=([], 10_001))) as query,
+    ):
+        response = client.get("/api/v1/telemetry/history", headers=headers, params={"page": 10_000})
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["total"] == 10_000 and data["total_capped"] is True and data["page"] == 10_000
+    assert query.await_args.kwargs["count_cap"] == 10_000
 
 
 def test_device_bounds_validation_and_forwarding(client, headers):
@@ -306,8 +335,8 @@ def test_get_telemetry_health_reads_dropped_counter_snapshot(client, headers):
             new=AsyncMock(return_value=None),
         ),
         patch(
-            "app.modules.telemetry.repository.TelemetryRecordRepository.count_all",
-            new=AsyncMock(return_value=0),
+            "app.modules.telemetry.repository.TelemetryRecordRepository.estimate_total_records",
+            new=AsyncMock(return_value=(0, False)),
         ),
         patch(
             "app.modules.telemetry.counters.TelemetryHealthCounterService.get_snapshot",
@@ -334,7 +363,8 @@ def test_get_telemetry_health_reads_dropped_counter_snapshot(client, headers):
     assert body["data"]["dropped_events"] == 3
 
 
-def test_get_telemetry_health_passes_event_redis_for_slo_alerting(client, headers):
+def test_get_telemetry_health_is_read_only_without_event_redis(client, headers):
+    """ADR-028 C12: the health read path never receives a publisher."""
     with patch("app.api.v1.telemetry.TelemetryQueryService") as mock_query_service_cls:
         mock_svc = AsyncMock()
         mock_svc.get_health = AsyncMock(
@@ -352,8 +382,25 @@ def test_get_telemetry_health_passes_event_redis_for_slo_alerting(client, header
 
     assert response.status_code == 200
     call_kwargs = mock_query_service_cls.call_args.kwargs
-    assert "event_redis" in call_kwargs
-    assert call_kwargs["event_redis"] is not None
+    assert "event_redis" not in call_kwargs
+    assert call_kwargs["counter_service"] is not None
+
+
+def test_get_telemetry_health_reports_additive_slo_object(client, headers, session_auth):
+    with (
+        patch("app.modules.telemetry.repository.TelemetryRecordRepository.get_latest_observed_at",
+              new=AsyncMock(return_value=datetime.now(UTC))),
+        patch("app.modules.telemetry.repository.TelemetryRecordRepository.estimate_total_records",
+              new=AsyncMock(return_value=(7, False))),
+        patch("app.events.publisher.publish_event", new_callable=AsyncMock) as publish,
+    ):
+        response = client.get("/api/v1/telemetry/health", headers=headers)
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["total_records"] == 7 and data["total_records_estimated"] is False
+    assert data["slo"]["status"] in {"unavailable", "ok", "degraded", "critical"}
+    assert {"alert_active", "evaluated_at", "stale", "thresholds"} <= set(data["slo"])
+    publish.assert_not_awaited()
 
 
 def test_get_telemetry_health_validates_workspace_claim_scope(client):

@@ -15,30 +15,30 @@ function buildListAlertsQuery(params: AlertListParams): string {
   return query.toString();
 }
 
-export function listAlerts(token: string, params: AlertListParams = {}) {
+export function listAlerts(token: string, params: AlertListParams = {}, signal?: AbortSignal) {
   const query = buildListAlertsQuery(params);
   const path = query ? `/api/v1/alerts?${query}` : "/api/v1/alerts";
-  return apiRequest<AlertListResult>(path, { token });
+  return apiRequest<AlertListResult>(path, { token, signal });
 }
 
 export function acknowledgeAlert(token: string, alertId: string) {
-  return apiRequest<AlertActionResult>(`/api/v1/alerts/${alertId}/ack`, {
+  return apiRequest<AlertActionResult>(`/api/v1/alerts/${encodeURIComponent(alertId)}/ack`, {
     method: "POST",
     token,
   });
 }
 
 export function resolveAlert(token: string, alertId: string) {
-  return apiRequest<AlertActionResult>(`/api/v1/alerts/${alertId}/resolve`, {
+  return apiRequest<AlertActionResult>(`/api/v1/alerts/${encodeURIComponent(alertId)}/resolve`, {
     method: "POST",
     token,
   });
 }
 
-export function getAlert(token: string, alertId: string) {
-  return apiRequest<AlertRecord>(`/api/v1/alerts/${encodeURIComponent(alertId)}`, { token });
+export function getAlert(token: string, alertId: string, signal?: AbortSignal) {
+  return apiRequest<AlertRecord>(`/api/v1/alerts/${encodeURIComponent(alertId)}`, { token, signal });
 }
 
-export function getAlertHistory(token: string, alertId: string) {
-  return apiRequest<AlertHistoryResult>(`/api/v1/alerts/${encodeURIComponent(alertId)}/history`, { token });
+export function getAlertHistory(token: string, alertId: string, signal?: AbortSignal) {
+  return apiRequest<AlertHistoryResult>(`/api/v1/alerts/${encodeURIComponent(alertId)}/history`, { token, signal });
 }

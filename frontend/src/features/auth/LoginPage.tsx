@@ -9,7 +9,7 @@ import { getProfile } from "@/features/auth/api";
 import { useUiStore } from "@/shared/state/ui-store";
 import { BrandMark } from "@/shared/ui/BrandMark";
 import { NetworkArtwork } from "@/shared/ui/NetworkArtwork";
-import "@/features/auth/session";
+import { logoutSession } from "@/features/auth/session";
 
 export function LoginPage() {
   const navigate = useNavigate();
@@ -19,6 +19,7 @@ export function LoginPage() {
   const setSession = useAuthStore((state) => state.setSession);
   const clearSession = useAuthStore((state) => state.clearSession);
   const pushToast = useUiStore((state) => state.pushToast);
+  const notice = useAuthStore((state) => state.notice);
 
   const loginMutation = useLogin();
 
@@ -26,7 +27,17 @@ export function LoginPage() {
     event.preventDefault();
     if (isSubmitting) return;
     setIsSubmitting(true);
+    let revocationUnconfirmed = false;
     try {
+      const previous = useAuthStore.getState();
+      if (previous.accessToken || previous.refreshToken) {
+        // Signing in again replaces this tab's session: revoke the old family first.
+        try {
+          await logoutSession();
+        } catch {
+          revocationUnconfirmed = true;
+        }
+      }
       const tokenPair = await loginMutation.mutateAsync({ email, password });
       try {
         const profile = await getProfile(tokenPair.access_token);
@@ -46,6 +57,13 @@ export function LoginPage() {
         return;
       }
       navigate("/ops/overview");
+      if (revocationUnconfirmed) {
+        pushToast({
+          title: "Previous session not confirmed revoked",
+          description: "The earlier sign-in in this tab could not be revoked by the backend. It expires on its own; sign out again later to be sure.",
+          tone: "warn",
+        });
+      }
     } catch {
       // The mutation exposes the login failure in the form.
     } finally {
@@ -106,6 +124,9 @@ export function LoginPage() {
               description={toErrorMessage(loginMutation.error)}
             />
           </div>
+        ) : null}
+        {notice === "copied_tab" ? (
+          <p className="login-note" role="status">This tab was copied from another NANFO tab, so its session was not reused. Sign in to start a separate session here.</p>
         ) : null}
         <p className="login-note">Sessions stay in this tab. Sign in separately in other tabs to access your workspace.</p>
       </div>

@@ -30,9 +30,22 @@ from app.modules.network.service import DeviceService, NetworkService
 from app.modules.organization.models import Organization, OrgMember, Workspace
 from tests.integration.test_network_outbox_postgres import sessions  # noqa: F401
 
+def _migration_head() -> str:
+    from pathlib import Path
+
+    from alembic.config import Config
+    from alembic.script import ScriptDirectory
+
+    config = Config()
+    config.set_main_option("script_location", str(Path(__file__).resolve().parents[2] / "alembic"))
+    return ScriptDirectory.from_config(config).get_current_head()
+
+
+# The full current schema (ADR-028 relies on migration 0030's unique active
+# campus-building index for ON CONFLICT upserts).
 pytestmark = [pytest.mark.skipif(not os.environ.get("NETWORK_OUTBOX_TEST_DSN"),
                                reason="NETWORK_OUTBOX_TEST_DSN not configured"),
-              pytest.mark.parametrize("sessions", ["0028"], indirect=True)]
+              pytest.mark.parametrize("sessions", [_migration_head()], indirect=True)]
 ORG, WORKSPACE, ACTOR, OTHER_ORG, OTHER_WORKSPACE, OTHER_ACTOR = [uuid.UUID(int=n) for n in range(11, 17)]
 
 
@@ -402,3 +415,253 @@ async def test_new_asset_mapping_persists_canonical_uuid_and_rejects_conflicts(s
         with pytest.raises(ValidationError, match="conflicting"):
             request(mapping_by_device_id={str(did): "room", did.hex: "different"})
         assert await db.scalar(select(func.count()).select_from(CampusModelAssetRecord)) == 1
+
+
+async def _network_with_devices(sessions, fake_redis, *hostnames):
+    await seed(sessions)
+    async with sessions() as db:
+        network = await NetworkService(db, fake_redis).create_network(
+            CreateNetworkRequest(workspace_id=WORKSPACE, name="Groups"), str(ACTOR), "create",
+        )
+        devices = [await DeviceService(db, fake_redis).add_device(
+            network.network_id, CreateDeviceRequest(hostname=name, device_type="ap"), str(ACTOR), "add",
+        ) for name in hostnames]
+    return network.network_id, [device.device_id for device in devices]
+
+
+def _group(key="floor", *device_ids, **changes):
+    from app.modules.network.schemas import UpsertDeviceGroupInput
+
+    return UpsertDeviceGroupInput.model_validate({
+        "group_key": key, "name": changes.pop("name", "Floor"), "group_type": "custom",
+        "device_ids": [str(device_id) for device_id in device_ids], **changes,
+    })
+
+
+async def test_group_update_returns_real_updated_at_after_commit_and_enforces_c8(sessions, fake_redis):
+    """Regression: update_group only flushed; reading updated_at after commit raised MissingGreenlet."""
+    from app.modules.network.models import DeviceGroup, DeviceGroupMember
+    from app.modules.network.schemas import UpsertDeviceGroupsRequest
+    from app.modules.network.service import DeviceGroupService
+
+    nid, (first, second, third) = await _network_with_devices(sessions, fake_redis, "a", "b", "c")
+    async with sessions() as db:
+        created = (await DeviceGroupService(db, fake_redis).upsert_groups(
+            network_id=nid, actor_id=str(ACTOR), correlation_id="create",
+            req=UpsertDeviceGroupsRequest(groups=[_group("floor", first, second)]),
+        )).items[0]
+    async with sessions() as db:
+        kept_member = await db.scalar(select(DeviceGroupMember.device_group_member_id).where(
+            DeviceGroupMember.device_id == first, DeviceGroupMember.deleted_at.is_(None)))
+    async with sessions() as db:
+        updated = (await DeviceGroupService(db, fake_redis).upsert_groups(
+            network_id=nid, actor_id=str(ACTOR), correlation_id="update",
+            req=UpsertDeviceGroupsRequest(groups=[_group(
+                "floor", first, third, name="Renamed", expected_updated_at=created.updated_at.isoformat(),
+            )]),
+        )).items[0]
+    assert updated.device_group_id == created.device_group_id and updated.name == "Renamed"
+    assert updated.updated_at > created.updated_at and set(updated.device_ids) == {first, third}
+    async with sessions() as db:
+        stored = await db.get(DeviceGroup, created.device_group_id)
+        assert stored.updated_at == updated.updated_at
+        # Membership diff: the kept device keeps its membership row; only b/c change.
+        assert await db.scalar(select(DeviceGroupMember.device_group_member_id).where(
+            DeviceGroupMember.device_id == first, DeviceGroupMember.deleted_at.is_(None))) == kept_member
+    for stale in (created.updated_at, None):
+        async with sessions() as db:
+            with pytest.raises(HTTPException) as exc:
+                await DeviceGroupService(db, fake_redis).upsert_groups(
+                    network_id=nid, actor_id=str(ACTOR),
+                    req=UpsertDeviceGroupsRequest(groups=[_group(
+                        "floor" if stale else "absent", first,
+                        expected_updated_at=(stale or updated.updated_at).isoformat(),
+                    )]),
+                )
+            assert exc.value.status_code == 409 and exc.value.detail["code"] == "DEVICE_GROUP_CONFLICT"
+    async with sessions() as db:
+        from app.modules.identity.models import AuditLog
+
+        audits = (await db.scalars(select(AuditLog).where(AuditLog.event_type == "network.device_groups.upserted"))).all()
+        assert len(audits) == 2 and all(audit.org_id == ORG for audit in audits)
+        assert {audit.metadata_.get("request_id") for audit in audits} == {"create", "update"}
+
+
+async def test_concurrent_group_creates_never_raise_integrity_errors(sessions, fake_redis):
+    from app.modules.network.models import DeviceGroup
+    from app.modules.network.schemas import UpsertDeviceGroupsRequest
+    from app.modules.network.service import DeviceGroupService
+
+    nid, (first,) = await _network_with_devices(sessions, fake_redis, "a")
+
+    async def create():
+        async with sessions() as db:
+            return await DeviceGroupService(db, fake_redis).upsert_groups(
+                network_id=nid, actor_id=str(ACTOR), req=UpsertDeviceGroupsRequest(groups=[_group("race", first)]),
+            )
+
+    results = await asyncio.wait_for(asyncio.gather(*(create() for _ in range(4))), 20)
+    assert len({result.items[0].device_group_id for result in results}) == 1
+    async with sessions() as db:
+        assert await db.scalar(select(func.count()).select_from(DeviceGroup).where(
+            DeviceGroup.deleted_at.is_(None))) == 1
+
+
+def _building(building_id, **changes):
+    from app.modules.network.schemas import UpsertCampusBuildingInput
+
+    return UpsertCampusBuildingInput(**{
+        "building_id": building_id, "campus_key": "campus", "building_key": building_id, "label": building_id,
+        "geometry": "box", "x": 1.0, "z": 2.0, "base_y": 0.0, "width": 10.0, "depth": 8.0, "height": 6.0,
+        "floors": 2, "footprint": [[0, 0], [1, 0], [1, 1]], **changes,
+    })
+
+
+async def test_building_upserts_update_in_place_and_replace_retires_absent(sessions, fake_redis):
+    """Regression: replace_existing=false updates read updated_at after commit (MissingGreenlet)."""
+    from app.modules.identity.models import AuditLog
+    from app.modules.network.models import CampusBuildingRecord
+    from app.modules.network.schemas import UpsertCampusBuildingsRequest
+    from app.modules.network.service import CampusBuildingService
+
+    nid, _ = await _network_with_devices(sessions, fake_redis)
+    async with sessions() as db:
+        created = await CampusBuildingService(db, fake_redis).upsert_buildings(
+            network_id=nid, actor_id=str(ACTOR), correlation_id="create",
+            req=UpsertCampusBuildingsRequest(buildings=[_building("a"), _building("b")]),
+        )
+    ids = {item.building_id: item.campus_building_id for item in created.items}
+    async with sessions() as db:
+        updated = await CampusBuildingService(db, fake_redis).upsert_buildings(
+            network_id=nid, actor_id=str(ACTOR), correlation_id="update",
+            req=UpsertCampusBuildingsRequest(replace_existing=False, buildings=[_building("a", label="A2")]),
+        )
+    assert updated.items[0].campus_building_id == ids["a"] and updated.items[0].label == "A2"
+    assert updated.items[0].updated_at > created.items[0].updated_at
+    async with sessions() as db:
+        replaced = await CampusBuildingService(db, fake_redis).upsert_buildings(
+            network_id=nid, actor_id=str(ACTOR), correlation_id="replace",
+            req=UpsertCampusBuildingsRequest(replace_existing=True, buildings=[_building("a", label="A3")]),
+        )
+    assert [item.campus_building_id for item in replaced.items] == [ids["a"]]
+    async with sessions() as db:
+        rows = (await db.scalars(select(CampusBuildingRecord))).all()
+        # No soft-delete + reinsert churn: two identities in total, b retired in place.
+        assert len(rows) == 2
+        by_id = {row.building_id: row for row in rows}
+        assert by_id["a"].deleted_at is None and by_id["a"].label == "A3"
+        assert by_id["b"].deleted_at is not None
+        audits = (await db.scalars(select(AuditLog).where(
+            AuditLog.event_type == "network.campus_buildings.upserted"))).all()
+        assert len(audits) == 3 and all(audit.org_id == ORG for audit in audits)
+
+
+async def test_owner_blocking_queries_run_against_real_owner_tables(sessions, fake_redis):
+    from app.modules.autonomy import queries as autonomy_queries
+    from app.modules.autonomy.models import AutonomyControl
+    from app.modules.intent import queries as intent_queries
+    from app.modules.intent.models import Intent
+    from app.modules.simulation import queries as simulation_queries
+    from app.modules.simulation.models import Simulation
+
+    nid, _ = await _network_with_devices(sessions, fake_redis)
+    async with sessions() as db:
+        for owner in (simulation_queries, intent_queries, autonomy_queries):
+            assert await owner.has_blocking_work(db, network_id=nid) is False
+        now = datetime.now(UTC)
+        db.add(Simulation(network_id=nid, workspace_id=WORKSPACE, scenario_id=uuid.uuid4(), scenario_name="s",
+                          state="running", status="running", risk_gate="pending", requested_by_user_id=str(ACTOR),
+                          requested_at=now))
+        db.add(Intent(workspace_id=WORKSPACE, network_id=nid, intent_kind="throttle_qos", status="validated",
+                      correlation_id=uuid.uuid4(), requested_by_user_id=str(ACTOR), requested_at=now))
+        db.add(AutonomyControl(network_id=nid, workspace_id=WORKSPACE, mode="recommend"))
+        await db.commit()
+    async with sessions() as db:
+        for owner in (simulation_queries, intent_queries, autonomy_queries):
+            assert await owner.has_blocking_work(db, network_id=nid) is True
+        with pytest.raises(HTTPException) as exc:
+            await NetworkService(db, fake_redis).delete_network(nid, str(ACTOR), "delete")
+        assert exc.value.status_code == 409
+
+
+async def test_unreleased_autonomous_execution_blocks_network_deletion(sessions, fake_redis):
+    """ADR-028: a verified/in-flight autonomous execution still owns device state."""
+    from app.modules.autonomy import queries as autonomy_queries
+    from app.modules.autonomy.execution_models import AutonomousExecution
+    from app.modules.autonomy.models import AutonomyControl
+
+    nid, _ = await _network_with_devices(sessions, fake_redis)
+    execution_id = uuid.uuid4()
+    async with sessions() as db:
+        db.add(AutonomyControl(network_id=nid, workspace_id=WORKSPACE, mode="monitor"))
+        await db.flush()
+        db.add(AutonomousExecution(
+            execution_id=execution_id, decision_id=uuid.uuid4(), network_id=nid, workspace_id=WORKSPACE,
+            resource_id=f"network:{nid}", fence=1, command={}, phase="verified", released=False,
+            cancel_requested=False,
+        ))
+        await db.commit()
+    async with sessions() as db:
+        assert await autonomy_queries.has_unresolved_execution(db, network_id=nid) is True
+        assert await autonomy_queries.has_blocking_work(db, network_id=nid) is True
+        with pytest.raises(HTTPException) as exc:
+            await NetworkService(db, fake_redis).delete_network(nid, str(ACTOR), "delete")
+        assert exc.value.status_code == 409 and "autonomy" in exc.value.detail["message"]
+    async with sessions() as db:
+        await db.execute(update(AutonomousExecution).where(AutonomousExecution.execution_id == execution_id)
+                         .values(phase="cancelled", released=True))
+        await db.commit()
+    async with sessions() as db:
+        assert await autonomy_queries.has_blocking_work(db, network_id=nid) is False
+        await NetworkService(db, fake_redis).delete_network(nid, str(ACTOR), "delete")
+    async with sessions() as db:
+        assert await NetworkRepository(db).get_by_id(nid) is None
+
+
+async def test_workspace_inventory_port_answers_from_active_networks(sessions, fake_redis):
+    """Organization's WorkspaceInventory port (ADR-028 fix 14): member-only existence probe."""
+    await seed(sessions)
+    async with sessions() as db:
+        service = NetworkService(db, fake_redis)
+        assert await service.has_active_networks(workspace_id=WORKSPACE, actor_user_id=str(ACTOR)) is False
+        network = await service.create_network(
+            CreateNetworkRequest(workspace_id=WORKSPACE, name="Port"), str(ACTOR), "create",
+        )
+    async with sessions() as db:
+        service = NetworkService(db, fake_redis)
+        assert await service.has_active_networks(workspace_id=WORKSPACE, actor_user_id=str(ACTOR)) is True
+        with pytest.raises(HTTPException):
+            await service.has_active_networks(workspace_id=WORKSPACE, actor_user_id=str(OTHER_ACTOR))
+        await db.rollback()
+        await service.delete_network(network.network_id, str(ACTOR), "delete")
+    async with sessions() as db:
+        assert await NetworkService(db, fake_redis).has_active_networks(
+            workspace_id=WORKSPACE, actor_user_id=str(ACTOR)) is False
+
+
+async def test_public_owner_device_reads_return_current_ip_and_status(sessions, fake_redis):
+    """BE-Telemetry request (ADR-028 fix 17): device-by-id read instead of paging."""
+    await seed(sessions)
+    async with sessions() as db:
+        network = await NetworkService(db, fake_redis).create_network(
+            CreateNetworkRequest(workspace_id=WORKSPACE, name="Reads"), str(ACTOR), "create",
+        )
+        kept, gone = [await DeviceService(db, fake_redis).add_device(
+            network.network_id, CreateDeviceRequest(hostname=name, device_type="switch", ip_address=ip),
+            str(ACTOR), "add",
+        ) for name, ip in (("kept", "10.9.0.1"), ("gone", "10.9.0.2"))]
+        await DeviceService(db, fake_redis).delete_device(network.network_id, gone.device_id, str(ACTOR), "delete")
+    async with sessions() as db:
+        service = NetworkService(db, fake_redis)
+        one = await service.get_device_for_owner(device_id=kept.device_id, actor_user_id=str(ACTOR),
+                                                 network_id=network.network_id, requested_workspace_id=WORKSPACE)
+        assert (one.ip_address, one.status) == ("10.9.0.1", "active")
+        batch = await service.get_devices_for_owner(network_id=network.network_id, actor_user_id=str(ACTOR),
+                                                    device_ids=[kept.device_id, gone.device_id, uuid.uuid4()])
+        assert list(batch) == [kept.device_id]
+        with pytest.raises(HTTPException) as missing:
+            await service.get_device_for_owner(device_id=gone.device_id, actor_user_id=str(ACTOR))
+        assert missing.value.status_code == 404
+        with pytest.raises(HTTPException) as denied:
+            await service.get_device_for_owner(device_id=kept.device_id, actor_user_id=str(OTHER_ACTOR))
+        assert denied.value.status_code == 403

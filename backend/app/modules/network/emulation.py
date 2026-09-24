@@ -1,28 +1,65 @@
-"""Network-owned trusted inventory binding and observed discovery (ADR-009)."""
+"""Network-owned trusted inventory binding and observed discovery (ADR-009).
+
+The discovery service depends only on narrow structural contracts (profile lookup,
+network authority + owner device reads, and observed-edge writing), never on
+concrete repositories. :func:`build_emulation_discovery` is the single public
+composition for one fresh database session. The binding wire primitives
+(DPID/Name/strict schema/bounded trusted file read) remain the shared emulation
+snapshot format published by Telemetry; no other Telemetry internals are used.
+"""
 
 from __future__ import annotations
 
 import asyncio
 import uuid
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from pathlib import Path
-from typing import Annotated, Literal, Self
+from typing import TYPE_CHECKING, Annotated, Any, Literal, Protocol, Self
 
 from fastapi import HTTPException
 from pydantic import Field, model_validator
 
-from app.modules.identity.service import AuthService
-from app.modules.network.repository import DeviceRepository
-from app.modules.network.service import NetworkService
 from app.modules.network.synthetic_topology import PlannedEdge
-from app.modules.network.topology import TopologyQueryService
 from app.modules.telemetry.emulation import (
     DPID,
-    EmulationSnapshot,
     Name,
     StrictSchema,
     read_bounded_file,
     validate_json,
 )
+
+if TYPE_CHECKING:
+    from app.modules.telemetry.emulation import EmulationSnapshot
+
+
+class ProfileLookup(Protocol):
+    async def get_profile(self, user_id: str) -> Any: ...
+
+
+class NetworkAuthority(Protocol):
+    """``NetworkService`` subset: write authority plus the public owner device read."""
+
+    async def assert_network_workspace_access(
+        self, *, network_id: uuid.UUID, requested_workspace_id: uuid.UUID | None, actor_user_id: str,
+        require_write: bool = False,
+    ) -> Any: ...
+
+    async def get_devices_for_owner(
+        self, *, network_id: uuid.UUID, device_ids: Sequence[uuid.UUID], actor_user_id: str,
+        requested_workspace_id: uuid.UUID | None = None,
+    ) -> Mapping[uuid.UUID, Any]: ...
+
+
+class DeviceLookup(Protocol):
+    """Deprecated compatibility shape (repository-style lookup); prefer the network read."""
+
+    async def get_by_id(self, device_id: uuid.UUID) -> Any: ...
+
+
+class ObservedEdgeWriter(Protocol):
+    async def replace_observed_device_edges(
+        self, *, network_id: str, workspace_id: str, owner_id: str, edges: Sequence[PlannedEdge],
+    ) -> int: ...
 
 
 class EmulationBinding(StrictSchema):
@@ -67,16 +104,40 @@ async def load_binding(path: Path, *, snapshot_path: Path) -> EmulationBinding:
 
 
 class EmulationDiscoveryService:
-    """Public composition contract; call on every poll with a fresh DB session."""
+    """Public composition contract; call on every poll with a fresh DB session.
 
-    def __init__(self, *, identity: AuthService, network: NetworkService,
-                 devices: DeviceRepository, topology: TopologyQueryService,
-                 expected_topology: dict):
+    Build it with :func:`build_emulation_discovery`. ``devices`` is a deprecated
+    compatibility argument for compositions that still inject a repository-style
+    ``get_by_id``; when omitted, devices are read through the Network service's
+    public ``get_devices_for_owner`` (one authorized batch read). ``release`` ends
+    the caller's database transaction after validation and before any graph write,
+    so no PostgreSQL lock or snapshot is held across Neo4j I/O.
+    """
+
+    def __init__(self, *, identity: ProfileLookup, network: NetworkAuthority,
+                 topology: ObservedEdgeWriter | None = None, expected_topology: dict,
+                 devices: DeviceLookup | None = None,
+                 release: Callable[[], Awaitable[None]] | None = None):
         self.identity = identity
         self.network = network
         self.devices = devices
         self.topology = topology
         self.expected_topology = expected_topology
+        self.release = release
+
+    async def _bound_devices(self, binding: EmulationBinding) -> dict[uuid.UUID, Any]:
+        device_ids = [*binding.switches.values(), *binding.hosts.values()]
+        if self.devices is None:
+            return dict(await self.network.get_devices_for_owner(
+                network_id=binding.network_id, device_ids=device_ids,
+                actor_user_id=str(binding.actor_user_id), requested_workspace_id=binding.workspace_id,
+            ))
+        found = {}
+        for device_id in device_ids:
+            device = await self.devices.get_by_id(device_id)
+            if device is not None:
+                found[device_id] = device
+        return found
 
     async def validate_binding(self, binding: EmulationBinding) -> dict[str, object]:
         expected = self.expected_topology
@@ -92,11 +153,12 @@ class EmulationDiscoveryService:
             network_id=binding.network_id, requested_workspace_id=binding.workspace_id,
             actor_user_id=str(binding.actor_user_id), require_write=True,
         )
+        found = await self._bound_devices(binding)
         inventory = {}
         for identity, device_id in {**binding.switches, **binding.hosts}.items():
-            device = await self.devices.get_by_id(device_id)
+            device = found.get(device_id)
             if (device is None or device.network_id != binding.network_id
-                    or device.status != "active" or device.deleted_at is not None):
+                    or device.status != "active" or getattr(device, "deleted_at", None) is not None):
                 raise ValueError("binding references unavailable or out-of-scope inventory")
             inventory[identity] = device
         return inventory
@@ -168,8 +230,35 @@ class EmulationDiscoveryService:
             )
         for queue in snapshot.queues:
             port_bound(queue.dpid, queue.port_no)
+        if self.topology is None:
+            raise ValueError("observed topology writer is not configured")
+        if self.release is not None:
+            # Validation is complete: end the PostgreSQL transaction (and its org/
+            # network fences) before graph I/O. The graph writer serializes against
+            # device deletion with per-device revision locks.
+            await self.release()
         await self.topology.replace_observed_device_edges(
             network_id=str(binding.network_id), workspace_id=str(binding.workspace_id),
             owner_id=binding.owner_id, edges=list(edges.values()),
         )
         return binding.model_dump(mode="json")
+
+
+def build_emulation_discovery(
+    db, redis, *, expected_topology: dict, topology: ObservedEdgeWriter | None = None,
+) -> EmulationDiscoveryService:
+    """The single public composition of :class:`EmulationDiscoveryService` for ONE session.
+
+    Uses only public owner services (Identity profile lookup, Network authority and
+    owner device reads); no repository is constructed by the caller. ``topology`` is
+    required only for :meth:`EmulationDiscoveryService.apply_snapshot`; read paths
+    that only call ``validate_binding`` omit it. The session's transaction is
+    released after validation and before any graph write.
+    """
+    from app.modules.identity.service import AuthService
+    from app.modules.network.service import NetworkService
+
+    return EmulationDiscoveryService(
+        identity=AuthService(db, redis), network=NetworkService(db, redis), topology=topology,
+        expected_topology=expected_topology, release=db.rollback,
+    )

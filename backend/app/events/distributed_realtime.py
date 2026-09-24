@@ -10,7 +10,7 @@ from functools import wraps
 from app.core.logging import get_logger
 from app.events.fanout import FanoutPublisher, FanoutSubscriber, _publisher
 from app.events.fanout_contract import FanoutEnvelope, FanoutSettings
-from app.events.realtime import ApiRealtimeLease, RealtimeLeaseBusy, terminate_api
+from app.events.realtime import ApiRealtimeLease, RealtimeLeaseBusy, terminate_api, termination_requested
 
 logger = get_logger(__name__)
 LeaderFactory = Callable[[ApiRealtimeLease], AbstractAsyncContextManager[Sequence[asyncio.Task]]]
@@ -45,7 +45,8 @@ class DistributedRealtime:
 
     Tasks yielded by the factory are mandatory long-running work. Any completion
     (including cancellation) restarts leadership after bounded teardown. A lease
-    renewal failure terminates this process: no unfenced collector survives it.
+    renewal failure fences all leader work and shuts this process down (graceful
+    SIGTERM, hard-exit fallback); a draining process never re-acquires leadership.
     """
 
     def __init__(self, redis, *, leader_factory: LeaderFactory,
@@ -116,6 +117,10 @@ class DistributedRealtime:
 
     async def _supervise(self):
         while True:
+            if termination_requested():
+                # A graceful shutdown is draining this process: never re-elect it.
+                logger.warning("realtime_leadership_stopped_for_shutdown")
+                return
             lease = ApiRealtimeLease(self.redis, key=self.settings.lease_key,
                                      ttl_seconds=self.settings.lease_ttl_seconds, on_lost=self.on_lost)
             try:

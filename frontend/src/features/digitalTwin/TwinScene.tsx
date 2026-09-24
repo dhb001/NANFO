@@ -23,15 +23,8 @@ import {
   resolveCampusBuildingCameraFocus,
   type CampusBuildingViewState,
 } from "@/features/digitalTwin/campusBuildings";
-import {
-  DEFAULT_MAX_DEVICE_LABELS,
-  deriveAlertingDeviceIds,
-} from "@/features/digitalTwin/deviceVisuals";
-
-interface AlertLike {
-  event_type: string;
-  payload: Record<string, unknown>;
-}
+import { DEFAULT_MAX_DEVICE_LABELS } from "@/features/digitalTwin/deviceVisuals";
+import { overlayColor } from "./twinStatusTones";
 
 interface TwinSceneProps {
   spatialScene?: SpatialScene;
@@ -50,8 +43,8 @@ interface TwinSceneProps {
     showOverlays: boolean;
     showModel: boolean;
   };
-  /** Alert feed consumed as-is; device association is derived in-scene. */
-  alerts?: readonly AlertLike[];
+  /** Devices with an active backend alert (REST snapshot + realtime deltas, derived upstream). */
+  alertingDeviceIds?: ReadonlySet<string>;
   /** Maximum simultaneous DOM labels. Guards against hundreds of `<Html>` overlays. */
   maxDeviceLabels?: number;
   importedModelUrl?: string | null;
@@ -66,20 +59,6 @@ interface LinkLabel {
   id: string;
   edgeType: string;
   mid: [number, number, number];
-}
-
-function overlayColor(overlay: TwinOverlayObject) {
-  const normalizedStatus = (overlay.status ?? overlay.state ?? "").toLowerCase();
-  if (normalizedStatus.includes("failed") || normalizedStatus === "cancelled") {
-    return "#c93f2e";
-  }
-  if (normalizedStatus.includes("completed") || normalizedStatus === "validated") {
-    return "#2ca774";
-  }
-  if (normalizedStatus.includes("paused") || normalizedStatus.includes("queued")) {
-    return "#d1780f";
-  }
-  return overlay.objectType === "intent_state" ? "#2873cb" : "#2f8f99";
 }
 
 function CameraFocusController({
@@ -284,7 +263,7 @@ function SessionModelLayer({
   );
 }
 
-const EMPTY_ALERTS: readonly AlertLike[] = [];
+const EMPTY_ALERTING: ReadonlySet<string> = new Set<string>();
 
 function MeasuredPathLayer({ segments }: { segments: readonly MeasuredPathSegment[] }) {
   return <group>{segments.map((segment) => {
@@ -305,7 +284,7 @@ export function TwinScene({
   onSelectNode,
   reducedMotion,
   layers,
-  alerts = EMPTY_ALERTS,
+  alertingDeviceIds = EMPTY_ALERTING,
   maxDeviceLabels = DEFAULT_MAX_DEVICE_LABELS,
   importedModelUrl,
   modelRegistration,
@@ -380,10 +359,6 @@ export function TwinScene({
     });
   }, [selectedBuilding, mergedBuildingViewState?.selectedFloorKey, nodes, selectedNodeId, canonicalFocus, activeFloor]);
 
-  const alertingDeviceIds = useMemo(() => {
-    const knownDeviceIds = new Set(nodes.map((node) => node.id));
-    return deriveAlertingDeviceIds(alerts, knownDeviceIds);
-  }, [alerts, nodes]);
   const visibleNodes = useMemo(() => nodes.filter((node) =>
     (!activeFloor || geometry.floorByObject.get(node.spatialObjectId ?? "") === activeFloor)
     && clippingPlanes.every((plane) => plane.distanceToPoint(new Vector3(node.x, node.y, node.z)) >= 0)

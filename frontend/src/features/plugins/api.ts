@@ -1,12 +1,13 @@
 import { apiRequest, apiRequestNoContent } from "@/shared/lib/api";
-import {
+import type {
   InstallPluginRequest,
   PluginActionResult,
   PluginListResult,
+  PluginStatus,
 } from "@/shared/types/plugins";
 
 interface ListPluginsParams {
-  status?: "installed" | "enabled" | "disabled" | "failed";
+  status?: PluginStatus;
   enabled?: boolean;
   search?: string;
   limit?: number;
@@ -21,10 +22,10 @@ function buildListPluginsQuery(params: ListPluginsParams): string {
   return query.toString();
 }
 
-export function listPlugins(token: string, params: ListPluginsParams = {}) {
+export function listPlugins(token: string, params: ListPluginsParams = {}, signal?: AbortSignal) {
   const query = buildListPluginsQuery(params);
   const path = query ? `/api/v1/plugins?${query}` : "/api/v1/plugins";
-  return apiRequest<PluginListResult>(path, { token });
+  return apiRequest<PluginListResult>(path, { token, signal });
 }
 
 export function installPlugin(token: string, body: InstallPluginRequest) {

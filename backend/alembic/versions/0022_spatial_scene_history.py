@@ -4,7 +4,6 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql as pg
 
 from alembic import op
-from app.modules.network.spatial_models import SpatialSceneRevision  # noqa: F401 -- owning metadata
 
 revision = "0022"
 down_revision = "0021"
@@ -43,5 +42,17 @@ def upgrade():
 
 
 def downgrade():
+    # Upgrading again only re-creates exact baseline copies of the current scenes (ADR-028).
+    if op.get_context().as_sql:
+        raise RuntimeError("Downgrade below 0022 must run online (not --sql): it must first verify that "
+                           "no irreproducible spatial scene history would be dropped")
+    if op.get_bind().scalar(sa.text("""SELECT EXISTS (
+            SELECT 1 FROM network_spatial_scene_revisions AS history
+            WHERE history.origin <> 'baseline' OR NOT EXISTS (
+                SELECT 1 FROM network_spatial_scenes AS snapshot
+                WHERE snapshot.network_id = history.network_id AND snapshot.revision = history.revision
+                  AND snapshot.scene = history.scene))""")):
+        raise RuntimeError("Downgrade below 0022 refused: immutable spatial scene history exists that an "
+                           "upgrade cannot reproduce")
     op.drop_table("network_spatial_scene_revisions")
     op.execute("DROP FUNCTION protect_spatial_scene_history()")

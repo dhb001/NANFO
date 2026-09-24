@@ -123,8 +123,17 @@ async def test_all_groups_earliest_pending_unread_cutoff(redis, archive):
     assert result['deleted'] == 1 and await redis.xlen(STREAM) == 1
 
 
-@pytest.mark.parametrize('race', ['new_group', 'destroy_group', 'reset', 'pending', 'consumer', 'entry'])
-async def test_atomic_race_recheck_no_partial_delete(redis, archive, race):
+@pytest.mark.parametrize('race,refused,remaining,bundles', [
+    # Group-set changes are configuration faults: refused, never retried.
+    ('new_group', 'retention_unknown_groups', 5, 1),
+    ('destroy_group', 'retention_group_count', 5, 1),
+    # ADR-028: invalidated batches are re-planned from current state (bounded).
+    ('reset', None, 5, 1),        # cursor moved backwards: nothing delivered any more
+    ('pending', None, 4, 2),      # 2-0 claimed inside the batch: only 1-0 stays eligible
+    ('consumer', None, 0, 1),     # a new consumer without pending work is harmless
+    ('entry', None, 0, 2),        # changed entry: the rest is re-archived and deleted
+])
+async def test_atomic_race_recheck_no_partial_delete(redis, archive, race, refused, remaining, bundles):
     await seed(redis)
     original = redis.eval
 
@@ -144,10 +153,14 @@ async def test_atomic_race_recheck_no_partial_delete(redis, archive, race):
                 await redis.xdel(STREAM, '5-0')
         return await original(script, *args)
 
-    with patch.object(redis, 'eval', racing), pytest.raises(ResponseError):
-        await operator(redis, archive).run(mode='apply')
-    assert await redis.xlen(STREAM) == (4 if race == 'entry' else 5)
-    assert len(list(archive.root.iterdir())) == 1
+    with patch.object(redis, 'eval', racing):
+        if refused:
+            with pytest.raises(ResponseError, match=refused):
+                await operator(redis, archive).run(mode='apply')
+        else:
+            await operator(redis, archive).run(mode='apply')
+    assert await redis.xlen(STREAM) == remaining
+    assert len(list(archive.root.iterdir())) == bundles
 
 
 @pytest.mark.parametrize('failure', ['write', 'readback', 'disk', 'path', 'permissions'])
@@ -275,7 +288,7 @@ async def test_explicit_known_new_group_blocks_until_processed(redis, archive):
     assert (await op.run(mode='apply'))['deleted'] == 5
 
 
-async def test_ack_race_conservatively_refuses_snapshot(redis, archive):
+async def test_ack_race_proceeds_from_current_state(redis, archive):
     await seed(redis, ack=False)
     await redis.xack(STREAM, GROUP, '1-0')
     original = redis.eval
@@ -285,9 +298,10 @@ async def test_ack_race_conservatively_refuses_snapshot(redis, archive):
             await redis.xack(STREAM, GROUP, '2-0')
         return await original(script, *args)
 
-    with patch.object(redis, 'eval', ack), pytest.raises(ResponseError, match='state_changed'):
-        await operator(redis, archive).run(mode='apply')
-    assert await redis.xlen(STREAM) == 5
+    with patch.object(redis, 'eval', ack):
+        result = await operator(redis, archive).run(mode='apply')
+    # ADR-028: an ACK can only widen eligibility; the planned 1-0 and then 2-0 go.
+    assert result['deleted'] == 2 and await redis.xlen(STREAM) == 3
 
 
 async def test_eviction_policy_blocks_apply(redis, archive):
@@ -343,3 +357,25 @@ async def test_health_cli_and_capacity_soak(redis, archive, owned_lab, monkeypat
         assert (await op.run(mode='apply'))['deleted'] == 100
         assert await redis.xlen(STREAM) == 0
         assert await redis.memory_usage(STREAM) < 16384
+
+
+async def test_many_idle_consumers_without_pending_do_not_block(redis, archive):
+    await seed(redis)
+    for index in range(70):
+        await redis.xgroup_createconsumer(STREAM, GROUP, f'restart-{index}')
+    result = await operator(redis, archive).run(mode='apply')
+    assert result['deleted'] == 5
+    assert 'consumer_churn' in result['health']['alerts']
+
+
+async def test_dead_letter_stream_archived_before_delete(redis, archive):
+    from app.events.retention import dead_letter_policy
+
+    for index in range(1, 4):
+        await redis.execute_command('XADD', 'stream:dead_letter', f'{index}-0', 'event_id', 'e',
+                                    'failure_reason', 'malformed_envelope', 'payload', b'\xff')
+    op = StreamRetention(redis, dead_letter_policy(min_age_seconds=60, min_free_bytes=1024**2), archive)
+    result = await op.run(mode='apply')
+    assert result['deleted'] == 3 and await redis.xlen('stream:dead_letter') == 0
+    manifest, entries = decode_bundle(archive.read(result['archives'][0]))
+    assert manifest['stream'] == 'stream:dead_letter' and entries[0][1][-1] == b'\xff'

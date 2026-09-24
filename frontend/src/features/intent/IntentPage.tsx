@@ -287,7 +287,7 @@ function IntentPageContent() {
         </QueryState>
         <nav aria-label="Intent history pagination">
           <Button disabled={historyPage <= 1 || history.isFetching} onClick={() => setHistoryPage(historyPage - 1)}>Previous intents</Button>
-          <span> Page {historyPage} | {history.data?.total ?? "Unknown"} intents </span>
+          <span aria-live="polite"> Page {historyPage}{history.isPlaceholderData ? " (loading…)" : ""} | {history.data?.total ?? "Unknown"} intents </span>
           <Button disabled={!history.data || historyPage * history.data.page_size >= history.data.total || history.isFetching} onClick={() => setHistoryPage(historyPage + 1)}>Next intents</Button>
         </nav>
       </Panel>

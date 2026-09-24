@@ -4,10 +4,10 @@ import uuid
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from jose import JWTError, jwt
 
 from app.core.config import get_settings
 from app.core.security import (
+    JWTError,
     create_access_token,
     create_refresh_token,
     decode_token,
@@ -15,6 +15,7 @@ from app.core.security import (
     remaining_ttl_seconds,
     verify_password,
 )
+from tests.jwt_support import jwt
 
 USER_ID = str(uuid.UUID(int=1))
 

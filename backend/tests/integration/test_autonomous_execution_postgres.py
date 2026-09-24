@@ -275,7 +275,7 @@ async def test_two_receiver_process_connections_serialize_device_io(sessions, fa
     assert device.applied == 1
 
 
-async def test_frames_immutable_history_not_reseedable_and_migration_roundtrip(sessions):
+async def test_frames_immutable_history_not_reseedable_and_migration_downgrade_refused(sessions):
     case = fixture()
     async with sessions() as db:
         repo = ProviderStateRepository(db)
@@ -289,8 +289,10 @@ async def test_frames_immutable_history_not_reseedable_and_migration_roundtrip(s
     async with sessions() as db:
         assert await db.scalar(select(func.count()).select_from(AutonomousProviderState)) == 1
         conn = await db.connection()
-        await conn.run_sync(lambda sync: migrate(sync, "downgrade"))
-        await conn.run_sync(lambda sync: migrate(sync, "upgrade"))
+        # ADR-028: the 0027 downgrade refuses (before any DDL) while frames/journals exist.
+        with pytest.raises(RuntimeError, match="Downgrade below 0027 refused"):
+            await conn.run_sync(lambda sync: migrate(sync, "downgrade"))
+        assert await db.scalar(select(func.count()).select_from(AutonomousProviderState)) == 1
         await db.commit()
 
 

@@ -84,7 +84,17 @@ class SNMPCredentials(StrictConfig):
         return self
 
 
-def load_protected_json(path: Path, model: type[StrictConfig]) -> StrictConfig:
+def binding_sha256(binding: SNMPBinding) -> str:
+    """Revision identity of a pinned binding (authority caches are keyed by it)."""
+    import hashlib
+
+    return hashlib.sha256(binding.model_dump_json().encode()).hexdigest()
+
+
+DEFAULT_MAX_CONFIG_BYTES = 65536
+
+
+def read_protected_bytes(path: Path, *, max_bytes: int = DEFAULT_MAX_CONFIG_BYTES) -> bytes:
     """Read an operator/secret-manager provisioned 0600 file, without symlinks.
 
     Reject writable non-sticky ancestors and writable immediate parents. Opening
@@ -109,16 +119,13 @@ def load_protected_json(path: Path, model: type[StrictConfig]) -> StrictConfig:
         fd = os.open(path.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory)
         info = os.fstat(fd)
         if (not stat.S_ISREG(info.st_mode) or stat.S_IMODE(info.st_mode) != 0o600
-                or info.st_uid not in {0, os.geteuid()} or info.st_size > 65536):
+                or info.st_uid not in {0, os.geteuid()} or info.st_size > max_bytes):
             raise SNMPError("unsafe_config_file")
         with os.fdopen(fd, "rb", closefd=False) as stream:
-            data = stream.read(65537)
-        if len(data) > 65536:
+            data = stream.read(max_bytes + 1)
+        if len(data) > max_bytes:
             raise SNMPError("config_size_limit")
-        document = json.loads(data, object_pairs_hook=reject_duplicate_keys)
-        if model is SNMPBinding and type(document.get("version")) is not int:
-            raise SNMPError("invalid_config")
-        return model.model_validate_json(data)
+        return data
     except (OSError, ValueError, TypeError, AttributeError, RecursionError):
         raise SNMPError("protected_config_invalid_or_unavailable") from None
     finally:
@@ -126,3 +133,40 @@ def load_protected_json(path: Path, model: type[StrictConfig]) -> StrictConfig:
             os.close(fd)
         if directory is not None:
             os.close(directory)
+
+
+def parse_protected_json(data: bytes, model: type[StrictConfig]) -> StrictConfig:
+    try:
+        document = json.loads(data, object_pairs_hook=reject_duplicate_keys)
+        if model is SNMPBinding and type(document.get("version")) is not int:
+            raise SNMPError("invalid_config")
+        return model.model_validate_json(data)
+    except (ValueError, TypeError, AttributeError, RecursionError):
+        raise SNMPError("protected_config_invalid_or_unavailable") from None
+
+
+def load_protected_json(path: Path, model: type[StrictConfig], *,
+                        max_bytes: int = DEFAULT_MAX_CONFIG_BYTES) -> StrictConfig:
+    """Securely read and strictly parse a protected operator file (see ``read_protected_bytes``)."""
+    return parse_protected_json(read_protected_bytes(path, max_bytes=max_bytes), model)
+
+
+class ProtectedRevision:
+    """Exact revision check for a pinned protected file without re-parsing it.
+
+    Every call performs the full secure open/read (ownership, modes, symlinks,
+    ancestors). Parsing and model comparison only happen when the bytes differ
+    from the last verified revision, so the check is exact (no timestamp races).
+    """
+
+    def __init__(self, path: Path, model: type[StrictConfig], *, max_bytes: int = DEFAULT_MAX_CONFIG_BYTES):
+        self.path, self.model, self.max_bytes = path, model, max_bytes
+        self._verified: tuple[bytes, StrictConfig] | None = None
+
+    def matches(self, expected: StrictConfig) -> bool:
+        data = read_protected_bytes(self.path, max_bytes=self.max_bytes)
+        if self._verified is not None and self._verified[0] == data:
+            return self._verified[1] == expected
+        current = parse_protected_json(data, self.model)
+        self._verified = (data, current)
+        return current == expected

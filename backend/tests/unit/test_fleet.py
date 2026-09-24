@@ -249,3 +249,157 @@ async def test_health_does_not_present_old_publication_as_fresh(config):
     assert health["status"] == "degraded"
     assert all(not row["fresh"] for row in health["devices"])
     assert instance.redis.set.call_args.kwargs["ex"] == config.health_ttl_seconds
+
+
+# ---------------------------------------------------------------- ADR-028 scheduler / diagnostics
+
+
+def many_targets_config(tmp_path, count, *, concurrency=4, interval=10.0):
+    targets = [{"device_id": str(uuid.UUID(int=1000 + number)),
+                "binding_path": str(tmp_path / f"binding{number}.json"),
+                "credentials_path": str(tmp_path / f"secret{number}.json"),
+                "interval_seconds": interval, "backoff_max_seconds": interval * 8}
+               for number in range(count)]
+    manifest = protected(tmp_path / "manifest.json", {"version": 1, "targets": targets})
+    return FleetSettings(manifest_path=manifest, concurrency=concurrency, scan_seconds=1.0)
+
+
+class VirtualTime:
+    """Deterministic event-loop driver: collections finish instantly; time only
+    advances when every slot is idle and the scheduler asked to sleep."""
+
+    def __init__(self, instance, until):
+        self.now, self.until, self.instance = 0.0, until, instance
+        self.stop = asyncio.Event()
+
+    def clock(self):
+        return self.now
+
+    async def pause(self, stop, timeout):
+        for _ in range(3):
+            await asyncio.sleep(0)
+        if any(task.done() for task in self.instance._active.values()):
+            return  # a slot freed: the real scheduler wakes immediately
+        self.now += max(timeout, 1e-6)
+        if self.now >= self.until:
+            self.stop.set()
+
+
+async def run_virtual(instance, until):
+    driver = VirtualTime(instance, until)
+    instance._clock, instance._pause = driver.clock, driver.pause
+    starts = {}
+
+    async def collect(target):
+        starts.setdefault(target.device_id, []).append(driver.now)
+        return "published"
+
+    instance.collect_target = collect
+    instance.repository.health = AsyncMock(return_value=[])
+    await instance.run(driver.stop)
+    return starts
+
+
+async def test_run_polls_256_targets_at_their_configured_interval(tmp_path):
+    """Regression: rotation advanced by one per scan, so the effective interval was
+    ~targets x scan seconds (256 s) instead of the configured 10 s."""
+    config = many_targets_config(tmp_path, 256, concurrency=4, interval=10.0)
+    instance, *_ = worker(config)
+    starts = await run_virtual(instance, until=100.0)
+    assert len(starts) == 256
+    gaps = [later - earlier for times in starts.values() for earlier, later in zip(times, times[1:])]
+    assert all(len(times) >= 9 for times in starts.values())
+    assert gaps and max(gaps) <= 10.0 + 1e-6 * 10 and min(gaps) >= 10.0 - 1e-6
+    assert instance.schedule_summary(100.0)["active"] == 0
+
+
+async def test_free_slots_go_to_the_most_overdue_targets(tmp_path):
+    config = many_targets_config(tmp_path, 5, concurrency=2)
+    instance, *_ = worker(config)
+    ids = [target.device_id for target in instance.manifest.targets]
+    instance._next_due = {ids[0]: 50.0, ids[1]: 10.0, ids[2]: 5.0, ids[3]: 99.0, ids[4]: 120.0}
+    assert [t.device_id for t in instance.due_targets(100.0)] == [ids[2], ids[1]]
+    instance._active[ids[2]] = asyncio.get_running_loop().create_future()
+    assert [t.device_id for t in instance.due_targets(100.0)] == [ids[1]]
+    assert instance.schedule_summary(100.0) == {"active": 1, "due": 3, "max_overdue_seconds": 90.0}
+    instance._active[ids[2]].cancel()
+
+
+def test_failures_back_off_exponentially_and_success_resets(tmp_path):
+    config = many_targets_config(tmp_path, 1, interval=2.0)
+    instance, *_ = worker(config)
+    target = instance.manifest.targets[0]
+    delays = [instance._delay(target, "collection_deferred") for _ in range(5)]
+    assert delays == [4.0, 8.0, 16.0, 16.0, 16.0]  # capped at backoff_max_seconds
+    assert instance._delay(target, "not_due_or_owned") == 2.0
+    assert instance._delay(target, "collection_deferred") == 16.0  # owner/lease skip keeps backoff
+    assert instance._delay(target, "published") == 2.0
+    assert instance._delay(target, "lease_or_storage_unavailable") == 4.0
+
+
+async def test_collection_failures_log_fixed_codes_and_are_counted(config, monkeypatch):
+    from app.modules.telemetry import fleet as fleet_module
+
+    logged = []
+    monkeypatch.setattr(fleet_module.logger, "warning", lambda event, **fields: logged.append((event, fields)))
+    instance, _, locks, _, transport, _ = worker(config)
+    transport.get.side_effect = RuntimeError("postgresql://user:hunter2@db/nanfo")
+    assert await instance.collect_target(instance.manifest.targets[0]) == "collection_deferred"
+    event, fields = logged[-1]
+    assert event == "fleet_collection_deferred"
+    assert fields["error_code"] == "fleet_collection_failed" and fields["error_type"] == "RuntimeError"
+    assert "hunter2" not in repr(logged)
+    transport.get.side_effect = SNMPError("snmp_timeout")
+    await instance.collect_target(instance.manifest.targets[0])
+    assert logged[-1][1]["error_code"] == "snmp_timeout"
+
+    @asynccontextmanager
+    async def broken(*_):
+        raise ConnectionError("redis://:hunter2@cache")
+        yield  # pragma: no cover
+
+    locks.acquire = broken
+    assert await instance.collect_target(instance.manifest.targets[0]) == "lease_or_storage_unavailable"
+    assert logged[-1][0] == "fleet_lease_or_storage_unavailable" and "hunter2" not in repr(logged)
+    assert instance.failures.snapshot() == {
+        "fleet_collection_failed": 1, "fleet_lease_or_storage_unavailable": 1, "snmp_timeout": 1}
+    instance.repository.health = AsyncMock(return_value=[])
+    assert (await instance.health())["errors"] == instance.failures.snapshot()
+
+
+async def test_health_publication_failure_is_counted_and_slo_hosted(config):
+    instance, repo, *_ = worker(config)
+    repo.health = AsyncMock(side_effect=ConnectionError("down"))
+    instance.slo_evaluator = SimpleNamespace(maybe_evaluate=AsyncMock(side_effect=RuntimeError("redis down")))
+    await instance._housekeeping(0.0)
+    assert instance.failures.snapshot() == {"fleet_health_unavailable": 1, "fleet_slo_unavailable": 1}
+    instance.slo_evaluator.maybe_evaluate.assert_awaited_once()
+    assert instance._next_housekeeping == config.scan_seconds
+
+
+async def test_fleet_batch_performs_one_full_owner_check(config, monkeypatch):
+    from app.modules.telemetry import snmp_ownership
+
+    full = AsyncMock()
+    monkeypatch.setattr(snmp_ownership, "validate_owner_scope", full)
+    exists = AsyncMock(return_value=True)
+    monkeypatch.setattr(snmp_ownership.IdentityDirectoryService, "user_exists", exists)
+
+    @asynccontextmanager
+    async def session():
+        yield object()
+
+    boundaries = []
+
+    def boundary_factory(**kwargs):
+        boundaries.append(snmp_ownership.SNMPOwnerBoundary(**{**kwargs, "session_factory": session}))
+        return boundaries[-1]
+
+    instance, *_ = worker(config)
+    instance.boundary_factory = boundary_factory
+    assert await instance.collect_target(instance.manifest.targets[0]) == "published"
+    assert full.await_count == 1 and boundaries[0].full_checks == 1
+    # Read checks around the single GET plus one write check per published sample.
+    assert exists.await_count >= 3
+    assert await instance.collect_target(instance.manifest.targets[0]) == "published"
+    assert full.await_count == 2  # every batch starts with a fresh full authorization

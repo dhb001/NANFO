@@ -10,9 +10,6 @@ services:
   gateway:
     depends_on:
       api2: {condition: service_healthy}
-    configs:
-      - source: distributed-upstream
-        target: /etc/nginx/nginx-upstream.conf
-configs:
-  distributed-upstream:
-    file: ./nginx-distributed-upstream.conf
+    environment:
+      # Selects the upstream file baked into the gateway image; no checkout bind mount.
+      NANFO_GATEWAY_UPSTREAM: distributed

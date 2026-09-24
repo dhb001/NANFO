@@ -1,6 +1,9 @@
 import { webcrypto } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { decodePersistedModel, MAX_MODEL_BYTES, validateModelBytes } from "./modelAsset";
+import { bytesToBase64, decodePersistedModel, encodeBase64, loadValidatedModel, MAX_MODEL_BYTES, MAX_MODEL_SIZE_TEXT, sha256Hex, validateModelBytes } from "./modelAsset";
+
+const loader = vi.hoisted(() => ({ constructed: 0 }));
+vi.mock("three/examples/jsm/loaders/GLTFLoader.js", () => ({ GLTFLoader: class { constructor() { loader.constructed += 1; } } }));
 import type { CampusModelAssetRecord } from "@/shared/types/network";
 
 function glb(document = { asset: { version: "2.0" }, scene: 0, scenes: [{ nodes: [0] }], nodes: [{ name: "campus" }] }) {
@@ -60,5 +63,59 @@ describe("persisted model validation", () => {
   });
   it("accepts self-contained supported glTF JSON", async () => {
     await expect(validateModelBytes(new TextEncoder().encode('{"asset":{"version":"2.0"},"scenes":[{}],"scene":0}').buffer, "campus.gltf", "model/gltf+json")).resolves.toBeUndefined();
+  });
+  it("validates structure with one JSON parse and never runs a second full glTF parse", async () => {
+    const parse = vi.spyOn(JSON, "parse");
+    await validateModelBytes(glb(), "campus.glb", "model/gltf-binary");
+    expect(parse).toHaveBeenCalledTimes(1);
+    parse.mockRestore();
+    expect(loader.constructed).toBe(0);
+  });
+  it("rejects relative and non-data URIs as well as absolute ones", async () => {
+    for (const uri of ["texture.png", "../secret.bin", "blob:https://x/y", "data:text/html;base64,AAAA", "HTTPS://EXAMPLE.ORG/A.BIN"]) {
+      await expect(validateModelBytes(new TextEncoder().encode(JSON.stringify({ asset: { version: "2.0" }, images: [{ uri }] })), "campus.gltf", "model/gltf+json"))
+        .rejects.toThrow("self-contained");
+    }
+  });
+  it("reads and validates a file once and reuses the result for persistence", async () => {
+    const file = new File([glb()], "campus.glb", { type: "model/gltf-binary" });
+    const read = vi.fn(async () => glb());
+    Object.defineProperty(file, "arrayBuffer", { value: read });
+    const first = await loadValidatedModel(file);
+    const second = await loadValidatedModel(file);
+    expect(second).toBe(first);
+    expect(read).toHaveBeenCalledTimes(1);
+    expect(first).toMatchObject({ name: "campus.glb", mime: "model/gltf-binary", binary: true });
+    const oversized = new File([new Uint8Array(MAX_MODEL_BYTES + 1)], "big.glb", { type: "model/gltf-binary" });
+    const oversizedRead = vi.fn();
+    Object.defineProperty(oversized, "arrayBuffer", { value: oversizedRead });
+    await expect(loadValidatedModel(oversized)).rejects.toThrow(`Model must be between 1 byte and ${MAX_MODEL_SIZE_TEXT}.`);
+    expect(oversizedRead).not.toHaveBeenCalled();
+  });
+  it("encodes base64 natively and in bounded chunks identically to the reference encoder", async () => {
+    for (const size of [0, 1, 2, 3, 0x8000 - 1, 0x8000, 0x8000 * 3 + 7]) {
+      const bytes = new Uint8Array(size).map((_, index) => (index * 31 + 7) % 256);
+      const expected = Buffer.from(bytes).toString("base64");
+      expect(bytesToBase64(bytes)).toBe(expected);
+      expect(await encodeBase64(bytes)).toBe(expected);
+    }
+  });
+  it("rejects non-canonical base64 tails for inline persisted models", async () => {
+    vi.stubGlobal("crypto", webcrypto);
+    let json = JSON.stringify({ asset: { version: "2.0" }, scenes: [{}], scene: 0 });
+    while (json.length % 3 !== 1) json += " ";
+    const bytes = new TextEncoder().encode(json);
+    const digest = Buffer.from(await webcrypto.subtle.digest("SHA-256", bytes)).toString("hex");
+    const canonical = Buffer.from(bytes).toString("base64");
+    expect(canonical.endsWith("==")).toBe(true);
+    const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    const last = canonical[canonical.length - 3];
+    const nonCanonical = canonical.slice(0, -3) + alphabet[alphabet.indexOf(last) | 1] + "==";
+    expect(Buffer.from(nonCanonical, "base64")).toEqual(Buffer.from(bytes));
+    const record = { campus_model_asset_id: "a", network_id: "n", model_file_name: "campus.gltf", model_mime_type: "model/gltf+json", model_size_bytes: bytes.length,
+      model_sha256: digest, mapping_by_device_id: {}, source: null, created_at: "", updated_at: "" };
+    expect((await decodePersistedModel({ ...record, model_data_base64: canonical }, "n", new Set())).size).toBe(bytes.length);
+    await expect(decodePersistedModel({ ...record, model_data_base64: nonCanonical }, "n", new Set())).rejects.toThrow("Persisted model size or base64 encoding is invalid.");
+    expect(await sha256Hex(new Uint8Array([1, 2, 3]))).toBe("039058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81");
   });
 });

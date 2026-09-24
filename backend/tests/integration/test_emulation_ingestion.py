@@ -51,7 +51,7 @@ async def test_snapshot_retry_publishes_stable_ids_and_persists_once(integration
     repository = AsyncMock()
     repository.get_by_event_id.side_effect = lambda event_id: rows.get(event_id)
     repository.create.side_effect = create
-    with patch("app.modules.telemetry.service.TelemetryRecordRepository", return_value=repository):
+    with patch("app.modules.telemetry.persistence.TelemetryRecordRepository", return_value=repository):
         persistence = TelemetryPersistenceService(AsyncMock())
         persistence._dedup = AsyncMock()
         persistence._dedup.archived.return_value = False
@@ -80,7 +80,7 @@ async def test_snapshot_retry_publishes_stable_ids_and_persists_once(integration
         return await publish_event(**kwargs)
 
     with (
-        patch("app.modules.telemetry.service.publish_event", side_effect=fail_second),
+        patch("app.modules.telemetry.ingestion.publish_event", side_effect=fail_second),
         pytest.raises(RuntimeError),
     ):
         await poll()
@@ -99,7 +99,7 @@ async def test_snapshot_retry_publishes_stable_ids_and_persists_once(integration
     assert {fields["event_id"] for _, fields in retried} == {str(key) for key in rows}
     assert {fields["event_id"] for _, fields in retried} == original_ids
     rows.clear()
-    with patch("app.modules.telemetry.service.TelemetryRecordRepository", return_value=repository):
+    with patch("app.modules.telemetry.persistence.TelemetryRecordRepository", return_value=repository):
         persistence = TelemetryPersistenceService(AsyncMock())
         persistence._dedup = AsyncMock()
         persistence._dedup.archived.return_value = False

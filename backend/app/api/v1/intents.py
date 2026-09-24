@@ -19,12 +19,16 @@ from app.core.dependencies import (
     get_request_meta,
     require_permissions,
 )
+from app.core.pagination import PageNumber
 from app.core.responses import APIResponse, success_response
 from app.db.postgres import AsyncSession
 from app.modules.intent.schemas import (
+    ExecuteIntentEnvelope,
     ExecuteIntentRequest,
     ExecuteIntentResponse,
     IntentDetailResponse,
+    IntentResponseMeta,
+    ValidateIntentEnvelope,
     ValidateIntentRequest,
     ValidateIntentResponse,
 )
@@ -35,7 +39,14 @@ from app.modules.organization.service import WorkspaceService
 router = APIRouter(prefix="/api/v1/intents", tags=["Intent"])
 
 
-@router.post("/validate", response_model=APIResponse[ValidateIntentResponse], status_code=status.HTTP_200_OK)
+def _replay_envelope(envelope_type, payload, *, replay: bool, meta: RequestMeta, started: float):
+    """Canonical envelope whose meta additionally reports ``idempotent_replay`` (ADR-028 C3)."""
+    envelope = success_response(payload, meta.request_id, started, meta.timestamp)
+    return envelope_type(success=True, data=payload, errors=None,
+                         meta=IntentResponseMeta(**envelope.meta.model_dump(), idempotent_replay=replay))
+
+
+@router.post("/validate", response_model=ValidateIntentEnvelope, status_code=status.HTTP_200_OK)
 async def validate_intent(
     req: ValidateIntentRequest,
     claims: Annotated[TokenClaims, Depends(require_permissions("write:config"))],
@@ -61,10 +72,11 @@ async def validate_intent(
         requested_by_user_id=claims.user_id,
     )
     payload = ValidateIntentResponse.model_validate(result)
-    return success_response(payload, meta.request_id, started, meta.timestamp)
+    return _replay_envelope(ValidateIntentEnvelope, payload, replay=payload.idempotent_replay, meta=meta,
+                            started=started)
 
 
-@router.post("/execute", response_model=APIResponse[ExecuteIntentResponse], status_code=status.HTTP_202_ACCEPTED)
+@router.post("/execute", response_model=ExecuteIntentEnvelope, status_code=status.HTTP_202_ACCEPTED)
 async def execute_intent(
     req: ExecuteIntentRequest,
     claims: Annotated[TokenClaims, Depends(require_permissions("write:config"))],
@@ -92,9 +104,11 @@ async def execute_intent(
         manual_approval=req.manual_approval,
         cancel=req.cancel,
         simulation_id=req.simulation_id,
+        approval_binding=req.approval_binding.model_dump(mode="json") if req.approval_binding else None,
     )
     payload = ExecuteIntentResponse.model_validate(result)
-    return success_response(payload, meta.request_id, started, meta.timestamp)
+    return _replay_envelope(ExecuteIntentEnvelope, payload, replay=payload.idempotent_replay, meta=meta,
+                            started=started)
 
 
 @router.get("", response_model=APIResponse[IntentHistoryPage])
@@ -105,7 +119,7 @@ async def list_intents(
     db: Annotated[AsyncSession, Depends(get_db)],
     redis: Annotated[aioredis.Redis, Depends(get_redis)],
     network_id: uuid.UUID | None = None,
-    page: int = Query(1, ge=1),
+    page: PageNumber = 1,
     page_size: int = Query(20, ge=1, le=200),
 ):
     started = time.monotonic()

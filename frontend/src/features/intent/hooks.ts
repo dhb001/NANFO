@@ -1,4 +1,5 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { samePageSeries } from "@/shared/lib/queryKeys";
 import { executeIntent, getIntentDetail, validateIntent, listIntents } from "@/features/intent/api";
 import { ExecuteIntentRequest, ValidateIntentRequest } from "@/shared/types/intent";
 import { useEffect } from "react";
@@ -11,10 +12,12 @@ const MAX_DETAIL_READS = 40;
 
 export function useIntentHistory(token: string | null, workspaceId: string | null, networkId: string | null, page: number) {
   const session = useSessionScope();
+  const queryKey = ["intent", session.key, session.authority, "history", page];
   return useQuery({
-    queryKey: ["intent", session.key, session.authority, "history", page],
+    queryKey,
     queryFn: ({ signal }) => session.read((credential) => listIntents(credential, workspaceId!, networkId, page, signal), signal).then((response) => response.data),
     enabled: Boolean(token && workspaceId),
+    placeholderData: (previous, previousQuery) => samePageSeries(previousQuery?.queryKey, queryKey, 4) ? keepPreviousData(previous) : undefined,
   });
 }
 

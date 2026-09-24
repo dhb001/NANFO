@@ -1,0 +1,58 @@
+# Backend tests that read ignored local evidence under ai-engine/artifacts/
+# (frozen ADR014/ADR024 checkpoints, histories, campaign snapshots).
+#
+# They run automatically when that evidence store is present (developer and
+# private-evidence lanes) and are skipped with an explicit reason when it is
+# absent. Portable CI deselects them with `-m "not private_artifacts"`.
+#
+# Format: one pytest node-id prefix per line, relative to backend/.
+#   tests/unit/test_x.py                -> every test in the module
+#   tests/unit/test_x.py::test_name     -> that test and all its parametrizations
+# Lines starting with '#' and blank lines are ignored.
+
+tests/unit/test_model_diagnostics.py::test_registry_scopes_and_permission_bits
+tests/unit/test_model_diagnostics.py::test_registry_hash_tampering
+tests/unit/test_model_diagnostics.py::test_real_frozen_replay
+tests/unit/test_model_diagnostics.py::test_real_runner_denies_tampered_artifacts
+tests/unit/test_model_diagnostics.py::test_child_is_reaped_on_bounded_failure
+tests/unit/test_model_diagnostics.py::test_child_environment_is_allowlisted
+tests/unit/test_model_diagnostics.py::test_authority_rechecked_after_inference
+tests/unit/test_model_diagnostics.py::test_current_network_scope_blocks_unregistered_history
+tests/unit/test_model_diagnostic_confinement.py::test_same_uid_filesystem_and_control_syscalls_are_confined
+tests/unit/test_live_providers.py::test_passive_snapshot_scope_digest_and_no_actuation
+tests/unit/test_live_providers.py::test_snapshot_rejects_invalid_input
+tests/unit/test_live_providers.py::test_registry_rejects_self_asserted_qualification_and_tampering
+tests/unit/test_live_providers.py::test_cannot_infer_with_self_asserted_qualification
+tests/unit/test_live_providers.py::test_real_readonly_benchmark_qualification
+tests/unit/test_live_providers.py::test_real_historical_replay_no_live_claim
+tests/unit/test_live_providers.py::test_expired_installation_is_not_qualified
+tests/unit/test_live_providers.py::test_concurrent_inference_rejected
+tests/unit/test_live_providers.py::test_qualification_pending_then_receipt_and_frozen_inference
+tests/unit/test_live_providers.py::test_runtime_result_and_postoffload_fences
+tests/unit/test_live_providers.py::test_confined_child_failure_is_killed_and_reaped
+tests/unit/test_passive_observer.py::test_original_frame_preserved_and_clock_derived
+tests/unit/test_passive_observer.py::test_rejects_old_incompatible_or_unavailable_measurement
+tests/unit/test_passive_observer.py::test_clock_and_process_authority
+tests/unit/test_passive_observer.py::test_admission_protected_hash_and_atomic_permissions
+tests/unit/test_passive_observer.py::test_confined_candidate_validates_original_nonterminal_frame
+tests/unit/test_passive_observer.py::test_idle_bridge_never_publishes_existing_history_or_dispatches
+tests/unit/test_passive_observer.py::test_bridge_validates_before_atomic_publish_and_invalidates_on_disconnect
+tests/unit/test_passive_observer.py::test_docker_time_namespace_requires_exact_kernel_offsets
+tests/unit/test_experimental_campaign.py::test_all_retained_historical_plan_assertions_remain_reserved
+tests/unit/test_experimental_campaign.py::test_auditor_replays_full_owner_chain_with_real_configured_simulator
+tests/unit/test_experimental_campaign.py::test_real_preserved_frame_matches_campaign_capacity_interfaces_and_metric_semantics
+tests/unit/test_experimental_independent_stop.py::test_bootstrap_stop_during_admission_read_is_not_admitted
+tests/unit/test_experimental_lab_adapter.py::test_campaign_watchdog_does_not_issue_or_consume_pending_writer_grant
+tests/unit/test_experimental_lab_adapter.py::test_real_adapter_observe_prepare_recover_raw_hashes_and_episode
+tests/unit/test_fresh_live_verifier.py::test_failed_campaign_never_attempts_live_inference
+tests/unit/test_fresh_live_verifier.py::test_only_measurements_after_verifier_start_are_accepted
+tests/unit/test_rebuilt_qualification.py::test_exact_image_only_parent_relation
+tests/unit/test_rebuilt_qualification.py::test_lineage_rejects_every_nonimage_change
+tests/unit/test_rebuilt_qualification.py::test_raw_capture_chronology_and_image
+tests/unit/test_rebuilt_qualification.py::test_rebuilt_plan_cannot_borrow_old_qualification
+tests/unit/test_rebuilt_qualification.py::test_rebuilt_plan_exact_writer_fields
+tests/unit/test_rebuilt_qualification.py::test_rebuilt_protocol_requires_pinned_parent
+# durable_case() reads ai-engine/artifacts/adr024-qualified-001/model/recorded-history-*.json
+tests/unit/test_experimental_simulation_raw.py::test_durable_frame_counts_model_units_and_honest_comparator_admission
+tests/unit/test_experimental_simulation_raw.py::test_core_record_udp_loss_is_not_probe_loss_and_probe_gate_is_independent
+tests/unit/test_experimental_simulation_raw.py::test_comparator_wrong_kind_and_forged_qualification_rejected

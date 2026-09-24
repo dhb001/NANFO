@@ -1,0 +1,41 @@
+# gitleaks v8.30 policy for the full-history scan (evidence-hygiene.yml, ADR-028 §5).
+#
+# Scope notes (measured 2026-09-24 with `gitleaks git --log-opts=--all`):
+# - The default rules do NOT detect the 71 expired receiver tokens: they are bare
+#   64-hex files with no key/value context. The custom rule below makes every
+#   receiver-token file visible, and exactly those 71 historical blobs are allowlisted.
+# - The default `generic-api-key` rule reports SHA-256 integrity digests in evidence
+#   manifests ("path/auth.py": "<64 hex>", "*_sha256": "<64 hex>") because the file
+#   names contain words like auth/api/token. A digest-shaped value keyed by a file name
+#   or a *_sha256 field is allowlisted for that rule only. Any other finding fails,
+#   except the individually reviewed fingerprints in .gitleaksignore.
+
+title = "NANFO secret scanning"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "nanfo-receiver-token-file"
+description = "NANFO campaign receiver token file (bare 64-hex credential)"
+path = '''(?:^|/)receiver[-_]token(?:\.[A-Za-z0-9]+)?$'''
+regex = '''\b[0-9a-fA-F]{64}\b'''
+tags = ["nanfo", "credential"]
+
+  # ONLY the 71 known expired receiver tokens added in 3f9f1f1 and removed from the
+  # tree in 75b514f. Rewriting history to purge them is an owner action (ADR-028 §5);
+  # until then these exact commit/path pairs are the single accepted exception.
+  [[rules.allowlists]]
+  description = "71 expired ADR-024 receiver tokens pending the owner's history rewrite (ADR-028 §5)"
+  condition = "AND"
+  commits = ["3f9f1f1fd247cd1af6d66cf38d94155ee32a91e1"]
+  paths = ['''^nanfo-experimental-campaign-014/[^/]+/receiver-token$''']
+
+[[allowlists]]
+description = "SHA-256 integrity digests keyed by a file name or a *_sha256 field are not credentials"
+targetRules = ["generic-api-key"]
+regexTarget = "match"
+regexes = [
+  '''^[\w.-]*\.(?:py|pyi|ts|tsx|js|mjs|cjs|jsx|css|json|jsonl|md|txt|sh|yml|yaml|toml|lock|ini|cfg|html|sql|mako|csv|svg|png)["']?\s*:\s*["']?[0-9a-f]{64}["']?$''',
+  '''^[\w.-]*_sha256["']?\s*:\s*["']?[0-9a-f]{64}["']?$''',
+]

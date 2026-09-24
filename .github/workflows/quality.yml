@@ -10,11 +10,77 @@ permissions:
   contents: read
 
 concurrency:
-  group: quality-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+# Independent gates run even after an earlier gate failed (`!cancelled()` plus an
+# explicit install check), so one red step never hides another result.
 jobs:
   backend:
+    name: backend
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      POETRY_VIRTUALENVS_IN_PROJECT: 'true'
+      PIP_DISABLE_PIP_VERSION_CHECK: '1'
+      # Coverage floor = measured baseline - 1 point. No trustworthy local baseline
+      # existed when this gate was introduced (ADR-028), so it starts at 80: raise it
+      # to (reported total - 1) after the first green run on main.
+      COVERAGE_FLOOR: '80'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version-file: backend/.python-version
+      - name: Install locked backend environment
+        id: install
+        run: |
+          python -m pip install poetry==2.4.1
+          poetry check --lock
+          poetry sync --with dev --no-root --no-interaction
+          poetry run python -m pip check
+      - name: Verify declared fakeredis Lua support in the clean locked environment
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: poetry run python ../scripts/check_fakeredis_lua.py
+      - name: Backend lint
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: poetry run ruff check app tests scripts
+      - name: Disposable audit runner isolation and evidence regressions
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: poetry run pytest scripts/test_audit_isolated_suite.py --no-cov -q
+      - name: Unit and service-contract tests (portable; private evidence deselected)
+        id: portable
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        # Tests listed in tests/private_artifacts.txt need the ignored ai-engine/artifacts
+        # store; they are marked `private_artifacts` by tests/conftest.py (ADR-028).
+        run: >-
+          poetry run pytest tests/unit tests/integration -q -m "not private_artifacts"
+          --junitxml=quality-results.xml --cov-report=xml:coverage.xml --cov-fail-under="$COVERAGE_FLOOR"
+      - name: Explicit skip budget (every allowlisted reason executes in another lane)
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: >-
+          python ../.github/scripts/ci_gates.py junit quality-results.xml
+          --budget ../.github/ci-skip-budget.json --lane backend --min-cases 4500
+      - name: Full portable deployment, emulation, root-script and CI-gate regressions (zero skips)
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: poetry run python ../scripts/run_portable_tests.py --junitxml=portable-results.xml
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: backend-quality-results
+          path: |
+            backend/quality-results.xml
+            backend/coverage.xml
+            backend/portable-results*.xml
+          retention-days: 7
+
+  gateway-proxy-boundary:
+    name: gateway-proxy-boundary
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     defaults:
@@ -24,102 +90,77 @@ jobs:
       POETRY_VIRTUALENVS_IN_PROJECT: 'true'
       PIP_DISABLE_PIP_VERSION_CHECK: '1'
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: '3.12.14'
+          python-version-file: backend/.python-version
       - name: Install locked backend environment
+        id: install
         run: |
           python -m pip install poetry==2.4.1
           poetry check --lock
           poetry sync --with dev --no-root --no-interaction
-          poetry run python -m pip check
-      - name: Verify declared fakeredis Lua support in the clean locked environment
-        run: poetry run python ../scripts/check_fakeredis_lua.py
-      - name: Backend lint
-        run: poetry run ruff check app tests scripts
-      - name: Disposable audit runner isolation and evidence regressions
-        run: poetry run pytest scripts/test_audit_isolated_suite.py --no-cov -q
-      - name: Unit and service-contract tests (no live lab)
-        # Exact historical-fixture tests require ignored ADR014 evidence/frozen AI.
-        # Keep artifact-independent tests in these modules. See DeliverySecurity.md.
-        run: >-
-          poetry run pytest tests/unit tests/integration -q --junitxml=quality-results.xml
-          --deselect=tests/unit/test_model_diagnostics.py::test_registry_scopes_and_permission_bits
-          --deselect=tests/unit/test_model_diagnostics.py::test_registry_hash_tampering
-          --deselect=tests/unit/test_model_diagnostics.py::test_real_frozen_replay
-          --deselect=tests/unit/test_model_diagnostics.py::test_real_runner_denies_tampered_artifacts
-          --deselect=tests/unit/test_model_diagnostics.py::test_child_is_reaped_on_bounded_failure
-          --deselect=tests/unit/test_model_diagnostics.py::test_child_environment_is_allowlisted
-          --deselect=tests/unit/test_model_diagnostics.py::test_authority_rechecked_after_inference
-          --deselect=tests/unit/test_model_diagnostics.py::test_current_network_scope_blocks_unregistered_history
-          --deselect=tests/unit/test_model_diagnostic_confinement.py::test_same_uid_filesystem_and_control_syscalls_are_confined
-          --deselect=tests/unit/test_live_providers.py::test_passive_snapshot_scope_digest_and_no_actuation
-          --deselect=tests/unit/test_live_providers.py::test_snapshot_rejects_invalid_input
-          --deselect=tests/unit/test_live_providers.py::test_registry_rejects_self_asserted_qualification_and_tampering
-          --deselect=tests/unit/test_live_providers.py::test_cannot_infer_with_self_asserted_qualification
-          --deselect=tests/unit/test_live_providers.py::test_real_readonly_benchmark_qualification
-          --deselect=tests/unit/test_live_providers.py::test_real_historical_replay_no_live_claim
-          --deselect=tests/unit/test_live_providers.py::test_expired_installation_is_not_qualified
-          --deselect=tests/unit/test_live_providers.py::test_concurrent_inference_rejected
-          --deselect=tests/unit/test_live_providers.py::test_qualification_pending_then_receipt_and_frozen_inference
-          --deselect=tests/unit/test_live_providers.py::test_runtime_result_and_postoffload_fences
-          --deselect=tests/unit/test_live_providers.py::test_confined_child_failure_is_killed_and_reaped
-          --deselect=tests/unit/test_passive_observer.py::test_original_frame_preserved_and_clock_derived
-          --deselect=tests/unit/test_passive_observer.py::test_rejects_old_incompatible_or_unavailable_measurement
-          --deselect=tests/unit/test_passive_observer.py::test_clock_and_process_authority
-          --deselect=tests/unit/test_passive_observer.py::test_admission_protected_hash_and_atomic_permissions
-          --deselect=tests/unit/test_passive_observer.py::test_confined_candidate_validates_original_nonterminal_frame
-          --deselect=tests/unit/test_passive_observer.py::test_idle_bridge_never_publishes_existing_history_or_dispatches
-          --deselect=tests/unit/test_passive_observer.py::test_bridge_validates_before_atomic_publish_and_invalidates_on_disconnect
-      - name: Full portable deployment, emulation and root-script regressions
-        run: poetry run python ../scripts/run_portable_tests.py --junitxml=portable-results.xml
       - name: Install local gateway test binary
         run: sudo apt-get update && sudo apt-get install --no-install-recommends -y nginx
       - name: Real nginx authentication proxy boundary
         run: >-
           poetry run pytest --no-cov -q --junitxml=proxy-results.xml
           tests/unit/test_proxy_boundary.py::test_real_nginx_two_login_clients_and_untrusted_spoof
-      - name: Require executed real nginx regression with zero skips
-        run: |
-          python - <<'PY'
-          import xml.etree.ElementTree as ET
+      - name: Require the executed real nginx case with zero skips
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: >-
+          python ../.github/scripts/ci_gates.py junit proxy-results.xml --zero-skips
+          --require test_real_nginx_two_login_clients_and_untrusted_spoof
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: gateway-proxy-boundary-results
+          path: backend/proxy-results.xml
+          retention-days: 7
 
-          cases = ET.parse('proxy-results.xml').getroot().findall('.//testcase')
-          required = 'test_real_nginx_two_login_clients_and_untrusted_spoof'
-          assert any(case.get('name') == required for case in cases), 'Real nginx proxy case missing'
-          for tag in ('skipped', 'failure', 'error'):
-              assert not any(case.find(tag) is not None for case in cases), f'Gateway lane recorded {tag}'
-          print(f'{len(cases)} gateway/proxy cases passed; zero skips')
-          PY
-      - name: Gateway response headers
+  gateway-headers:
+    name: gateway-headers
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      POETRY_VIRTUALENVS_IN_PROJECT: 'true'
+      PIP_DISABLE_PIP_VERSION_CHECK: '1'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version-file: backend/.python-version
+      - name: Install locked backend environment
+        id: install
+        run: |
+          python -m pip install poetry==2.4.1
+          poetry check --lock
+          poetry sync --with dev --no-root --no-interaction
+      - name: Install local gateway test binary
+        run: sudo apt-get update && sudo apt-get install --no-install-recommends -y nginx
+      - name: Gateway response headers through the real deploy/nginx.conf
         env:
           NANFO_TEST_NGINX: '1'
         run: poetry run pytest tests/integration/test_gateway_headers.py --no-cov -q --junitxml=gateway-results.xml
       - name: Require executed gateway header cases with zero skips
-        run: |
-          python - <<'PY'
-          import xml.etree.ElementTree as ET
-
-          cases = ET.parse('gateway-results.xml').getroot().findall('.//testcase')
-          assert len(cases) >= 6, 'Gateway header cases missing'
-          for tag in ('skipped', 'failure', 'error'):
-              assert not any(case.find(tag) is not None for case in cases), f'Gateway lane recorded {tag}'
-          PY
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: python ../.github/scripts/ci_gates.py junit gateway-results.xml --zero-skips --min-cases 6
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
-          name: backend-quality-results
-          path: |
-            backend/quality-results.xml
-            backend/portable-results.xml
-            backend/gateway-results.xml
-            backend/proxy-results.xml
+          name: gateway-headers-results
+          path: backend/gateway-results.xml
           retention-days: 7
 
   ai:
+    name: ai
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     defaults:
@@ -131,19 +172,30 @@ jobs:
       PYTHONNOUSERSITE: '1'
       OMP_NUM_THREADS: '1'
       MKL_NUM_THREADS: '1'
+      # ADR-028 gate (explicit marker): the full AI suite needs the environment spec that
+      # tests/conftest.py still reads from the ignored artifacts store
+      # (artifacts/adr014-001/release.json). Set to 'true' once the small hashed spec
+      # fixture from the AI-Emulation workstream is committed; until then the
+      # artifact-independent suites below run and must pass with zero skips.
+      AI_FULL_SUITE: 'false'
+      AI_PORTABLE_SUITES: >-
+        tests/test_transport.py tests/test_ppo.py tests/test_holdout.py tests/test_shadow.py
+        tests/test_agent_runtime.py
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: '3.12.14'
+          python-version-file: backend/.python-version
       - name: Install separate locked CPU AI environment
+        id: install
         run: |
           python -m pip install uv==0.8.22
           uv sync --locked --group dev --python "$(command -v python)"
           uv pip check --python .venv-ci/bin/python
       - name: Verify backend export schemas need only AI dependencies
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: |
           uv run --no-sync python -I - <<'PY'
           import importlib.util
@@ -161,15 +213,22 @@ jobs:
           assert ModelDiagnosticRecord.model_fields and ModelDiagnosticsResponse.model_fields
           PY
       - name: AI lint
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: uv run --no-sync ruff check src tests scripts/shadow scripts/shadow_evaluate.py scripts/agent_runtime
-      - name: Artifact-independent AI unit tests (no live training or lab launcher)
-        # Other suites consume ignored historical release/checkpoint artifacts.
-        # Keep this boundary explicit until portable fixtures are delivered.
-        run: >-
-          uv run --no-sync pytest -q --junitxml=quality-results.xml
-          tests/test_transport.py tests/test_ppo.py tests/test_holdout.py tests/test_shadow.py
-          tests/test_agent_runtime.py
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - name: AI unit tests (no live training or lab launcher)
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: |
+          if [ "$AI_FULL_SUITE" = true ]; then
+            uv run --no-sync pytest -q --junitxml=quality-results.xml
+          else
+            echo "::notice title=AI suite gated (ADR-028)::Artifact-independent suites only until the hashed environment-spec fixture is committed."
+            # shellcheck disable=SC2086 # word splitting of the explicit suite list is intended
+            uv run --no-sync pytest -q --junitxml=quality-results.xml $AI_PORTABLE_SUITES
+          fi
+      - name: Require executed AI cases with zero skips
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: python ../.github/scripts/ci_gates.py junit quality-results.xml --zero-skips --min-cases 150
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
           name: ai-quality-results
@@ -177,32 +236,44 @@ jobs:
           retention-days: 7
 
   frontend:
+    name: frontend
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 25
     defaults:
       run:
         working-directory: frontend
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '22.22.0'
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - name: Install frontend lock
+        id: install
         run: npm ci --no-audit --no-fund
-      - run: npm run lint
-      - run: npm run typecheck
-      - run: npm test
+      - name: Lint
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: npm run lint
+      - name: Typecheck
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: npm run typecheck
+      - name: Unit tests
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: npm test
       - name: Production build and existing bundle budgets
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: npm run perf:bundle
       - name: Install lock-matched browser
+        id: browser
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: npx --no-install playwright install --with-deps chromium
       - name: Chromium contract and CSP regressions
+        if: ${{ !cancelled() && steps.browser.outcome == 'success' }}
         run: npm run test:e2e -- --project=chromium --retries=0 --workers=2
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: failure()
         with:
           name: frontend-browser-failure-results

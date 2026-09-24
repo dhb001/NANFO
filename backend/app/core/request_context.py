@@ -8,9 +8,14 @@ from starlette.datastructures import MutableHeaders
 from structlog.contextvars import bind_contextvars, clear_contextvars
 
 from app.core.config import get_settings
+from app.core.logging import get_logger
+
+logger = get_logger(__name__)
 
 # Protocol bound, not an operational setting. Never truncate correlation identity.
 MAX_REQUEST_ID_LENGTH = 128
+# Probes must never fail on proxy-duplicated/garbled correlation headers.
+PROBE_PATHS = frozenset({"/health", "/ready"})
 
 
 def normalize_request_id(value: str | None) -> str:
@@ -48,6 +53,9 @@ def request_context(request: Request) -> RequestMeta:
             error = None
         except HTTPException as exc:
             request_id, error = str(uuid.uuid4()), exc
+            if request.scope.get("path") in PROBE_PATHS:
+                # Liveness/readiness answer with a fresh identity instead of 400.
+                error = None
         request.state.request_id_error = error
         request.state.request_meta = RequestMeta(request_id, datetime.now(UTC).isoformat(), request)
     return request.state.request_meta
@@ -93,8 +101,11 @@ class RequestContextMiddleware:
                 await self.app(scope, receive, send_with_identity)
             except Exception as exc:
                 # Handle before context cleanup, unlike the outer ServerErrorMiddleware.
-                # A started stream cannot be replaced by a second response.
+                # A started stream cannot be replaced by a second response; record the
+                # redacted stack with this request's identity before the server sees it.
                 if response_started:
+                    logger.error("unhandled_exception_after_response_start", path=scope.get("path", ""),
+                                 error_type=type(exc).__name__, request_id=meta.request_id, exc_info=exc)
                     raise
                 response = await self.error_handler(request, exc)
                 await response(scope, receive, send_with_identity)

@@ -189,3 +189,22 @@ def test_workload_allows_route_change_not_demand_change():
     assert workload_hash(config) == workload_hash(ScenarioConfig.model_validate(value))
     value["flows"][0]["demand_mbps"] = [3.0]
     assert workload_hash(config) != workload_hash(ScenarioConfig.model_validate(value))
+
+
+def test_digest_is_byte_identical_to_historical_strict_canonical_json():
+    """ADR-028 C20: switching to app.core.canonical must not change persisted digests."""
+    import hashlib
+    import json
+
+    from app.core.canonical import canonical_json_bytes, canonical_sha256
+
+    config = scenario()
+    _, result = completed(config)
+    values = [canonical_config(config), result, {"unicode": "caf\u00e9 \u2603", "nested": [1, 2.5, None, True]},
+              {"b": 1, "a": {"d": [3, 2], "c": -0.0}}]
+    for value in values:
+        historical = json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
+        assert canonical_json_bytes(value) == historical
+        assert digest(value) == canonical_sha256(value) == hashlib.sha256(historical).hexdigest()
+    with pytest.raises(ValueError):
+        digest({"nan": math.nan})

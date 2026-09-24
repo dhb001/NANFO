@@ -42,4 +42,16 @@ describe("restored session verification", () => {
     expect(screen.queryByText("Protected workspace")).not.toBeInTheDocument();
     expect(fetchMock.mock.calls.filter(([url]) => String(url).endsWith("/auth/refresh"))).toHaveLength(1);
   });
+  it("keeps the session and shows a reconnecting state when refresh hits an outage", async () => {
+    fetchMock.mockImplementation(async (url) => String(url).endsWith("/auth/refresh")
+      ? Response.json({ success: false, data: null, meta: {}, errors: { code: "DEPENDENCY_UNAVAILABLE", message: "Retry later." } }, { status: 503, headers: { "Retry-After": "30" } })
+      : Response.json({ success: false, data: null, meta: {}, errors: { code: "AUTH_TOKEN_MISSING_OR_INVALID", message: "Expired" } }, { status: 401 }));
+    renderGate();
+    expect(await screen.findByText(/Reconnecting\./)).toBeInTheDocument();
+    expect(screen.getByText(/sign-in service is temporarily unavailable/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Retry now" })).toBeEnabled();
+    expect(screen.queryByText("Login required")).not.toBeInTheDocument();
+    expect(useAuthStore.getState().accessToken).toBe("restored");
+    expect(useAuthStore.getState().refreshToken).toBe("refresh");
+  });
 });

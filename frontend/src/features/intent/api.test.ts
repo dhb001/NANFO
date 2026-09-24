@@ -15,7 +15,13 @@ describe("manual intent execute contract", () => {
     await executeIntent("token", request, "same-key");
     await executeIntent("token", { ...request, cancel: true }, "same-key");
     expect(result.data.status).toBe("execution_started");
-    expect(fetchMock.mock.calls[0]).toEqual(fetchMock.mock.calls[1]);
+    // Identical retries apart from each request's own timeout signal.
+    const withoutSignal = (call: unknown[]) => {
+      const [url, { signal: _signal, ...options }] = call as [string, RequestInit];
+      return [url, options];
+    };
+    expect(withoutSignal(fetchMock.mock.calls[0])).toEqual(withoutSignal(fetchMock.mock.calls[1]));
+    expect(fetchMock.mock.calls[0][1].signal).toBeInstanceOf(AbortSignal);
     for (const [url, options] of fetchMock.mock.calls) {
       expect(url).toMatch(/\/api\/v1\/intents\/execute$/);
       expect(options.headers["Idempotency-Key"]).toBe("same-key");

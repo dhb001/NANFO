@@ -128,7 +128,7 @@ class TestOrgService:
 
     @pytest.mark.asyncio
     async def test_get_org_requires_membership(self, org_svc):
-        """Non-member requesting an org must get 403 (Organization.md §6: cross-org leakage)."""
+        """Non-member and absent orgs are indistinguishable (Organization.md §6, ADR-028 C6)."""
         org = _make_org()
         with (
             patch.object(org_svc._repo, "get_by_id", return_value=org),
@@ -136,7 +136,13 @@ class TestOrgService:
             pytest.raises(HTTPException) as exc_info,
         ):
             await org_svc.get_org(org_id=org.org_id, user_id=str(uuid.uuid4()))
-        assert exc_info.value.status_code == 403
+        with (
+            patch.object(org_svc._repo, "get_by_id", return_value=None),
+            pytest.raises(HTTPException) as absent,
+        ):
+            await org_svc.get_org(org_id=uuid.uuid4(), user_id=str(uuid.uuid4()))
+        assert exc_info.value.status_code == 404
+        assert (exc_info.value.status_code, exc_info.value.detail) == (absent.value.status_code, absent.value.detail)
 
     @pytest.mark.asyncio
     async def test_update_org_success_and_event_publish(self, org_svc):
@@ -407,7 +413,7 @@ class TestMemberService:
         with (
             patch.object(member_svc._org_repo, "get_by_id", return_value=org),
             patch.object(member_svc._identity_directory, "user_exists", return_value=True),
-            patch.object(member_svc._repo, "get_member", side_effect=[actor_member, None]),
+            patch.object(member_svc._repo, "get_member", side_effect=[actor_member, actor_member, None]),
             patch.object(member_svc._repo, "add_member", return_value=member),
             patch("app.modules.organization.service.publish_event", new_callable=AsyncMock),
         ):
@@ -434,7 +440,7 @@ class TestMemberService:
         with (
             patch.object(member_svc._org_repo, "get_by_id", return_value=org),
             patch.object(member_svc._identity_directory, "user_exists", return_value=True),
-            patch.object(member_svc._repo, "get_member", side_effect=[actor_member, None]),
+            patch.object(member_svc._repo, "get_member", side_effect=[actor_member, actor_member, None]),
             patch.object(member_svc._repo, "add_member", return_value=member),
             patch(
                 "app.modules.organization.service.publish_event",
@@ -478,7 +484,7 @@ class TestMemberService:
         actor_member = _make_member(org_id, uuid.UUID(actor_user_id))
 
         with (
-            patch.object(member_svc._repo, "get_member", side_effect=[actor_member, member]),
+            patch.object(member_svc._repo, "get_member", side_effect=[actor_member, actor_member, member]),
             patch.object(member_svc._repo, "remove_member", new_callable=AsyncMock),
             patch.object(member_svc._repo, "list_admin_ids", return_value=[uuid.UUID(actor_user_id)]),
             patch.object(member_svc._identity_directory, "can_administer_organization", return_value=True),

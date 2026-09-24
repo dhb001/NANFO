@@ -66,6 +66,9 @@ class TelemetryAggregationResponse(BaseModel):
     total: int
     page: int
     page_size: int
+    # Additive (ADR-028): API totals are counted over at most HISTORY_COUNT_CAP+1
+    # rows; ``total_capped`` means "at least ``total``". Prefer cursor mode.
+    total_capped: bool = False
 
 
 class TelemetryRecordResponse(BaseModel):
@@ -91,6 +94,7 @@ class TelemetryHistoryResponse(BaseModel):
     total: int
     page: int
     page_size: int
+    total_capped: bool = False
 
 
 class TelemetryCursorRequest(BaseModel):
@@ -125,6 +129,44 @@ class TelemetryDeviceHistoryResponse(BaseModel):
     total: int
     page: int
     page_size: int
+    total_capped: bool = False
+
+
+class TelemetrySLOWindowHealth(BaseModel):
+    """Counter deltas observed in the last closed evaluation window."""
+
+    start: AwareDatetime | None
+    end: AwareDatetime
+    seconds: float
+    ingest_attempts: int
+    ingest_failures: int
+    invalid_samples: int
+    dropped_samples: int
+    invalid_sample_ratio: float
+    counter_reset: bool
+
+
+class TelemetrySLOTrendHealth(BaseModel):
+    window_size: int
+    max_window_size: int
+    severity_transition_counts: dict[str, int]
+    anomaly_reason_frequency: dict[str, int]
+
+
+class TelemetrySLOHealth(BaseModel):
+    """Additive read-only view of the collector-evaluated SLO state (ADR-028 C12)."""
+
+    status: Literal["ok", "degraded", "critical", "unavailable"]
+    severity_reason: str | None = None
+    alert_active: bool = False
+    anomaly_reason_flags: list[str] = Field(default_factory=list)
+    anomaly_streak: int = 0
+    evaluated_at: AwareDatetime | None = None
+    evaluation_interval_seconds: float
+    stale: bool
+    window: TelemetrySLOWindowHealth | None = None
+    trend: TelemetrySLOTrendHealth | None = None
+    thresholds: dict[str, float | int] = Field(default_factory=dict)
 
 
 class TelemetryHealthResponse(BaseModel):
@@ -133,3 +175,7 @@ class TelemetryHealthResponse(BaseModel):
     dropped_events: int
     latest_observed_at: datetime | None
     total_records: int
+    # Additive (ADR-028): total_records comes from the planner estimate / a
+    # bounded count cached for at least 60 s, never a full count per request.
+    total_records_estimated: bool = False
+    slo: TelemetrySLOHealth | None = None

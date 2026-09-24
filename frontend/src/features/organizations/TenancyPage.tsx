@@ -75,7 +75,7 @@ function OrganizationDetails({ organization, onDeleted, onSaved }: {
   const [memberId, setMemberId] = useState("");
   const [role, setRole] = useState("Operator");
   const members = useOrgMembers(token, orgId, page);
-  const authority = useOrgAuthority(token, orgId, members.data);
+  const authority = useOrgAuthority(token, orgId);
   const update = useUpdateOrganization(token, orgId);
   const remove = useDeleteOrganization(token, orgId);
   const addMember = useAddOrgMember(token, orgId);

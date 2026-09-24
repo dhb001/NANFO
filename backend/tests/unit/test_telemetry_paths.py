@@ -208,11 +208,11 @@ async def test_composition_rechecks_binding_owner_and_actual_network(path_eviden
                           "permissions": ["read:telemetry"], "jti": "test", "sid": "test", "exp": 9999999999})
     access = AsyncMock(return_value=SimpleNamespace(network_id=e.binding.network_id,
                                                    workspace_id=e.binding.workspace_id))
-    monkeypatch.setattr("app.api.v1.telemetry_paths.NetworkService.assert_network_workspace_access", access)
+    monkeypatch.setattr("app.modules.telemetry.probe_paths.NetworkService.assert_network_workspace_access", access)
     validation = AsyncMock()
-    monkeypatch.setattr("app.api.v1.telemetry_paths.EmulationDiscoveryService.validate_binding", validation)
+    monkeypatch.setattr("app.modules.telemetry.probe_paths.EmulationDiscoveryService.validate_binding", validation)
     reader = AsyncMock(return_value=await e.reader.read(**e.args))
-    monkeypatch.setattr("app.api.v1.telemetry_paths.ProbePathsReader.read", reader)
+    monkeypatch.setattr("app.modules.telemetry.probe_paths.ProbePathsReader.read", reader)
     args = dict(settings=settings, db=None, redis=None, claims=claims, network_id=e.binding.network_id)
     assert (await read_paths(**args)).status == "measured"
     assert validation.await_args.args[0].actor_user_id == e.binding.actor_user_id
@@ -231,10 +231,26 @@ async def test_binding_symlink_is_not_accepted(path_evidence, monkeypatch):
     alias.symlink_to(e.binding_path)
     settings = get_settings().model_copy(update={"EXECUTION_MODE": "emulation",
         "EMULATION_BINDING_PATH": str(alias), "EMULATION_SNAPSHOT_PATH": str(e.snapshot_path)})
-    monkeypatch.setattr("app.api.v1.telemetry_paths.NetworkService.assert_network_workspace_access",
+    monkeypatch.setattr("app.modules.telemetry.probe_paths.NetworkService.assert_network_workspace_access",
                         AsyncMock(return_value=SimpleNamespace(network_id=e.binding.network_id,
                                                                workspace_id=e.binding.workspace_id)))
     claims = TokenClaims({"sub": str(uuid.uuid4()), "email": "reader@example.com", "roles": [],
                           "permissions": ["read:telemetry"], "jti": "test", "sid": "test", "exp": 9999999999})
     result = await read_paths(settings=settings, db=None, redis=None, claims=claims, network_id=e.binding.network_id)
     assert result.reason == "trusted_binding_unavailable" and not result.paths
+
+
+def test_router_holds_no_cross_module_repository_or_identity_composition():
+    """ADR-028: composition moved from the router into Telemetry's ProbePathsService."""
+    import app.api.v1.telemetry_paths as router_module
+
+    for name in ("DeviceRepository", "AuthService", "NetworkService", "EmulationDiscoveryService"):
+        assert not hasattr(router_module, name), name
+
+
+def test_emulation_discovery_composition_is_built_per_session():
+    from app.modules.telemetry.probe_paths import build_emulation_discovery
+
+    first = build_emulation_discovery(object(), None, expected_topology={"topology_id": "t"})
+    second = build_emulation_discovery(object(), None, expected_topology={"topology_id": "t"})
+    assert first.devices is not second.devices and first.topology is None

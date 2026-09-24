@@ -119,6 +119,8 @@ async def tenant_api(monkeypatch, mock_db, fake_redis):
     audit_query = repo(AuditLogRepository, "list_entries", return_value=([], 0))
     plugin_query = repo(PluginRepository, "list_plugins", return_value=[])
     alert_query = repo(AlertRepository, "list_alerts", return_value=[])
+    repo(AlertRepository, "count_alerts", return_value={})
+    repo(AlertRepository, "legacy_network_ids", return_value=[])
     repo(AlertRepository, "get_by_id", return_value=SimpleNamespace(payload={"workspace_id": str(WS_B)}))
 
     app = FastAPI()

@@ -85,29 +85,68 @@ async def test_count_all_and_latest_observed_at(mock_db):
 
 
 @pytest.mark.asyncio
-async def test_get_latest_scope_returns_workspace_and_network_from_latest_row(mock_db):
-    result = MagicMock()
-    workspace_id = uuid.uuid4()
-    network_id = uuid.uuid4()
-    result.first.return_value = (workspace_id, network_id)
-
-    mock_db.execute = AsyncMock(return_value=result)
-
-    repo = TelemetryRecordRepository(mock_db)
-    latest_workspace_id, latest_network_id = await repo.get_latest_scope()
-
-    assert latest_workspace_id == workspace_id
-    assert latest_network_id == network_id
+async def test_repository_has_no_cross_tenant_latest_scope_lookup(mock_db):
+    """ADR-028 C12 regression: platform SLO alerts must never borrow a tenant scope."""
+    assert not hasattr(TelemetryRecordRepository(mock_db), "get_latest_scope")
 
 
 @pytest.mark.asyncio
-async def test_get_latest_scope_returns_none_tuple_when_no_rows(mock_db):
-    result = MagicMock()
-    result.first.return_value = None
-    mock_db.execute = AsyncMock(return_value=result)
+@pytest.mark.parametrize("device", [False, True])
+async def test_capped_count_limits_the_counted_subquery(mock_db, device):
+    from sqlalchemy.dialects import postgresql
 
+    count_result = MagicMock()
+    count_result.scalar_one.return_value = 10_001
+    rows_result = MagicMock()
+    rows_result.scalars.return_value.all.return_value = []
+    mock_db.execute = AsyncMock(side_effect=[count_result, rows_result])
     repo = TelemetryRecordRepository(mock_db)
-    latest_workspace_id, latest_network_id = await repo.get_latest_scope()
+    scope = {"network_id": uuid.uuid4(), "workspace_id": uuid.uuid4(), "metric": None, "page": 1, "page_size": 5}
+    if device:
+        rows, total = await repo.list_for_device(device_id=uuid.uuid4(), count_cap=10_000, **scope)
+    else:
+        rows, total = await repo.list_history(count_cap=10_000, **scope)
+    assert (rows, total) == ([], 10_001)
+    count_sql = str(mock_db.execute.call_args_list[0].args[0].compile(
+        dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}))
+    assert "LIMIT 10001" in count_sql
+    # The bounded count selects a single key column, not whole JSONB rows.
+    assert "telemetry_records.tags" not in count_sql
 
-    assert latest_workspace_id is None
-    assert latest_network_id is None
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reltuples,exact,expected", [
+    (5_000_000, None, (5_000_000, True)),   # large table: planner estimate, no scan
+    (-1, 42, (42, False)),                  # never analyzed: bounded exact count
+    (3, 10_001, (10_001, True)),            # stale small estimate but big table
+])
+async def test_estimate_total_records_never_full_counts(mock_db, reltuples, exact, expected):
+    mock_db.scalar = AsyncMock(return_value=reltuples)
+    count_result = MagicMock()
+    count_result.scalar_one.return_value = exact
+    mock_db.execute = AsyncMock(return_value=count_result)
+    assert await TelemetryRecordRepository(mock_db).estimate_total_records() == expected
+    if exact is None:
+        mock_db.execute.assert_not_awaited()
+    else:
+        from sqlalchemy.dialects import postgresql
+
+        sql = str(mock_db.execute.await_args.args[0].compile(
+            dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}))
+        assert "LIMIT 10001" in sql
+
+
+@pytest.mark.asyncio
+async def test_latest_observed_at_can_exclude_future_rows(mock_db):
+    from datetime import UTC, datetime
+
+    from sqlalchemy.dialects import postgresql
+
+    result = MagicMock()
+    result.scalar_one_or_none.return_value = None
+    mock_db.execute = AsyncMock(return_value=result)
+    bound = datetime(2026, 9, 23, tzinfo=UTC)
+    await TelemetryRecordRepository(mock_db).get_latest_observed_at(not_after=bound)
+    sql = str(mock_db.execute.await_args.args[0].compile(
+        dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}))
+    assert "max(telemetry_records.observed_at)" in sql and "observed_at <=" in sql

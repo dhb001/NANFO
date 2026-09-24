@@ -1,16 +1,16 @@
-"""Deletion requires exact owner-projected compensation/restoration evidence."""
+"""Deletion requires exact owner-projected compensation/restoration evidence (Intent-owned)."""
 
 import copy
 import uuid
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from fastapi import HTTPException
+from sqlalchemy.dialects import postgresql
 
 from app.modules.intent.lab import digest
-from app.modules.network.deletion import InventoryDeletionService, _verified_intent_restoration
+from app.modules.intent.queries import has_blocking_work, verified_restoration
 
 INTENT, NETWORK, WORKSPACE, EXECUTION, RUN = [uuid.UUID(int=n) for n in range(1, 6)]
 
@@ -33,10 +33,13 @@ def restored_detail(*, restore=False):
             }}
 
 
+def verified(detail) -> bool:
+    return verified_restoration(status=detail["status"], provenance=detail["execution_provenance"])
+
+
 @pytest.mark.parametrize("restore", [False, True])
 def test_exact_restoration_is_safe(restore):
-    assert _verified_intent_restoration(restored_detail(restore=restore), intent_id=INTENT,
-                                       network=SimpleNamespace(network_id=NETWORK, workspace_id=WORKSPACE))
+    assert verified(restored_detail(restore=restore))
 
 
 @pytest.mark.parametrize("field,value", [
@@ -49,45 +52,59 @@ def test_exact_restoration_is_safe(restore):
 def test_incomplete_ambiguous_or_mismatched_proof_blocks(field, value):
     detail = restored_detail()
     detail["execution_provenance"][field] = value
-    assert not _verified_intent_restoration(detail, intent_id=INTENT,
-                                           network=SimpleNamespace(network_id=NETWORK, workspace_id=WORKSPACE))
+    assert not verified(detail)
 
 
 def test_applied_policy_and_foreign_restore_do_not_prove_restoration():
-    network = SimpleNamespace(network_id=NETWORK, workspace_id=WORKSPACE)
     detail = restored_detail(restore=True)
-    for key in ("intent_id", "network_id", "workspace_id"):
-        foreign = copy.deepcopy(detail)
-        foreign[key] = str(uuid.UUID(int=99))
-        assert not _verified_intent_restoration(foreign, intent_id=INTENT, network=network)
-    proof = detail["execution_provenance"]
-    proof["verification"]["probe"]["destination_host"] = "h4"
-    assert not _verified_intent_restoration(detail, intent_id=INTENT, network=network)
+    proof = copy.deepcopy(detail)
+    proof["execution_provenance"]["verification"]["probe"]["destination_host"] = "h4"
+    assert not verified(proof)
     applied = restored_detail()
     applied["status"] = applied["execution_provenance"]["status"] = "execution_completed"
     applied["execution_provenance"]["phase"] = "completed"
-    assert not _verified_intent_restoration(applied, intent_id=INTENT, network=network)
+    assert not verified(applied)
+    assert not verified_restoration(status="execution_failed", provenance=None)
+
+
+def _rows(*rows):
+    result = MagicMock()
+    result.all.return_value = list(rows)
+    return result
+
+
+async def test_blocking_intent_status_is_one_indexed_network_probe():
+    db = AsyncMock()
+    db.scalar.return_value = INTENT
+    assert await has_blocking_work(db, network_id=NETWORK) is True
+    sql = db.scalar.call_args.args[0].compile(dialect=postgresql.dialect())
+    assert "intents.network_id =" in str(sql) and "intents.status NOT IN" in str(sql)
+    assert NETWORK in sql.params.values()
+    db.execute.assert_not_awaited()
 
 
 @pytest.mark.parametrize("restore", [False, True])
-async def test_dependency_uses_owning_detail_and_still_blocks_missing_proof(mock_db, fake_redis, restore):
-    network = SimpleNamespace(network_id=NETWORK, workspace_id=WORKSPACE)
-    with (
-        patch("app.modules.simulation.history.SimulationHistoryService.list_page", new_callable=AsyncMock) as sim,
-        patch("app.modules.intent.history.IntentHistoryService.list_page", new_callable=AsyncMock) as intent,
-        patch("app.modules.intent.service.IntentExecutionService.get_intent_detail", new_callable=AsyncMock) as detail,
-        patch("app.modules.autonomy.service.AutonomyService.snapshot", new_callable=AsyncMock) as autonomy,
-    ):
-        sim.return_value = SimpleNamespace(items=[], total=0)
-        detail.return_value = restored_detail(restore=restore)
-        intent.return_value = SimpleNamespace(items=[SimpleNamespace(intent_id=INTENT,
-            status=detail.return_value["status"])], total=1)
-        autonomy.return_value = SimpleNamespace(mode="monitor", active_execution_id=None,
-                                               cancellation_status="none", blocked_reasons=[])
-        service = InventoryDeletionService(mock_db, fake_redis)
-        await service._assert_workflows_safe(network, "actor")
-        detail.assert_awaited_once_with(workspace_id=WORKSPACE, intent_id=INTENT, user_id="actor")
-        detail.return_value = {}
-        with pytest.raises(HTTPException) as exc:
-            await service._assert_workflows_safe(network, "actor")
-        assert exc.value.status_code == 409
+async def test_finished_executions_require_verified_restoration(restore):
+    detail = restored_detail(restore=restore)
+    good = SimpleNamespace(intent_id=INTENT, status=detail["status"], execution_provenance=detail["execution_provenance"])
+    db = AsyncMock()
+    db.scalar.return_value = None
+    db.execute.return_value = _rows(good)
+    assert await has_blocking_work(db, network_id=NETWORK) is False
+    unproven = SimpleNamespace(intent_id=INTENT, status=detail["status"],
+                               execution_provenance={**detail["execution_provenance"], "blocks_lab": True})
+    db.execute.return_value = _rows(unproven)
+    assert await has_blocking_work(db, network_id=NETWORK) is True
+
+
+async def test_restoration_proofs_are_paged_by_intent_id():
+    detail = restored_detail()
+    good = [SimpleNamespace(intent_id=uuid.UUID(int=100 + n), status=detail["status"],
+                            execution_provenance=detail["execution_provenance"]) for n in range(200)]
+    bad = SimpleNamespace(intent_id=uuid.UUID(int=999), status=detail["status"], execution_provenance={})
+    db = AsyncMock()
+    db.scalar.return_value = None
+    db.execute.side_effect = [_rows(*good), _rows(bad)]
+    assert await has_blocking_work(db, network_id=NETWORK) is True
+    second = str(db.execute.await_args_list[1].args[0].compile(dialect=postgresql.dialect()))
+    assert "intents.intent_id >" in second

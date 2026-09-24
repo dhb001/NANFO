@@ -1,77 +1,73 @@
-import type { TwinMetricSnapshot } from "@/features/digitalTwin/sceneAdapter";
+import type { BackendDeviceAlert } from "@/features/digitalTwin/twinSeverity";
 
-interface IntentHandoffPrefill {
+/**
+ * Digital Twin -> Intent prefill. The operator reviews and edits everything before
+ * validation. Only backend-owned facts are carried: device identity, the persisted
+ * spatial reference and references to open backend alerts. The Twin's visual heuristic
+ * is display-only and is never embedded (no policy id, score or heuristic severity), and
+ * no action is pre-selected from it.
+ */
+export interface IntentHandoffPrefill {
   source: "digital-twin";
-  action: string;
+  /** Always null: the Twin does not recommend an action. */
+  action: null;
   scopeJson: string;
   constraintsJson: string;
   contextSummary: string;
 }
 
-interface IntentHandoffNode {
+export interface IntentHandoffNode {
   id: string;
   hostname: string;
-  type: string;
   spatialRefId: string | null;
-  congestion: {
-    severity: "low" | "medium" | "high" | "neutral";
-    score: number | null;
-    policyVersion: string;
-    primaryPolicyId: string | null;
-    metrics: TwinMetricSnapshot[];
-  };
+  persistedSpatialRefId?: string | null;
 }
 
-function recommendIntentAction(severity: "low" | "medium" | "high" | "neutral") {
-  if (severity === "high") {
-    return "throttle_qos";
-  }
-  if (severity === "medium") {
-    return "optimize_wireless_capacity";
-  }
-  return "reroute_path";
-}
+/** Bounded so the scope stays far inside the intent payload limits. */
+export const MAX_HANDOFF_ALERT_REFS = 5;
 
-export function buildIntentHandoffFromNode(node: IntentHandoffNode): IntentHandoffPrefill {
-  const action = recommendIntentAction(node.congestion.severity);
-  const topMetric = node.congestion.metrics.find((metric) => !metric.stale) ?? null;
+export function buildIntentHandoffFromNode(node: IntentHandoffNode, alerts: readonly BackendDeviceAlert[] = []): IntentHandoffPrefill {
+  const refs = alerts.slice(0, MAX_HANDOFF_ALERT_REFS).map((alert) => ({
+    alert_id: alert.alertId,
+    alert_key: alert.alertKey,
+    status: alert.status,
+    severity: alert.severity,
+    metric: alert.metric,
+  }));
   const scope = {
     source: "digital_twin",
     device_id: node.id,
-    spatial_ref_id: node.spatialRefId,
-    congestion: {
-      severity: node.congestion.severity,
-      score: node.congestion.score,
-      policy_id: node.congestion.primaryPolicyId,
-      metric: topMetric
-        ? {
-            name: topMetric.metric,
-            value: topMetric.value,
-            unit: topMetric.unit,
-            severity: topMetric.severity,
-          }
-        : null,
-    },
+    spatial_ref_id: node.persistedSpatialRefId ?? null,
+    backend_alerts: refs,
   };
-
   const constraints = {
     max_downtime: 0,
     preserve_connectivity: true,
     simulation_required: true,
     context_source: "digital_twin",
   };
-
+  const active = alerts.filter((alert) => alert.status === "active").length;
+  const acknowledged = alerts.length - active;
   const summary = [
     `device=${node.hostname}`,
-    `severity=${node.congestion.severity}`,
-    `policy=${node.congestion.primaryPolicyId ?? "none"}`,
+    `backend_alerts=${active} active, ${acknowledged} acknowledged`,
+    "action=operator choice",
   ].join(" | ");
-
   return {
     source: "digital-twin",
-    action,
+    action: null,
     scopeJson: JSON.stringify(scope),
     constraintsJson: JSON.stringify(constraints),
     contextSummary: summary,
   };
+}
+
+/** Query string for `/ops/intent`; the action parameter is omitted deliberately. */
+export function intentHandoffQuery(handoff: IntentHandoffPrefill): string {
+  const query = new URLSearchParams();
+  query.set("source", handoff.source);
+  query.set("scope", handoff.scopeJson);
+  query.set("constraints", handoff.constraintsJson);
+  query.set("context_summary", handoff.contextSummary);
+  return query.toString();
 }

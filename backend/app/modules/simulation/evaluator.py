@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 import copy
-import hashlib
-import json
 import math
 
+from app.core.canonical import canonical_sha256
 from app.modules.simulation.schemas import ScenarioConfig
 
 MODEL_VERSION = "finite-buffer-fluid.v1"
@@ -14,11 +13,13 @@ LATENCY_DEFINITION = "delivered-byte-weighted residence time; proportional mixed
 
 
 def digest(value) -> str:
-    return hashlib.sha256(
-        json.dumps(
-            value, sort_keys=True, separators=(",", ":"), allow_nan=False
-        ).encode()
-    ).hexdigest()
+    """Strict canonical SHA-256 (ADR-028 C20).
+
+    Byte-identical to the historical local helper
+    ``sha256(json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False).encode())``
+    so persisted input/checkpoint/output digests remain valid.
+    """
+    return canonical_sha256(value)
 
 
 def canonical_config(config: ScenarioConfig) -> dict:

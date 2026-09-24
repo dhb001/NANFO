@@ -134,6 +134,14 @@ function toBuildingId(campusKey: string, buildingKey: string): string {
   return `${normalizeKey(campusKey)}:${normalizeKey(buildingKey)}`;
 }
 
+/**
+ * Extruded footprints are rotated -90° about X, which maps shape (x, y) to world (x, -y).
+ * Footprints are Twin [x, z], so the shape uses (x, -z) to land on world (x, z) unmirrored.
+ */
+export function footprintShapePoint(point: readonly [number, number]): [number, number] {
+  return [point[0], point[1] === 0 ? 0 : -point[1]];
+}
+
 export function buildCampusBuildingId(campusKey: string, buildingKey: string): string {
   return toBuildingId(campusKey, buildingKey);
 }

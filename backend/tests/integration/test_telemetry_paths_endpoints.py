@@ -31,7 +31,7 @@ def paths_http(request, session_auth, tenant_auth, monkeypatch):
     monkeypatch.setattr("app.modules.telemetry.paths.datetime", clock)
     network_access = AsyncMock(return_value=SimpleNamespace(network_id=e.binding.network_id,
                                                            workspace_id=e.binding.workspace_id))
-    monkeypatch.setattr("app.api.v1.telemetry_paths.NetworkService.assert_network_workspace_access", network_access)
+    monkeypatch.setattr("app.modules.telemetry.probe_paths.NetworkService.assert_network_workspace_access", network_access)
     # Keep real binding validation and device lookup logic, replace only persistence.
     devices = {device_id: SimpleNamespace(network_id=e.binding.network_id, status="active", deleted_at=None)
                for device_id in (*e.binding.switches.values(), *e.binding.hosts.values())}

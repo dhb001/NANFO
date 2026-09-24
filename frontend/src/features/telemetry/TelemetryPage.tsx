@@ -279,7 +279,7 @@ function TelemetryPageContent() {
           </QueryState>
           <nav aria-label="Telemetry device pagination">
             <Button disabled={devicePage <= 1 || devicesQuery.isFetching} onClick={() => setDevicePage(devicePage - 1)}>Previous devices</Button>
-            <span> Page {devicePage} | {devicesQuery.data?.total ?? "Unknown"} devices </span>
+            <span aria-live="polite"> Page {devicePage}{devicesQuery.isPlaceholderData ? " (loading…)" : ""} | {devicesQuery.data?.total ?? "Unknown"} devices </span>
             <Button disabled={!devicesQuery.data || devicePage * devicesQuery.data.page_size >= devicesQuery.data.total || devicesQuery.isFetching} onClick={() => setDevicePage(devicePage + 1)}>Next devices</Button>
           </nav>
         </Panel>

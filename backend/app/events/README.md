@@ -17,34 +17,55 @@ does not acquire the API lease.
 | Setting | Default | Meaning |
 | --- | --- | --- |
 | `API_REALTIME_LEASE_TTL_SECONDS` | 30 | Lease expiry; renewal every TTL/3, Redis calls bounded to TTL/6 |
-| `EVENT_RECLAIM_IDLE_MS` | 60000 | Minimum pending idle time before reclaim |
+| `EVENT_RECLAIM_IDLE_MS` | 60000 | Minimum pending idle time before reclaim (the redelivery backoff) |
 | `EVENT_CONSUMER_BATCH_SIZE` | 10 | Entries per reclaim page and new-message read, maximum 100 |
-| `EVENT_COMPLETION_TTL_SECONDS` | 86400 | Per-stream/group/handler completion cache lifetime |
+| `EVENT_MAX_DELIVERIES` | 20 | Deliveries (XPENDING counter) before a pending entry is dead-lettered |
+| `EVENT_COMPLETION_TTL_SECONDS` | 3600 | Completion-marker lifetime; must cover the replay horizon below |
 | `EVENT_HANDLER_TIMEOUT_SECONDS` | 30 | Time bound per handler attempt |
+| `EVENT_CONSUMER_NAME` | `<role>-<hostname>` | Stable consumer name per instance |
+| `EVENT_CONSUMER_CONCURRENCY` | 1 | >1 processes entries concurrently, ordered per network/device |
+| `EVENT_PUBLISH_MAX_MEMORY_RATIO` | 0.90 | Producers refuse (503) at this `used_memory/maxmemory` |
 
-Contention or Redis acquisition failure fails startup. Token-checked Lua renewal
-failure, timeout, or expiry invokes `os._exit(1)` to close the process's existing
-WebSockets, consumers, and collector, rather than leaving a degraded realtime
-process serving. Use a supervisor with restart backoff. Normal shutdown stops
-runtime tasks before token-checked lease release. A successor's lease is never
-deleted by a stale owner. This assumes a single authoritative Redis primary,
-not a consensus fence across independently writable Redis primaries.
+Contention or Redis acquisition failure fails startup. Renewal retries transient
+Redis failures until one IO deadline before local expiry. On loss the deadline is
+cleared first (every collector/handler/readiness fence fails closed), domain tasks
+are cancelled, and the process receives SIGTERM for a graceful shutdown with a
+hard-exit fallback (`API_REALTIME_LEASE_LOSS_EXIT_SECONDS`, exit status 1). Normal
+shutdown stops runtime tasks before token-checked lease release. A successor's
+lease is never deleted by a stale owner. This assumes a single authoritative Redis
+primary, not a consensus fence across independently writable Redis primaries.
 
-## Recovery Semantics
+## Recovery Semantics (ADR-028 C14)
 
-Consumer identities include a fresh UUID on every start. Each loop visits one
-bounded `XAUTOCLAIM` page, advances its cursor, then reads new entries. Existing
-`event:seen:*` keys are intentionally ignored. Individual handler completion is
-recorded only after success. A later handler's failure does not repeat previously
-completed handlers while their markers remain available. Unknown valid event
-types are ACKed and ignored, as before.
+Each instance uses one stable consumer name, so a restart reclaims its own pending
+entries; the leader's janitor removes consumers idle for more than
+`max(10 x EVENT_RECLAIM_IDLE_MS, 1 h)` that hold no pending entries (atomic Lua
+re-check). Each loop visits one bounded `XAUTOCLAIM` page, advances its cursor, then
+reads new entries. Existing `event:seen:*` keys are intentionally ignored.
+Individual handler completion is recorded only after success; handlers registered
+`idempotent` (audit and telemetry persistence, unique `event_id`) skip markers.
 
-Malformed identity/JSON/object payloads and exhausted handler retries are appended
-to `stream:dead_letter` with original fields and stream/group/entry provenance.
-Only a successful, untrimmed DLQ `XADD` permits ACK. DLQ failures leave pending
-entries recoverable. Configure Redis persistence and backup appropriately: Redis
-acknowledgement is not a promise against loss of an unfsynced Redis write. Do not
-trim or delete the DLQ before operator inspection/recovery.
+* Transient/unclassified failures (Redis/PostgreSQL/Neo4j outages, timeouts, OS
+  errors, unknown exceptions) leave the entry **pending**; reclaim retries it after
+  `EVENT_RECLAIM_IDLE_MS`. Later entries of the same network/device are held back,
+  a dependency outage pauses the loop with exponential backoff (<= 30 s).
+* Deterministic failures (ValueError/KeyError/TypeError/ValidationError/
+  `DeterministicEventError`, unsupported envelope major version, missing
+  dereferenced fields per `app.events.contracts`) are dead-lettered immediately.
+* Entries delivered more than `EVENT_MAX_DELIVERIES` times are dead-lettered
+  without running handlers (crash-loop protection).
+
+Replay horizon: `EVENT_MAX_DELIVERIES x (EVENT_RECLAIM_IDLE_MS + handler timeout)`
+= 20 x 90 s = 30 min; markers live 60 min (validated at startup).
+
+Dead-letter entries keep the original fields/bytes plus `failed_stream`,
+`failed_group`, `failed_entry_id`, `failure_reason`, `failed_handler`,
+`delivery_count` and `error_type` (never exception messages). Only a successful,
+untrimmed DLQ `XADD` permits ACK. Operate the DLQ with
+`python -m scripts.dead_letter {list,replay,purge}`; retention runs continuously
+via `python -m scripts.stream_retention schedule` (archive-before-delete, DLQ
+included). Configure Redis persistence and backup appropriately: Redis
+acknowledgement is not a promise against loss of an unfsynced Redis write.
 
 Apply migration `0012` after `0011` before starting these consumers. Identity owns
 the nullable unique `audit_logs.event_id` and uses `INSERT ON CONFLICT DO NOTHING`
@@ -57,7 +78,7 @@ This is at-least-once delivery, not universal exactly-once. A side effect may fi
 before its completion marker is recorded. Audit and telemetry database identity
 constraints protect their durable inserts; ephemeral WebSocket deliveries can
 repeat. Metrics counters remain best-effort. Telemetry persistence/validation,
-fanout and transition publication failures propagate for retry/DLQ; derived alert
+fanout and transition publication failures propagate for reclaim/DLQ; derived alert
 publication reuses an event ID deterministically derived from the source identity.
 
 Outbox work remains Intent-owned. Existing Report and Simulation services still

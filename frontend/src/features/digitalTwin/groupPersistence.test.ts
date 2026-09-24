@@ -29,3 +29,15 @@ it("sends the custom editor's exact stable-key membership payload", async () => 
   await upsertDeviceGroups("token", "network", { replaceExisting: false, groups: [group] });
   expect(fetchMock).toHaveBeenCalledOnce();
 });
+
+it("forwards C8 expected_updated_at per group only when present", async () => {
+  const fetchMock = vi.fn<typeof fetch>(async () => Response.json({ success: true, data: { items: [], total: 0 }, meta: {}, errors: null }));
+  vi.stubGlobal("fetch", fetchMock);
+  await upsertDeviceGroups("token", "network", { replaceExisting: false, groups: [
+    { group_key: "pinned", name: "Pinned", group_type: "functional", selector: { functional_group: "wireless" }, device_ids: [], expected_updated_at: "2026-09-24T10:00:00.123456Z" },
+    { group_key: "new", name: "New", group_type: "operational", selector: { site_prefix: "campus-a" }, device_ids: [] },
+  ] });
+  const body = JSON.parse(String(fetchMock.mock.calls[0][1]?.body)) as { groups: Array<Record<string, unknown>> };
+  expect(body.groups[0].expected_updated_at).toBe("2026-09-24T10:00:00.123456Z");
+  expect(body.groups[1]).not.toHaveProperty("expected_updated_at");
+});

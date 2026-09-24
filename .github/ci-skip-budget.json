@@ -1,0 +1,70 @@
+{
+  "schema": "nanfo-ci-skip-budget-v1",
+  "about": "Explicit skip allowlist for CI JUnit gates (.github/scripts/ci_gates.py). Every reason names where the skipped tests really execute. Counts were measured on a CI-equivalent checkout (tracked files only, no ai-engine/artifacts, no DSNs) on 2026-09-24. Adding a skip needs a reviewed bump here; an unlisted reason always fails.",
+  "lanes": {
+    "backend": {
+      "reasons": [
+        {
+          "pattern": "\\b[A-Z][A-Z0-9_]*_TEST_(?:DSN|REDIS_URL)\\b",
+          "max": 294,
+          "why": "Real PostgreSQL/Redis contracts; executed with zero skips by disposable-integration.yml database-contracts (drift-checked file list)."
+        },
+        {
+          "pattern": "^explicit exact disposable Redis image required$",
+          "max": 29,
+          "why": "Real Redis stream-retention races; executed with zero skips by disposable-integration.yml stream-retention."
+        },
+        {
+          "pattern": "^NANFO_TEST_NGINX=1 required$",
+          "max": 6,
+          "why": "Real nginx gateway headers; executed with zero skips by quality.yml gateway-headers."
+        },
+        {
+          "pattern": "^nginx executable required for live forwarding test$",
+          "max": 1,
+          "why": "Real nginx login-IP proxy boundary; executed with zero skips by quality.yml gateway-proxy-boundary (hosted runners may lack nginx here)."
+        },
+        {
+          "pattern": "^isolated Docker acceptance opt-in$",
+          "max": 3,
+          "why": "Owner opt-in lane RUN_DISTRIBUTED_REALTIME=1 (isolated multi-API Docker acceptance); not run on hosted CI."
+        },
+        {
+          "pattern": "^explicit disposable Docker provider lane required$",
+          "max": 1,
+          "why": "Owner opt-in lane NANFO_LIVE_PROVIDER_POSTGRES=1 (disposable Docker live-provider worker); not run on hosted CI."
+        },
+        {
+          "pattern": "^explicit private fleet PG/Redis and local SNMP acceptance required$",
+          "max": 1,
+          "why": "Owner opt-in lane FLEET_LOCAL_SNMP=1 with FLEET_TEST_DSN/FLEET_TEST_REDIS_URL and a local snmpd; not run on hosted CI."
+        },
+        {
+          "pattern": "^Opt-in replay of local real lab captures, not live tenant authorization$",
+          "max": 1,
+          "why": "Owner opt-in lane NANFO_REPLAY_PROBE_CAPTURE=1 replaying private lab captures; not run on hosted CI."
+        },
+        {
+          "pattern": "^opt-in immutable measured campaign$",
+          "max": 2,
+          "why": "Private evidence lane NANFO_TEST_ADR013_CAMPAIGN_ROOT=<immutable campaign>; historical bytes are never published to CI."
+        },
+        {
+          "pattern": "^parent has not supplied a pinned actual native v2 capture$",
+          "max": 1,
+          "why": "Private evidence lane NANFO_NATIVE_REPLAY_ROOT + NANFO_NATIVE_REPLAY_RECEIPT_SHA256 (read-only native capture replay)."
+        },
+        {
+          "pattern": "^explicit retained native evidence required$",
+          "max": 1,
+          "why": "Private evidence lane NANFO_NATIVE_DRIVER_EVIDENCE=<retained native driver evidence>."
+        },
+        {
+          "pattern": "^actual derived artifact not supplied$",
+          "max": 1,
+          "why": "Private evidence lane NANFO_REBUILT_CHECKPOINT_TEST=<derived checkpoint> (read-only lineage check)."
+        }
+      ]
+    }
+  }
+}

@@ -1,4 +1,4 @@
-import { API_BASE_URL } from "@/shared/lib/env";
+import { apiUrl } from "@/shared/lib/env";
 import { ApiClientError } from "@/shared/lib/errors";
 import { useAuthStore } from "@/shared/state/auth-store";
 import { useWorkspaceStore } from "@/shared/state/workspace-store";
@@ -28,7 +28,7 @@ export async function downloadReport(report: ReportRecord, artifact: ReportArtif
   for (let attempt = 0; attempt < 2; attempt++) {
     assertCurrent();
     const token = useAuthStore.getState().accessToken;
-    response = await fetch(`${API_BASE_URL}${path}`, { headers: { Authorization: `Bearer ${token}` }, signal, cache: "no-store", redirect: "error" });
+    response = await fetch(apiUrl(path), { headers: { Authorization: `Bearer ${token}` }, signal, cache: "no-store", redirect: "error" });
     assertCurrent();
     if (response.status !== 401 || attempt > 0) break;
     await response.body?.cancel();

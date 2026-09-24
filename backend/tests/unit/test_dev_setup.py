@@ -163,7 +163,62 @@ def test_sample_cannot_render_and_all_dev_ports_are_loopback(setup_tree):
     assert all(port["host_ip"] == "127.0.0.1" for service in services.values() for port in service["ports"])
 
 
+def make_dry_run(target):
+    if shutil.which("make") is None:
+        pytest.skip("make is required to render Makefile recipes")
+    result = subprocess.run(["make", "-n", target], cwd=ROOT / "backend", capture_output=True, text=True, check=True)
+    return [line for line in result.stdout.splitlines() if line.strip()]
+
+
 @pytest.mark.parametrize("target,operation", [("migrate", "upgrade head"), ("migrate-down", "downgrade -1")])
 def test_make_uses_actual_alembic_config(target, operation):
-    result = subprocess.run(["make", "-n", target], cwd=ROOT / "backend", capture_output=True, text=True, check=True)
-    assert f"alembic -c alembic/alembic.ini {operation}" in result.stdout
+    assert make_dry_run(target) == [f"poetry run alembic -c alembic/alembic.ini {operation}"]
+
+
+PYTHON_TARGETS = ("migrate", "migrate-down", "dev", "test", "test-unit", "test-integration", "lint", "check")
+
+
+@pytest.mark.parametrize("target", PYTHON_TARGETS)
+def test_make_python_targets_use_the_locked_poetry_environment(target):
+    lines = make_dry_run(target)
+    assert lines and all(line.startswith("poetry run ") for line in lines)
+
+
+def test_make_dev_server_binds_loopback_only():
+    [line] = make_dry_run("dev")
+    assert "--host 127.0.0.1" in line and "0.0.0.0" not in line
+
+
+def workflow(name):
+    yaml = pytest.importorskip("yaml")
+    return yaml.safe_load((ROOT / ".github/workflows" / name).read_text())
+
+
+def backend_job_commands():
+    return [step.get("run", "") for step in workflow("quality.yml")["jobs"]["backend"]["steps"]]
+
+
+def test_make_lint_and_check_match_the_ci_backend_job():
+    ci = backend_job_commands()
+    assert make_dry_run("lint") == ["poetry run ruff check app tests scripts"]
+    assert any(" ".join(command.split()) == "poetry run ruff check app tests scripts" for command in ci)
+    ruff, pytest_line = make_dry_run("check")
+    assert ruff == "poetry run ruff check app tests scripts"
+    assert pytest_line.startswith("poetry run pytest tests/unit tests/integration ")
+    assert '-m "not private_artifacts"' in pytest_line
+    portable = [command for command in ci if "pytest tests/unit tests/integration" in command]
+    assert portable and all('-m "not private_artifacts"' in command and "--deselect" not in command
+                            for command in portable)
+
+
+def test_python_version_pin_matches_every_ci_interpreter():
+    pinned = (ROOT / "backend/.python-version").read_text().strip()
+    assert pinned == "3.12.14"
+    versions = {
+        str(step["with"]["python-version"])
+        for path in sorted((ROOT / ".github/workflows").glob("*.yml"))
+        for job in workflow(path.name)["jobs"].values()
+        for step in job.get("steps", [])
+        if "setup-python" in step.get("uses", "")
+    }
+    assert versions == {pinned}

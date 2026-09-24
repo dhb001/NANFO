@@ -63,7 +63,7 @@ async def test_stub_never_fabricates_samples(execution_mode, mode):
 @pytest.mark.parametrize("adapter_mode", ["seeded", "snmp", "grpc"])
 async def test_demo_provenance_survives_ingestion(adapter_mode, fake_redis):
     raw = (await _adapter(adapter_mode).poll())[0]
-    with patch("app.modules.telemetry.service.publish_event", new_callable=AsyncMock) as publish:
+    with patch("app.modules.telemetry.ingestion.publish_event", new_callable=AsyncMock) as publish:
         await TelemetryIngestionService(fake_redis).ingest(raw, str(uuid.UUID(int=1)))
     tags = publish.await_args.kwargs["payload"]["tags"]
     assert tags["synthetic"] is True
@@ -75,7 +75,7 @@ async def test_demo_provenance_survives_ingestion(adapter_mode, fake_redis):
 @pytest.mark.parametrize("raw_value", [None, True, False, "invalid", "", "NaN", "Infinity", float("nan"), float("inf"), -float("inf"), {}, []])
 async def test_invalid_value_never_becomes_zero_or_publishes(raw_value, fake_redis):
     svc = TelemetryIngestionService(fake_redis)
-    with patch("app.modules.telemetry.service.publish_event", new_callable=AsyncMock) as publish:
+    with patch("app.modules.telemetry.ingestion.publish_event", new_callable=AsyncMock) as publish:
         with pytest.raises(ValueError):
             await svc.ingest({"metric": "latency_ms", "value": raw_value}, str(uuid.UUID(int=1)))
         publish.assert_not_awaited()
@@ -110,7 +110,7 @@ async def test_health_distinguishes_unknown_lag_from_measured_lag(mock_db, fake_
     svc = TelemetryQueryService(mock_db, counter_service=TelemetryHealthCounterService(fake_redis))
     latest = datetime.now(UTC) - timedelta(seconds=2) if observed else None
     svc._repo.get_latest_observed_at = AsyncMock(return_value=latest)
-    svc._repo.count_all = AsyncMock(return_value=1 if observed else 0)
+    svc._repo.estimate_total_records = AsyncMock(return_value=(1 if observed else 0, False))
     result = await svc.get_health()
     assert result.status == ("degraded" if failure else "ok" if observed else "unavailable")
     assert result.latest_observed_at == latest
@@ -118,3 +118,33 @@ async def test_health_distinguishes_unknown_lag_from_measured_lag(mock_db, fake_
         assert result.ingest_lag_ms >= 2000
     else:
         assert result.model_dump(mode="json")["ingest_lag_ms"] is None
+
+
+@pytest.mark.parametrize("observed_at", ["2026-09-08T00:00:00", "3000-01-01T00:00:00Z", 12345])
+def test_ingestion_rejects_naive_and_far_future_timestamps(fake_redis, observed_at):
+    with pytest.raises(ValueError):
+        TelemetryIngestionService(fake_redis).normalize_payload(
+            {"metric": "latency_ms", "value": 1, "observed_at": observed_at})
+
+
+def test_ingestion_emits_canonical_utc_timestamps(fake_redis):
+    normalized = TelemetryIngestionService(fake_redis).normalize_payload(
+        {"metric": "latency_ms", "value": 1, "observed_at": "2026-09-08T03:00:00+03:00"})
+    assert normalized["observed_at"] == "2026-09-08T00:00:00+00:00"
+    stamped = TelemetryIngestionService(fake_redis).normalize_payload({"metric": "latency_ms", "value": 1})
+    assert datetime.fromisoformat(stamped["observed_at"]).tzinfo is not None
+
+
+async def test_poll_action_counts_bad_timestamps_as_invalid_samples_not_failures(fake_redis):
+    from app.modules.telemetry.service import TelemetryCollectorRunner, build_runtime_poll_action
+
+    svc = TelemetryIngestionService(fake_redis)
+    runner = TelemetryCollectorRunner(svc, slo_evaluator=None)
+    sample = {"device_id": str(uuid.uuid4()), "network_id": str(uuid.uuid4()), "workspace_id": str(uuid.uuid4()),
+              "metric": "latency_ms", "value": 1.0, "observed_at": "2026-09-08T00:00:00"}
+    adapter = AsyncMock()
+    adapter.poll = AsyncMock(return_value=[sample])
+    await build_runtime_poll_action(collector_runner=runner, adapter=adapter)()
+    snapshot = await svc.counter_service.get_snapshot()
+    assert snapshot["runtime_adapter_invalid_samples"] == 1 and snapshot["runtime_adapter_ingest_failures"] == 0
+    adapter.acknowledge_batch.assert_not_awaited()

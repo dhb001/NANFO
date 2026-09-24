@@ -10,7 +10,11 @@ from unittest.mock import AsyncMock
 import pytest
 from fastapi import HTTPException
 
+from app.modules.alert.scope import AlertListScope
 from app.modules.alert.service import AlertService
+
+WORKSPACE, ORG, OTHER_WORKSPACE = uuid.UUID(int=501), uuid.UUID(int=502), uuid.UUID(int=503)
+NETWORKS = [uuid.UUID(int=600 + i) for i in range(2)]
 
 
 @pytest.fixture(autouse=True)
@@ -27,6 +31,7 @@ def _make_alert_row(
     alert_key: str = "telemetry_runtime_adapter_slo_threshold_breach",
     status: str = "active",
     severity: str | None = "critical",
+    scope: dict | None = None,
 ) -> SimpleNamespace:
     now = datetime.now(UTC)
     row_alert_id = alert_id or uuid.uuid4()
@@ -42,6 +47,7 @@ def _make_alert_row(
             "alert_key": alert_key,
             "status": status,
             "severity": severity,
+            **(scope or {}),
         },
         acknowledged_by_user_id=None,
         resolved_by_user_id=None,
@@ -52,18 +58,26 @@ def _make_alert_row(
     )
 
 
+def _scoped_list_service(mock_db, fake_redis, rows, counts):
+    service = AlertService(db=mock_db, redis=fake_redis)
+    service._assert_alert_access = AsyncMock(side_effect=AssertionError("list must not authorize per row"))
+    service._accessible_scopes = AsyncMock(return_value=AlertListScope(workspace_orgs={WORKSPACE: ORG}))
+    service._workspace_svc.list_accessible_workspace_ids = AsyncMock(return_value=[WORKSPACE])
+    service._network_svc.list_networks = AsyncMock(return_value=SimpleNamespace(
+        items=[SimpleNamespace(network_id=network) for network in NETWORKS], total=len(NETWORKS)))
+    service._repo.list_alerts = AsyncMock(return_value=rows)
+    service._repo.count_alerts = AsyncMock(return_value=counts)
+    return service
+
+
 @pytest.mark.asyncio
 async def test_list_alerts_normalizes_filters_and_returns_status_counts(mock_db, fake_redis):
-    service = AlertService(db=mock_db, redis=fake_redis)
-    service._assert_alert_access = AsyncMock(return_value=None)
-    service._accessible_scopes = AsyncMock(return_value=([], []))
-    service._repo.list_alerts = AsyncMock(
-        return_value=[
-            _make_alert_row(status="active"),
-            _make_alert_row(status="ACKNOWLEDGED"),
-            _make_alert_row(status="resolved"),
-        ]
-    )
+    scope = {"workspace_id": str(WORKSPACE)}
+    service = _scoped_list_service(mock_db, fake_redis, [
+        _make_alert_row(status="active", scope=scope),
+        _make_alert_row(status="ACKNOWLEDGED", scope=scope),
+        _make_alert_row(status="resolved", scope=scope),
+    ], {"active": 1, "ACKNOWLEDGED": 1, "resolved": 1})
 
     result = await service.list_alerts(
         status_filter="ACTIVE",
@@ -73,35 +87,30 @@ async def test_list_alerts_normalizes_filters_and_returns_status_counts(mock_db,
         search_filter="  link down  ",
         limit=999,
         actor_user_id=str(uuid.uuid4()),
-        requested_workspace_id=uuid.uuid4(),
-        claim_org_id=uuid.uuid4(),
+        requested_workspace_id=WORKSPACE,
+        claim_org_id=ORG,
     )
 
     assert result.total == 3
     assert result.status_counts["active"] == 1
     assert result.status_counts["acknowledged"] == 1
     assert result.status_counts["resolved"] == 1
-    assert service._repo.list_alerts.await_args.kwargs["status"] == "active"
-    assert service._repo.list_alerts.await_args.kwargs["severity"] == "critical"
-    assert service._repo.list_alerts.await_args.kwargs["source"] == "telemetry"
-    assert service._repo.list_alerts.await_args.kwargs["search"] == "link down"
+    for call in (service._repo.list_alerts, service._repo.count_alerts):
+        assert call.await_args.kwargs["status"] == "active"
+        assert call.await_args.kwargs["severity"] == "critical"
+        assert call.await_args.kwargs["source"] == "telemetry"
+        assert call.await_args.kwargs["search"] == "link down"
     assert service._repo.list_alerts.await_args.kwargs["limit"] == 500
-    assert service._assert_alert_access.await_count == 3
+    service._assert_alert_access.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_list_alerts_filters_out_forbidden_alert_rows(mock_db, fake_redis):
-    service = AlertService(db=mock_db, redis=fake_redis)
-    allowed_row = _make_alert_row(status="active")
-    service._accessible_scopes = AsyncMock(return_value=([], []))
-    denied_row = _make_alert_row(status="resolved")
-    service._repo.list_alerts = AsyncMock(return_value=[allowed_row, denied_row])
-
-    async def _access_check(*, alert, actor_user_id, requested_workspace_id, claim_org_id):
-        if alert.alert_id == denied_row.alert_id:
-            raise HTTPException(status_code=403, detail="Insufficient permissions.")
-
-    service._assert_alert_access = AsyncMock(side_effect=_access_check)
+    allowed_row = _make_alert_row(status="active", scope={"workspace_id": str(WORKSPACE)})
+    denied_row = _make_alert_row(status="resolved", scope={"workspace_id": str(OTHER_WORKSPACE)})
+    unscoped_row = _make_alert_row(status="resolved")
+    service = _scoped_list_service(mock_db, fake_redis, [allowed_row, denied_row, unscoped_row],
+                                   {"active": 1, "resolved": 2})
 
     result = await service.list_alerts(
         status_filter=None,
@@ -111,13 +120,75 @@ async def test_list_alerts_filters_out_forbidden_alert_rows(mock_db, fake_redis)
         search_filter=None,
         limit=50,
         actor_user_id=str(uuid.uuid4()),
-        requested_workspace_id=uuid.uuid4(),
-        claim_org_id=uuid.uuid4(),
+        requested_workspace_id=WORKSPACE,
+        claim_org_id=ORG,
     )
 
     assert result.total == 1
     assert len(result.items) == 1
     assert result.items[0].alert_id == allowed_row.alert_id
+    assert result.status_counts == {"active": 1, "acknowledged": 0, "resolved": 0}
+
+
+@pytest.mark.asyncio
+async def test_list_alerts_total_counts_every_match_beyond_the_limit(mock_db, fake_redis):
+    # Regression: total used to be len(items), i.e. never more than the limit.
+    scope = {"workspace_id": str(WORKSPACE)}
+    service = _scoped_list_service(mock_db, fake_redis, [_make_alert_row(scope=scope), _make_alert_row(scope=scope)],
+                                   {"active": 250, "acknowledged": 3, "resolved": 1000})
+    result = await service.list_alerts(status_filter=None, severity_filter=None, source_filter=None,
+        correlation_id_filter=None, search_filter=None, limit=2, actor_user_id=str(uuid.uuid4()))
+    assert len(result.items) == 2
+    assert result.total == 1253
+    assert result.status_counts == {"active": 250, "acknowledged": 3, "resolved": 1000}
+
+
+@pytest.mark.asyncio
+async def test_list_alerts_final_recheck_is_batched_not_per_row(mock_db, fake_redis):
+    # Regression (N+1): 200 rows used to trigger ~4 owner queries each.
+    rows = [_make_alert_row(scope={"workspace_id": str(WORKSPACE), "network_id": str(NETWORKS[i % 2])})
+            for i in range(200)]
+    service = _scoped_list_service(mock_db, fake_redis, rows, {"active": 200})
+    result = await service.list_alerts(status_filter=None, severity_filter=None, source_filter=None,
+        correlation_id_filter=None, search_filter=None, limit=200, actor_user_id=str(uuid.uuid4()))
+    assert result.total == 200 and len(result.items) == 200
+    service._workspace_svc.list_accessible_workspace_ids.assert_awaited_once()
+    service._network_svc.list_networks.assert_awaited_once()  # one listing per recorded workspace
+    service._assert_alert_access.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_list_alerts_drops_rows_of_deleted_or_foreign_networks_and_revoked_workspaces(mock_db, fake_redis):
+    active, gone = NETWORKS
+    rows = [
+        _make_alert_row(scope={"workspace_id": str(WORKSPACE)}),
+        _make_alert_row(scope={"workspace_id": str(WORKSPACE), "network_id": str(active)}),
+        # Deleted, or recorded under this workspace but owned by another one.
+        _make_alert_row(scope={"workspace_id": str(WORKSPACE), "network_id": str(gone)}),
+    ]
+    service = _scoped_list_service(mock_db, fake_redis, rows, {"active": 3})
+    service._network_svc.list_networks = AsyncMock(return_value=SimpleNamespace(
+        items=[SimpleNamespace(network_id=active)], total=1))
+    result = await service.list_alerts(status_filter=None, severity_filter=None, source_filter=None,
+        correlation_id_filter=None, search_filter=None, limit=10, actor_user_id=str(uuid.uuid4()))
+    assert [item.alert_id for item in result.items] == [rows[0].alert_id, rows[1].alert_id]
+    assert result.total == 2
+    # Membership revoked while the request ran: the single fresh read removes everything.
+    service._workspace_svc.list_accessible_workspace_ids = AsyncMock(return_value=[])
+    result = await service.list_alerts(status_filter=None, severity_filter=None, source_filter=None,
+        correlation_id_filter=None, search_filter=None, limit=10, actor_user_id=str(uuid.uuid4()))
+    assert result.items == [] and result.total == 0
+
+
+@pytest.mark.asyncio
+async def test_list_alerts_rejects_overlong_search_before_querying(mock_db, fake_redis):
+    service = _scoped_list_service(mock_db, fake_redis, [], {})
+    with pytest.raises(HTTPException) as error:
+        await service.list_alerts(status_filter=None, severity_filter=None, source_filter=None,
+            correlation_id_filter=None, search_filter="x" * 201, limit=10, actor_user_id=str(uuid.uuid4()))
+    assert error.value.status_code == 400 and error.value.detail["code"] == "ALERT_SEARCH_INVALID"
+    service._repo.list_alerts.assert_not_awaited()
+    service._accessible_scopes.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -481,3 +552,198 @@ async def test_ingest_resolved_event_uses_alert_key_lookup_when_id_missing(mock_
     assert target.resolved_by_user_id == actor_id
     service._repo.mark_resolved.assert_awaited_once()
     mock_db.commit.assert_awaited_once()
+
+
+def _opaque_uuid(value: str) -> uuid.UUID:
+    return uuid.uuid5(uuid.NAMESPACE_URL, f"nanfo:audit-correlation:{value}")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation,marker", [("acknowledge_alert", "mark_acknowledged"),
+                                               ("resolve_alert", "mark_resolved")])
+@pytest.mark.parametrize("request_id", ["req_ack/42", str(uuid.UUID(int=42)), "{00000000-0000-0000-0000-00000000002A}"])
+async def test_actions_map_request_id_with_shared_correlation_and_keep_original(
+    mock_db, fake_redis, operation, marker, request_id,
+):
+    # Regression: opaque request ids used to become a random uuid4 (untraceable).
+    row = _make_alert_row(status="active", scope={"workspace_id": str(WORKSPACE)})
+    service = AlertService(db=mock_db, redis=fake_redis)
+    service._repo.get_by_id = AsyncMock(return_value=row)
+    service._assert_alert_access = AsyncMock(return_value=None)
+    setattr(service._repo, marker, AsyncMock(return_value=row))
+
+    await getattr(service, operation)(alert_id=row.alert_id, correlation_id=request_id,
+                                      requested_by_user_id=str(uuid.uuid4()))
+
+    history = service._repo.append_history.await_args.kwargs
+    state_payload = getattr(service._repo, marker).await_args.kwargs["payload"]
+    if request_id.startswith("req_"):
+        assert history["correlation_id"] == _opaque_uuid(request_id)
+        assert history["payload"]["request_id"] == request_id
+    else:
+        assert history["correlation_id"] == uuid.UUID(int=42)
+        # Canonical UUIDs carry no metadata; non-canonical spellings keep the original.
+        assert history["payload"].get("request_id") == (None if request_id == str(uuid.UUID(int=42)) else request_id)
+    # Request provenance is event metadata, never merged into the alert state.
+    assert "request_id" not in state_payload
+
+
+@pytest.mark.asyncio
+async def test_ingested_opaque_correlation_is_deterministic_not_random(mock_db, fake_redis):
+    service = AlertService(db=mock_db, redis=fake_redis)
+    service._repo.get_by_generated_event_id = AsyncMock(return_value=None)
+    service._repo.get_latest_unresolved_by_key = AsyncMock(return_value=None)
+    service._repo.create_generated = AsyncMock(return_value=_make_alert_row())
+    await service.ingest_alert_event({
+        "event_id": str(uuid.uuid4()), "event_type": "alert.generated", "source": "telemetry",
+        "correlation_id": "legacy-producer/7", "timestamp": datetime.now(UTC).isoformat(),
+        "payload": {"alert_key": "legacy", "workspace_id": str(WORKSPACE)},
+    })
+    assert service._repo.create_generated.await_args.kwargs["correlation_id"] == _opaque_uuid("legacy-producer/7")
+    history = service._repo.append_history.await_args.kwargs
+    assert history["correlation_id"] == _opaque_uuid("legacy-producer/7")
+    assert history["payload"]["request_id"] == "legacy-producer/7"
+    assert "request_id" not in service._repo.create_generated.await_args.kwargs["payload"]
+
+
+# ── Platform-scoped SLO alerts (ADR-028, BE-Telemetry request) ───────────────
+
+def _slo_payload(event_type="alert.generated", active=True):
+    from app.modules.telemetry.slo.rules import alert_payload
+
+    window = {"start": "2026-09-23T00:00:00+00:00", "end": "2026-09-23T00:00:30+00:00", "seconds": 30.0,
+              "counter_reset": False, "last_batch_size": 5, "invalid_samples": 0, "dropped_samples": 3,
+              "ingest_attempts": 5, "ingest_failures": 0}
+    return alert_payload(event_type=event_type, previous_active=not active, current_active=active,
+                         severity="warning" if active else "ok", severity_reason="anomaly_streak_threshold_exceeded",
+                         flags=["dropped_samples"], window=window)
+
+
+def _platform_row(**overrides):
+    row = _make_alert_row(scope={**_slo_payload(), "workspace_id": None, "network_id": None, "org_id": None})
+    for key, value in overrides.items():
+        setattr(row, key, value)
+    return row
+
+
+def _platform_list_service(mock_db, fake_redis, rows, counts):
+    service = AlertService(db=mock_db, redis=fake_redis)
+    service._member_org_ids = AsyncMock(return_value=[])  # a global Admin need not be an org member
+    service._workspace_svc.list_accessible_workspace_ids = AsyncMock(return_value=[])
+    service._repo.legacy_network_ids = AsyncMock(return_value=[])
+    service._repo.list_alerts = AsyncMock(return_value=rows)
+    service._repo.count_alerts = AsyncMock(return_value=counts)
+    return service
+
+
+@pytest.mark.asyncio
+async def test_global_admin_lists_platform_alerts_with_their_evaluation_window(mock_db, fake_redis):
+    platform = _platform_row()
+    service = _platform_list_service(mock_db, fake_redis, [platform], {"active": 1})
+    result = await service.list_alerts(status_filter=None, severity_filter=None, source_filter=None,
+        correlation_id_filter=None, search_filter=None, limit=50, actor_user_id=str(uuid.uuid4()),
+        platform_reader=True)
+    scope = service._repo.list_alerts.await_args.kwargs["scope"]
+    assert scope.platform and not scope.empty
+    assert service._repo.count_alerts.await_args.kwargs["scope"] is scope
+    assert [item.alert_id for item in result.items] == [platform.alert_id] and result.total == 1
+    item = result.items[0]
+    assert item.payload["alert_scope"] == "platform"
+    assert item.payload["evaluation_window"] == {"start": "2026-09-23T00:00:00+00:00",
+                                                 "end": "2026-09-23T00:00:30+00:00", "seconds": 30.0,
+                                                 "counter_reset": False}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("narrowing", [
+    {"platform_reader": False},
+    {"platform_reader": True, "claim_org_id": ORG},
+    {"platform_reader": True, "requested_workspace_id": WORKSPACE},
+    {"platform_reader": True, "workspace_id_filter": WORKSPACE},
+    {"platform_reader": True, "network_id_filter": NETWORKS[0]},
+], ids=["tenant", "org-scoped-token", "workspace-scoped-token", "workspace-selection", "network-selection"])
+async def test_platform_alerts_never_reach_tenant_or_narrowed_views(mock_db, fake_redis, narrowing):
+    platform = _platform_row()
+    service = _platform_list_service(mock_db, fake_redis, [platform], {"active": 1})
+    service._member_org_ids = AsyncMock(return_value=[ORG])
+    service._workspace_svc.list_accessible_workspace_ids = AsyncMock(return_value=[WORKSPACE])
+    service._workspace_svc.get_active_workspace = AsyncMock(return_value=SimpleNamespace(org_id=ORG))
+    service._network_svc.assert_network_workspace_access = AsyncMock(
+        return_value=SimpleNamespace(workspace_id=WORKSPACE))
+    result = await service.list_alerts(status_filter=None, severity_filter=None, source_filter=None,
+        correlation_id_filter=None, search_filter=None, limit=50, actor_user_id=str(uuid.uuid4()), **narrowing)
+    assert service._repo.list_alerts.await_args.kwargs["scope"].platform is False
+    # Even if a platform row came back, the in-memory recheck removes it.
+    assert result.items == [] and result.total == 0
+
+
+@pytest.mark.asyncio
+async def test_platform_alert_detail_and_history_are_global_admin_reads_only(mock_db, fake_redis):
+    platform = _platform_row()
+    service = AlertService(db=mock_db, redis=fake_redis)
+    service._repo.get_by_id = AsyncMock(return_value=platform)
+    service._repo.history = AsyncMock(return_value=[])
+    detail = await service.get_alert(alert_id=platform.alert_id, actor_user_id="admin", platform_reader=True)
+    assert detail.payload["evaluation_window"]["seconds"] == 30.0
+    history = await service.get_history(alert_id=platform.alert_id, actor_user_id="admin", platform_reader=True)
+    assert history.alert_id == platform.alert_id and history.total == 0
+    for kwargs in ({"platform_reader": False}, {"platform_reader": True, "claim_org_id": ORG},
+                   {"platform_reader": True, "requested_workspace_id": WORKSPACE}):
+        with pytest.raises(HTTPException) as denied:
+            await service.get_alert(alert_id=platform.alert_id, actor_user_id="user", **kwargs)
+        assert denied.value.status_code == 403
+    # Lifecycle belongs to the SLO evaluator: nobody acknowledges/resolves it by hand.
+    for action in (service.acknowledge_alert, service.resolve_alert):
+        with pytest.raises(HTTPException) as denied:
+            await action(alert_id=platform.alert_id, correlation_id=str(uuid.uuid4()), requested_by_user_id="admin")
+        assert denied.value.status_code == 403
+    mock_db.commit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_slo_generation_and_resolution_pass_the_evaluation_window_through(mock_db, fake_redis):
+    from app.modules.alert.scope import is_platform_scoped, scope_columns
+
+    service = AlertService(db=mock_db, redis=fake_redis)
+    service._repo.get_by_generated_event_id = AsyncMock(return_value=None)
+    service._repo.get_latest_unresolved_by_key = AsyncMock(return_value=None)
+    service._repo.create_generated = AsyncMock(return_value=_make_alert_row())
+    await service.ingest_alert_event({"event_id": str(uuid.uuid4()), "event_type": "alert.generated",
+                                      "source": "telemetry", "correlation_id": str(uuid.uuid4()),
+                                      "timestamp": "2026-09-23T00:00:30+00:00", "payload": _slo_payload()})
+    stored = service._repo.create_generated.await_args.kwargs["payload"]
+    assert is_platform_scoped(stored) and stored["evaluation_window"]["end"] == "2026-09-23T00:00:30+00:00"
+    assert scope_columns(stored) == {"org_id": None, "workspace_id": None, "network_id": None}
+
+    target = _platform_row(created_at=datetime(2026, 9, 23, tzinfo=UTC))
+    service._repo.get_latest_unresolved_by_key = AsyncMock(return_value=target)
+    service._repo.mark_resolved = AsyncMock()
+    resolved = _slo_payload("alert.resolved", active=False)
+    resolved["evaluation_window"]["end"] = "2026-09-23T00:05:00+00:00"
+    await service.ingest_alert_event({"event_id": str(uuid.uuid4()), "event_type": "alert.resolved",
+                                      "source": "telemetry", "correlation_id": str(uuid.uuid4()),
+                                      "timestamp": "2026-09-23T00:05:00+00:00", "payload": resolved})
+    merged = service._repo.mark_resolved.await_args.kwargs["payload"]
+    assert merged["status"] == "resolved" and merged["evaluation_window"]["end"] == "2026-09-23T00:05:00+00:00"
+    assert is_platform_scoped(merged)
+
+
+@pytest.mark.asyncio
+async def test_network_listings_are_reused_between_legacy_resolution_and_recheck(mock_db, fake_redis):
+    rows = [_make_alert_row(scope={"workspace_id": str(WORKSPACE), "network_id": str(NETWORKS[0])}),
+            _make_alert_row(scope={"network_id": str(NETWORKS[1])})]  # legacy network-only scope
+    service = AlertService(db=mock_db, redis=fake_redis)
+    service._member_org_ids = AsyncMock(return_value=[ORG])
+    service._workspace_svc.list_accessible_workspace_ids = AsyncMock(return_value=[WORKSPACE])
+    # More distinct legacy networks than workspaces: one listing per workspace, not per network.
+    service._repo.legacy_network_ids = AsyncMock(return_value=[NETWORKS[1], uuid.UUID(int=699)])
+    service._network_svc.list_networks = AsyncMock(return_value=SimpleNamespace(
+        items=[SimpleNamespace(network_id=network) for network in NETWORKS], total=len(NETWORKS)))
+    service._network_svc.assert_network_workspace_access = AsyncMock(side_effect=AssertionError("per-network"))
+    service._repo.list_alerts = AsyncMock(return_value=rows)
+    service._repo.count_alerts = AsyncMock(return_value={"active": 2})
+    result = await service.list_alerts(status_filter=None, severity_filter=None, source_filter=None,
+        correlation_id_filter=None, search_filter=None, limit=10, actor_user_id=str(uuid.uuid4()))
+    assert [item.alert_id for item in result.items] == [row.alert_id for row in rows] and result.total == 2
+    assert service._repo.list_alerts.await_args.kwargs["scope"].networks == {NETWORKS[1]: WORKSPACE}
+    service._network_svc.list_networks.assert_awaited_once()  # reused by the final recheck

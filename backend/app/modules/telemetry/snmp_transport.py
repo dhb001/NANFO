@@ -1,16 +1,67 @@
-"""Bounded SNMPv3 authPriv GET via net-snmp; no shell, SET, WALK or fallback."""
+"""Bounded SNMPv3 authPriv GET via net-snmp; no shell, SET, WALK or fallback.
+
+Credential file lifecycle (ADR-028): net-snmp only reads USM secrets from a
+config file, so each GET writes ``snmp.conf`` into a fresh per-request ``0700``
+directory created inside a *private, memory-backed* runtime base (explicit
+``NANFO_SNMP_RUNTIME_DIR``, else ``$XDG_RUNTIME_DIR``, else ``/dev/shm``; never
+the shared default temp dir). The file is ``0600``, created ``O_EXCL|O_NOFOLLOW``,
+and unlinked immediately after the child exits (success, failure or cancel),
+before the directory itself is removed.
+"""
 
 from __future__ import annotations
 
 import asyncio
 import os
 import re
+import shutil
 import stat
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
 from app.modules.telemetry.snmp_config import InterfaceBinding, SNMPBinding, SNMPCredentials, SNMPError
+
+RUNTIME_DIR_ENV = "NANFO_SNMP_RUNTIME_DIR"
+_SHARED_MEMORY_DIR = Path("/dev/shm")
+
+
+def _usable_base(path: Path, *, require_private: bool) -> bool:
+    try:
+        info = os.lstat(path)
+    except OSError:
+        return False
+    if not stat.S_ISDIR(info.st_mode) or not os.access(path, os.W_OK | os.X_OK):
+        return False
+    mode = stat.S_IMODE(info.st_mode)
+    if info.st_uid == os.geteuid():
+        return not (require_private and mode & 0o077)
+    # A shared base is acceptable only if sticky (others cannot rename/remove
+    # our per-request directory) and root-owned, like /dev/shm.
+    return not require_private and info.st_uid == 0 and bool(mode & stat.S_ISVTX)
+
+
+def private_runtime_base() -> Path:
+    """Directory in which per-request credential directories are created."""
+    explicit = os.environ.get(RUNTIME_DIR_ENV)
+    if explicit:
+        path = Path(explicit)
+        if path.is_absolute() and ".." not in path.parts and _usable_base(path, require_private=True):
+            return path
+        raise SNMPError("snmp_runtime_dir_unsafe")
+    xdg = os.environ.get("XDG_RUNTIME_DIR")
+    if xdg and Path(xdg).is_absolute() and _usable_base(Path(xdg), require_private=True):
+        return Path(xdg)
+    if _usable_base(_SHARED_MEMORY_DIR, require_private=False):
+        return _SHARED_MEMORY_DIR
+    raise SNMPError("snmp_runtime_dir_unavailable")
+
+
+def _unlink_quietly(path: Path) -> None:
+    try:
+        os.unlink(path)
+    except FileNotFoundError:
+        pass
 
 SYS_UPTIME = ".1.3.6.1.2.1.1.3.0"
 SYS_NAME = ".1.3.6.1.2.1.1.5.0"
@@ -118,33 +169,43 @@ class NetSNMPTransport:
 
         self.check_available()
         credentials = load_protected_json(self.credentials_path, SNMPCredentials)
-        with tempfile.TemporaryDirectory(prefix="nanfo-snmp-") as temporary:
-            directory = Path(temporary)
+        # mkdtemp: unpredictable name, mode 0700, inside a private memory-backed base.
+        temporary = tempfile.mkdtemp(prefix="nanfo-snmp-", dir=private_runtime_base())
+        directory = Path(temporary)
+        config = directory / "snmp.conf"
+        try:
+            os.chmod(directory, 0o700)
             # Debian Net-SNMP initializes this under SNMP_PERSISTENT_DIR even
             # with persistence disabled, logging directory creation to stderr.
             # Provision it privately before exec; retain strict stderr rejection.
             (directory / "cert_indexes").mkdir(mode=0o700)
-            config = directory / "snmp.conf"
-            fd = os.open(config, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-            with os.fdopen(fd, "w") as stream:
-                stream.write(
-                    "defVersion 3\ndefSecurityLevel authPriv\n"
-                    f"defSecurityName {credentials.username.get_secret_value()}\n"
-                    f"defAuthType {credentials.auth_protocol}\n"
-                    f"defPrivType {credentials.priv_protocol}\n"
-                    f"defAuthPassphrase {credentials.auth_passphrase.get_secret_value()}\n"
-                    f"defPrivPassphrase {credentials.priv_passphrase.get_secret_value()}\n"
-                    "doDebugging 0\ndumpPacket no\nnoPersistentLoad yes\nnoPersistentSave yes\n"
-                )
-            # Isolate all configuration and persistent state from system/user
-            # defaults. No secrets are put in argv or environment values.
-            env = {"LC_ALL": "C", "HOME": temporary, "SNMPCONFPATH": temporary,
-                   "SNMP_PERSISTENT_DIR": temporary, "MIBS": "", "MIBDIRS": temporary}
-            target = (f"udp6:[{binding.target}]:{binding.port}" if binding.target.version == 6
-                      else f"udp:{binding.target}:{binding.port}")
-            args = [str(self.executable), "-v", "3", "-l", "authPriv", "-One", "-m", "",
-                    "-r", "0", "-t", str(binding.timeout_seconds), target, *requested_oids(interface)]
-            data = await self._execute(args, env, temporary, binding.timeout_seconds + 1)
+            try:
+                fd = os.open(config, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
+                with os.fdopen(fd, "w") as stream:
+                    stream.write(
+                        "defVersion 3\ndefSecurityLevel authPriv\n"
+                        f"defSecurityName {credentials.username.get_secret_value()}\n"
+                        f"defAuthType {credentials.auth_protocol}\n"
+                        f"defPrivType {credentials.priv_protocol}\n"
+                        f"defAuthPassphrase {credentials.auth_passphrase.get_secret_value()}\n"
+                        f"defPrivPassphrase {credentials.priv_passphrase.get_secret_value()}\n"
+                        "doDebugging 0\ndumpPacket no\nnoPersistentLoad yes\nnoPersistentSave yes\n"
+                    )
+                # Isolate all configuration and persistent state from system/user
+                # defaults. No secrets are put in argv or environment values.
+                env = {"LC_ALL": "C", "HOME": temporary, "SNMPCONFPATH": temporary,
+                       "SNMP_PERSISTENT_DIR": temporary, "MIBS": "", "MIBDIRS": temporary}
+                target = (f"udp6:[{binding.target}]:{binding.port}" if binding.target.version == 6
+                          else f"udp:{binding.target}:{binding.port}")
+                args = [str(self.executable), "-v", "3", "-l", "authPriv", "-One", "-m", "",
+                        "-r", "0", "-t", str(binding.timeout_seconds), target, *requested_oids(interface)]
+                data = await self._execute(args, env, temporary, binding.timeout_seconds + 1)
+            finally:
+                # The child has exited (or was killed and reaped): remove the
+                # secret before anything else, including parsing and cleanup.
+                _unlink_quietly(config)
+        finally:
+            shutil.rmtree(temporary, ignore_errors=True)
         return parse_response(data, binding, interface)
 
     @staticmethod

@@ -78,6 +78,13 @@ def upgrade():
 
 
 def downgrade():
+    # Runs carry immutable bindings; receipts are the immutable journal (ADR-028).
+    if op.get_context().as_sql:
+        raise RuntimeError("Downgrade below 0028 must run online (not --sql): it must first verify that "
+                           "no experimental run or journal entry would be dropped")
+    if op.get_bind().scalar(sa.text("SELECT EXISTS (SELECT 1 FROM experimental_lab_runs) "
+                                    "OR EXISTS (SELECT 1 FROM experimental_lab_receipts)")):
+        raise RuntimeError("Downgrade below 0028 refused: experimental lab runs or their immutable journal exist")
     for table in ("receipts", "actions", "runs", "resources"):
         op.drop_table(f"experimental_lab_{table}")
     op.execute("DROP FUNCTION experimental_lab_binding_guard()")

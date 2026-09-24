@@ -2,10 +2,19 @@
 
 The event is a locator, never measurement evidence. Re-read the owning Telemetry
 public query contract and current Network binding/Identity/Organization authority.
+
+ADR-028: the operator binding is cached briefly per binding-file revision and the
+pre-lock authority answer per (revision, actor, scope) for a few seconds. The
+authoritative decision is one fresh-session authorization immediately before each
+commit, so revocation or expiry still rolls back observation/state/history/outbox.
 """
 
 import json
+import os
+import threading
+import time
 import uuid
+from collections import OrderedDict
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -14,6 +23,7 @@ from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
+from app.core.correlation import correlation_uuid
 from app.modules.alert.detector import (
     METRICS, DetectorSettings, MeasuredObservation, advance_window, detector_identity, identity_key,
 )
@@ -31,6 +41,70 @@ from app.modules.telemetry.references import (
 from app.modules.alert.models import AlertHistory, AlertRecord
 
 install_direct_owner("alert")
+
+# Binding reads are cached per file revision; pre-lock authority per (revision,
+# actor, scope). Short TTLs bound staleness; commits always re-authorize freshly.
+BINDING_CACHE_SECONDS = 5.0
+AUTHORITY_CACHE_SECONDS = 5.0
+_AUTHORITY_CACHE_MAX = 1024
+_cache_lock = threading.Lock()
+_binding_cache: dict[tuple, tuple[float, object]] = {}
+_authority_cache: "OrderedDict[tuple, tuple[float, uuid.UUID]]" = OrderedDict()
+
+
+def _binding_revision(path: Path, snapshot_path: Path) -> tuple | None:
+    """File identity of the operator binding; None when it cannot be observed."""
+    try:
+        info = os.stat(path, follow_symlinks=False)
+    except (OSError, ValueError):
+        return None
+    return (str(path), str(snapshot_path), info.st_dev, info.st_ino, info.st_size,
+            info.st_mtime_ns, info.st_ctime_ns)
+
+
+async def _cached_binding(path: Path, snapshot_path: Path):
+    """Return ``(binding, revision)``; the revision keys every dependent cache entry."""
+    revision = _binding_revision(path, snapshot_path)
+    if revision is not None:
+        with _cache_lock:
+            hit = _binding_cache.get(revision)
+        if hit is not None and time.monotonic() - hit[0] <= BINDING_CACHE_SECONDS:
+            return hit[1], revision
+    loaded_at = time.monotonic()
+    binding = await load_binding(path, snapshot_path=snapshot_path)
+    # Cache only when the file did not change while it was read and validated.
+    if revision is not None and _binding_revision(path, snapshot_path) == revision:
+        with _cache_lock:
+            _binding_cache.clear()
+            _binding_cache[revision] = (loaded_at, binding)
+        return binding, revision
+    return binding, None
+
+
+def _authority_cache_get(key: tuple) -> uuid.UUID | None:
+    with _cache_lock:
+        hit = _authority_cache.get(key)
+        if hit is None:
+            return None
+        if time.monotonic() - hit[0] > AUTHORITY_CACHE_SECONDS:
+            _authority_cache.pop(key, None)
+            return None
+        return hit[1]
+
+
+def _authority_cache_put(key: tuple, org_id: uuid.UUID) -> None:
+    with _cache_lock:
+        _authority_cache[key] = (time.monotonic(), org_id)
+        _authority_cache.move_to_end(key)
+        while len(_authority_cache) > _AUTHORITY_CACHE_MAX:
+            _authority_cache.popitem(last=False)
+
+
+def clear_authority_caches() -> None:
+    """Drop cached bindings/authority (tests and operator binding rotation)."""
+    with _cache_lock:
+        _binding_cache.clear()
+        _authority_cache.clear()
 
 
 def alert_scope(row):
@@ -56,17 +130,26 @@ for _model in (AlertRecord, AlertHistory):
 
 
 async def telemetry_reference_page(db, *, workspace_id, after=None, limit=100):
-    """Alert-owned observation receipt enumeration, never just current incidents."""
-    from sqlalchemy import or_, select
+    """Alert-owned observation receipt enumeration, never just current incidents.
+
+    Platform-scoped (runtime SLO) alerts are no tenant's evidence and are not
+    enumerated for any workspace: they record no workspace, and the before-flush
+    owner guard refuses unscoped known telemetry identities, so they can never
+    reference tenant telemetry (otherwise every workspace would report them as
+    ``legacy_alert_scope_unknown`` forever).
+    """
+    from sqlalchemy import func, or_, select
     from app.modules.alert.models import AlertDetectorState, AlertObservation
+    from app.modules.alert.scope import PLATFORM_ALERT_SCOPE
 
     stage, last = page_position(after, stages=3, limit=limit)
     if stage:
         model, key = ((AlertRecord, AlertRecord.alert_id), (AlertHistory, AlertHistory.event_id))[stage - 1]
         direct = model.payload["workspace_id"].astext
         nested = model.payload["scope"]["workspace_id"].astext
-        query = select(model).where(or_(direct == str(workspace_id), nested == str(workspace_id),
-                                       (direct.is_(None) & nested.is_(None))))
+        tenant_unscoped = (direct.is_(None) & nested.is_(None)
+                           & (func.coalesce(model.payload["alert_scope"].astext, "") != PLATFORM_ALERT_SCOPE))
+        query = select(model).where(or_(direct == str(workspace_id), nested == str(workspace_id), tenant_unscoped))
         if last:
             query = query.where(key > last)
         rows = list((await db.scalars(query.order_by(key).limit(limit + 1))).all())
@@ -116,8 +199,10 @@ class MeasuredAlertService:
         if event.get("event_type") != "telemetry.metric.ingested":
             return
         try:
+            # The event is only a locator; an opaque request id maps through the
+            # shared deterministic helper (the persisted record's value is stored).
             candidate = MeasuredObservation.model_validate({**event["payload"],
-                "event_id": event["event_id"], "correlation_id": event["correlation_id"]})
+                "event_id": event["event_id"], "correlation_id": correlation_uuid(event["correlation_id"])})
         except (ValidationError, KeyError, TypeError):
             return
         # Exact-time bounded lookup through Telemetry's public service, not its repository.
@@ -134,23 +219,26 @@ class MeasuredAlertService:
         except ValidationError:
             return
         try:
+            # Pre-lock screen only (may be answered from the short authority cache);
+            # apply_observation re-authorizes freshly before it commits anything.
             org_id = await self.authorize_observation(observation)
         except (HTTPException, ValueError):
             return
         await self.apply_observation(observation, org_id)
 
-    async def authorize_observation(self, observation, *, fresh=False):
+    async def authorize_observation(self, observation, *, fresh=False, use_cache=True):
         if fresh:
             # A new identity map and READ COMMITTED transaction cannot reuse
             # membership/user objects loaded before a contended detector lock.
             async with AsyncSession(bind=self.db.bind, expire_on_commit=False) as db:
-                return await MeasuredAlertService(db=db, redis=self.redis).authorize_observation(observation)
+                return await MeasuredAlertService(db=db, redis=self.redis).authorize_observation(
+                    observation, use_cache=False)
         settings = get_settings()
         if (settings.EXECUTION_MODE != "emulation" or not settings.EMULATION_BINDING_PATH
                 or not settings.EMULATION_SNAPSHOT_PATH):
             raise ValueError("measured observer binding unavailable")
-        binding = await load_binding(Path(settings.EMULATION_BINDING_PATH),
-                                     snapshot_path=Path(settings.EMULATION_SNAPSHOT_PATH))
+        binding, revision = await _cached_binding(Path(settings.EMULATION_BINDING_PATH),
+                                                  Path(settings.EMULATION_SNAPSHOT_PATH))
         if (binding.network_id != observation.network_id or binding.workspace_id != observation.workspace_id
                 or binding.topology_id != observation.tags.topology_id):
             raise ValueError("observation outside binding scope")
@@ -166,6 +254,22 @@ class MeasuredAlertService:
               or binding.hosts[tags.peer_host] == observation.device_id):
             raise ValueError("observation outside bound probe")
         actor = str(binding.actor_user_id)
+        needed = {observation.device_id}
+        if tags.peer_host is not None:
+            needed.add(binding.hosts[tags.peer_host])
+        key = None if revision is None else (revision, actor, observation.network_id, observation.workspace_id,
+                                             frozenset(needed))
+        if use_cache and key is not None:
+            cached = _authority_cache_get(key)
+            if cached is not None:
+                return cached
+        org_id = await self._current_authority(observation, actor, needed)
+        if key is not None:
+            _authority_cache_put(key, org_id)
+        return org_id
+
+    async def _current_authority(self, observation, actor, needed):
+        """Live Identity/Network/Organization authority of the binding actor."""
         profile = await AuthService(self.db, self.redis).get_profile(actor)
         if not {"read:telemetry", "read:topology", "write:config"}.issubset(profile.permissions):
             raise ValueError("observer capability revoked")
@@ -176,9 +280,7 @@ class MeasuredAlertService:
             requested_workspace_id=observation.workspace_id, actor_user_id=actor)
         if actual_network != observation.network_id:
             raise ValueError("device moved from observed network")
-        needed = {observation.device_id}
-        if tags.peer_host is not None:
-            needed.add(binding.hosts[tags.peer_host])
+        needed = set(needed)
         devices, page = DeviceService(self.db, self.redis), 1
         while needed:
             result = await devices.list_devices(network_id=observation.network_id, actor_user_id=actor,
@@ -196,11 +298,26 @@ class MeasuredAlertService:
             observation.workspace_id, user_id=actor)
         return workspace.org_id
 
+    def _fresh(self, observation, rule) -> bool:
+        return 0 <= (self.clock() - observation.observed_at).total_seconds() <= rule.max_age_seconds
+
+    async def _commit_if_authorized(self, observation, org_id, rule) -> bool:
+        """The single authoritative fence: fresh authority and wall clock, then commit."""
+        try:
+            authorized_org = await self.authorize_observation(observation, fresh=True)
+        except (HTTPException, ValueError):
+            await self.db.rollback()
+            return False
+        if authorized_org != org_id or not self._fresh(observation, rule):
+            await self.db.rollback()
+            return False
+        await self.db.commit()
+        return True
+
     async def apply_observation(self, observation, org_id):
         """Internal transaction boundary; caller has verified persisted evidence and authority."""
         rule = getattr(self.rules, METRICS[observation.metric][0])
-        now = self.clock()
-        if not 0 <= (now - observation.observed_at).total_seconds() <= rule.max_age_seconds:
+        if not self._fresh(observation, rule):
             return
         identity = detector_identity(observation, org_id, rule)
         key = identity_key(identity)
@@ -208,13 +325,9 @@ class MeasuredAlertService:
         if state.rule != rule.model_dump():
             raise ValueError("operator rule changed without a new version")
         incident = await self.repo.get_by_id(state.incident_id, lock=True) if state.incident_id else None
-        try:
-            authorized_org = await self.authorize_observation(observation, fresh=True)
-        except (HTTPException, ValueError):
-            await self.db.rollback()
-            return
+        # Cheap post-lock clock check; authority is re-verified once, before commit.
         now = self.clock()
-        if authorized_org != org_id or not 0 <= (now - observation.observed_at).total_seconds() <= rule.max_age_seconds:
+        if not 0 <= (now - observation.observed_at).total_seconds() <= rule.max_age_seconds:
             await self.db.rollback()
             return
         evidence = TelemetryEvidenceService(self.db, scope=EvidenceOwnerScope(
@@ -223,7 +336,7 @@ class MeasuredAlertService:
             network_id=observation.network_id, reference_id=observation.event_id)
         await evidence.pin(reference)
         if not await self.repo.accept_observation(observation, key):
-            await self.db.commit()
+            await self._commit_if_authorized(observation, org_id, rule)
             return
         ready = advance_window(state, observation, rule, now=now)
         if incident is not None and incident.status == "resolved":
@@ -259,13 +372,4 @@ class MeasuredAlertService:
                 event_id=event_id, publish=True)
             state.incident_id = None
             state.phase, state.phase_since, state.sample_count = None, None, 0
-        try:
-            authorized_org = await self.authorize_observation(observation, fresh=True)
-        except (HTTPException, ValueError):
-            await self.db.rollback()
-            return
-        now = self.clock()
-        if authorized_org != org_id or not 0 <= (now - observation.observed_at).total_seconds() <= rule.max_age_seconds:
-            await self.db.rollback()
-            return
-        await self.db.commit()
+        await self._commit_if_authorized(observation, org_id, rule)

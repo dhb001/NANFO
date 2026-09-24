@@ -486,3 +486,51 @@ def test_alert_detail_history_denial_envelope(client, code, suffix, method):
             headers={"Authorization": f"Bearer {_make_read_only_token()}"})
     assert response.status_code == code
     assert response.json()["success"] is False
+
+
+def test_list_alerts_rejects_search_longer_than_200_characters(client):
+    # Regression: unbounded search was passed straight into an ILIKE over the payload.
+    headers = {"Authorization": f"Bearer {_make_token()}"}
+    with patch("app.modules.alert.service.AlertService.list_alerts", new=AsyncMock()) as mock_list:
+        response = client.get("/api/v1/alerts", params={"search": "x" * 201}, headers=headers)
+        assert response.status_code == 422
+        assert response.json()["success"] is False
+        mock_list.assert_not_awaited()
+        mock_list.return_value = {"items": [], "total": 0, "status_counts": {}}
+        response = client.get("/api/v1/alerts", params={"search": "%_" * 100}, headers=headers)
+    assert response.status_code == 200
+    assert mock_list.await_args.kwargs["search_filter"] == "%_" * 100
+
+
+@pytest.mark.parametrize("roles,claims,expected", [
+    (["Admin"], {}, True),
+    (["Operator"], {}, False),
+    (["Read-Only"], {}, False),
+    (["Admin"], {"org_id": str(uuid.UUID(int=31))}, False),
+    (["Admin"], {"workspace_id": str(uuid.UUID(int=32)), "org_id": str(uuid.UUID(int=31))}, False),
+], ids=["global-admin", "operator", "read-only", "admin-org-token", "admin-workspace-token"])
+def test_only_global_admin_unscoped_tokens_read_platform_alerts(client, roles, claims, expected):
+    token, _ = create_access_token(user_id=str(uuid.uuid4()), email="alerts-platform@example.com", roles=roles,
+                                   permissions=["read:telemetry"], **claims)
+    headers = {"Authorization": f"Bearer {token}"}
+    alert_id = uuid.uuid4()
+    now = datetime.now(UTC)
+    record = {"alert_id": alert_id, "alert_key": "telemetry_runtime_adapter_slo_threshold_breach",
+              "source": "telemetry", "status": "active", "severity": "warning", "correlation_id": uuid.uuid4(),
+              "payload": {"alert_scope": "platform", "evaluation_window": {"seconds": 30.0}},
+              "acknowledged_by_user_id": None, "resolved_by_user_id": None, "acknowledged_at": None,
+              "resolved_at": None, "created_at": now, "updated_at": now}
+    with (
+        patch("app.modules.alert.service.AlertService.list_alerts",
+              new=AsyncMock(return_value={"items": [record], "total": 1, "status_counts": {}})) as mock_list,
+        patch("app.modules.alert.service.AlertService.get_alert", new=AsyncMock(return_value=record)) as mock_get,
+        patch("app.modules.alert.service.AlertService.get_history",
+              new=AsyncMock(return_value={"alert_id": alert_id, "items": [], "total": 0})) as mock_history,
+    ):
+        listed = client.get("/api/v1/alerts", headers=headers)
+        detail = client.get(f"/api/v1/alerts/{alert_id}", headers=headers)
+        history = client.get(f"/api/v1/alerts/{alert_id}/history", headers=headers)
+    assert listed.status_code == detail.status_code == history.status_code == 200
+    assert listed.json()["data"]["items"][0]["payload"]["evaluation_window"] == {"seconds": 30.0}
+    for mock in (mock_list, mock_get, mock_history):
+        assert mock.await_args.kwargs["platform_reader"] is expected

@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { listDevices } from "@/features/networks/api";
+import { useSessionScope } from "@/features/auth/sessionScope";
+import { scopedKey } from "@/shared/lib/queryKeys";
 import { Button } from "@/shared/ui/Button";
 import { toErrorMessage } from "@/shared/lib/errors";
 
@@ -10,9 +12,10 @@ export function TwinInventoryPicker({ token, networkId, selected, onToggle, disa
   onToggle: (id: string) => void; disabled?: boolean;
 }) {
   const [page, setPage] = useState(1);
+  const scope = useSessionScope();
   const query = useQuery({
-    queryKey: ["twin-inventory", token, networkId, page],
-    queryFn: async () => (await listDevices(token!, networkId!, page, 20)).data,
+    queryKey: scopedKey(scope, "twin-inventory", networkId, page),
+    queryFn: async ({ signal }) => (await scope.read((credential) => listDevices(credential, networkId!, page, 20, signal), signal)).data,
     enabled: Boolean(token && networkId), retry: false,
   });
   return <fieldset disabled={disabled}><legend>Network inventory</legend>
@@ -21,7 +24,7 @@ export function TwinInventoryPicker({ token, networkId, selected, onToggle, disa
     <Button type="button" tone="ghost" disabled={query.isFetching} onClick={() => void query.refetch()}>Reload inventory</Button>
     <p>Inventory page {page} · {query.data?.total ?? "unknown"} total · {selected.length} selected across pages</p>
     {query.data?.items.length === 0 ? <p>No devices on this page.</p> : null}
-    {query.data?.items.map((device) => <label key={device.device_id} style={{ display: "block" }}>
+    {query.data?.items.map((device) => <label key={device.device_id} className="twin-block-label">
       <input type="checkbox" checked={selected.includes(device.device_id)} onChange={() => onToggle(device.device_id)} />
       {device.hostname} · {device.device_type} · {device.device_id}
     </label>)}

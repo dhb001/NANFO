@@ -11,10 +11,10 @@ from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import fakeredis
-from jose import jwt
 
 from app.core.security import create_access_token, create_refresh_token
 from app.modules.identity.sessions import SessionRepository
+from tests.jwt_support import jwt
 
 _current_identities: ContextVar["SessionIdentities"] = ContextVar("session_test_identities")
 

@@ -1,11 +1,21 @@
 import { create } from "zustand";
 import type { UserProfile } from "@/shared/types/auth";
+import { tabIdentity, type TabOwnership } from "@/shared/state/tab-identity";
 
 interface Session {
   accessToken: string;
   refreshToken: string;
   userId: string;
 }
+
+/** Transient refresh failure (502/503/network/timeout): the session is kept and retried (ADR-028). */
+export interface SessionRecovery {
+  retryAt: number;
+  attempt: number;
+  reason: "refresh_unavailable" | "profile_unavailable";
+}
+
+export type SessionNotice = "copied_tab" | null;
 
 interface AuthState {
   accessToken: string | null;
@@ -14,9 +24,14 @@ interface AuthState {
   profile: UserProfile | null;
   generation: number;
   endingSession: boolean;
+  /** null while this tab's duplicate check is pending (see tab-identity.ts). */
+  ownership: TabOwnership | null;
+  recovery: SessionRecovery | null;
+  notice: SessionNotice;
   setSession: (values: Session & { profile: UserProfile }) => void;
   replaceTokens: (values: Pick<Session, "accessToken" | "refreshToken"> & { profile?: UserProfile }) => void;
   setProfile: (profile: UserProfile) => void;
+  setRecovery: (recovery: SessionRecovery | null) => void;
   clearSession: () => void;
 }
 
@@ -75,9 +90,12 @@ export const useAuthStore = create<AuthState>((set) => ({
   profile: null,
   generation: 0,
   endingSession: false,
+  ownership: tabIdentity.state(),
+  recovery: null,
+  notice: null,
   setSession: ({ profile, ...session }) => set((state) => {
     persistSession(session);
-    return { ...session, profile, generation: state.generation + 1, endingSession: false };
+    return { ...session, profile, generation: state.generation + 1, endingSession: false, recovery: null, notice: null };
   }),
   replaceTokens: (tokens) => set((state) => {
     if (!state.userId) return state;
@@ -85,9 +103,22 @@ export const useAuthStore = create<AuthState>((set) => ({
     return tokens;
   }),
   setProfile: (profile) => set({ profile }),
+  setRecovery: (recovery) => set({ recovery }),
   clearSession: () => set((state) => {
     persistSession(null);
     return { accessToken: null, refreshToken: null, userId: null, profile: null,
-      generation: state.generation + 1, endingSession: false };
+      generation: state.generation + 1, endingSession: false, recovery: null };
   }),
 }));
+
+// A copied tab drops the inherited credentials locally. It never calls logout:
+// revoking would sign out the original tab that legitimately owns the family.
+void tabIdentity.ownership.then((ownership) => {
+  const state = useAuthStore.getState();
+  if (ownership === "duplicate" && initialSession && state.generation === 0 && state.accessToken === initialSession.accessToken) {
+    state.clearSession();
+    useAuthStore.setState({ ownership, notice: "copied_tab" });
+  } else {
+    useAuthStore.setState({ ownership });
+  }
+});

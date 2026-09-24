@@ -133,3 +133,107 @@ async def test_no_implicit_apply():
     with pytest.raises(ValueError):
         await operator.run(mode='other')
     redis.eval.assert_not_awaited()
+
+
+# ── ADR-028 C14: supervised schedule, machine-readable refusals ──────────────
+
+import asyncio  # noqa: E402
+
+from scripts import stream_retention  # noqa: E402
+from tests.lua_streams import LuaStreams  # noqa: E402
+
+
+def schedule_env(root, **overrides):
+    env = {"NANFO_STREAM_ARCHIVE_ROOT": str(root), "STREAM_RETENTION_REDIS_URL": "redis://unused",
+           "NANFO_STREAM_RETENTION_INTERVAL_SECONDS": "5", "NANFO_STREAM_RETENTION_JITTER_SECONDS": "0"}
+    env.update(overrides)
+    return env
+
+
+def test_schedule_config_defaults_and_bounds(archive):
+    config = stream_retention.schedule_config({"NANFO_STREAM_ARCHIVE_ROOT": str(archive.root)})
+    assert config["interval_seconds"] == 300 and config["max_entries"] == 1000
+    assert config["jitter_seconds"] == 30 and config["max_refusals"] == 5
+    assert config["min_age_seconds"] == 86400 and config["dlq_min_age_seconds"] == 604800
+    with pytest.raises(KeyError):
+        stream_retention.schedule_config({})
+    with pytest.raises(ValueError):
+        stream_retention.schedule_config({"NANFO_STREAM_ARCHIVE_ROOT": "/x",
+                                          "NANFO_STREAM_RETENTION_MAX_ENTRIES": "0"})
+    policies = stream_retention.schedule_policies(config)
+    assert [policy.stream for policy in policies][-1] == "stream:dead_letter"
+    assert {policy.stream for policy in policies} >= {"stream:network", "stream:telemetry"}
+
+
+def test_redis_url_from_application_environment():
+    url = stream_retention.redis_url_from_environment(
+        {"REDIS_HOST": "redis", "REDIS_PASSWORD": "p@ss/word", "REDIS_PORT": "6380", "REDIS_DB": "2"})
+    assert url == "redis://:p%40ss%2Fword@redis:6380/2"
+    assert stream_retention.redis_url_from_environment({"STREAM_RETENTION_REDIS_URL": "redis://x"}) == "redis://x"
+
+
+def test_schedule_without_archive_root_refuses_with_reason(capsys, monkeypatch):
+    monkeypatch.delenv("NANFO_STREAM_ARCHIVE_ROOT", raising=False)
+    assert main(["schedule"]) == 1
+    output = json.loads(capsys.readouterr().out)
+    assert output == {"status": "refused_or_incomplete", "reason": "missing_environment",
+                      "recovery": "inspect verified archives; earlier batches may have completed"}
+
+
+def test_one_shot_refusals_are_machine_readable(capsys, monkeypatch, archive):
+    monkeypatch.setenv("STREAM_RETENTION_REDIS_URL", "redis://127.0.0.1:1/0")
+    assert main(["apply", "--stream", "stream:telemetry", "--group", "nanfo-consumers",
+                 "--min-age-seconds", "60"]) == 1
+    assert json.loads(capsys.readouterr().out)["reason"] == "archive_required"
+    assert main(["apply", "--stream", "stream:unknown", "--group", "g", "--min-age-seconds", "60"]) == 1
+    assert json.loads(capsys.readouterr().out)["reason"] == "invalid_policy"
+    assert main(["dry-run"]) == 1  # one-shot modes still require an explicit stream/group/age
+    assert json.loads(capsys.readouterr().out)["reason"] == "precondition_failed"
+
+
+def seeded_streams():
+    redis = LuaStreams()
+    for stream, group in stream_retention.STREAM_GROUPS.items():
+        redis.add(stream, "1-0", "event_id", "e")
+        redis.create_group(stream, group)
+        redis.ack(stream, group, *redis.deliver(stream, group, "api-host"))
+    redis.add("stream:dead_letter", "1-0", "event_id", "poison")
+    return redis
+
+
+async def test_schedule_cycles_every_stream_including_dlq_until_stopped(archive):
+    redis, stop, lines = seeded_streams(), asyncio.Event(), []
+
+    def emit(line):
+        lines.append(json.loads(line))
+        stop.set()
+
+    code = await stream_retention.schedule(schedule_env(archive.root), stop=stop, emit=emit,
+                                           connect_redis=lambda url: redis)
+    assert code == 0 and redis.closed
+    [cycle] = lines
+    assert cycle["status"] == "ok" and cycle["consecutive_refusals"] == 0
+    assert cycle["streams"]["stream:dead_letter"]["deleted"] == 1
+    assert all(result["deleted"] == 1 for result in cycle["streams"].values())
+    assert sum(1 for _ in archive.root.iterdir()) == len(cycle["streams"])
+
+
+async def test_schedule_isolates_refusals_and_exits_after_consecutive_limit(archive, monkeypatch):
+    redis = seeded_streams()
+    redis.create_group("stream:network", "unregistered")  # misconfiguration on one stream
+    lines = []
+    monkeypatch.setattr(stream_retention.asyncio, "wait_for", _no_wait)
+    code = await stream_retention.schedule(
+        schedule_env(archive.root, NANFO_STREAM_RETENTION_MAX_REFUSALS="3"),
+        emit=lambda line: lines.append(json.loads(line)), connect_redis=lambda url: redis)
+    assert code == stream_retention.EXIT_REPEATED_REFUSALS
+    assert [cycle["consecutive_refusals"] for cycle in lines] == [1, 2, 3]
+    first = lines[0]
+    assert first["refusals"] == ["retention_unknown_groups"]
+    assert first["streams"]["stream:network"] == {"status": "refused", "reason": "retention_unknown_groups"}
+    assert first["streams"]["stream:telemetry"]["deleted"] == 1  # other streams still retained
+
+
+async def _no_wait(awaitable, timeout):
+    awaitable.close()
+    raise TimeoutError

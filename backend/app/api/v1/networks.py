@@ -7,11 +7,12 @@ Deferred topology endpoints excluded (C6).
 
 import time
 import uuid
+from collections.abc import Iterator
 from typing import Annotated
 
 import redis.asyncio as aioredis
-from fastapi import APIRouter, Depends, Query, status
-from fastapi.responses import Response
+from fastapi import APIRouter, Depends, Header, Query, status
+from fastapi.responses import Response, StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.dependencies import (
@@ -24,6 +25,8 @@ from app.core.dependencies import (
     get_request_meta,
     require_permissions,
 )
+from app.core.http_cache import digest_etag
+from app.core.pagination import PageNumber
 from app.core.responses import APIResponse, success_response
 from app.modules.network.schemas import (
     CampusBuildingListResponse,
@@ -50,6 +53,14 @@ from app.modules.network.service import (
 )
 
 router = APIRouter(prefix="/api/v1/networks", tags=["Networks"])
+
+_DOWNLOAD_CHUNK_BYTES = 64 * 1024
+
+
+def _chunks(body: bytes) -> Iterator[bytes]:
+    view = memoryview(body)
+    for start in range(0, len(view), _DOWNLOAD_CHUNK_BYTES):
+        yield bytes(view[start:start + _DOWNLOAD_CHUNK_BYTES])
 
 
 # ── Networks ──────────────────────────────────────────────────────────────────
@@ -82,7 +93,7 @@ async def list_networks(
     meta: Annotated[RequestMeta, Depends(get_request_meta)],
     db: Annotated[AsyncSession, Depends(get_db)],
     redis: Annotated[aioredis.Redis, Depends(get_redis)],
-    page: int = Query(default=1, ge=1),
+    page: PageNumber = 1,
     page_size: int = Query(default=20, ge=1, le=200),
 ):
     started = time.monotonic()
@@ -164,7 +175,7 @@ async def list_devices(
     meta: Annotated[RequestMeta, Depends(get_request_meta)],
     db: Annotated[AsyncSession, Depends(get_db)],
     redis: Annotated[aioredis.Redis, Depends(get_redis)],
-    page: int = Query(default=1, ge=1),
+    page: PageNumber = 1,
     page_size: int = Query(default=20, ge=1, le=200),
 ):
     started = time.monotonic()
@@ -286,8 +297,8 @@ async def list_campus_model_assets(
     meta: Annotated[RequestMeta, Depends(get_request_meta)],
     db: Annotated[AsyncSession, Depends(get_db)],
     redis: Annotated[aioredis.Redis, Depends(get_redis)],
-    include_data: bool = True,
-    page: int = Query(default=1, ge=1),
+    include_data: bool = False,
+    page: PageNumber = 1,
     page_size: int = Query(default=20, ge=1, le=100),
 ):
     started = time.monotonic()
@@ -325,6 +336,7 @@ async def upsert_campus_model_assets(
         actor_id=claims.user_id,
         requested_workspace_id=requested_workspace_id,
         claim_org_id=get_claim_org_scope(claims=claims),
+        correlation_id=meta.request_id,
     )
     return success_response(result, meta.request_id, started, meta.timestamp)
 
@@ -334,13 +346,14 @@ async def retire_campus_model_asset(
     network_id: uuid.UUID,
     asset_id: uuid.UUID,
     claims: Annotated[TokenClaims, Depends(require_permissions("write:config"))],
+    meta: Annotated[RequestMeta, Depends(get_request_meta)],
     db: Annotated[AsyncSession, Depends(get_db)],
     redis: Annotated[aioredis.Redis, Depends(get_redis)],
 ):
     await CampusModelAssetService(db=db, redis=redis).retire_asset(
         network_id=network_id, asset_id=asset_id, actor_id=claims.user_id,
         requested_workspace_id=enforce_workspace_scope(claims=claims, workspace_id=None),
-        claim_org_id=get_claim_org_scope(claims=claims),
+        claim_org_id=get_claim_org_scope(claims=claims), correlation_id=meta.request_id,
     )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
@@ -352,16 +365,22 @@ async def download_campus_model_asset(
     claims: Annotated[TokenClaims, Depends(require_permissions("read:topology"))],
     db: Annotated[AsyncSession, Depends(get_db)],
     redis: Annotated[aioredis.Redis, Depends(get_redis)],
+    if_none_match: Annotated[str | None, Header(max_length=4096)] = None,
 ):
+    """Verified download (C4): digest ETag, ``If-None-Match`` -> 304, streamed body."""
     body, digest = await CampusModelAssetService(db=db, redis=redis).download_asset(
         network_id=network_id, asset_id=asset_id, actor_user_id=claims.user_id,
         requested_workspace_id=enforce_workspace_scope(claims=claims, workspace_id=None),
-        claim_org_id=get_claim_org_scope(claims=claims),
+        claim_org_id=get_claim_org_scope(claims=claims), if_none_match=if_none_match,
     )
-    return Response(content=body, media_type="application/octet-stream", headers={
+    headers = {"ETag": digest_etag(digest), "Cache-Control": "private, no-store",
+               "X-Content-Type-Options": "nosniff"}
+    if body is None:
+        return Response(status_code=status.HTTP_304_NOT_MODIFIED, headers=headers)
+    # The body is a verified in-memory snapshot (never a later-opened file).
+    return StreamingResponse(_chunks(body), media_type="application/octet-stream", headers={
+        **headers, "Content-Length": str(len(body)),
         "Content-Disposition": f'attachment; filename="{asset_id}.bin"',
-        "ETag": f'"sha256:{digest}"', "Cache-Control": "private, no-store",
-        "X-Content-Type-Options": "nosniff",
     })
 
 
@@ -411,5 +430,6 @@ async def upsert_device_groups(
         actor_id=claims.user_id,
         requested_workspace_id=requested_workspace_id,
         claim_org_id=get_claim_org_scope(claims=claims),
+        correlation_id=meta.request_id,
     )
     return success_response(result, meta.request_id, started, meta.timestamp)

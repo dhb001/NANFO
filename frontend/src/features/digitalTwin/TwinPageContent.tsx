@@ -10,12 +10,21 @@ import {
 import {
   mapImportedBuildingsToCampusBuildings,
   mapPersistedCampusBuildingRecordsToCampusBuildings,
-  parseCampusGeoJson,
+  parseCampusGeoJsonFile,
   type ImportedCampusBuilding,
   type CampusImportParseResult,
 } from "@/features/digitalTwin/campusImportProvider";
 import { useTwinSceneModel } from "@/features/digitalTwin/hooks";
-import { CONGESTION_POLICY_VERSION } from "@/features/digitalTwin/sceneAdapter";
+import {
+  BACKEND_DETECTOR_RULES,
+  HEURISTIC_LEVEL_TEXT,
+  VISUAL_HEURISTIC_LABEL,
+  activeAlertDeviceIds,
+  deriveDeviceAlertStates,
+  describeDetectorRule,
+  describeDeviceAlerts,
+} from "@/features/digitalTwin/twinSeverity";
+import { useAlertsQuery } from "@/features/reliability/hooks";
 import type { ImportSummary } from "@/features/digitalTwin/twinImport";
 import { Panel } from "@/shared/ui/Panel";
 import { QueryState } from "@/shared/ui/QueryState";
@@ -28,7 +37,7 @@ import { Button } from "@/shared/ui/Button";
 import { usePrefersReducedMotion } from "@/shared/lib/reduced-motion";
 import { SceneReconciliationStatus } from "@/features/realtime/SceneReconciliationStatus";
 import { useIsNarrowViewport } from "@/shared/lib/viewport";
-import { formatNumber, formatTimestamp } from "@/shared/lib/format";
+import { formatTimestamp } from "@/shared/lib/format";
 import {
   useCampusModelAssets,
   useCampusBuildings,
@@ -36,7 +45,6 @@ import {
   useUpdateDeviceSpatialRef,
   useUpsertCampusModelAssets,
   useUpsertCampusBuildings,
-  useUpsertDeviceGroups,
 } from "@/features/networks/hooks";
 import { useUiStore } from "@/shared/state/ui-store";
 import type { MeasuredPathSegment } from "./measuredPathMapping";
@@ -50,12 +58,15 @@ import type { AssetRegistration, CampusModelAssetRecord } from "@/shared/types/n
 import { registrationTransform, validateRegistration } from "./modelRegistration";
 import { RFImportPanel, type RFImportState } from "./RFImportPanel";
 import { TwinScene } from "./TwinScene";
-import { MAX_MODEL_BYTES, validateModelBytes, decodePersistedModel } from "./modelAsset";
-import { buildIntentHandoffFromNode } from "./intentHandoff";
+import { decodePersistedModel, encodeBase64, loadValidatedModel, sha256Hex } from "./modelAsset";
+import { buildIntentHandoffFromNode, intentHandoffQuery } from "./intentHandoff";
 import * as importModule from "./twinImport";
 import { downloadModelBytes } from "./assetDownload";
 import { CustomGroupEditor } from "./CustomGroupEditor";
 import { TwinLifecycleControls } from "./TwinLifecycleControls";
+import { overlayTone } from "./twinStatusTones";
+import { DeviceGroupsPanel } from "./DeviceGroupsPanel";
+import type { GroupFocus } from "./groupProposal";
 
 const MeasuredPathPanel = lazy(() => import("./MeasuredPathPanel").then((module) => ({ default: module.MeasuredPathPanel })));
 
@@ -98,64 +109,7 @@ function revokeSessionModelUrl(modelUrl: string | null): void {
   URL.revokeObjectURL(modelUrl);
 }
 
-function toBase64(buffer: ArrayBuffer): string {
-  const bytes = new Uint8Array(buffer);
-  let binary = "";
-  for (let index = 0; index < bytes.length; index += 1) {
-    binary += String.fromCharCode(bytes[index]);
-  }
-  return btoa(binary);
-}
-
-async function sha256Hex(buffer: ArrayBuffer): Promise<string> {
-  const digest = await crypto.subtle.digest("SHA-256", buffer);
-  const bytes = new Uint8Array(digest);
-  return Array.from(bytes, (value) => value.toString(16).padStart(2, "0")).join("");
-}
-
-function toSeverityTone(severity: "low" | "medium" | "high" | "neutral"): "ok" | "warn" | "danger" | "neutral" {
-  if (severity === "low") {
-    return "ok";
-  }
-  if (severity === "medium") {
-    return "warn";
-  }
-  if (severity === "high") {
-    return "danger";
-  }
-  return "neutral";
-}
-
-function isWirelessDeviceType(deviceType: string): boolean {
-  const normalized = deviceType.trim().toLowerCase();
-  return normalized.includes("wireless") || normalized === "ap" || normalized.endsWith("_ap");
-}
-
-function pickMostCommonValue(values: Array<string | null>): string | null {
-  const counts = new Map<string, number>();
-  for (const value of values) {
-    if (!value) {
-      continue;
-    }
-    counts.set(value, (counts.get(value) ?? 0) + 1);
-  }
-
-  let selected: string | null = null;
-  let selectedCount = -1;
-  for (const [value, count] of counts.entries()) {
-    if (count > selectedCount || (count === selectedCount && (selected === null || value.localeCompare(selected) < 0))) {
-      selected = value;
-      selectedCount = count;
-    }
-  }
-
-  return selected;
-}
-
-function toSafeGroupToken(value: string): string {
-  const normalized = value.toLowerCase().replace(/[^a-z0-9:_-]+/g, "-").replace(/^-+|-+$/g, "");
-  return normalized || "scope";
-}
+const DETECTOR_RULE_TEXT = Object.entries(BACKEND_DETECTOR_RULES).map(([metric, rule]) => describeDetectorRule(metric, rule));
 
 export function TwinPageContent() {
   const navigate = useNavigate();
@@ -195,7 +149,6 @@ export function TwinPageContent() {
   const [isCampusImporting, setIsCampusImporting] = useState(false);
   const [isPersistingCampus, setIsPersistingCampus] = useState(false);
   const [isPersistingModelAsset, setIsPersistingModelAsset] = useState(false);
-  const [isPersistingDeviceGroups, setIsPersistingDeviceGroups] = useState(false);
   const [selectedBuildingId, setSelectedBuildingId] = useState<string | null>(null);
   const [selectedFloorKey, setSelectedFloorKey] = useState<string | null>(null);
   const [focusSelectedBuildingOnly, setFocusSelectedBuildingOnly] = useState(false);
@@ -229,9 +182,10 @@ export function TwinPageContent() {
   const deviceGroupsQuery = useDeviceGroups(token, networkId);
   const upsertCampusBuildingsMutation = useUpsertCampusBuildings(token, networkId);
   const upsertCampusModelAssetsMutation = useUpsertCampusModelAssets(token, networkId);
-  const upsertDeviceGroupsMutation = useUpsertDeviceGroups(token, networkId);
 
   const schematicModel = useTwinSceneModel(baseGraph?.nodes ?? [], baseGraph?.edges ?? [], importSummary?.mappingByDeviceId);
+  const alertsQuery = useAlertsQuery(token, { status: "active", networkId: networkId ?? undefined, workspaceId: workspaceId ?? undefined, limit: 200 },
+    Boolean(networkId && hasPermission(profile, "read:telemetry")));
   const spatialQuery = useSpatialScene(token, networkId, hasPermission(profile, "read:topology"));
   const sceneModel = useMemo(() => applySpatialScene(schematicModel, spatialQuery.data), [schematicModel, spatialQuery.data]);
 
@@ -256,6 +210,7 @@ export function TwinPageContent() {
       id: overlay.id,
       object_type: overlay.objectType,
       status: overlay.status,
+      state: overlay.state,
       spatial_ref_id: overlay.spatialRefId,
     }));
   }, [sceneModel.overlays]);
@@ -267,6 +222,12 @@ export function TwinPageContent() {
   }, [sceneModel.nodes]);
 
   const selectedNode = selectedNodeId ? sceneModel.nodeById[selectedNodeId] : null;
+  const deviceAlertStates = useMemo(
+    () => deriveDeviceAlertStates(alertsQuery.data?.items, liveAlerts, new Set(sceneModel.nodes.map((node) => node.id))),
+    [alertsQuery.data?.items, liveAlerts, sceneModel.nodes],
+  );
+  const alertingDeviceIds = useMemo(() => activeAlertDeviceIds(deviceAlertStates), [deviceAlertStates]);
+  const selectedNodeAlerts = selectedNodeId ? deviceAlertStates.get(selectedNodeId) : undefined;
 
   const selectedNodeScope = useMemo(() => {
     return deriveSpatialBuildingScope(selectedNode?.spatialRefId);
@@ -274,6 +235,13 @@ export function TwinPageContent() {
 
   const resolvedBuildingId = selectedBuildingId ?? selectedNodeScope.buildingId;
   const resolvedFloorKey = selectedFloorKey ?? selectedNodeScope.floorKey;
+  // Persisted actions never derive scope from a session-only mapping of the selected node.
+  const groupFocus = useMemo<GroupFocus>(() => {
+    const persistedScope = deriveSpatialBuildingScope(selectedNode?.persistedSpatialRefId);
+    return selectedBuildingId
+      ? { buildingId: selectedBuildingId, floorKey: selectedFloorKey }
+      : { buildingId: persistedScope.buildingId, floorKey: selectedFloorKey ?? persistedScope.floorKey };
+  }, [selectedBuildingId, selectedFloorKey, selectedNode?.persistedSpatialRefId]);
 
   const buildingViewState = useMemo<CampusBuildingViewState | undefined>(() => {
     if (!resolvedBuildingId && !resolvedFloorKey && !focusSelectedBuildingOnly && !filterSelectedFloorOnly) {
@@ -364,29 +332,15 @@ export function TwinPageContent() {
     }
   }, [networkId, pushToast, selectedNode, token, updateSpatialRefMutation]);
 
-  const parseCampusGeoJsonFile = useCallback(async (file: File | null) => {
+  const importCampusGeoJson = useCallback(async (file: File | null) => {
     if (!file) {
-      return;
-    }
-
-    const lowerName = file.name.toLowerCase();
-    const mime = file.type.toLowerCase();
-    const isJsonLike =
-      lowerName.endsWith(".json") ||
-      lowerName.endsWith(".geojson") ||
-      mime.includes("application/json") ||
-      mime.includes("application/geo+json");
-
-    if (!isJsonLike) {
-      setCampusImportError("Campus file must be .geojson or .json.");
       return;
     }
 
     setIsCampusImporting(true);
     setCampusImportError(null);
     try {
-      const text = await file.text();
-      const parsed = parseCampusGeoJson(text);
+      const parsed = await parseCampusGeoJsonFile(file);
       setImportedCampusBuildings(parsed.buildings);
       setCampusImportSummary(parsed.summary);
     } catch (error) {
@@ -460,17 +414,18 @@ export function TwinPageContent() {
     const operation = modelOperation.current;
     const epoch = useLiveStore.getState().epoch;
     try {
-      if (currentModelFile.size > MAX_MODEL_BYTES) throw new Error("Model must be no larger than 8 MiB.");
-      const modelBuffer = await currentModelFile.arrayBuffer();
-      await validateModelBytes(modelBuffer, currentModelFile.name, currentModelFile.type || "application/octet-stream");
-      const modelDataBase64 = toBase64(modelBuffer);
+      if (importedModelStatus !== "ready") throw new Error("The model must render successfully before it is persisted.");
+      // Validated once at import/restore; the same bytes are hashed and natively base64-encoded.
+      const model = await loadValidatedModel(currentModelFile);
+      const modelBuffer = model.bytes;
+      const modelDataBase64 = await encodeBase64(modelBuffer);
       const modelSha256 = await sha256Hex(modelBuffer);
       if (!mounted.current || modelOperation.current !== operation || useLiveStore.getState().epoch !== epoch || useAuthStore.getState().endingSession) return;
 
       const appliedRegistration = registration?.url === importedModelUrl ? registration.value : null;
       const saved = await upsertCampusModelAssetsMutation.mutateAsync({
         model_file_name: currentModelFile.name,
-        model_mime_type: currentModelFile.type || "application/octet-stream",
+        model_mime_type: model.mime,
         model_data_base64: modelDataBase64,
         model_sha256: modelSha256,
         model_size_bytes: modelBuffer.byteLength,
@@ -502,121 +457,12 @@ export function TwinPageContent() {
     currentModelFile,
     registration,
     importedModelUrl,
+    importedModelStatus,
     importSummary,
     networkId,
     pushToast,
     token,
     upsertCampusModelAssetsMutation,
-  ]);
-
-  const persistDerivedDeviceGroups = useCallback(async () => {
-    if (!networkId || !token || sceneModel.nodes.length === 0 || graphQuery.data?.nextCursor || graphQuery.isFetching) {
-      return;
-    }
-
-    setIsPersistingDeviceGroups(true);
-    try {
-      const nodesWithScope = sceneModel.nodes.map((node) => ({
-        node,
-        scope: deriveSpatialBuildingScope(node.spatialRefId),
-      }));
-
-      const scopedBuildingId = resolvedBuildingId ?? pickMostCommonValue(nodesWithScope.map(({ scope }) => scope.buildingId));
-      const scopedFloorKey =
-        resolvedFloorKey ??
-        pickMostCommonValue(
-          nodesWithScope
-            .filter(({ scope }) => !scopedBuildingId || scope.buildingId === scopedBuildingId)
-            .map(({ scope }) => scope.floorKey),
-        );
-
-      const scopedNodes = nodesWithScope
-        .filter(({ scope }) => {
-          if (scopedBuildingId && scope.buildingId !== scopedBuildingId) {
-            return false;
-          }
-          if (scopedFloorKey && scope.floorKey !== scopedFloorKey) {
-            return false;
-          }
-          return true;
-        })
-        .map(({ node }) => node);
-
-      const effectiveNodes = scopedNodes.length > 0 ? scopedNodes : sceneModel.nodes;
-      const wirelessDeviceIds = effectiveNodes
-        .filter((node) => isWirelessDeviceType(node.type))
-        .map((node) => node.id);
-      const scopedDeviceIds = effectiveNodes.map((node) => node.id);
-
-      const [scopeCampusKey, scopeBuildingKey] = scopedBuildingId?.split(":") ?? [];
-      const sitePrefix =
-        scopeCampusKey && scopeBuildingKey
-          ? scopedFloorKey
-            ? `${scopeCampusKey}/${scopeBuildingKey}/${scopedFloorKey}`
-            : `${scopeCampusKey}/${scopeBuildingKey}`
-          : null;
-
-      const scopeToken = toSafeGroupToken(sitePrefix ?? "network");
-      const scopeLabel = [scopeBuildingKey?.toUpperCase() ?? null, scopedFloorKey?.toUpperCase() ?? null]
-        .filter((part): part is string => Boolean(part))
-        .join(" ");
-
-      const wirelessSelector: Record<string, string> = {
-        functional_group: "wireless",
-      };
-      if (sitePrefix) {
-        wirelessSelector.site_prefix = sitePrefix;
-      }
-
-      const operationsSelector: Record<string, string> = {};
-      if (sitePrefix) {
-        operationsSelector.site_prefix = sitePrefix;
-      }
-
-      await upsertDeviceGroupsMutation.mutateAsync({
-        replaceExisting: false,
-        groups: [
-          {
-            group_key: `wireless-${scopeToken}`.slice(0, 160),
-            name: scopeLabel ? `${scopeLabel} Wireless` : "Wireless Devices",
-            group_type: "functional",
-            selector: wirelessSelector,
-            device_ids: wirelessDeviceIds,
-          },
-          {
-            group_key: `ops-${scopeToken}`.slice(0, 160),
-            name: scopeLabel ? `${scopeLabel} Operations` : "Operations Devices",
-            group_type: "operational",
-            selector: operationsSelector,
-            device_ids: scopedDeviceIds,
-          },
-        ],
-      });
-
-      pushToast({
-        tone: "ok",
-        title: "Device groups persisted",
-        description: "Native network device groups updated for this campus context.",
-      });
-    } catch (error) {
-      pushToast({
-        tone: "danger",
-        title: "Device group persist failed",
-        description: error instanceof Error ? error.message : "Could not persist device groups.",
-      });
-    } finally {
-      setIsPersistingDeviceGroups(false);
-    }
-  }, [
-    networkId,
-    pushToast,
-    resolvedBuildingId,
-    resolvedFloorKey,
-    sceneModel.nodes,
-    token,
-    upsertDeviceGroupsMutation,
-    graphQuery.data?.nextCursor,
-    graphQuery.isFetching,
   ]);
 
   const handleConfigureIntentWorkflow = useCallback(async () => {
@@ -625,15 +471,9 @@ export function TwinPageContent() {
       return;
     }
 
-    const handoff = buildIntentHandoffFromNode(selectedNode);
-    const query = new URLSearchParams();
-    query.set("source", handoff.source);
-    query.set("action", handoff.action);
-    query.set("scope", handoff.scopeJson);
-    query.set("constraints", handoff.constraintsJson);
-    query.set("context_summary", handoff.contextSummary);
-    navigate(`/ops/intent?${query.toString()}`);
-  }, [navigate, selectedNode]);
+    const handoff = buildIntentHandoffFromNode(selectedNode, selectedNodeAlerts?.alerts ?? []);
+    navigate(`/ops/intent?${intentHandoffQuery(handoff)}`);
+  }, [navigate, selectedNode, selectedNodeAlerts]);
 
   const onCampusImport = useCallback(async (
     modelFile: File | null,
@@ -664,6 +504,9 @@ export function TwinPageContent() {
     setIsImporting(true);
     setImportError(null);
     try {
+      // Size, structure and self-contained data: URIs are validated before any object URL exists.
+      if (options.replaceModelAsset) await loadValidatedModel(modelFile);
+      if (!mounted.current || operation !== modelOperation.current) return;
       const summary = await importModule.parseImportSummary(modelFile, mappingFile, graphNodes);
       if (!mounted.current || operation !== modelOperation.current) return;
       setImportSummary(summary);
@@ -885,7 +728,7 @@ export function TwinPageContent() {
                   onSelectNode={setSelectedNodeId}
                   reducedMotion={prefersReducedMotion}
                   layers={layers}
-                  alerts={liveAlerts}
+                  alertingDeviceIds={alertingDeviceIds}
                   importedModelUrl={importedModelUrl}
                   modelRegistration={registration?.url === importedModelUrl ? registrationTransform(registration.value) : null}
                   importedCampusBuildings={effectiveCampusBuildings}
@@ -907,10 +750,9 @@ export function TwinPageContent() {
                 }}
               >
                 <strong style={{ fontSize: "0.9rem" }}>Congestion legend</strong>
-                <div style={{ display: "flex", gap: "0.35rem", flexWrap: "wrap" }}>
-                  <Badge text={`policy ${CONGESTION_POLICY_VERSION}`} tone="info" />
-                  <Badge text="priority loss>latency>util>cpu" tone="neutral" />
-                </div>
+                <p>Authoritative severity: backend alerts. {alertsQuery.isError ? "Backend alerts unavailable." : alertsQuery.isFetching && !alertsQuery.data ? "Loading backend alerts…" : `${alertingDeviceIds.size} devices with active backend alerts.`}</p>
+                <p>{VISUAL_HEURISTIC_LABEL} (ring colour, not an alert, never sent as policy) mirrors the backend detector defaults:</p>
+                <ul>{DETECTOR_RULE_TEXT.map((line) => <li key={line}>{line}</li>)}</ul>
               </div>
 
               <div
@@ -1021,7 +863,7 @@ export function TwinPageContent() {
                     Campus GeoJSON file
                   </span>
                   <input aria-label="Campus GeoJSON file" type="file" accept=".geojson,.json,application/geo+json,application/json" onChange={(event) => {
-                    void parseCampusGeoJsonFile(event.target.files?.[0] ?? null);
+                    void importCampusGeoJson(event.target.files?.[0] ?? null);
                   }} />
                 </label>
                 {isCampusImporting ? <div style={{ color: "var(--ink-3)" }}>Parsing GeoJSON campus buildings...</div> : null}
@@ -1039,32 +881,8 @@ export function TwinPageContent() {
                 </div>
               </div>
 
-              <div
-                style={{
-                  border: "1px solid var(--line-soft)",
-                  borderRadius: "10px",
-                  padding: "0.48rem 0.56rem",
-                  display: "grid",
-                  gap: "0.3rem",
-                }}
-              >
-                <strong style={{ fontSize: "0.9rem" }}>Device groups</strong>
-                <div style={{ display: "flex", gap: "0.35rem", flexWrap: "wrap" }}>
-                  <Badge text={`persisted ${deviceGroupsQuery.data?.total ?? 0}`} tone={(deviceGroupsQuery.data?.total ?? 0) > 0 ? "ok" : "neutral"} />
-                  <Badge text="native network groups" tone="info" />
-                </div>
-                <div style={{ display: "flex", gap: "0.35rem", flexWrap: "wrap" }}>
-                  <Button
-                    type="button"
-                    tone="ghost"
-                    disabled={sceneModel.nodes.length === 0 || Boolean(graphQuery.data?.nextCursor) || graphQuery.isFetching || isPersistingDeviceGroups || !networkId || !token}
-                    permission="write:config"
-                    onClick={persistDerivedDeviceGroups}
-                  >
-                    {isPersistingDeviceGroups ? "Persisting groups..." : "Persist Device Groups"}
-                  </Button>
-                </div>
-              </div>
+              <DeviceGroupsPanel token={token} networkId={networkId} nodes={sceneModel.nodes} focus={groupFocus}
+                graphComplete={Boolean(baseGraph) && !graphQuery.data?.nextCursor} graphFetching={graphQuery.isFetching} />
 
               </div>
             </div>
@@ -1073,7 +891,7 @@ export function TwinPageContent() {
       </Panel>
 
       <TwinLifecycleControls networkId={networkId} assets={selectableAssets} selectedId={selectedAssetId} onSelect={selectAsset}
-        disabled={isImporting || isPersistingModelAsset || isPersistingCampus || isPersistingDeviceGroups}
+        disabled={isImporting || isPersistingModelAsset || isPersistingCampus}
         onReload={async () => {
           const results = await Promise.all([campusModelAssetsQuery.refetch(), campusBuildingsQuery.refetch(), deviceGroupsQuery.refetch()]);
           return results.every((result) => !result.isError);
@@ -1124,7 +942,7 @@ export function TwinPageContent() {
                 <div style={{ marginTop: "0.2rem", display: "flex", gap: "0.35rem", flexWrap: "wrap" }}>
                   <Badge text={selectedNode.type} tone="info" />
                   <Badge text={selectedNode.status} tone={selectedNode.status === "active" ? "ok" : "warn"} />
-                  <Badge text={`congestion ${selectedNode.congestion.severity}`} tone={toSeverityTone(selectedNode.congestion.severity)} />
+                  <Badge text={describeDeviceAlerts(selectedNodeAlerts)} tone={selectedNodeAlerts?.status === "active" ? "danger" : selectedNodeAlerts ? "warn" : "neutral"} />
                 </div>
                 <div className="mono" style={{ color: "var(--ink-3)", fontSize: "0.74rem", marginTop: "0.2rem" }}>
                   spatial_ref_id: {selectedNode.spatialRefId ?? "none"}
@@ -1135,13 +953,8 @@ export function TwinPageContent() {
                   {hasImportedSpatialRef ? <Badge text="session import" tone="warn" /> : null}
                 </div>
                 <div className="mono" style={{ color: "var(--ink-3)", fontSize: "0.74rem", marginTop: "0.12rem" }}>
-                  congestion_score: {selectedNode.congestion.score === null ? "neutral" : `${formatNumber(selectedNode.congestion.score * 100, 0)}%`}
+                  {VISUAL_HEURISTIC_LABEL}: {selectedNode.congestion.metrics[0] && !selectedNode.congestion.metrics[0].stale ? `${selectedNode.congestion.metrics[0].metric} ${HEURISTIC_LEVEL_TEXT[selectedNode.congestion.metrics[0].level]}` : "no current detector-covered sample"} (not an alert)
                 </div>
-                {selectedNode.congestion.primaryPolicyId ? (
-                  <div className="mono" style={{ color: "var(--ink-3)", fontSize: "0.74rem", marginTop: "0.12rem" }}>
-                    congestion_policy: {selectedNode.congestion.primaryPolicyId} ({selectedNode.congestion.policyVersion})
-                  </div>
-                ) : null}
               </div>
 
               <MetricSnapshotList metrics={selectedNode.congestion.metrics} />
@@ -1212,13 +1025,7 @@ export function TwinPageContent() {
                     <div style={{ marginTop: "0.2rem" }}>
                       <Badge
                         text={sceneObject.status}
-                        tone={
-                          sceneObject.status === "execution_failed" || sceneObject.status === "cancelled"
-                            ? "danger"
-                            : sceneObject.status === "validated" || sceneObject.status === "completed"
-                              ? "ok"
-                              : "warn"
-                        }
+                        tone={overlayTone({ objectType: sceneObject.object_type, status: sceneObject.status, state: sceneObject.state })}
                       />
                     </div>
                   ) : null}

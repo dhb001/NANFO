@@ -145,6 +145,8 @@ def findings(report):
 def evaluate(lane, report, policy, today):
     raw, unique, skipped = findings(report)
     validate_policy(policy)
+    # Exact audited pins. Skipped rows carry the version restored by main().
+    audited = {(normalized(p["name"]), p.get("version")) for p in report["dependencies"]}
     errors = []
     accepted = set()
     for exception in policy["exceptions"]:
@@ -153,11 +155,20 @@ def evaluate(lane, report, policy, today):
         if not all(exception.get(key) for key in ("owner", "rationale", "remediation", "expires")):
             errors.append("Incomplete exception metadata")
             continue
+        if (exception["package"], exception["version"]) not in audited:
+            # Dead policy must be removed: it would silently re-accept the advisories
+            # if a dependency ever reintroduced that exact pin (e.g. ecdsa, ADR-028 C10).
+            errors.append(f"Stale exception: {exception['package']}=={exception['version']} "
+                          f"is not in the {lane} inventory")
+            continue
         if dt.date.fromisoformat(exception["expires"]) <= today:
             errors.append(f"Expired exception: {exception['package']}")
             continue
         accepted.update((exception["package"], exception["version"], advisory)
                         for advisory in exception["advisories"])
+    for gap in policy.get("coverage_gaps", []):
+        if gap["lane"] == lane and (gap["package"], gap["version"]) not in audited:
+            errors.append(f"Stale coverage gap: {gap['package']}=={gap['version']} is not in the {lane} inventory")
     for row in sorted(unique - accepted):
         errors.append("Unreviewed advisory: " + " / ".join(row))
     for name, version, reason in sorted(skipped):

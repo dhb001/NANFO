@@ -44,6 +44,9 @@ def upgrade():
 
 def downgrade():
     # Dropping dedup/archive receipts after deletion would lose replay safety.
+    if op.get_context().as_sql:
+        raise RuntimeError("Downgrade below 0025 must run online (not --sql): it must first verify that "
+                           "no archive receipt exists")
     connection = op.get_bind()
     if connection.scalar(sa.text("SELECT EXISTS (SELECT 1 FROM telemetry_archive_receipts)")):
         raise RuntimeError("Restore/archive and dedup history require retention0025; downgrade refused")

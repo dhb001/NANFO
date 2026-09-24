@@ -1,11 +1,10 @@
 """Immutable requested configuration; frozen training parameters are never modified."""
 
-import hashlib
-import json
 from datetime import UTC, datetime
 
 from fastapi import HTTPException
 
+from app.core.canonical import canonical_sha256
 from app.modules.autonomy.models import ConfigurationRevision
 from app.modules.autonomy.schemas import (
     ConfigurationResponse,
@@ -41,8 +40,7 @@ class ConfigurationService(AutonomyService):
             await self.db.rollback()
             raise HTTPException(409, detail={"code": "CONFIGURATION_REVISION_CONFLICT", "message": "Refresh configuration before editing."})
         operational, training = request.operational.model_dump(mode="json"), request.training.model_dump(mode="json")
-        content_hash = hashlib.sha256(json.dumps({"operational": operational, "training": training},
-            sort_keys=True, separators=(",", ":"), allow_nan=False).encode()).hexdigest()
+        content_hash = canonical_sha256({"operational": operational, "training": training})
         self.db.add(ConfigurationRevision(network_id=request.network_id, workspace_id=network.workspace_id,
             revision=revision + 1, actor_id=claims.user_id, reason=request.reason,
             operational=operational, training=training, content_sha256=content_hash))

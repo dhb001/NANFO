@@ -1,5 +1,43 @@
 # Configured Simulation (ADR-017 Step 11)
 
+## ADR-028 changes (read first)
+
+- **Policy floors (C18).** A simulation is execution evidence only if its limits are
+  at least as strict as the server floors: `max_loss_pct <= SIMULATION_POLICY_MAX_LOSS_PCT`
+  (default 1.0), `max_latency_ms <= SIMULATION_POLICY_MAX_LATENCY_MS` (1000),
+  `min_throughput_mbps >= SIMULATION_POLICY_MIN_THROUGHPUT_MBPS` (0). A run with
+  `max_loss_pct=100` still computes and may pass its own objectives, but is 409
+  `SIMULATION_POLICY_VIOLATION` as evidence. Evidence records `policy_floors`.
+  `GET /simulations/{id}` adds `execution_policy: {policy_floors, limits_respect_policy}`
+  (null for unconfigured runs) so clients can tell before executing.
+- **Stable network state hash (v2).** `current_network_state_hash` digests
+  `{version: 2, binding, topology}` where topology keeps version/topology/run identity,
+  switch identities with port-number sets, links and hosts, and drops every
+  timestamp, `sequence`, port/flow counter (reactive flow entries included), queue
+  backlog and probe. Unchanged topology keeps evidence valid across samples; a
+  topology, run or binding change invalidates it. Intent validate returns it.
+- **Workspace quota and fairness.** Starting or resuming a modeled run while the
+  workspace already has `SIMULATION_MAX_ACTIVE_PER_WORKSPACE` (default 8) queued or
+  running runs is **429 `SIMULATION_QUOTA_EXCEEDED`** (`Retry-After`). Workers claim
+  least-recently-active workspace first, oldest job within it.
+- **Claim attempts.** Each claim without committed progress increments
+  `claim_attempts` (migration 0030; reset by every committed batch). At
+  `SIMULATION_MAX_CLAIM_ATTEMPTS` (default 5) the run becomes terminal
+  `state=failed`, `failure_reason=attempts_exhausted`, emitted as the documented
+  terminal event `simulation.cancelled` (no new event name). The worker loop
+  isolates exceptions per iteration.
+- **Same-state requests are no-ops**: pause of a paused run or resume of a queued
+  run changes nothing and emits nothing.
+- **Off-loop verification.** Detail/compare re-verify whole checkpoints in a worker
+  thread with a per-process cache keyed by `(simulation_id, revision, digests)`;
+  execution-evidence checks always re-verify (never cached), also off-loop.
+- **Commit before publish.** Unconfigured (legacy) runs now write their lifecycle
+  envelope to `simulation_outbox` in the state transaction, then publish the same
+  stable event ID immediately; unpublished copies are delivered by the worker.
+- Correlation IDs use `normalize_audit_correlation`; opaque ids are kept as
+  `request_id` in `audit_provenance` and event payloads.
+- Digests use `app.core.canonical.canonical_sha256` (byte-identical to before).
+
 Simulation owns the pure `finite-buffer-fluid.v1` evaluator, persisted inputs,
 checkpoints, lease/revision fencing and lifecycle outbox. These are operator-configured
 model predictions, not observations, calibrated bounds, packet simulation, RTT,
@@ -146,8 +184,8 @@ with scoped REST detail; existing WS projection does not expose every REST field
 
 ## Execution Binding
 
-Existing `POST /intents/execute` accepts optional `simulation_id`. Omission preserves
-existing manual/executor behavior. A supplied reference is checked **before idempotent
+Existing `POST /intents/execute` accepts `simulation_id` (required for high-impact
+manual lab actions since ADR-028 C18; optional otherwise). A supplied reference is checked **before idempotent
 execution replay**, against the Simulation owning service, never cross-module SQL.
 Reference validation requires active actor/workspace/network authorization, matching
 network, completed positively versioned/hash-verified output, all objectives passing,
@@ -181,14 +219,16 @@ single owning helper `simulation.modeled.current_network_state_hash(binding,snap
 
 1. Obtain **the current actual** binding/snapshot returned by `prepare_plan`, which
    verifies configured authority, trusted inventory/topology and snapshot freshness.
-2. Serialize snapshot in JSON mode; remove **only top-level `observed_at`**. Keep
-   `sequence`, `run_id`, all nested observation timestamps, counters, durations,
-   queues, probes and graph attributes. Advancing measured samples normally changes
-   this exact hash. No stale client-supplied hash substitutes for this snapshot.
-3. Sort top-level arrays of objects by their canonical SHA256; do not sort path arrays
-   or recursively discard timestamps. Serialize the binding unchanged in JSON mode.
-4. Hash `{version:1,binding:<binding>,snapshot:<snapshot>}` using sorted JSON object
-   keys, separators `(',',':')`, UTF-8, `allow_nan=False` and SHA256.
+2. (ADR-028, version 2) Serialize the snapshot in JSON mode and keep only the
+   stable topology/configuration projection: drop top-level `observed_at`,
+   `sequence`, `queues` and `probes`; reduce each switch to its identity fields and
+   the sorted list of `port_no` (no counters, durations, flows or timestamps).
+   `run_id`, links and hosts are kept. No stale client-supplied hash substitutes
+   for this snapshot.
+3. Sort top-level arrays of objects by their canonical SHA256; do not sort path arrays.
+   Serialize the binding unchanged in JSON mode.
+4. Hash `{version:2,binding:<binding>,topology:<projection>}` using sorted JSON object
+   keys, separators `(',',':')`, `allow_nan=False` and SHA256.
 
 Evidence producers must use the same helper with the same approved actual snapshot;
 there is no new preparation endpoint in this slice. The verifier's direct service

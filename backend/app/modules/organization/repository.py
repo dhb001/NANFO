@@ -7,11 +7,24 @@ No cross-module SQL joins. user_id in org_members is a stored reference only.
 from __future__ import annotations
 
 import uuid
+from dataclasses import dataclass
+from datetime import datetime
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.organization.models import Organization, OrgMember, Workspace
+
+
+@dataclass(frozen=True)
+class MemberOrganization:
+    """An active organization plus the listing user's current org role (ADR-028 C6)."""
+
+    org_id: uuid.UUID
+    name: str
+    slug: str
+    created_at: datetime
+    caller_role: str
 
 
 class OrganizationRepository:
@@ -50,16 +63,32 @@ class OrganizationRepository:
 
     async def list_for_user(
         self, user_id: uuid.UUID, page: int = 1, page_size: int = 20, org_id: uuid.UUID | None = None,
-    ) -> tuple[list[Organization], int]:
-        """Return organizations the user is a member of."""
-        member_org_ids = select(OrgMember.org_id).where(OrgMember.user_id == user_id, OrgMember.deleted_at.is_(None))
-        q = select(Organization).where(Organization.org_id.in_(member_org_ids), Organization.deleted_at.is_(None))
+    ) -> tuple[list[MemberOrganization], int]:
+        """Return active organizations the user is an active member of, with their role.
+
+        One joined query per page (the membership PK is (org_id, user_id), so each
+        organization appears once); no per-row role lookups.
+        """
+        memberships = (
+            select(OrgMember.org_id, OrgMember.org_role)
+            .where(OrgMember.user_id == user_id, OrgMember.deleted_at.is_(None))
+            .subquery()
+        )
+        q = (
+            select(Organization, memberships.c.org_role)
+            .join(memberships, memberships.c.org_id == Organization.org_id)
+            .where(Organization.deleted_at.is_(None))
+        )
         if org_id is not None:
             q = q.where(Organization.org_id == org_id)
         total = (await self._db.execute(select(func.count()).select_from(q.subquery()))).scalar_one()
         rows = (await self._db.execute(q.order_by(Organization.created_at, Organization.org_id)
-                                      .offset((page - 1) * page_size).limit(page_size))).scalars().all()
-        return list(rows), total
+                                      .offset((page - 1) * page_size).limit(page_size))).all()
+        return [
+            MemberOrganization(org_id=org.org_id, name=org.name, slug=org.slug,
+                               created_at=org.created_at, caller_role=role)
+            for org, role in rows
+        ], total
 
     async def soft_delete(self, org: Organization) -> None:
         from datetime import UTC, datetime

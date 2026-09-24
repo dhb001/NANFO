@@ -56,10 +56,12 @@ async def test_leader_reacquire_has_local_cleanup_and_fenced_poll(runtime_parts)
 async def test_partial_startup_cancellation_stops_collector(runtime_parts, monkeypatch):
     _, collectors, lease, _ = runtime_parts
     reached = asyncio.Event()
-    async def backfill(**kwargs):
+    async def schema():
         reached.set()
         await asyncio.Event().wait()
-    monkeypatch.setattr(main, "_run_topology_workspace_backfill", backfill)
+    monkeypatch.setattr(main, "_ensure_graph_schema", schema)
+    settings = runtime_parts[0]
+    settings.API_STARTUP_GRAPH_SCHEMA_TIMEOUT_SECONDS = 60
     app = FastAPI()
     async def startup():
         async with main._runtime_lifespan(app, lease=lease):
@@ -119,3 +121,82 @@ async def test_consumers_keep_handler_identity_and_require_current_lease(runtime
         lease.verify.return_value = False
         with pytest.raises(asyncio.CancelledError):
             await handler({})
+
+
+async def test_unbounded_backfill_runs_in_background_and_is_cancelled_on_exit(runtime_parts, monkeypatch):
+    """ADR-028: leader startup never waits on the topology backfill (< 35 s budget)."""
+    _, collectors, lease, _ = runtime_parts
+    started, cancelled = asyncio.Event(), asyncio.Event()
+
+    async def backfill(**kwargs):
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            cancelled.set()
+            raise
+
+    monkeypatch.setattr(main, "_run_topology_workspace_backfill", backfill)
+    app = FastAPI()
+    async with asyncio.timeout(2):
+        async with main._runtime_lifespan(app, lease=lease) as tasks:
+            assert started.is_set()  # began before readiness, never awaited by startup
+            assert len(tasks) == len(main.STREAM_GROUPS) + 1  # optional work is not supervised
+            assert {task.get_name() for task in app.state.background_tasks} == {
+                "leader-topology-backfill", "leader-consumer-janitor"}
+    assert cancelled.is_set() and app.state.background_tasks == []
+
+
+async def test_graph_schema_is_ensured_before_consumers_and_failure_is_bounded(runtime_parts, monkeypatch):
+    settings, _, lease, _ = runtime_parts
+    order = []
+
+    async def schema():
+        order.append("schema")
+        raise RuntimeError("graph unavailable")
+
+    async def consumer(**kwargs):
+        order.append("consumer")
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(main, "_ensure_graph_schema", schema)
+    monkeypatch.setattr(main, "run_consumer_loop", consumer)
+    async with main._runtime_lifespan(FastAPI(), lease=lease):
+        await asyncio.sleep(0)
+    assert order[0] == "schema" and order.count("consumer") == len(main.STREAM_GROUPS)
+
+
+async def test_consumers_use_stable_name_and_delivery_bounds(runtime_parts, monkeypatch):
+    settings, _, lease, _ = runtime_parts
+    settings.EVENT_CONSUMER_NAME = "api-node-1"
+    captured = []
+
+    async def consumer(**kwargs):
+        captured.append(kwargs)
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(main, "run_consumer_loop", consumer)
+    async with main._runtime_lifespan(FastAPI(), lease=lease):
+        await asyncio.sleep(0)
+    assert {kwargs["consumer_name"] for kwargs in captured} == {"api-node-1"}
+    assert {kwargs["max_deliveries"] for kwargs in captured} == {settings.EVENT_MAX_DELIVERIES}
+    assert {kwargs["concurrency"] for kwargs in captured} == {settings.EVENT_CONSUMER_CONCURRENCY}
+    handlers = captured[0]["handlers"]
+    from app.events.bus import is_idempotent
+    assert is_idempotent(handlers["network.device.added"][0])  # audit: unique event_id
+    assert is_idempotent(handlers["telemetry.metric.ingested"][0])  # telemetry persistence
+    # Audit (unique) then the alert-publishing transition handler (keeps markers).
+    assert [is_idempotent(item) for item in handlers["telemetry.collector.sustained_failure_activated"]] == [
+        True, False]
+    assert not is_idempotent(handlers["network.device.added"][1])  # topology keeps markers
+
+
+async def test_graph_schema_hook_delegates_to_network_module(monkeypatch):
+    from app.modules.network import topology
+
+    ensure = AsyncMock(return_value={"device_id_unique": "ok"})
+    monkeypatch.setattr(topology, "ensure_graph_schema", ensure)
+    assert await main._ensure_graph_schema() == {"device_id_unique": "ok"}
+    ensure.assert_awaited_once_with()
+    monkeypatch.delattr(topology, "ensure_graph_schema")
+    assert await main._ensure_graph_schema() is None  # tolerated until the owner ships it

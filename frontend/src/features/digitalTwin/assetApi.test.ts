@@ -8,8 +8,13 @@ it("requests only bounded metadata pages and forwards cancellation", async () =>
   vi.stubGlobal("fetch", fetch);
   const controller = new AbortController();
   expect((await listCampusModelAssets("test-token", "n", 3, 20, controller.signal)).data).toEqual(data);
-  expect(fetch).toHaveBeenCalledWith(expect.stringContaining("/campus/model-assets?include_data=false&page=3&page_size=20"), expect.objectContaining({ signal: controller.signal }));
+  expect(fetch).toHaveBeenCalledWith(expect.stringContaining("/campus/model-assets?include_data=false&page=3&page_size=20"), expect.objectContaining({ signal: expect.any(AbortSignal) }));
   expect(fetch).toHaveBeenCalledTimes(1);
+  // The request signal may be composed (timeout); caller cancellation must still reach fetch.
+  const forwarded = fetch.mock.calls[0][1].signal as AbortSignal;
+  expect(forwarded.aborted).toBe(false);
+  controller.abort();
+  expect(forwarded.aborted).toBe(true);
 });
 it("preserves registration omission vs explicit clearing in the existing asset POST", async () => {
   const fetch = vi.fn().mockImplementation(async () => new Response(JSON.stringify({ success: true, data: { items: [], total: 0 }, meta: {}, errors: null })));

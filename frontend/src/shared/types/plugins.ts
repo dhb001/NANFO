@@ -9,6 +9,9 @@ export interface PluginManifest {
   metadata: Record<string, unknown>;
 }
 
+/** Backend `PluginRecordResponse.status` value set. */
+export type PluginStatus = "installed" | "enabled" | "disabled" | "failed" | "uninstalled";
+
 export interface PluginRecord {
   registry_only?: true;
   execution_supported?: false;
@@ -23,7 +26,7 @@ export interface PluginRecord {
   signature_status: string;
   dependency_status: string;
   sandbox_status: string;
-  status: "installed" | "enabled" | "disabled" | "failed" | string;
+  status: PluginStatus;
   enabled: boolean;
   failure_reason: string | null;
   queue_status: string;

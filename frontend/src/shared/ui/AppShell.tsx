@@ -5,6 +5,8 @@ import { Button } from "@/shared/ui/Button";
 import { BrandMark } from "@/shared/ui/BrandMark";
 import { useUiStore } from "@/shared/state/ui-store";
 import { RealtimeBridge } from "@/features/realtime/RealtimesBridge";
+import { RealtimeRetryControl } from "@/features/realtime/RealtimeRetryControl";
+import { SessionRecoveryBanner } from "@/features/auth/SessionRecoveryBanner";
 import { logoutSession } from "@/features/auth/session";
 import { canAccessRoute } from "@/features/auth/permissions";
 import { useWorkspaceStore } from "@/shared/state/workspace-store";
@@ -98,6 +100,8 @@ export function AppShell() {
           </div>
         </header>
         <ExecutionModeBanner />
+        <SessionRecoveryBanner />
+        <RealtimeRetryControl />
         <div key={contextKey} id="workspace-content" tabIndex={-1} className="workspace-content">
           {currentPage?.description && canAccessRoute(profile, location.pathname) ? <header className="page-heading" key={location.pathname}><div><div className="eyebrow">{currentGroup?.label} / Network atlas</div><h1>{currentPage.label}</h1><p>{currentPage.description}</p></div><span className="page-index" aria-hidden="true">N / {currentPage.key}</span></header> : null}
           {canAccessRoute(profile, location.pathname) ? <Outlet /> : <AsyncState title="Permission denied" description="Your current backend profile does not permit this route." />}

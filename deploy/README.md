@@ -132,8 +132,8 @@ to loopback, forwarding to non-root nginx port 8080. `/health` is liveness; `/re
 checks the exact current-source schema0029, PostgreSQL, Redis, Neo4j, API lease and event consumers. Worker
 health uses the existing `check_worker_health.py --worker NAME` and actual completed
 loop progress under each container's private `/run/nanfo` tmpfs, not process existence.
-Both `NANFO_WORKER_HEARTBEAT_PATH` and the current backend setting
-`WORKER_HEARTBEAT_PATH` identify `/run/nanfo/heartbeat.json`.
+The backend reads only `WORKER_HEARTBEAT_PATH` (`/run/nanfo/heartbeat.json`, one
+`.<loop>` file per loop); the unread legacy duplicate variable was removed (ADR-028).
 
 ## Stop And Restart
 

@@ -3,17 +3,18 @@
 import json
 import uuid
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi import HTTPException
 from httpx import ASGITransport, AsyncClient
+from redis.exceptions import ConnectionError as RedisConnectionError
 
 from app.core.dependencies import get_db, get_redis
 from app.core.security import decode_token
 from app.main import app
 from app.modules.identity.repository import AuditLogRepository, UserRepository
-from app.modules.identity.service import AuthService
+from app.modules.identity.service import AuthService, login_email_bucket_key, login_ip_bucket_key
 from app.modules.identity.sessions import SessionRepository
 
 
@@ -50,7 +51,7 @@ async def login(client, request_id, password="correct"):
 async def test_login_outcomes(identity_client, fake_redis, request_id, outcome):
     client, audit, published = identity_client
     if outcome == "rate_limit":
-        await fake_redis.set("ratelimit:login:email:identity@example.com", "5", ex=60)
+        await fake_redis.set(login_email_bucket_key("identity@example.com"), "5", ex=60)
     response = await login(client, request_id, "wrong" if outcome == "invalid" else "correct")
     assert response.status_code == {"success": 200, "invalid": 401, "rate_limit": 429}[outcome]
     assert response.json()["meta"]["request_id"] == request_id
@@ -92,9 +93,16 @@ async def test_opaque_refresh_and_family_revocation(identity_client, fake_redis,
         assert (await client.get("/api/v1/auth/me", headers={
             "Authorization": f"Bearer {tokens['access_token']}"})).status_code == 200
     if termination == "replay":
+        # ADR-028 C9: outside the 20 s retry grace a spent token is reuse.
+        await fake_redis.delete(SessionRepository.rotation_key(pair["refresh_token"]))
         response = await client.post("/api/v1/auth/refresh", headers={"X-Request-ID": "req_replay/27"},
                                      json={"refresh_token": pair["refresh_token"]})
         assert response.status_code == 401
+        reuse = audit.await_args.kwargs
+        assert reuse["event_type"] == "auth.token.reuse_detected"
+        assert reuse["metadata"]["session_id"] == old["sid"] and reuse["actor_id"] == uuid.UUID(old["sub"])
+        assert reuse["metadata"]["ip_address"] == "127.0.0.1"
+        assert reuse["metadata"]["request_id"] == "req_replay/27"
     else:
         response = await client.post("/api/v1/auth/logout", headers={
             "Authorization": f"Bearer {rotated['access_token']}", "X-Request-ID": "req_logout/27"})
@@ -127,7 +135,9 @@ async def test_invalid_header_has_no_auth_side_effects(identity_client, fake_red
     assert response.status_code == 400
     assert response.json()["errors"]["code"] == "REQUEST_ID_INVALID"
     assert await fake_redis.get(session_key) == before
-    assert await fake_redis.get("ratelimit:login:email:identity@example.com") == "1"
+    # Every attempt counts per IP; the per-email failure bucket was cleared by the success.
+    assert await fake_redis.get(login_ip_bucket_key("127.0.0.1")) == "1"
+    assert await fake_redis.get(login_email_bucket_key("identity@example.com")) is None
     audit.assert_not_awaited()
     published.assert_not_awaited()
     mock_db.commit.assert_not_awaited()
@@ -163,3 +173,71 @@ async def test_opaque_logout_without_refresh(identity_client, fake_redis):
     assert response.json()["meta"]["request_id"] == "req_logout_only"
     assert audit.await_args.kwargs["metadata"] == {"jti": claims["jti"], "request_id": "req_logout_only"}
     assert not await fake_redis.exists(SessionRepository.key(claims["sid"]))
+
+
+async def test_refresh_retry_inside_grace_returns_identical_pair(identity_client, fake_redis):
+    """C9: a lost refresh response can be retried with the same token for 20 s."""
+    client, audit, _ = identity_client
+    pair = (await login(client, str(uuid.UUID(int=27)))).json()["data"]
+    first = await client.post("/api/v1/auth/refresh", headers={"X-Request-ID": "req_first"},
+                              json={"refresh_token": pair["refresh_token"]})
+    retry = await client.post("/api/v1/auth/refresh", headers={"X-Request-ID": "req_retry"},
+                              json={"refresh_token": pair["refresh_token"]})
+    assert first.status_code == retry.status_code == 200
+    rotated, retried = first.json()["data"], retry.json()["data"]
+    assert (retried["access_token"], retried["refresh_token"]) == (rotated["access_token"], rotated["refresh_token"])
+    assert 0 < retried["expires_in"] <= rotated["expires_in"]
+    assert audit.await_args.kwargs["metadata"]["retry_grace"] is True
+    assert 0 < await fake_redis.ttl(SessionRepository.rotation_key(pair["refresh_token"])) <= 20
+    assert (await client.get("/api/v1/auth/me", headers={
+        "Authorization": f"Bearer {retried['access_token']}"})).status_code == 200
+
+
+@pytest.mark.parametrize("body", [{"refresh_token": ""}, {"refresh_token": "x" * 4097}])
+async def test_refresh_token_length_is_bounded(identity_client, body):
+    client, audit, _ = identity_client
+    response = await client.post("/api/v1/auth/refresh", json=body)
+    assert response.status_code == 422
+    audit.assert_not_awaited()
+
+
+async def test_login_email_length_is_bounded(identity_client):
+    client, audit, _ = identity_client
+    response = await client.post("/api/v1/auth/login",
+                                 json={"email": "a" * 250 + "@example.com", "password": "correct"})
+    assert response.status_code == 422
+    audit.assert_not_awaited()
+
+
+@pytest.mark.parametrize("operation", ["login", "me", "refresh"])
+async def test_session_store_outage_is_503_not_401(identity_client, fake_redis, operation):
+    """ADR-028 C2: Redis outages during authentication are retryable 503s, never 401."""
+    client, _, _ = identity_client
+    pair = (await login(client, str(uuid.UUID(int=27)))).json()["data"]
+    if operation == "login":
+        pipeline_type = type(fake_redis.pipeline())
+        with patch.object(pipeline_type, "execute", AsyncMock(side_effect=RedisConnectionError("down"))):
+            response = await login(client, "req_outage")
+    else:
+        fake_redis.get = AsyncMock(side_effect=RedisConnectionError("down"))
+        response = (await client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {pair['access_token']}"})
+                    if operation == "me" else
+                    await client.post("/api/v1/auth/refresh", json={"refresh_token": pair["refresh_token"]}))
+    assert response.status_code == 503, response.text
+    assert response.json()["errors"]["code"] == "DEPENDENCY_UNAVAILABLE"
+    assert int(response.headers["Retry-After"]) >= 1
+    assert "redis" not in response.text.lower()
+
+
+async def test_me_loads_user_and_roles_once_per_request(identity_client, mock_db):
+    """Fix 11: authentication and the profile share one identity load per request."""
+    client, _, _ = identity_client
+    pair = (await login(client, str(uuid.UUID(int=27)))).json()["data"]
+    mock_db.info = {}  # a real per-request AsyncSession exposes an info dict
+    UserRepository.get_by_id.reset_mock()
+    UserRepository.get_roles_for_user.reset_mock()
+    response = await client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {pair['access_token']}"})
+    assert response.status_code == 200
+    assert response.json()["data"]["roles"] == ["Admin"]
+    assert UserRepository.get_by_id.await_count == 1
+    assert UserRepository.get_roles_for_user.await_count == 1

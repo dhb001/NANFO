@@ -3,7 +3,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import TIMESTAMP, BigInteger, Boolean, CheckConstraint, Index, Text, func, text
+from sqlalchemy import TIMESTAMP, BigInteger, Boolean, CheckConstraint, ForeignKey, Index, Text, func, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -25,6 +25,8 @@ class AutonomousExecution(Base):
         Index("uq_autonomous_decision", "decision_id", unique=True),
         Index("ix_autonomous_execution_pending", "updated_at",
               postgresql_where=text("released = false")),
+        Index("ix_autonomous_executions_network_unreleased", "network_id",
+              postgresql_where=text("released = false")),
         CheckConstraint("fence > 0", name="ck_autonomous_fence"),
         CheckConstraint("phase IN ('accepted','prepared','applying','verified','recovering','cancelled','uncertain')",
                         name="ck_autonomous_phase"),
@@ -35,7 +37,11 @@ class AutonomousExecution(Base):
     decision_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     network_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     workspace_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
-    resource_id: Mapped[str] = mapped_column(Text, nullable=False)
+    # The fenced resource row is inserted (and locked) before its execution row.
+    resource_id: Mapped[str] = mapped_column(
+        Text, ForeignKey("autonomous_resources.resource_id", name="fk_autonomous_executions_resource"),
+        nullable=False, index=True,
+    )
     fence: Mapped[int] = mapped_column(BigInteger, nullable=False)
     command: Mapped[dict] = mapped_column(JSONB, nullable=False)
     phase: Mapped[str] = mapped_column(Text, nullable=False, default="accepted")

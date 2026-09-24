@@ -55,6 +55,9 @@ class OrgResponse(BaseModel):
     name: str
     slug: str
     created_at: datetime
+    # ADR-028 C6: the caller's current role in this organization. Always set by
+    # list/get (and create/update, whose caller is necessarily Admin).
+    caller_role: OrgRole | None = None
 
     model_config = {"from_attributes": True}
 

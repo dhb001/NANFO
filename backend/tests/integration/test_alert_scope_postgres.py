@@ -44,7 +44,9 @@ async def test_filters_find_old_active_behind_200_newer_resolved_and_other_netwo
     async with sessions() as db:
         svc = AlertService(db=db, redis=None)
         unfiltered = await svc.list_alerts(**args)
-        assert unfiltered.total == 200
+        # ADR-028: the total is every authorized match (202 incidents + other network).
+        assert unfiltered.total == 203 and len(unfiltered.items) == 200
+        assert unfiltered.status_counts == {"active": 2, "acknowledged": 0, "resolved": 201}
         assert "incident-0" not in {r.alert_key for r in unfiltered.items}
         active = await svc.list_alerts(**{**args, "status_filter": "active"}, workspace_id_filter=WORKSPACE,
                                        network_id_filter=NETWORK)

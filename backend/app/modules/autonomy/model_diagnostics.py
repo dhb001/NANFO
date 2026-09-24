@@ -17,8 +17,9 @@ from app.modules.autonomy.model_diagnostic_schemas import (
     ModelDiagnosticsResponse,
     RegisteredModelStatus,
 )
+from app.core.canonical import canonical_sha256 as canonical_hash
+from app.modules.autonomy.model_diagnostic_registry import CONFIG_KEYS, load_registry, select_model
 from app.modules.autonomy.service import authorize
-from scripts.frozen_model_diagnostic import CONFIG_KEYS, canonical_hash, load_registry, select_model
 
 RUNNER = Path(__file__).resolve().parents[3] / "scripts" / "frozen_model_diagnostic.py"
 LOCK = "nanfo:autonomy:model-diagnostics:inference"

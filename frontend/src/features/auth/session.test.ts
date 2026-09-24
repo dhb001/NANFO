@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { logoutSession, recoverSocketUpgrade, refreshSession } from "@/features/auth/session";
+import { logoutSession, recoverSocketUpgrade, refreshSession, retrySessionNow } from "@/features/auth/session";
 import { useAuthStore } from "@/shared/state/auth-store";
 import { useWorkspaceStore } from "@/shared/state/workspace-store";
 import { useLiveStore } from "@/features/realtime/store";
@@ -112,7 +112,7 @@ describe("session lifecycle", () => {
     fetchMock.mockResolvedValueOnce(envelope(pair));
     fetchMock.mockResolvedValueOnce(envelope({ logged_out: true }));
     await logoutSession();
-    expect(fetchMock.mock.calls.map(([url]) => new URL(String(url)).pathname)).toEqual([
+    expect(fetchMock.mock.calls.map(([url]) => new URL(String(url), window.location.origin).pathname)).toEqual([
       "/api/v1/auth/logout", "/api/v1/auth/refresh", "/api/v1/auth/logout",
     ]);
     expect(fetchMock).toHaveBeenLastCalledWith(expect.stringContaining("/auth/logout"),
@@ -256,5 +256,116 @@ describe("session lifecycle", () => {
     finish(envelope({ simulation_id: "old-run" }));
     await rejected;
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+  describe("transient refresh failures keep the session (ADR-028)", () => {
+    const failure = (status: number, headers: Record<string, string> = {}) => Response.json(
+      { success: false, data: null, meta: { request_id: "req-refresh" }, errors: { code: status === 503 ? "DEPENDENCY_UNAVAILABLE" : `HTTP_${status}`, message: "unavailable" } },
+      { status, headers });
+    afterEach(() => { vi.useRealTimers(); });
+
+    it.each([
+      ["network error", () => Promise.reject(new TypeError("Failed to fetch"))],
+      ["502 bad gateway", () => Promise.resolve(new Response("<html>bad gateway</html>", { status: 502 }))],
+      ["503 dependency outage", () => Promise.resolve(failure(503, { "Retry-After": "7" }))],
+      ["429 throttled", () => Promise.resolve(failure(429))],
+      ["timeout", () => Promise.reject(new DOMException("The operation timed out.", "TimeoutError"))],
+    ])("keeps credentials and schedules a retry after a %s", async (_name, answer) => {
+      fetchMock.mockImplementationOnce(answer);
+      expect(await refreshSession()).toBe(false);
+      const state = useAuthStore.getState();
+      expect(state.accessToken).toBe("access-old");
+      expect(state.refreshToken).toBe("refresh-old");
+      expect(state.recovery).toMatchObject({ reason: "refresh_unavailable", attempt: 1 });
+      expect(JSON.parse(sessionStorage.getItem("nanfo.auth.session") ?? "{}")).toMatchObject({ refreshToken: "refresh-old" });
+    });
+
+    it.each([400, 401, 403])("ends the session on an authoritative %i", async (status) => {
+      fetchMock.mockResolvedValueOnce(failure(status));
+      expect(await refreshSession()).toBe(false);
+      expect(useAuthStore.getState().accessToken).toBeNull();
+      expect(useAuthStore.getState().recovery).toBeNull();
+      expect(queryClient.getQueryData(["private"])).toBeUndefined();
+    });
+
+    it("honours Retry-After, answers callers locally while waiting, then recovers single-flight", async () => {
+      vi.useFakeTimers();
+      fetchMock.mockResolvedValueOnce(failure(503, { "Retry-After": "7" }));
+      expect(await refreshSession()).toBe(false);
+      expect(useAuthStore.getState().recovery?.retryAt).toBe(Date.now() + 7_000);
+      // Callers during the wait get the local answer; no extra refresh request.
+      expect(await refreshSession()).toBe(false);
+      expect(await refreshSession()).toBe(false);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      fetchMock.mockResolvedValueOnce(envelope(pair)).mockResolvedValueOnce(envelope(operatorProfile));
+      await vi.advanceTimersByTimeAsync(6_999);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(1);
+      await vi.waitFor(() => expect(useAuthStore.getState().accessToken).toBe("access-new"));
+      expect(useAuthStore.getState().recovery).toBeNull();
+      expect(fetchMock.mock.calls.filter(([url]) => String(url).endsWith("/auth/refresh"))).toHaveLength(2);
+      expect(useWorkspaceStore.getState().networkId).toBe("network");
+    });
+
+    it("backs off with growing jittered delays when no Retry-After is given", async () => {
+      vi.useFakeTimers();
+      vi.spyOn(Math, "random").mockReturnValue(0.5);
+      fetchMock.mockRejectedValue(new TypeError("offline"));
+      await refreshSession();
+      const delays: number[] = [];
+      for (let attempt = 1; attempt <= 4; attempt++) {
+        const recovery = useAuthStore.getState().recovery!;
+        expect(recovery.attempt).toBe(attempt);
+        delays.push(recovery.retryAt - Date.now());
+        await vi.advanceTimersByTimeAsync(recovery.retryAt - Date.now());
+      }
+      expect(delays).toEqual([1_000, 2_000, 4_000, 8_000]);
+      expect(useAuthStore.getState().accessToken).toBe("access-old");
+      vi.mocked(Math.random).mockRestore();
+    });
+
+    it("retries immediately from the banner action", async () => {
+      fetchMock.mockRejectedValueOnce(new TypeError("offline"));
+      await refreshSession();
+      fetchMock.mockResolvedValueOnce(envelope(pair)).mockResolvedValueOnce(envelope(operatorProfile));
+      expect(await retrySessionNow()).toBe(true);
+      expect(useAuthStore.getState().recovery).toBeNull();
+      expect(useAuthStore.getState().accessToken).toBe("access-new");
+    });
+
+    it("stores a rotated pair when the profile re-read fails, without reporting verified success", async () => {
+      fetchMock.mockResolvedValueOnce(envelope(pair)).mockResolvedValueOnce(failure(503));
+      expect(await refreshSession()).toBe(false);
+      // The spent refresh token is never kept: the new pair is persisted.
+      expect(useAuthStore.getState().refreshToken).toBe("refresh-new");
+      expect(JSON.parse(sessionStorage.getItem("nanfo.auth.session") ?? "{}")).toMatchObject({ refreshToken: "refresh-new" });
+      expect(useAuthStore.getState().recovery).toMatchObject({ reason: "profile_unavailable" });
+    });
+
+    it("refuses to replay an approved write while authority is unverified", async () => {
+      fetchMock.mockImplementation(async (url) => {
+        if (String(url).endsWith("/auth/refresh")) return envelope(pair);
+        if (String(url).endsWith("/auth/me")) return failure(503);
+        return new Response(null, { status: 401 });
+      });
+      await expect(apiRequest("/api/v1/intents/execute", { method: "POST", token: "access-old", body: { manual_approval: true } }))
+        .rejects.toMatchObject({ status: 401 });
+      expect(fetchMock.mock.calls.filter(([url]) => String(url).endsWith("/intents/execute"))).toHaveLength(1);
+      expect(useAuthStore.getState().refreshToken).toBe("refresh-new");
+    });
+
+    it("still revokes with the current access token when an in-flight refresh fails transiently", async () => {
+      let fail!: (error: Error) => void;
+      fetchMock.mockReturnValueOnce(new Promise((_resolve, reject) => { fail = reject; }));
+      fetchMock.mockResolvedValueOnce(envelope({ logged_out: true }));
+      const rotation = refreshSession();
+      const logout = logoutSession();
+      fail(new TypeError("offline"));
+      expect(await rotation).toBe(false);
+      await logout;
+      expect(fetchMock).toHaveBeenLastCalledWith(expect.stringContaining("/auth/logout"),
+        expect.objectContaining({ headers: { Authorization: "Bearer access-old" } }));
+      expect(useAuthStore.getState().accessToken).toBeNull();
+      expect(useAuthStore.getState().recovery).toBeNull();
+    });
   });
 });

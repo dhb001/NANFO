@@ -3,18 +3,25 @@
 from __future__ import annotations
 
 import asyncio
+import uuid
 from datetime import UTC, datetime, timedelta
 
 from fastapi import HTTPException
 
 from app.core.config import get_settings
 from app.core.dependencies import get_claim_org_scope, get_claim_workspace_scope
+from app.core.logging import get_logger
 from app.db.postgres import AsyncSessionLocal
-from app.modules.autonomy.providers import Providers, installed_providers
-from app.modules.autonomy.repository import AutonomyRepository
+from app.modules.autonomy import governance
+from app.modules.autonomy.providers import Providers, cached_providers, shared_providers, stop_recovery
+from app.modules.autonomy.repository import AutonomyRepository, StopLockTimeout
 from app.modules.autonomy.schemas import (
     AutonomyResponse,
     DecisionResponse,
+    DecisionSummary,
+    ExecutionReference,
+    ProviderStatus,
+    ProviderStatuses,
     Qualification,
     Verification,
 )
@@ -23,6 +30,8 @@ from app.modules.network.service import NetworkService
 from app.modules.autonomy.models import AutonomyControl, AutonomyDecision, TimedOverride
 from app.modules.autonomy.execution_models import AutonomousExecution, AutonomousObservation, AutonomousProviderState
 from app.modules.telemetry.references import evidence_item, install_owner_guard, page_position, reference_page
+
+logger = get_logger(__name__)
 
 
 def autonomy_telemetry_references(row):

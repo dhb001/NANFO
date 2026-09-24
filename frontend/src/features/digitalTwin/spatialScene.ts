@@ -1,6 +1,6 @@
 import { Euler, Matrix4, Quaternion, Vector3 } from "three";
 import type { SpatialObject, SpatialObjectType, SpatialScene, SpatialSceneSnapshot, SpatialVector } from "@/shared/types/spatial";
-import type { TwinSceneModel } from "./sceneAdapter";
+import type { TwinTopology } from "./sceneAdapter";
 import { validateSpatialGeometry } from "./spatialGeometryValidation";
 
 export const EMPTY_SPATIAL_SCENE: SpatialScene = { version: 1, coordinate_system: { units: "m", up_axis: "y" }, objects: [] };
@@ -88,19 +88,24 @@ export function spatialWorldTransforms(scene: SpatialScene): Map<string, Matrix4
   return world;
 }
 
-export function applySpatialScene(model: TwinSceneModel, scene?: SpatialScene): TwinSceneModel {
+/** Canonical placements override schematic positions; topology only (telemetry independent). */
+export function applySpatialScene<M extends TwinTopology>(model: M, scene?: SpatialScene): M {
+  type N = M["nodes"][number];
   const world = scene ? spatialWorldTransforms(scene) : new Map<string, Matrix4>();
   const placements = new Map(scene?.objects.filter((item) => item.device_id !== null).map((item) => [item.device_id!.toLowerCase(), item]));
-  const nodes = model.nodes.map((node) => {
+  const position = new Vector3();
+  const rotation = new Euler();
+  const nodes = model.nodes.map((node): N => {
     const object = placements.get(node.id.toLowerCase());
     if (!object) return { ...node, placementSource: "schematic" as const };
     const matrix = world.get(object.object_id)!;
-    const position = new Vector3().setFromMatrixPosition(matrix);
-    const rotation = new Euler().setFromRotationMatrix(matrix, "XYZ");
+    position.setFromMatrixPosition(matrix);
+    rotation.setFromRotationMatrix(matrix, "XYZ");
     return { ...node, x: position.x, y: position.y, z: position.z, rotation: [rotation.x, rotation.y, rotation.z] as [number, number, number],
       placementSource: "canonical" as const, spatialObjectId: object.object_id };
   });
-  const nodeById = Object.fromEntries(nodes.map((node) => [node.id, node]));
+  const nodeById: Record<string, N> = {};
+  for (const node of nodes) nodeById[node.id] = node;
   const links = model.links.map((link) => {
     const source = nodeById[link.sourceId];
     const target = nodeById[link.targetId];

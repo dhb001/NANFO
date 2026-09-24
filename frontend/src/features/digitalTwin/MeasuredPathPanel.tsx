@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { hasPermission } from "@/features/auth/permissions";
+import { useSessionScope } from "@/features/auth/sessionScope";
+import { scopedKey } from "@/shared/lib/queryKeys";
 import { getProbePaths, probeEvidenceFresh } from "@/features/telemetry/pathApi";
 import { useAuthStore } from "@/shared/state/auth-store";
 import { useWorkspaceStore } from "@/shared/state/workspace-store";
@@ -13,17 +15,20 @@ import type { TwinLink, TwinNode } from "./sceneAdapter";
 export function MeasuredPathPanel({ nodes, links, onHighlight }: {
   nodes: readonly TwinNode[]; links: readonly TwinLink[]; onHighlight: (segments: MeasuredPathSegment[] | null) => void;
 }) {
-  const auth = useAuthStore();
+  const profile = useAuthStore((state) => state.profile);
+  const hasToken = useAuthStore((state) => Boolean(state.accessToken) && !state.endingSession);
   const scope = useWorkspaceStore();
-  const canRead = hasPermission(auth.profile, "read:telemetry");
-  const enabled = Boolean(canRead && auth.accessToken && !auth.endingSession && scope.networkId && scope.workspaceId && scope.organizationId);
+  const session = useSessionScope();
+  const canRead = hasPermission(profile, "read:telemetry");
+  const enabled = Boolean(canRead && hasToken && scope.networkId && scope.workspaceId && scope.organizationId);
   const [now, setNow] = useState(Date.now());
   const [selected, setSelected] = useState("");
   useEffect(() => { const timer = window.setInterval(() => setNow(Date.now()), 1000); return () => window.clearInterval(timer); }, []);
-  const query = useQuery({ queryKey: ["probe-paths", auth.generation, auth.accessToken, auth.profile?.permissions, scope.organizationId, scope.workspaceId, scope.networkId],
+  // Session-scoped identity (never the credential); the current credential is read at call time.
+  const query = useQuery({ queryKey: scopedKey(session, "probe-paths", scope.networkId, scope.workspaceId),
     queryFn: ({ signal }) => {
       if (!enabled) throw new Error("Current network scope and read:telemetry are required.");
-      return getProbePaths(auth.accessToken!, scope.networkId!, scope.workspaceId!, signal);
+      return session.read((credential) => getProbePaths(credential, scope.networkId!, scope.workspaceId!, signal), signal);
     }, enabled: false, retry: false, gcTime: 0, refetchOnWindowFocus: false });
   const data = query.data;
   const fresh = Boolean(enabled && query.isSuccess && !query.isFetching && data && probeEvidenceFresh(data, query.dataUpdatedAt, now));
@@ -35,7 +40,7 @@ export function MeasuredPathPanel({ nodes, links, onHighlight }: {
     return () => onHighlight(null);
   }, [fresh, path, nodes, links, onHighlight]);
   return <Panel title="Measured probe paths" subtitle="Actual selected-probe capture, separate from approved configuration">
-    <div style={{ display: "grid", gap: "0.7rem", overflowWrap: "anywhere", minWidth: 0 }}>
+    <div className="twin-stack twin-wrap">
       <p>Observed paths apply only to selected probes during their measured window, not all application flows or an indefinitely active path.</p>
       <Button tone="ghost" disabled={!enabled || query.isFetching} onClick={() => void query.refetch()}>{query.isFetching ? "Refreshing measured paths..." : "Refresh measured paths"}</Button>
       {!canRead && <p>Permission denied: measured paths require read:telemetry. No request is made.</p>}
@@ -52,7 +57,7 @@ export function MeasuredPathPanel({ nodes, links, onHighlight }: {
         <p>Observed path variation: {data.path_variation}. Different probes may take different paths.</p>
         <p className="mono">Evidence SHA-256: {data.evidence_sha256 ?? "unavailable"}. Verification: {data.evidence_verification ?? "unavailable"}.</p>
         {!data.paths.length ? <p>No observed hops available. No route is reconstructed from a planned configuration.</p> : <>
-          <label>Selected measured probe<select aria-label="Selected measured probe" value={selected} onChange={(event) => setSelected(event.target.value)} style={{ width: "100%", minWidth: 0 }}>
+          <label>Selected measured probe<select className="twin-select" aria-label="Selected measured probe" value={selected} onChange={(event) => setSelected(event.target.value)}>
             <option value="">Select a recorded probe</option>{data.paths.map((item) => <option key={item.packet_id} value={item.packet_id}>{item.packet_id} ({item.status})</option>)}
           </select></label>
           {path && <section aria-label="Ordered observed probe hops">

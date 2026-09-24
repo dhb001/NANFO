@@ -117,12 +117,20 @@ def test_actual_alembic_environment_escapes_interpolation_once(
     monkeypatch.setattr(context, "config", config, raising=False)
     monkeypatch.setattr(context, "is_offline_mode", lambda: True)
     configure = MagicMock()
+    execute = MagicMock()
     monkeypatch.setattr(context, "configure", configure)
     monkeypatch.setattr(context, "begin_transaction", MagicMock())
+    monkeypatch.setattr(context, "execute", execute)
     monkeypatch.setattr(context, "run_migrations", MagicMock())
+    monkeypatch.delenv("NANFO_MIGRATION_LOCK_TIMEOUT", raising=False)
     runpy.run_path("alembic/env.py")
     assert config.get_main_option("sqlalchemy.url") == settings.POSTGRES_SYNC_DSN
     url = make_url(configure.call_args.kwargs["url"])
     assert url.password == password
     assert url.database == database
     assert not url.query
+    # ADR-028: per-revision transactions, type/default comparison and a bounded lock wait.
+    options = configure.call_args.kwargs
+    assert options["transaction_per_migration"] is True
+    assert options["compare_type"] is True and options["compare_server_default"] is True
+    execute.assert_called_once_with("SET lock_timeout = '5s'")

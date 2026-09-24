@@ -1,4 +1,5 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { samePageSeries } from "@/shared/lib/queryKeys";
 import { useEffect } from "react";
 import { useSessionScope } from "@/features/auth/sessionScope";
 import type { ScenarioConfig } from "@/shared/types/simulation";
@@ -13,10 +14,12 @@ import {
 
 export function useSimulationHistory(token: string | null, workspaceId: string | null, networkId: string | null, page: number) {
   const session = useSessionScope();
+  const queryKey = ["simulation", session.key, session.authority, "history", page];
   return useQuery({
-    queryKey: ["simulation", session.key, session.authority, "history", page],
+    queryKey,
     queryFn: ({ signal }) => session.read((credential) => listSimulations(credential, workspaceId!, networkId, page, signal), signal).then((response) => response.data),
     enabled: Boolean(token && workspaceId),
+    placeholderData: (previous, previousQuery) => samePageSeries(previousQuery?.queryKey, queryKey, 4) ? keepPreviousData(previous) : undefined,
   });
 }
 

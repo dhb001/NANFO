@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { BoxGeometry, InstancedMesh, Matrix4, MeshBasicMaterial, Raycaster, Vector3 } from "three";
 import { buildDeviceBatches, distanceLabelIds, pickedDeviceId, writeDeviceInstances } from "./deviceInstances";
-import { deriveDeviceCongestion, type TwinNode } from "./sceneAdapter";
+import { deriveDeviceCongestion, type TwinSceneNode } from "./sceneAdapter";
 import { resolveDeviceVisual } from "./deviceVisuals";
 
-const node = (id: string, x = 0): TwinNode => ({ id, x, y: 0, z: 0, type: "switch", status: "active", hostname: id, spatialRefId: null, congestion: deriveDeviceCongestion([]) });
+const node = (id: string, x = 0): TwinSceneNode => ({ id, x, y: 0, z: 0, type: "switch", status: "active", hostname: id, spatialRefId: null, congestion: { ...deriveDeviceCongestion([]) } });
 
 describe("device instancing", () => {
   it("batches dense devices while retaining selection, status glow, alerts and congestion rings", () => {
@@ -14,7 +14,7 @@ describe("device instancing", () => {
     const batches = buildDeviceBatches(nodes, "0", new Set(["1"]), true);
     expect(batches).toHaveLength(5);
     for (const batch of batches) for (const item of batch.nodes) expect(batch.visual).toEqual(resolveDeviceVisual({ deviceType: item.type, status: item.status,
-      congestionSeverity: item.congestion.severity, selected: item.id === "0", alerting: item.id === "1", colorMode: "type", showCongestionRing: true }));
+      congestionSeverity: item.congestion?.severity ?? "neutral", selected: item.id === "0", alerting: item.id === "1", colorMode: "type", showCongestionRing: true }));
     expect(buildDeviceBatches(nodes, null, new Set(), false).every((batch) => batch.visual.ringColor === null)).toBe(true);
   });
 

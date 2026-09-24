@@ -18,6 +18,7 @@
  */
 
 import type { CongestionSeverity } from "@/features/digitalTwin/sceneAdapter";
+import { activeAlertDeviceIds, deriveDeviceAlertStates, type AlertEventLike } from "@/features/digitalTwin/twinSeverity";
 
 /** Network hierarchy tier. Mirrors the backend synthetic topology planner. */
 export type DeviceTier = "perimeter" | "core" | "distribution" | "access" | "leaf";
@@ -378,65 +379,20 @@ export function selectDeviceLabels(
 // Alert association
 // --------------------------------------------------------------------------------------
 
-interface AlertLike {
-  event_type: string;
-  payload: Record<string, unknown>;
-}
-
 /**
- * Extract the set of device ids that currently have an active alert.
+ * Extract the set of device ids that currently have an *active* backend alert.
  *
- * IMPORTANT / known limitation: NANFO alerts are presently infrastructure and SLO
- * alerts (for example telemetry collector sustained failure) and their payloads do NOT
- * carry a `device_id`. This function therefore returns an empty set against today's
- * backend, and per-device alert rings will not appear.
- *
- * That is deliberate. Fabricating device alerts from unrelated signals (congestion,
- * status) would misrepresent operational state. The extraction is defensive so that if
- * and when alert payloads gain a device reference, the visual lights up with no
- * renderer change required.
+ * Alerts that carry a device reference (measured detector alerts carry `device_id`) are
+ * tracked per alert identity, so resolving one alert of a device never hides another
+ * open alert. Alerts without a device reference (infrastructure/SLO alerts) are ignored:
+ * fabricating device alerts from unrelated signals (congestion, status) would
+ * misrepresent operational state.
  */
 export function deriveAlertingDeviceIds(
-  alerts: readonly AlertLike[],
+  alerts: readonly AlertEventLike[],
   knownDeviceIds?: ReadonlySet<string>,
 ): Set<string> {
-  const latestStateByDeviceId = new Map<string, boolean>();
-
-  for (const alert of alerts) {
-    const eventType = (alert.event_type ?? "").trim().toLowerCase();
-
-    const payload = alert.payload ?? {};
-    const candidate =
-      payload.device_id ?? payload.deviceId ?? payload.target_device_id ?? null;
-    if (typeof candidate !== "string") {
-      continue;
-    }
-
-    const deviceId = candidate.trim();
-    if (!deviceId) {
-      continue;
-    }
-    if (knownDeviceIds && !knownDeviceIds.has(deviceId)) {
-      continue;
-    }
-
-    // `alerts` is newest-first in the live store; first match wins.
-    if (latestStateByDeviceId.has(deviceId)) {
-      continue;
-    }
-
-    const isActive = !(eventType === "alert.resolved" || eventType === "alert.acknowledged");
-    latestStateByDeviceId.set(deviceId, isActive);
-  }
-
-  const alerting = new Set<string>();
-  for (const [deviceId, isActive] of latestStateByDeviceId.entries()) {
-    if (isActive) {
-      alerting.add(deviceId);
-    }
-  }
-
-  return alerting;
+  return activeAlertDeviceIds(deriveDeviceAlertStates(undefined, alerts, knownDeviceIds));
 }
 
 // --------------------------------------------------------------------------------------

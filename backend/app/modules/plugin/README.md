@@ -49,8 +49,23 @@ Uninstall and its audit append commit in one transaction. Identity owns the publ
 `plugin.registry.removed` carries resource_type `plugin`, resource ID, actor,
 correlation and metadata `{registry_only: true, previous_status, status:
 "uninstalled"}`. It is not a domain event; no `plugin.uninstalled` event is emitted.
-Existing installed/enabled/disabled/failed stream publication remains best-effort,
-not a durable outbox or an execution acknowledgment.
+## ADR-028
+
+- Lifecycle transitions commit first (row `queue_status=deferred`,
+  `warning=event_queue_unavailable`), then publish with a deterministic event ID
+  `uuid5(plugin_id, "<event_type>:<updated_at>")`; only a successful publication is
+  recorded, and only if no later transition committed meanwhile. The simulation
+  worker process sweeps deferred rows every 30 s (no plugin worker exists);
+  republished payloads carry `requested_by_user_id=null` and
+  `delivery="deferred_republish"` because registry rows do not persist the actor.
+- `plugin.failed` events for rejected installs (no record) are rate-limited: one per
+  (actor, plugin_key, failure code) per `PLUGIN_FAILED_EVENT_WINDOW_SECONDS`
+  (default 60) and at most `PLUGIN_FAILED_EVENT_MAX_PER_ACTOR` (default 10) per
+  actor per window.
+- Signer/signature are *declarations*: prefix/length/allowlist admission only, never
+  cryptographic verification; responses always report `declared_unverified`. The
+  historical error code `PLUGIN_SIGNATURE_INVALID` is kept for compatibility.
+- Correlation uses `normalize_audit_correlation`; opaque ids are kept as `request_id`.
 
 ## Verification
 

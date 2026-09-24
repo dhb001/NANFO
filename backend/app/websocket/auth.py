@@ -1,10 +1,17 @@
-"""Shared strict identity, capability and tenant checks for every WS channel."""
+"""Shared strict identity, capability and tenant checks for every WS channel.
+
+Transport (ADR-028 C1): browsers offer ``Sec-WebSocket-Protocol: nanfo.v1,
+nanfo.bearer.<access_token>``; the server selects exactly ``nanfo.v1`` and never
+echoes the bearer entry. ``?token=`` remains accepted for one compatibility release
+(uvicorn access/upgrade log lines are redacted by ``app.core.logging``).
+"""
 
 from __future__ import annotations
 
 import uuid
+from dataclasses import dataclass
 
-from fastapi import HTTPException
+from fastapi import HTTPException, WebSocket
 
 from app.db.postgres import AsyncSessionLocal
 from app.db.redis import get_redis_client
@@ -18,6 +25,29 @@ CHANNEL_PERMISSIONS = {
     "telemetry": "read:telemetry",
     "alerts": "read:telemetry",
 }
+SUBPROTOCOL = "nanfo.v1"
+BEARER_PREFIX = "nanfo.bearer."
+
+
+@dataclass(frozen=True)
+class Credentials:
+    token: str | None
+    subprotocol: str | None  # Selected on accept; only ever SUBPROTOCOL or None.
+    valid: bool = True
+
+
+def read_credentials(websocket: WebSocket, *, legacy_token: str | None = None) -> Credentials:
+    """Bearer from the offered subprotocols, else the legacy ``?token=`` query value."""
+    offered = [item for item in websocket.scope.get("subprotocols") or () if isinstance(item, str)]
+    selected = SUBPROTOCOL if SUBPROTOCOL in offered else None
+    bearers = [item[len(BEARER_PREFIX):] for item in offered if item.startswith(BEARER_PREFIX)]
+    if bearers:
+        # A bearer entry is only meaningful inside the versioned protocol.
+        if selected is None or len(bearers) != 1 or not bearers[0]:
+            return Credentials(None, None, valid=False)
+        return Credentials(bearers[0], selected)
+    token = legacy_token if legacy_token is not None else websocket.query_params.get("token")
+    return Credentials(token or None, selected)
 
 
 async def authenticate(token: str, channel: str) -> dict:
@@ -65,8 +95,8 @@ async def alert_workspaces(*, db, claims: dict) -> set[str]:
     return allowed
 
 
-async def authorized_workspaces(*, token: str, channel: str, network_id: str | None) -> set[str]:
-    claims = await authenticate(token, channel)
+async def authorize_claims(*, claims: dict, channel: str, network_id: str | None) -> set[str]:
+    """Current tenant authorization for already-authenticated claims (no re-authentication)."""
     async with AsyncSessionLocal() as db:
         if channel == "alerts":
             return await alert_workspaces(db=db, claims=claims)
@@ -83,3 +113,9 @@ async def authorized_workspaces(*, token: str, channel: str, network_id: str | N
         )
         await OrgService(db, redis).get_org(workspace.org_id, user_id=claims["sub"])
         return {str(workspace.workspace_id)}
+
+
+async def authorized_workspaces(*, token: str, channel: str, network_id: str | None) -> set[str]:
+    """Full revalidation: live session, identity, capability, then tenant scope."""
+    claims = await authenticate(token, channel)
+    return await authorize_claims(claims=claims, channel=channel, network_id=network_id)

@@ -161,3 +161,92 @@ async def test_neo4j_startup_failure_releases_lease_and_closes_connections():
     assert redis.owner is None
     close_neo4j.assert_awaited_once()
     close_redis.assert_awaited_once()
+
+
+# ── ADR-028: renewal retries inside the deadline; loss fences then shuts down ──
+
+async def test_transient_renewal_failures_retry_within_deadline():
+    redis = LeaseRedis()
+    lost = Mock()
+    original = redis.eval
+    failures = {"left": 2}
+
+    async def flaky(*args):
+        if failures["left"]:
+            failures["left"] -= 1
+            raise ConnectionError("blip")
+        return await original(*args)
+
+    redis.eval = flaky
+    async with ApiRealtimeLease(redis, ttl_seconds=0.6, on_lost=lost) as lease:
+        await asyncio.sleep(0.5)
+        assert lease.healthy and failures["left"] == 0
+    lost.assert_not_called()
+
+
+async def test_loss_fences_before_callback():
+    redis = LeaseRedis()
+    observed = []
+    lease = ApiRealtimeLease(redis, ttl_seconds=0.09, on_lost=lambda: observed.append(lease.healthy))
+    async with lease:
+        redis.owner = "successor"
+        async with asyncio.timeout(1):
+            while not observed:
+                await asyncio.sleep(0.01)
+    assert observed == [False]
+
+
+def test_terminate_api_requests_graceful_shutdown_with_hard_timeout(monkeypatch):
+    from app.events import realtime
+
+    signals, timers, exits = [], [], []
+
+    class Timer:
+        def __init__(self, interval, function):
+            timers.append(interval)
+            self.daemon = False
+
+        def start(self):
+            assert self.daemon  # never keeps a stalled process alive
+
+    monkeypatch.setattr(realtime, "_termination_requested", False)
+    monkeypatch.setattr(realtime.threading, "Timer", Timer)
+    monkeypatch.setattr(realtime.os, "kill", lambda pid, sig: signals.append((pid, sig)))
+    monkeypatch.setattr(realtime.atexit, "register", lambda function: exits.append(function))
+    realtime.terminate_api(hard_timeout_seconds=7)
+    realtime.terminate_api(hard_timeout_seconds=7)  # idempotent
+    assert signals == [(realtime.os.getpid(), realtime.signal.SIGTERM)]
+    assert timers == [7] and exits == [realtime._exit_nonzero]
+
+
+async def test_singleton_lease_loss_cancels_domain_work_then_terminates():
+    from types import SimpleNamespace
+
+    from app.runtime.lifespan import fence_and_terminate
+
+    consumer = asyncio.create_task(asyncio.Event().wait())
+    background = asyncio.create_task(asyncio.Event().wait())
+    collector = SimpleNamespace(stop=AsyncMock())
+    app = FastAPI()
+    app.state.consumer_tasks, app.state.background_tasks = [consumer], [background]
+    app.state.collector_watchdog, app.state.telemetry_collector = None, collector
+    deps = SimpleNamespace(terminate_api=Mock())
+    fence_and_terminate(app, deps)
+    await asyncio.gather(consumer, background, return_exceptions=True)
+    await asyncio.sleep(0)
+    assert consumer.cancelled() and background.cancelled()
+    collector.stop.assert_awaited_once()
+    deps.terminate_api.assert_called_once_with()
+
+
+async def test_draining_process_never_reacquires_leadership(monkeypatch):
+    from app.events import distributed_realtime, realtime
+    from app.events.fanout_contract import FanoutSettings
+
+    monkeypatch.setattr(realtime, "_termination_requested", True)
+    acquired = []
+    monkeypatch.setattr(distributed_realtime, "ApiRealtimeLease", lambda *a, **k: acquired.append(1))
+    runtime = distributed_realtime.DistributedRealtime(AsyncMock(), leader_factory=None, managers={},
+                                                       settings=FanoutSettings())
+    await asyncio.wait_for(runtime._supervise(), 1)
+    assert acquired == []

@@ -4,10 +4,16 @@ import type { PropsWithChildren } from "react";
 import { beforeEach, expect, it, vi } from "vitest";
 import { useTopologyGraph } from "./hooks";
 import { useLiveStore } from "@/features/realtime/store";
+import { useAuthStore } from "@/shared/state/auth-store";
+import { operatorProfile } from "@/test/profile";
 
 const getGraph = vi.fn();
 vi.mock("./api", () => ({ getTopologyGraphAll: (...args: unknown[]) => getGraph(...args) }));
-beforeEach(() => { getGraph.mockReset(); useLiveStore.getState().reset(); });
+beforeEach(() => {
+  getGraph.mockReset();
+  useAuthStore.getState().setSession({ accessToken: "token", refreshToken: "refresh", userId: operatorProfile.user_id, profile: operatorProfile });
+  useLiveStore.getState().reset();
+});
 
 it("does not retire a tombstone for a partial or pre-removal request, only a confirmed later snapshot", async () => {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });

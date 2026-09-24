@@ -42,7 +42,8 @@ async def maintenance_checkpoint(driver, *, max_groups=1000, max_revisions=1_000
             """
             MATCH (r:DeviceEventRevision)
             RETURN r.device_id AS device_id, r.epoch_us AS epoch_us,
-                   r.rank AS rank, r.event_id AS event_id, r.deleted AS deleted
+                   r.rank AS rank, r.event_id AS event_id, r.deleted AS deleted,
+                   r.sequence AS sequence
             ORDER BY device_id, epoch_us, rank, event_id, deleted LIMIT $limit
         """,
             limit=max_revisions + 1,
@@ -52,8 +53,13 @@ async def maintenance_checkpoint(driver, *, max_groups=1000, max_revisions=1_000
             count += 1
             if count > max_revisions:
                 raise ValueError("Graph revision inventory cap exceeded")
+            record = dict(row)
+            # C13 outbox sequences are covered when present; revisions written before
+            # sequences existed hash exactly as before, so older backups still verify.
+            if record.get("sequence") is None:
+                record.pop("sequence", None)
             raw = json.dumps(
-                dict(row), sort_keys=True, separators=(",", ":"), allow_nan=False
+                record, sort_keys=True, separators=(",", ":"), allow_nan=False
             ).encode()
             if len(raw) > 4096:
                 raise ValueError("Graph revision record cap exceeded")

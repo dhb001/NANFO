@@ -82,3 +82,23 @@ it("does not query audit without an organization", () => {
   expect(screen.getByText("Select an organization")).toBeInTheDocument();
   expect(requests).toHaveLength(0);
 });
+
+it("lists platform-scope events for global admins without an organization (C7)", async () => {
+  const user = userEvent.setup();
+  useWorkspaceStore.setState({ organizationId: null });
+  renderPage();
+  expect(screen.getByText("Select an organization")).toBeInTheDocument();
+  await user.click(screen.getByRole("radio", { name: /Platform events/ }));
+  await screen.findByText("event-1");
+  expect(requests.at(-1)?.get("scope")).toBe("platform");
+  // Platform scope never sends org_id (the backend rejects the combination).
+  expect(requests.at(-1)?.get("org_id")).toBeNull();
+  await user.click(screen.getByRole("radio", { name: "This organization" }));
+  expect(screen.getByText("Select an organization")).toBeInTheDocument();
+});
+
+it("keeps org scope as the default and never sends scope=platform implicitly", async () => {
+  renderPage();
+  await screen.findByText("event-1");
+  expect(requests.every((params) => params.get("scope") === null && params.get("org_id") === "org-1")).toBe(true);
+});

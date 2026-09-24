@@ -12,8 +12,8 @@ from redis.exceptions import RedisError
 
 from app.modules.autonomy.artifact_io import EvidenceError
 from app.modules.autonomy.live_schemas import OBSERVATION_CONTRACT, MeasuredFeatures, RuntimeResult
-from app.modules.autonomy.schemas import Proposal, ProviderStatus, Qualification
-from scripts.frozen_model_diagnostic import canonical_hash
+from app.modules.autonomy.schemas import POLICY_PROBABILITY_METHOD, Confidence, Proposal, ProviderStatus, Qualification
+from app.core.canonical import canonical_sha256 as canonical_hash
 
 RUNNER = Path(__file__).resolve().parents[3] / "scripts" / "frozen_live_inference.py"
 LOCK = "nanfo:autonomy:model-diagnostics:inference"  # share actual CPU admission with ADR018
@@ -198,8 +198,12 @@ class FrozenModelProvider:
             raise EvidenceError("live_registry_changed")
         await asyncio.to_thread(self.registry.snapshot, current, observation.network_id,
                                 observation.workspace_id, expected_hash=digest)
+        # C17: the selected action's raw policy probability is reported as typed confidence,
+        # explicitly uncalibrated (no calibration of policy probabilities is installed).
+        confidence = Confidence(value=float(result.probabilities[result.action]),
+                                method=POLICY_PROBABILITY_METHOD, calibrated=False)
         return Proposal(action_id=model.action_ids[result.action], checkpoint_sha256=model.checkpoint.sha256,
-            observation_contract=OBSERVATION_CONTRACT,
+            observation_contract=OBSERVATION_CONTRACT, confidence=confidence,
             evidence=[*qualification.evidence, f"passive_snapshot:{digest}", f"input:{result.input_sha256}",
                       f"checkpoint:{result.checkpoint_sha256}", f"weights:{result.weights_sha256}",
                       f"source:{result.source_sha256}", f"action_path:{'/'.join(result.action_path)}",

@@ -1,4 +1,9 @@
-"""Restartable bounded I/O worker; every lab wait occurs outside a DB transaction."""
+"""Restartable bounded I/O worker; every lab wait occurs outside a DB transaction.
+
+ADR-028: repositories never commit; this worker commits each short unit of work. The
+publish loop also applies bounded retention to *published* ``intent_outbox`` rows
+older than ``INTENT_OUTBOX_RETENTION_DAYS`` (default 30, 0 disables).
+"""
 
 from __future__ import annotations
 
@@ -23,11 +28,32 @@ from app.modules.intent.lab import (
     verified_rollback,
 )
 from app.modules.intent.repository import ExecutionRepository, IntentRepository
+from app.modules.intent.service import republish_deferred_intents
 from app.modules.simulation.modeled import current_network_state_hash
 from app.modules.simulation.schemas import SimulationEvidence
 from app.modules.simulation.service import SimulationStartService
 
 logger = get_logger(__name__)
+# ADR-028: committed intents whose validate/legacy events were never confirmed are
+# republished by this worker (the intents table has no outbox of its own).
+DEFERRED_SWEEP_INTERVAL_SECONDS = 30.0
+# Per-call XADD bound; always shorter than the publication lease (see publish_one).
+PUBLISH_TIMEOUT_SECONDS = 10.0
+DEFAULT_OUTBOX_RETENTION_DAYS = 30
+RETENTION_BATCH_ROWS = 500
+RETENTION_INTERVAL_SECONDS = 60.0
+_MAX_RETENTION_DAYS = 36_500
+
+
+def outbox_retention_days(settings) -> int | None:
+    """``INTENT_OUTBOX_RETENTION_DAYS``; ``None`` (retention off) for 0 or invalid values."""
+    value = getattr(settings, "INTENT_OUTBOX_RETENTION_DAYS", DEFAULT_OUTBOX_RETENTION_DAYS)
+    if type(value) is int and 1 <= value <= _MAX_RETENTION_DAYS:
+        return value
+    if value != 0:
+        # Deleting is the unsafe direction: an unusable value disables retention.
+        logger.warning("intent_outbox_retention_disabled_invalid_setting")
+    return None
 
 
 class LeaseAuthority(asyncio.Event):
@@ -53,24 +79,70 @@ return 0
 
 
 class ExecutionWorker:
-    def __init__(self, *, settings, sessions, redis):
+    # Retention defaults live on the class so every instance (including partially
+    # constructed test doubles) has a safe, bounded configuration.
+    retention_batch = RETENTION_BATCH_ROWS
+    retention_interval_seconds = RETENTION_INTERVAL_SECONDS
+    _next_purge: float | None = None
+    _clock = staticmethod(time.monotonic)
+
+    def __init__(self, *, settings, sessions, redis, clock=time.monotonic):
         self.settings = settings
         self.sessions = sessions
         self.redis = redis
         self.owner = str(uuid.uuid4())
         self.mailbox = Mailbox(settings)
+        self._clock = clock
+
+    @property
+    def retention_days(self) -> int | None:
+        return outbox_retention_days(self.settings)
+
+    async def purge_published(self) -> int:
+        """One bounded retention batch when due; a full batch makes the next one due at once.
+
+        Failures are isolated (logged) so retention never stalls publication.
+        """
+        days = self.retention_days
+        if days is None:
+            return 0
+        now = self._clock()
+        if self._next_purge is not None and now < self._next_purge:
+            return 0
+        self._next_purge = now + self.retention_interval_seconds
+        try:
+            async with self.sessions() as db:
+                purged = await ExecutionRepository(db).purge_published_events(
+                    older_than=timedelta(days=days), limit=self.retention_batch)
+                await db.commit()
+        except Exception as exc:  # noqa: BLE001 - rows stay and are retried next interval
+            logger.warning("intent_outbox_retention_deferred", worker_id=self.owner, error_type=type(exc).__name__)
+            return 0
+        if purged >= self.retention_batch:
+            self._next_purge = now  # backlog: continue next loop, one short transaction each
+        if purged:
+            logger.info("intent_outbox_retention_purged", worker_id=self.owner, rows=purged, retention_days=days)
+        return purged
 
     async def publish_one(self) -> bool:
+        """Claim (lease) -> commit -> bounded XADD -> owned acknowledgement."""
+        lease = self.settings.EMULATION_EXECUTION_LEASE_SECONDS
         async with self.sessions() as db:
-            row = await ExecutionRepository(db).claim_event(self.owner, self.settings.EMULATION_EXECUTION_LEASE_SECONDS)
+            row = await ExecutionRepository(db).claim_event(self.owner, lease)
             if row is None:
                 return False
             event_id, envelope = row.event_id, dict(row.envelope)
+            await db.commit()  # the lease is durable; no transaction spans Redis I/O
         # The stored full envelope is immutable, including timestamp and payload bytes.
         # XADD-before-ack crashes deliberately replay the same event_id (at least once).
-        await self.redis.xadd("stream:intent", envelope)
+        async with asyncio.timeout(min(PUBLISH_TIMEOUT_SECONDS, lease / 2)):
+            await self.redis.xadd("stream:intent", envelope)
         async with self.sessions() as db:
-            await ExecutionRepository(db).acknowledge_event(event_id, self.owner)
+            acknowledged = await ExecutionRepository(db).acknowledge_event(event_id, self.owner)
+            await db.commit()
+        if not acknowledged:
+            # Lease expired during XADD: a successor republishes the same event_id.
+            logger.warning("intent_outbox_lease_lost", worker_id=self.owner, event_id=str(event_id))
         return True
 
     async def _renew(self, job, lock_key, token, lost):
@@ -87,6 +159,7 @@ class ExecutionWorker:
                         if not await ExecutionRepository(db).renew(job.execution_id, self.owner, job.fence, seconds):
                             lost.set()
                             return
+                        await db.commit()
                 if lost.is_set():
                     lost.set()
                     return
@@ -99,6 +172,8 @@ class ExecutionWorker:
         started = time.monotonic()
         async with asyncio.timeout(seconds / 3), self.sessions() as db:
             job = await ExecutionRepository(db).claim(self.owner, self.settings.EMULATION_EXECUTION_LEASE_SECONDS)
+            if job is not None:
+                await db.commit()  # fence + lease are durable before any lab lock or I/O
         if job is None:
             return False
         key = f"intent:lab:lock:{job.lab_key}"
@@ -282,13 +357,27 @@ class ExecutionWorker:
                 return
             await asyncio.sleep(self.settings.EMULATION_EXECUTION_POLL_SECONDS)
 
+    async def sweep_deferred(self) -> int:
+        """Republish deferred intent events; failures are isolated from the outbox loop."""
+        try:
+            async with self.sessions() as db:
+                return await republish_deferred_intents(db=db, redis=self.redis)
+        except Exception as exc:  # noqa: BLE001 - rows stay deferred and are retried
+            logger.warning("intent_deferred_event_sweep_failed", worker_id=self.owner, error_type=type(exc).__name__)
+            return 0
+
     async def _publish_loop(self):
+        next_sweep = 0.0
         while True:
             try:
                 async with worker_iteration("outbox"):
                     await self.publish_one()
             except Exception:
                 logger.warning("intent_outbox_publication_failed", worker_id=self.owner)
+            if time.monotonic() >= next_sweep:
+                await self.sweep_deferred()
+                next_sweep = time.monotonic() + DEFERRED_SWEEP_INTERVAL_SECONDS
+            await self.purge_published()
             await asyncio.sleep(self.settings.EMULATION_EXECUTION_POLL_SECONDS)
 
     async def run(self):

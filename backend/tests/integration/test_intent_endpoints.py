@@ -538,3 +538,104 @@ def test_execute_and_get_intent_require_auth(client):
 
     assert r1.status_code in (401, 403)
     assert r2.status_code in (401, 403)
+
+
+def _validated_payload(workspace_id, *, replay):
+    now = datetime.now(UTC)
+    return {
+        "intent_id": uuid.uuid4(), "workspace_id": workspace_id, "network_id": uuid.uuid4(), "status": "validated",
+        "intent_kind": "reroute_path",
+        "validation": {"is_valid": True, "reasons": [], "required_checks": [], "capability_match": "trusted_lab_plan",
+                       "dependency_analysis": "not_performed", "simulation_required": True,
+                       "policy_reference": "ADR-010", "validated_at": now},
+        "explainability": {"summary": "ok", "evidence": [], "alternatives_considered": [], "policy_reference": "ADR-010"},
+        "confidence": {"score": 0.0, "band": "below_60", "approval_required": True},
+        "idempotency_key": "submit-1", "correlation_id": uuid.uuid4(), "requested_at": now,
+        "idempotent_replay": replay,
+        "approval_binding": {"plan_hash": "a" * 64, "binding_digest": "b" * 64, "run_id": str(uuid.uuid4())},
+        "simulation_action_binding": {"intent_id": str(uuid.uuid4()), "plan_sha256": "a" * 64,
+                                      "network_state_sha256": "c" * 64},
+    }
+
+
+@pytest.mark.parametrize("replay", [False, True])
+def test_validate_reports_idempotent_replay_in_meta_and_bindings(client, replay):
+    workspace_id = create_authorized_workspace()
+    result = _validated_payload(workspace_id, replay=replay)
+    with patch("app.modules.intent.service.IntentValidationService.validate_intent",
+               new=AsyncMock(return_value=result)):
+        response = client.post("/api/v1/intents/validate", headers={
+            "Authorization": f"Bearer {_make_token()}", "Idempotency-Key": "submit-1",
+        }, json={"workspace_id": str(workspace_id), "network_id": str(uuid.uuid4()),
+                 "intent": {"action": "reroute_path", "scope": {"source_host": "h1"}}})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["meta"]["idempotent_replay"] is replay and body["data"]["idempotent_replay"] is replay
+    assert body["meta"]["request_id"]
+    assert body["data"]["approval_binding"] == result["approval_binding"]
+    assert body["data"]["simulation_action_binding"] == result["simulation_action_binding"]
+
+
+def test_validate_idempotency_key_reuse_returns_409_envelope(client):
+    from fastapi import HTTPException
+
+    workspace_id = create_authorized_workspace()
+    with patch("app.modules.intent.service.IntentValidationService.validate_intent", new=AsyncMock(
+            side_effect=HTTPException(409, detail={"code": "IDEMPOTENCY_KEY_REUSED", "message": "reused"}))):
+        response = client.post("/api/v1/intents/validate", headers={"Authorization": f"Bearer {_make_token()}",
+            "Idempotency-Key": "submit-1"}, json={"workspace_id": str(workspace_id), "intent": {"action": "x"}})
+    assert response.status_code == 409 and response.json()["errors"]["code"] == "IDEMPOTENCY_KEY_REUSED"
+
+
+@pytest.mark.parametrize("intent", [
+    {"blob": "x" * (64 * 1024)},
+    {"a": {"b": {"c": {"d": {"e": {"f": {"g": {"h": {"i": {"j": {"k": 1}}}}}}}}}}},
+])
+def test_validate_rejects_unbounded_intent_with_422_not_500(client, intent):
+    workspace_id = create_authorized_workspace()
+    with patch("app.modules.intent.service.IntentValidationService.validate_intent", new=AsyncMock()) as validate:
+        response = client.post("/api/v1/intents/validate", headers={"Authorization": f"Bearer {_make_token()}"},
+                               json={"workspace_id": str(workspace_id), "intent": intent})
+    assert response.status_code == 422
+    assert response.json()["errors"]["code"] == "VALIDATION_ERROR"
+    validate.assert_not_awaited()
+
+
+def test_validate_rejects_non_finite_numbers_with_422(client):
+    workspace_id = create_authorized_workspace()
+    body = '{"workspace_id": "%s", "intent": {"action": "throttle_qos", "rate": NaN}}' % workspace_id
+    with patch("app.modules.intent.service.IntentValidationService.validate_intent", new=AsyncMock()) as validate:
+        response = client.post("/api/v1/intents/validate", content=body, headers={
+            "Authorization": f"Bearer {_make_token()}", "Content-Type": "application/json"})
+    assert response.status_code == 422
+    validate.assert_not_awaited()
+
+
+def test_execute_forwards_approval_binding_and_meta_replay(client):
+    workspace_id = create_authorized_workspace()
+    intent_id = uuid.uuid4()
+    binding = {"plan_hash": "a" * 64, "binding_digest": "b" * 64, "run_id": str(uuid.uuid4())}
+    now = datetime.now(UTC)
+    result = {"intent_id": intent_id, "workspace_id": workspace_id, "network_id": uuid.uuid4(),
+              "status": "execution_started", "intent_kind": "reroute_path", "queue_status": "outbox_pending",
+              "stream_entry_id": None, "warning": None, "validation_result": {}, "execution_provenance": {},
+              "explainability": {}, "confidence": {"score": 0.0, "band": "below_60", "approval_required": True},
+              "idempotency_key": "submit-1", "correlation_id": uuid.uuid4(), "requested_by_user_id": "u",
+              "requested_at": now, "updated_at": now, "idempotent_replay": True, "approval_binding": binding}
+    with patch("app.modules.intent.service.IntentExecutionService.execute_intent",
+               new=AsyncMock(return_value=result)) as execute:
+        response = client.post("/api/v1/intents/execute", headers={"Authorization": f"Bearer {_make_token()}"},
+            json={"workspace_id": str(workspace_id), "intent_id": str(intent_id), "idempotency_key": "submit-1",
+                  "manual_approval": True, "approval_binding": binding})
+    assert response.status_code == 202
+    assert execute.await_args.kwargs["approval_binding"] == binding
+    body = response.json()
+    assert body["meta"]["idempotent_replay"] is True and body["data"]["approval_binding"] == binding
+
+
+@pytest.mark.parametrize("path", ["/api/v1/intents", "/api/v1/simulations"])
+def test_history_page_is_bounded(client, path):
+    workspace_id = create_authorized_workspace()
+    response = client.get(path, params={"workspace_id": str(workspace_id), "page": 10_001},
+                          headers={"Authorization": f"Bearer {_make_token()}"})
+    assert response.status_code == 422

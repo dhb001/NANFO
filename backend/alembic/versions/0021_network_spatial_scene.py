@@ -4,7 +4,6 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql as pg
 
 from alembic import op
-from app.modules.network.spatial_models import SpatialSceneRecord  # noqa: F401 -- owning metadata
 
 revision = "0021"
 down_revision = "0020"
@@ -13,7 +12,7 @@ depends_on = None
 
 
 def upgrade():
-    # Freeze DDL while registering the owning model for migration metadata loading.
+    # Frozen DDL; alembic/env.py registers the owning model metadata.
     op.create_table(
         "network_spatial_scenes",
         sa.Column("network_id", pg.UUID(as_uuid=True),

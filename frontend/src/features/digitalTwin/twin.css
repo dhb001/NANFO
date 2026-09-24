@@ -1,0 +1,43 @@
+/* Digital Twin feature styles (ADR-028 FE-Twin #1: no inline styles in Twin components). */
+
+.twin-page { display: grid; gap: 1rem; min-width: 0; }
+.twin-stack { display: grid; gap: 0.7rem; min-width: 0; }
+.twin-stack--tight { gap: 0.36rem; }
+.twin-row { display: flex; justify-content: space-between; gap: 0.4rem; align-items: baseline; min-width: 0; }
+.twin-badges { display: flex; gap: 0.35rem; flex-wrap: wrap; align-items: center; }
+.twin-actions { display: flex; gap: 0.35rem; flex-wrap: wrap; }
+.twin-two-columns { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 1rem; align-items: start; }
+
+.twin-card {
+  border: 1px solid var(--line-soft);
+  border-radius: 10px;
+  padding: 0.48rem 0.56rem;
+  display: grid;
+  gap: 0.3rem;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.twin-card--compact { border-radius: 8px; padding: 0.34rem 0.42rem; gap: 0.14rem; }
+.twin-card-title { font-size: 0.9rem; font-weight: 600; margin: 0; }
+.twin-card-list { display: grid; gap: 0.32rem; max-height: 260px; overflow: auto; margin: 0; padding: 0; list-style: none; }
+
+.twin-muted { color: var(--ink-3); font-size: 0.84rem; margin: 0; }
+.twin-meta { color: var(--ink-3); font-size: 0.74rem; }
+.twin-value { font-size: 0.78rem; color: var(--ink-2); }
+.twin-field-label { font-size: 0.78rem; color: var(--ink-3); }
+.twin-field { display: grid; gap: 0.3rem; min-width: 0; }
+.twin-error { color: var(--danger); font-size: 0.82rem; margin: 0; }
+.twin-metric-list { display: grid; gap: 0.3rem; margin: 0; padding: 0; list-style: none; }
+
+.twin-select, .twin-input {
+  border: 1px solid var(--line-soft);
+  border-radius: 10px;
+  padding: 0.45rem 0.5rem;
+  width: 100%;
+  min-width: 0;
+  background: var(--surface-card, #fff);
+}
+
+@media (max-width: 900px) {
+  .twin-two-columns { grid-template-columns: minmax(0, 1fr); }
+}

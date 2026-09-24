@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { TELEMETRY_LIMITS, useLiveStore } from "@/features/realtime/store";
 
 describe("realtime store", () => {
@@ -339,5 +339,59 @@ describe("realtime store", () => {
     expect(state.sceneObjectIdsNewestFirst).toHaveLength(300);
     expect(state.sceneObjectIdsNewestFirst[0]).toBe("scene-359");
     expect(state.sceneObjectIdsNewestFirst[299]).toBe("scene-60");
+  });
+  describe("burst batches (ADR-028)", () => {
+    const base = { event_id: "e", workspace_id: "w", network_id: "n", device_id: "d", metric: "cpu", value: 1, unit: "%", source: "plugin", observed_at: "2026-09-19T00:00:00Z", tags: {} };
+
+    it("applies thousands of frames across channels with a single store update", () => {
+      useLiveStore.getState().reset();
+      const listener = vi.fn();
+      const unsubscribe = useLiveStore.subscribe(listener);
+      const telemetry = Array.from({ length: 5_000 }, (_, index) => ({ delta_type: "metric" as const, metric: {
+        ...base, device_id: `d-${index % 400}`, metric: `m-${index % 20}`, value: index, observed_at: new Date(Date.parse(base.observed_at) + index).toISOString() } }));
+      const topology = Array.from({ length: 200 }, (_, index) => ({ delta: { delta_type: "update" as const, node: { device_id: `d-${index}`, status: "up" } }, timestamp: new Date(Date.parse(base.observed_at) + index).toISOString() }));
+      useLiveStore.getState().applyDeltaBatch({ telemetry, topology,
+        alerts: [{ delta: { delta_type: "add", alert: { event_id: "a", event_type: "alert.generated", source: "telemetry", payload: {} } }, context: {} }],
+        digitalTwin: [{ delta: { delta_type: "update", scene_object: { id: "x", object_type: "simulation_state", simulation_id: "s", status: "running" } }, timestamp: base.observed_at }] });
+      unsubscribe();
+      expect(listener).toHaveBeenCalledTimes(1);
+      const state = useLiveStore.getState();
+      expect(new Set(Object.values(state.telemetryByDeviceMetric).map((row) => row.device_id)).size).toBe(TELEMETRY_LIMITS.resources);
+      expect(Object.values(state.telemetryByDeviceMetric).length).toBeLessThanOrEqual(TELEMETRY_LIMITS.resources * TELEMETRY_LIMITS.metricsPerResource);
+      expect(state.telemetryKeysNewestFirst).toHaveLength(Object.keys(state.telemetryByDeviceMetric).length);
+      // Newest frame first, latest observation retained per identity.
+      expect(state.telemetryByDeviceMetric[state.telemetryKeysNewestFirst[0]].value).toBe(4_999);
+      expect(state.topologyRevision).toBe(200);
+      expect(state.alerts).toHaveLength(1);
+      expect(state.sceneObjects["simulation:s"]).toMatchObject({ status: "running" });
+    });
+
+    it("matches sequential application for ordering, staleness and dedupe", () => {
+      const frames = [
+        { delta_type: "metric" as const, metric: { ...base, value: 1, observed_at: "2026-09-19T00:00:01Z" } },
+        { delta_type: "metric" as const, metric: { ...base, device_id: "other", value: 2 } },
+        { delta_type: "metric" as const, metric: { ...base, value: 3, observed_at: "2026-09-19T00:00:00Z" } },
+        { delta_type: "metric" as const, metric: { ...base, value: 4, observed_at: "2026-09-19T00:00:02Z" } },
+      ];
+      useLiveStore.getState().reset();
+      for (const frame of frames) useLiveStore.getState().applyTelemetryDelta(frame);
+      const sequential = useLiveStore.getState();
+      const expected = { keys: sequential.telemetryKeysNewestFirst, values: sequential.telemetryKeysNewestFirst.map((key) => sequential.telemetryByDeviceMetric[key].value) };
+      useLiveStore.getState().reset();
+      useLiveStore.getState().applyDeltaBatch({ telemetry: frames });
+      const batched = useLiveStore.getState();
+      expect({ keys: batched.telemetryKeysNewestFirst, values: batched.telemetryKeysNewestFirst.map((key) => batched.telemetryByDeviceMetric[key].value) }).toEqual(expected);
+      expect(expected.values).toEqual([4, 2]);
+    });
+
+    it("leaves the state object untouched when a whole batch is rejected", () => {
+      useLiveStore.getState().reset();
+      const before = useLiveStore.getState();
+      useLiveStore.getState().applyDeltaBatch({ telemetry: [{ delta_type: "metric", metric: { ...base, value: Number.NaN } }],
+        topology: [{ delta: { delta_type: "update", node: { device_id: "" } } }], alerts: [], digitalTwin: [] });
+      expect(useLiveStore.getState()).toBe(before);
+      useLiveStore.getState().setConnectionStatus("topology", before.topologyStatus);
+      expect(useLiveStore.getState()).toBe(before);
+    });
   });
 });

@@ -30,6 +30,7 @@ from app.modules.network.synthetic_topology import (
     plan_synthetic_topology,
 )
 from app.modules.network.topology import TopologyQueryService
+from scripts.verify_execution import TERMINAL_SIMULATION_STATES, policy_scenario_config, requires_simulation
 
 CAMPUS_CODE = "strathmore"
 
@@ -763,18 +764,71 @@ class NanfoApiClient:
             idempotency_key=idempotency_key,
         )
 
-    def execute_intent(self, *, workspace_id: str, intent_id: str, idempotency_key: str) -> dict[str, Any]:
+    def execute_intent(
+        self,
+        *,
+        workspace_id: str,
+        intent_id: str,
+        idempotency_key: str,
+        approval_binding: dict[str, Any] | None = None,
+        simulation_id: str | None = None,
+        manual_approval: bool | None = None,
+    ) -> dict[str, Any]:
+        """ADR-028: ``idempotency_key`` must be the intent's stored (validate) key.
+
+        ``approval_binding`` echoes the validate/detail lab identity and ``simulation_id``
+        references bound pre-execution evidence; both are sent only when present.
+        """
+        body: dict[str, Any] = {
+            "workspace_id": workspace_id,
+            "intent_id": intent_id,
+            "idempotency_key": idempotency_key,
+        }
+        if approval_binding is not None:
+            body["approval_binding"] = approval_binding
+        if simulation_id is not None:
+            body["simulation_id"] = simulation_id
+        if manual_approval is not None:
+            body["manual_approval"] = manual_approval
         return self._request_envelope(
             method="POST",
             path="/api/v1/intents/execute",
             expected_statuses=(202,),
-            json_body={
-                "workspace_id": workspace_id,
-                "intent_id": intent_id,
-                "idempotency_key": idempotency_key,
-            },
+            json_body=body,
             idempotency_key=idempotency_key,
         )
+
+    def run_bound_simulation(
+        self,
+        *,
+        network_id: str,
+        action_binding: dict[str, Any],
+        timeout_seconds: float = 60.0,
+        poll_interval_seconds: float = 0.5,
+    ) -> dict[str, Any]:
+        """C18 evidence: a policy-compliant modeled run bound verbatim to the intent."""
+        started = self._request_envelope(
+            method="POST",
+            path="/api/v1/simulations/start",
+            expected_statuses=(202,),
+            json_body={
+                "network_id": network_id,
+                "scenario_name": f"Pre-execution evidence {action_binding.get('intent_id')}",
+                "scenario_config": policy_scenario_config(action_binding),
+            },
+        )
+        simulation_id = str(started.get("simulation_id"))
+        deadline = time.monotonic() + timeout_seconds
+        while True:
+            detail = self.get_simulation_detail(simulation_id=simulation_id)
+            if detail.get("state") in TERMINAL_SIMULATION_STATES:
+                break
+            if time.monotonic() >= deadline:
+                raise NanfoApiError(f"simulation {simulation_id} did not finish within {timeout_seconds:g}s")
+            time.sleep(poll_interval_seconds)
+        if detail.get("state") != "completed" or detail.get("risk_gate") != "passed":
+            raise NanfoApiError(f"simulation {simulation_id} did not pass (state={detail.get('state')})")
+        return detail
 
     def get_intent_detail(self, *, workspace_id: str, intent_id: str) -> dict[str, Any]:
         return self._request_envelope(
@@ -924,11 +978,14 @@ def _run_apply_mode(args: argparse.Namespace, device_payloads: list[dict[str, An
             )
             intent_id = str(validated.get("intent_id"))
             if intent_id:
-                execute_idempotency_key = f"{args.idempotency_prefix}-execute-{_now_stamp()}"
-                api.execute_intent(
+                _execute_validated_intent(
+                    api,
+                    args,
+                    org_id=org_id,
                     workspace_id=workspace_id,
-                    intent_id=intent_id,
-                    idempotency_key=execute_idempotency_key,
+                    network_id=network_id,
+                    validated=validated,
+                    validate_idempotency_key=validate_idempotency_key,
                 )
                 api.get_intent_detail(workspace_id=workspace_id, intent_id=intent_id)
 
@@ -940,6 +997,66 @@ def _run_apply_mode(args: argparse.Namespace, device_payloads: list[dict[str, An
             simulation_id=simulation_id,
             intent_id=intent_id,
         )
+
+
+def _execute_validated_intent(
+    api: NanfoApiClient,
+    args: argparse.Namespace,
+    *,
+    org_id: str,
+    workspace_id: str,
+    network_id: str,
+    validated: dict[str, Any],
+    validate_idempotency_key: str,
+) -> dict[str, Any]:
+    """ADR-028 execute: the stored validate key (C3), the echoed approval binding, bound
+    simulation evidence when the server requires it (C18) and, when configured, a second
+    seeded operator as the distinct approver (manual lab approval rejects the requester).
+    """
+    stored_key = validated.get("idempotency_key") or validate_idempotency_key
+    approval_binding = validated.get("approval_binding") or None
+    approver_email = (getattr(args, "approver_email", "") or "").strip()
+    if not approver_email:
+        return _approve(api, workspace_id=workspace_id, network_id=network_id, validated=validated,
+                        stored_key=stored_key, approval_binding=approval_binding, args=args)
+    with NanfoApiClient(base_url=args.base_url, timeout_seconds=args.timeout_seconds) as approver:
+        approver.login(email=approver_email, password=args.approver_password)
+        approver_id = approver.get_profile().get("user_id")
+        if not isinstance(approver_id, str) or not approver_id:
+            raise NanfoApiError("approver profile response missing user_id")
+        api.add_org_member(org_id=org_id, user_id=approver_id, org_role="Operator")
+        print("[strathmore] intent execution approved by a distinct operator")
+        return _approve(approver, workspace_id=workspace_id, network_id=network_id, validated=validated,
+                        stored_key=stored_key, approval_binding=approval_binding, args=args)
+
+
+def _approve(
+    actor: NanfoApiClient,
+    *,
+    workspace_id: str,
+    network_id: str,
+    validated: dict[str, Any],
+    stored_key: str,
+    approval_binding: dict[str, Any] | None,
+    args: argparse.Namespace,
+) -> dict[str, Any]:
+    simulation_id = None
+    if requires_simulation(validated):
+        evidence = actor.run_bound_simulation(
+            network_id=network_id,
+            action_binding=validated["simulation_action_binding"],
+            timeout_seconds=getattr(args, "simulation_timeout_seconds", 60.0),
+        )
+        simulation_id = str(evidence.get("simulation_id"))
+    return actor.execute_intent(
+        workspace_id=workspace_id,
+        intent_id=str(validated.get("intent_id")),
+        idempotency_key=stored_key,
+        approval_binding=approval_binding,
+        simulation_id=simulation_id,
+        # Explicit approval accompanies an approval binding (manual lab path) only.
+        manual_approval=True if approval_binding is not None else None,
+    )
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -1064,6 +1181,25 @@ def _build_parser() -> argparse.ArgumentParser:
         "--idempotency-prefix",
         default="strathmore-demo",
         help="Idempotency key prefix for control-plane checks",
+    )
+    parser.add_argument(
+        "--approver-email",
+        default=os.getenv("NANFO_APPROVER_EMAIL", ""),
+        help=(
+            "Second seeded operator that approves (executes) the control-plane intent. "
+            "Manual lab approval (ADR-028) rejects the requester; demo mode accepts either."
+        ),
+    )
+    parser.add_argument(
+        "--approver-password",
+        default=os.getenv("NANFO_APPROVER_PASSWORD", ""),
+        help="Approver login password (prefer NANFO_APPROVER_PASSWORD over argv).",
+    )
+    parser.add_argument(
+        "--simulation-timeout-seconds",
+        type=float,
+        default=60.0,
+        help="Maximum wait for bound pre-execution simulation evidence when required.",
     )
     return parser
 

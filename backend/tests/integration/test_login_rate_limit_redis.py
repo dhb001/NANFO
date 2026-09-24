@@ -10,7 +10,8 @@ from fastapi import HTTPException
 from redis.asyncio import Redis
 from redis.exceptions import ConnectionError as RedisConnectionError
 
-from app.modules.identity.service import AuthService
+from app.core.errors import DependencyUnavailableError
+from app.modules.identity.service import AuthService, login_email_bucket_key, login_ip_bucket_key
 
 pytestmark = pytest.mark.skipif(
     not os.environ.get("AUTH_TEST_REDIS_URL"), reason="AUTH_TEST_REDIS_URL not configured"
@@ -21,13 +22,17 @@ async def test_concurrent_fixed_windows_and_lost_ack(mock_db):
     redis = Redis.from_url(os.environ["AUTH_TEST_REDIS_URL"], decode_responses=True)
     identity = uuid.uuid4().hex
     email, ip = f"{identity}@example.com", f"test-{identity}"
-    keys = [f"ratelimit:login:{ip}", f"ratelimit:login:email:{email}"]
+    ip_key, email_key = login_ip_bucket_key(ip), login_email_bucket_key(email)
     service = AuthService(mock_db, redis)
 
     async def login():
-        with pytest.raises(HTTPException) as error:
+        try:
             await service.login(email, "wrong", ip, str(uuid.uuid4()))
-        return error.value.status_code
+        except HTTPException as error:
+            return error.status_code
+        except DependencyUnavailableError:
+            return 503
+        raise AssertionError("login unexpectedly succeeded")
 
     try:
         with (
@@ -37,8 +42,10 @@ async def test_concurrent_fixed_windows_and_lost_ack(mock_db):
         ):
             statuses = await asyncio.gather(*(login() for _ in range(20)))
         assert statuses.count(401) == 5 and statuses.count(429) == 15
-        for key in keys:
-            assert await redis.get(key) == "20"
+        # Every attempt counts per IP; IP-throttled attempts never reach the email bucket.
+        assert await redis.get(ip_key) == "20"
+        assert await redis.get(email_key) == "5"
+        for key in (ip_key, email_key):
             assert 0 < await redis.ttl(key) <= 60
             await redis.expire(key, 15)
 
@@ -50,13 +57,13 @@ async def test_concurrent_fixed_windows_and_lost_ack(mock_db):
             raise RedisConnectionError("reply lost after EXEC")
 
         with patch.object(pipeline_type, "execute", lost_ack):
-            assert await login() == 401
-        for key in keys:
-            assert await redis.get(key) == "21"
-            assert 0 < await redis.ttl(key) <= 15
-        await redis.persist(keys[0])
+            # ADR-028 C2: an unknown throttle outcome is a retryable 503, never 401.
+            assert await login() == 503
+        assert await redis.get(ip_key) == "21"
+        assert 0 < await redis.ttl(ip_key) <= 15
+        await redis.persist(ip_key)
         assert await login() == 429
-        assert 0 < await redis.ttl(keys[0]) <= 60
+        assert 0 < await redis.ttl(ip_key) <= 60
     finally:
-        await redis.delete(*keys)
+        await redis.delete(ip_key, email_key, f"ratelimit:login-audited:{ip}")
         await redis.aclose()

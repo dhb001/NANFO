@@ -13,7 +13,7 @@ from pydantic import ValidationError
 
 from app.modules.plugin.repository import PluginRepository
 from app.modules.plugin.schemas import PluginInstallRequest, PluginRecordResponse
-from app.modules.plugin.service import PluginService
+from app.modules.plugin.service import PluginService, lifecycle_event_id, republish_deferred_plugin_events
 
 
 @pytest.fixture(autouse=True)
@@ -194,7 +194,12 @@ async def test_install_plugin_creates_record_and_publishes_installed_event(mock_
     assert service._repo.create.await_args.kwargs["dependency_status"] == "declared_unverified"
     assert service._repo.create.await_args.kwargs["sandbox_status"] == "not_executed"
     assert mock_publish.await_args.kwargs["event_type"] == "plugin.installed"
-    assert mock_db.commit.await_count == 1
+    # ADR-028: the transition commits (pessimistically deferred) before publication,
+    # then only the publication outcome is recorded.
+    assert mock_db.commit.await_count == 2
+    assert service._repo.update_lifecycle.await_args_list[0].kwargs["queue_status"] == "deferred"
+    assert mock_publish.await_args.kwargs["event_id"] == lifecycle_event_id(
+        row.plugin_id, "plugin.installed", row.updated_at)
     mock_db.refresh.assert_awaited_with(row)
 
 
@@ -585,7 +590,8 @@ async def test_uninstall_and_identical_reinstall_preserve_id_and_history(mock_db
     assert row.uninstalled_at is None
     assert row.signature_status == "verified"
     service._repo.create.assert_not_awaited()
-    assert mock_db.commit.await_count == 2
+    # Uninstall commits once; the reinstall commits its transition, then its publication.
+    assert mock_db.commit.await_count == 3
 
 
 @pytest.mark.asyncio
@@ -682,3 +688,189 @@ async def test_enable_revalidates_historical_manifest_schema(mock_db):
                                     requested_by_user_id=str(uuid.uuid4()))
     assert exc.value.detail["code"] == "PLUGIN_MANIFEST_INVALID"
     assert row.status == "failed"
+
+
+def _tracking_update():
+    async def _update(target, **kwargs):
+        for key in ("status", "enabled", "failure_reason", "queue_status", "stream_entry_id", "warning"):
+            setattr(target, key, kwargs[key])
+        return target
+    return AsyncMock(side_effect=_update)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("action,status_before,event_type", [
+    ("install", None, "plugin.installed"),
+    ("enable_plugin", "installed", "plugin.enabled"),
+    ("disable_plugin", "enabled", "plugin.disabled"),
+])
+async def test_lifecycle_commits_before_publishing(mock_db, fake_redis, action, status_before, event_type):
+    """Regression: install/enable/disable used to publish before their commit."""
+    row = _make_plugin_row(status=status_before or "installed", enabled=status_before == "enabled")
+    service = PluginService(db=mock_db, redis=fake_redis)
+    service._repo.get_by_plugin_key = AsyncMock(return_value=None)
+    service._repo.create = AsyncMock(return_value=row)
+    service._repo.get_by_id = AsyncMock(return_value=row)
+    service._repo.update_lifecycle = _tracking_update()
+    service._repo.mark_published = AsyncMock(return_value=True)
+    operations = []
+    mock_db.commit.side_effect = lambda: operations.append(("commit", row.queue_status))
+
+    async def publish(**kwargs):
+        operations.append(("publish", kwargs["event_type"]))
+        return "1-0"
+
+    with patch("app.modules.plugin.service.publish_event", new=AsyncMock(side_effect=publish)):
+        if action == "install":
+            result = await service.install_plugin(req=_install_request(), correlation_id=str(uuid.uuid4()),
+                                                  requested_by_user_id=str(uuid.uuid4()))
+        else:
+            result = await getattr(service, action)(plugin_id=row.plugin_id, correlation_id=str(uuid.uuid4()),
+                                                    requested_by_user_id=str(uuid.uuid4()))
+    assert operations == [("commit", "deferred"), ("publish", event_type), ("commit", "deferred")]
+    assert result.queue_status == "queued" and result.stream_entry_id == "1-0"
+    service._repo.mark_published.assert_awaited_once_with(row.plugin_id, committed_at=row.updated_at,
+                                                          stream_entry_id="1-0")
+
+
+@pytest.mark.asyncio
+async def test_publish_failure_leaves_committed_transition_deferred(mock_db, fake_redis):
+    row = _make_plugin_row(status="installed")
+    service = PluginService(db=mock_db, redis=fake_redis)
+    service._repo.get_by_id = AsyncMock(return_value=row)
+    service._repo.update_lifecycle = _tracking_update()
+    service._repo.mark_published = AsyncMock()
+    with patch("app.modules.plugin.service.publish_event", new=AsyncMock(side_effect=ConnectionError("down"))):
+        result = await service.enable_plugin(plugin_id=row.plugin_id, correlation_id=str(uuid.uuid4()),
+                                             requested_by_user_id=str(uuid.uuid4()))
+    assert (row.status, row.enabled, row.queue_status, row.warning) == (
+        "enabled", True, "deferred", "event_queue_unavailable")
+    assert (result.queue_status, result.warning) == ("deferred", "event_queue_unavailable")
+    mock_db.commit.assert_awaited_once()
+    service._repo.mark_published.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_late_publication_only_marks_the_exact_committed_transition(mock_db):
+    from sqlalchemy.dialects import postgresql
+
+    committed_at = datetime.now(UTC)
+    await PluginRepository(mock_db).mark_published(uuid.uuid4(), committed_at=committed_at, stream_entry_id="9-0")
+    sql = str(mock_db.scalar.await_args.args[0].compile(dialect=postgresql.dialect()))
+    assert "plugins.updated_at = %(updated_at_1)s" in sql and "plugins.queue_status = %(queue_status_1)s" in sql
+    assert "RETURNING plugins.plugin_id" in sql
+
+
+@pytest.mark.asyncio
+async def test_sweep_republishes_deferred_rows_with_the_same_event_id(mock_db, fake_redis):
+    first, second = _make_plugin_row(status="enabled", enabled=True), _make_plugin_row(status="disabled")
+    for row in (first, second):
+        row.queue_status, row.warning = "deferred", "event_queue_unavailable"
+    with patch("app.modules.plugin.service.PluginRepository.claim_deferred",
+               new=AsyncMock(return_value=[first, second])) as claim:
+        assert await republish_deferred_plugin_events(db=mock_db, redis=fake_redis) == 2
+    assert claim.await_args.kwargs == {"limit": 50, "older_than_seconds": 30}
+    entries = await fake_redis.xrange("stream:plugin")
+    assert [entry["event_type"] for _, entry in entries] == ["plugin.enabled", "plugin.disabled"]
+    assert entries[0][1]["event_id"] == lifecycle_event_id(first.plugin_id, "plugin.enabled", first.updated_at)
+    import json
+
+    payload = json.loads(entries[0][1]["payload"])
+    assert payload["delivery"] == "deferred_republish" and payload["requested_by_user_id"] is None
+    assert (first.queue_status, first.warning) == ("queued", None) and first.stream_entry_id == entries[0][0]
+    mock_db.commit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_sweep_stops_on_publish_failure_and_rows_stay_deferred(mock_db):
+    row = _make_plugin_row(status="installed")
+    row.queue_status = "deferred"
+    redis = AsyncMock()
+    redis.xadd.side_effect = ConnectionError("redis down")
+    with patch("app.modules.plugin.service.PluginRepository.claim_deferred", new=AsyncMock(return_value=[row])):
+        assert await republish_deferred_plugin_events(db=mock_db, redis=redis) == 0
+    assert row.queue_status == "deferred"
+
+
+@pytest.mark.asyncio
+async def test_rejected_install_failed_events_are_rate_limited(mock_db, fake_redis, monkeypatch):
+    monkeypatch.setattr("app.modules.plugin.service.get_settings", lambda: SimpleNamespace(
+        PLUGIN_TRUSTED_SIGNERS="nanfo-labs", PLUGIN_SIGNATURE_PREFIX="sig:", PLUGIN_SIGNATURE_MIN_LENGTH=16,
+        PLUGIN_FAILED_EVENT_WINDOW_SECONDS=60, PLUGIN_FAILED_EVENT_MAX_PER_ACTOR=2))
+    service = PluginService(db=mock_db, redis=fake_redis)
+    service._repo.get_by_plugin_key = AsyncMock(return_value=None)
+    actor = str(uuid.uuid4())
+
+    async def reject(**overrides):
+        with pytest.raises(HTTPException):
+            await service.install_plugin(req=_install_request(**overrides), correlation_id=str(uuid.uuid4()),
+                                         requested_by_user_id=actor)
+
+    for _ in range(5):
+        await reject(signature="bad-signature")  # identical rejection: one event per window
+    assert len(await fake_redis.xrange("stream:plugin")) == 1
+    await reject(signer="unknown-signer")          # a distinct rejection is still reported
+    await reject(plugin_key="other-plugin", signer="unknown-signer")  # per-actor cap (2) reached
+    events = await fake_redis.xrange("stream:plugin")
+    assert [entry["event_type"] for _, entry in events] == ["plugin.failed", "plugin.failed"]
+    mock_db.commit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_opaque_request_id_uses_shared_correlation_mapping(mock_db, fake_redis):
+    from app.core.correlation import correlation_uuid
+
+    row = _make_plugin_row(status="installed")
+    service = PluginService(db=mock_db, redis=fake_redis)
+    service._repo.get_by_id = AsyncMock(return_value=row)
+    service._repo.update_lifecycle = _tracking_update()
+    with patch("app.modules.plugin.service.publish_event", new_callable=AsyncMock) as publish:
+        publish.return_value = "5-0"
+        await service.enable_plugin(plugin_id=row.plugin_id, correlation_id="client-trace-9",
+                                    requested_by_user_id=str(uuid.uuid4()))
+    # Regression: a non-UUID request id used to become a fresh random uuid4.
+    assert publish.await_args.kwargs["correlation_id"] == str(correlation_uuid("client-trace-9"))
+    assert publish.await_args.kwargs["payload"]["request_id"] == "client-trace-9"
+
+
+@pytest.mark.asyncio
+async def test_uninstall_audit_receives_original_request_id_for_normalization(mock_db, fake_redis):
+    row = _make_plugin_row()
+    service = PluginService(db=mock_db, redis=fake_redis)
+    service._repo.get_by_id = AsyncMock(return_value=row)
+    with patch("app.modules.identity.service.AuditLogRepository.append", new_callable=AsyncMock) as audit:
+        await service.uninstall_plugin(plugin_id=row.plugin_id, correlation_id="opaque id",
+                                       requested_by_user_id=str(uuid.uuid4()))
+    from app.core.correlation import correlation_uuid
+
+    assert audit.await_args.kwargs["correlation_id"] == correlation_uuid("opaque id")
+    assert audit.await_args.kwargs["metadata"]["request_id"] == "opaque id"
+
+
+def test_signature_admission_is_declared_only_and_documented_honestly():
+    service = PluginService(db=None, redis=None)
+    assert not hasattr(service, "_validate_signature")
+    failure = service._check_declared_signature(signer="nanfo-labs", signature="sig:short")
+    assert failure["code"] == "PLUGIN_SIGNATURE_INVALID" and "not verified" in failure["message"]
+    assert service._check_declared_signature(signer="nanfo-labs", signature="sig:abcdef1234567890") is None
+    fields = PluginInstallRequest.model_json_schema()["properties"]
+    assert "never cryptographically verified" in fields["signature"]["description"]
+    assert "never verified" in fields["signer"]["description"]
+    status_schema = PluginRecordResponse.model_json_schema()["properties"]["signature_status"]
+    assert status_schema["const"] == "declared_unverified"
+    assert "no cryptographic verification" in status_schema["description"]
+
+
+@pytest.mark.asyncio
+async def test_deferred_claim_query_is_aged_unconfirmed_and_skip_locked(mock_db):
+    from unittest.mock import MagicMock
+
+    from sqlalchemy.dialects import postgresql
+
+    result = MagicMock()
+    result.scalars.return_value.all.return_value = []
+    mock_db.execute = AsyncMock(return_value=result)
+    assert await PluginRepository(mock_db).claim_deferred(limit=5, older_than_seconds=30) == []
+    sql = str(mock_db.execute.await_args.args[0].compile(dialect=postgresql.dialect()))
+    assert "plugins.queue_status = %(queue_status_1)s" in sql and "plugins.stream_entry_id IS NULL" in sql
+    assert "plugins.updated_at < now() - %(now_1)s" in sql and "FOR UPDATE SKIP LOCKED" in sql

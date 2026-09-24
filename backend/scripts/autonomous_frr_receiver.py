@@ -287,13 +287,16 @@ async def operate(args, config):
             executor, _ = build_execution_providers(AsyncSessionLocal, get_redis_client(), installation, driver,
                                                     binding.resource_id, execution_mode="emulation")
             from app.modules.autonomy.execution_settings import load_config as load_client_config
+            from app.modules.autonomy.health_secret import signing_credentials
             from app.modules.autonomy.receiver_health import ReceiverHealth
             client_config = load_client_config()
-            client_installation, health_key = await asyncio.to_thread(client_config.load)
+            client_installation, legacy_key = await asyncio.to_thread(client_config.load)
             if client_installation.sha256 != installation.sha256 or client_config.resource_id != binding.resource_id:
                 raise ValueError("receiver_client_installation_mismatch")
+            # C21: only this receiver holds the Ed25519 private key; verifiers get the public key.
+            signer, legacy_key = await asyncio.to_thread(signing_credentials, legacy_key)
             executor.health_publisher = ReceiverHealth(get_redis_client(), installation, binding.resource_id,
-                health_key, max_age_seconds=client_config.health_max_age_seconds)
+                legacy_key, signer=signer, max_age_seconds=client_config.health_max_age_seconds)
             # The original confined loader stays mandatory. A new runtime pin is
             # not qualification and cannot replace that independent provider gate.
             while True:

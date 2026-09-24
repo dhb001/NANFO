@@ -183,8 +183,8 @@ async def test_telemetry_fanout_failure_increments_dropped_counter(integration_f
         patch("app.events.consumers.telemetry_consumer.telemetry_ws_manager") as mock_ws_manager,
     ):
         mock_ws_manager.push_delta = AsyncMock(side_effect=RuntimeError("ws unavailable"))
-        with pytest.raises(RuntimeError, match="ws unavailable"):
-            await handle_telemetry_event(event_data)
+        # ADR-028: fanout after the commit is best-effort; the durable event is acknowledged.
+        await handle_telemetry_event(event_data)
 
     db.commit.assert_awaited_once()
     assert await integration_fake_redis.get("telemetry:health:persisted_events") == "1"

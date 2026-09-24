@@ -7,8 +7,9 @@ import uuid
 from typing import Annotated
 
 import redis.asyncio as aioredis
-from fastapi import APIRouter, Depends, Query, status
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, Depends, Query, Request, status
+from fastapi.responses import Response, StreamingResponse
+from starlette.background import BackgroundTask
 
 from app.core.dependencies import (
     RequestMeta,
@@ -20,6 +21,8 @@ from app.core.dependencies import (
     get_request_meta,
     require_permissions,
 )
+from app.core.http_cache import digest_etag, if_none_match_satisfied
+from app.core.pagination import PageNumber
 from app.core.responses import APIResponse, success_response
 from app.db.postgres import AsyncSession
 from app.modules.organization.service import WorkspaceService
@@ -85,7 +88,7 @@ async def report_history(
     meta: Annotated[RequestMeta, Depends(get_request_meta)],
     db: Annotated[AsyncSession, Depends(get_db)],
     redis: Annotated[aioredis.Redis, Depends(get_redis)],
-    page: int = Query(default=1, ge=1, le=1000000),
+    page: PageNumber = 1,
     page_size: int = Query(default=20, ge=1, le=100),
 ):
     started = time.monotonic()
@@ -108,6 +111,7 @@ async def report_history(
 async def download_report(
     report_id: uuid.UUID,
     workspace_id: uuid.UUID,
+    request: Request,
     claims: Annotated[TokenClaims, Depends(require_permissions("read:telemetry"))],
     db: Annotated[AsyncSession, Depends(get_db)],
     redis: Annotated[aioredis.Redis, Depends(get_redis)],
@@ -116,24 +120,36 @@ async def download_report(
     await WorkspaceService(db=db, redis=redis).get_active_workspace(
         scoped, user_id=claims.user_id, claim_org_id=get_claim_org_scope(claims=claims)
     )
-    data, receipt = await ReportService(db=db, redis=redis).download(
+    service = ReportService(db=db, redis=redis)
+    output_format, receipt = await service.download_receipt(
         report_id=report_id, workspace_id=scoped, user_id=claims.user_id
     )
-
-    async def chunks():
-        for offset in range(0, len(data), 65536):
-            yield data[offset : offset + 65536]
-
+    # C5: strong digest validator "sha256:<hex>"; clients also accept the legacy
+    # bare-hex form. Evaluated only after authorization and receipt verification.
+    etag = digest_etag(receipt["checksum_sha256"])
+    headers = {
+        "ETag": etag,
+        "Cache-Control": "no-store",
+        "X-Content-Type-Options": "nosniff",
+    }
+    if if_none_match_satisfied(request.headers.get("If-None-Match"), etag):
+        return Response(status_code=status.HTTP_304_NOT_MODIFIED, headers=headers)
+    artifact = await service.open_artifact(
+        report_id=report_id,
+        workspace_id=scoped,
+        user_id=claims.user_id,
+        output_format=output_format,
+        receipt=receipt,
+    )
     return StreamingResponse(
-        chunks(),
+        artifact.chunks(),
         media_type=receipt["media_type"],
         headers={
-            "Content-Length": str(len(data)),
+            **headers,
+            "Content-Length": str(artifact.size),
             "Content-Disposition": f'attachment; filename="{receipt["filename"]}"',
-            "Cache-Control": "no-store",
-            "X-Content-Type-Options": "nosniff",
-            "ETag": f'"{receipt["checksum_sha256"]}"',
         },
+        background=BackgroundTask(artifact.close),
     )
 
 

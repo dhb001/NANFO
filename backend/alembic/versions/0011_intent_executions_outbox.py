@@ -60,5 +60,12 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    # Executions are the immutable approval/command identity of lab changes (ADR-028).
+    if op.get_context().as_sql:
+        raise RuntimeError("Downgrade below 0011 must run online (not --sql): it must first verify that "
+                           "no intent execution records would be dropped")
+    if op.get_bind().scalar(sa.text("SELECT EXISTS (SELECT 1 FROM intent_executions) "
+                                    "OR EXISTS (SELECT 1 FROM intent_outbox)")):
+        raise RuntimeError("Downgrade below 0011 refused: immutable intent execution records exist")
     op.drop_table("intent_outbox")
     op.drop_table("intent_executions")

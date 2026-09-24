@@ -454,20 +454,87 @@ def test_report_history_contract_and_bounded_page(client):
     assert history.await_args.kwargs["page"] == 2
     response = client.get("/api/v1/reports", params={"workspace_id": str(payload["workspace_id"]), "page_size": 101}, headers=headers)
     assert response.status_code == 422 and not response.json()["success"]
+    # ADR-028: every page parameter uses the shared PageNumber bound (1..10000).
+    response = client.get("/api/v1/reports", params={"workspace_id": str(payload["workspace_id"]), "page": 10001}, headers=headers)
+    assert response.status_code == 422 and not response.json()["success"]
+
+
+class _Artifact:
+    def __init__(self, body):
+        self.body, self.size, self.closed = body, len(body), 0
+
+    def chunks(self):
+        yield self.body[:2]
+        yield self.body[2:]
+
+    def close(self):
+        self.closed += 1
 
 
 def test_report_download_binary_and_json_error_contract(client):
     payload = _report_response_payload(status="requested", queue_status="outbox_pending", idempotent_replay=False)
     headers = {"Authorization": f"Bearer {_make_token()}"}
     path = f"/api/v1/reports/{payload['report_id']}/download"
-    with patch("app.modules.report.service.ReportService.download", AsyncMock(return_value=(b"a,b\r\n", {
-        "media_type": "text/csv", "filename": "safe.csv", "checksum_sha256": "a" * 64,
-    }))):
+    receipt = {"media_type": "text/csv", "filename": "safe.csv", "checksum_sha256": "a" * 64}
+    artifact = _Artifact(b"a,b\r\n")
+    with patch("app.modules.report.service.ReportService.download_receipt", AsyncMock(return_value=("csv", receipt))), \
+            patch("app.modules.report.service.ReportService.open_artifact", AsyncMock(return_value=artifact)) as opened:
         response = client.get(path, params={"workspace_id": str(payload["workspace_id"])}, headers=headers)
     assert response.status_code == 200 and response.content == b"a,b\r\n"
     assert response.headers["content-length"] == "5" and response.headers["cache-control"] == "no-store"
-    with patch("app.modules.report.service.ReportService.download", AsyncMock(side_effect=HTTPException(409, detail={
+    assert response.headers["x-content-type-options"] == "nosniff"
+    # C5: strong digest ETag, "sha256:<hex>" (was the bare hex).
+    assert response.headers["etag"] == f'"sha256:{"a" * 64}"'
+    assert opened.await_args.kwargs["output_format"] == "csv" and artifact.closed >= 1
+    with patch("app.modules.report.service.ReportService.download_receipt", AsyncMock(side_effect=HTTPException(409, detail={
         "code": "REPORT_ARTIFACT_INVALID", "message": "Invalid artifact",
     }))):
         response = client.get(path, params={"workspace_id": str(payload["workspace_id"])}, headers=headers)
     assert response.status_code == 409 and response.json()["errors"]["code"] == "REPORT_ARTIFACT_INVALID"
+
+
+@pytest.mark.parametrize("if_none_match", [
+    f'"sha256:{"b" * 64}"', f'W/"sha256:{"b" * 64}"', f'"other", "sha256:{"b" * 64}"', "*",
+])
+def test_report_download_if_none_match_returns_304_without_reading_bytes(client, if_none_match):
+    payload = _report_response_payload(status="requested", queue_status="outbox_pending", idempotent_replay=False)
+    receipt = {"media_type": "application/pdf", "filename": "r.pdf", "checksum_sha256": "b" * 64}
+    headers = {"Authorization": f"Bearer {_make_token()}", "If-None-Match": if_none_match}
+    with patch("app.modules.report.service.ReportService.download_receipt", AsyncMock(return_value=("pdf", receipt))), \
+            patch("app.modules.report.service.ReportService.open_artifact", AsyncMock()) as opened:
+        response = client.get(f"/api/v1/reports/{payload['report_id']}/download",
+                              params={"workspace_id": str(payload["workspace_id"])}, headers=headers)
+    assert response.status_code == 304 and response.content == b""
+    assert response.headers["etag"] == f'"sha256:{"b" * 64}"'
+    opened.assert_not_awaited()
+
+
+def test_report_download_stale_validator_streams_the_body(client):
+    payload = _report_response_payload(status="requested", queue_status="outbox_pending", idempotent_replay=False)
+    receipt = {"media_type": "text/csv", "filename": "r.csv", "checksum_sha256": "c" * 64}
+    headers = {"Authorization": f"Bearer {_make_token()}", "If-None-Match": f'"{"c" * 64}"'}  # legacy bare hex
+    with patch("app.modules.report.service.ReportService.download_receipt", AsyncMock(return_value=("csv", receipt))), \
+            patch("app.modules.report.service.ReportService.open_artifact", AsyncMock(return_value=_Artifact(b"x,y"))):
+        response = client.get(f"/api/v1/reports/{payload['report_id']}/download",
+                              params={"workspace_id": str(payload["workspace_id"])}, headers=headers)
+    assert response.status_code == 200 and response.content == b"x,y"
+
+
+def test_generate_report_org_quota_exceeded_returns_507_envelope(client):
+    """ADR-028 C26: distinct per-organisation quota code, 507 like other storage quotas."""
+    headers = {"Authorization": f"Bearer {_make_token()}"}
+    with patch(
+        "app.modules.report.service.ReportService.generate_report",
+        new=AsyncMock(side_effect=HTTPException(status_code=507, detail={
+            "code": "REPORT_ORG_QUOTA_EXCEEDED",
+            "message": "Organisation report storage quota is exhausted; no new report was accepted.",
+        })),
+    ):
+        response = client.post("/api/v1/reports/generate", headers=headers, json={
+            "workspace_id": str(create_authorized_workspace()), "report_type": "executive_summary", "format": "csv",
+            "date_range": {"start": "2026-08-01T00:00:00Z", "end": "2026-08-02T00:00:00Z"},
+        })
+    assert response.status_code == 507
+    body = response.json()
+    assert body["success"] is False and body["errors"]["code"] == "REPORT_ORG_QUOTA_EXCEEDED"
+    assert "Traceback" not in response.text

@@ -1,15 +1,20 @@
+/** Organization roles (backend `OrgRole`). */
+export type OrgRole = "Admin" | "Operator" | "Read-Only";
+
 export interface Organization {
   org_id: string;
   name: string;
   slug: string;
   created_at: string;
+  /** The caller's own membership role (ADR-028 C6); absent from older backends. */
+  caller_role?: OrgRole | null;
 }
 
+// Organization, workspace and member lists return `{items, total}` only;
+// the requested page is the caller's own state.
 export interface OrganizationList {
   items: Organization[];
   total: number;
-  page?: number;
-  page_size?: number;
 }
 
 export interface Workspace {
@@ -23,20 +28,16 @@ export interface Workspace {
 export interface WorkspaceList {
   items: Workspace[];
   total: number;
-  page?: number;
-  page_size?: number;
 }
 
 export interface OrgMember {
   org_id: string;
   user_id: string;
-  org_role: string;
+  org_role: OrgRole | (string & {});
   created_at: string;
 }
 
 export interface OrgMemberList {
   items: OrgMember[];
   total: number;
-  page?: number;
-  page_size?: number;
 }

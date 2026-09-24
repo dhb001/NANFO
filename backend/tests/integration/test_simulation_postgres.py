@@ -34,7 +34,7 @@ from app.modules.simulation.models import Simulation, SimulationOutbox
 from app.modules.simulation.repository import SimulationRepository
 from app.modules.simulation.service import SimulationStartService
 from app.modules.simulation.worker import SimulationWorker
-from tests.simulation_support import completed, record, scenario
+from tests.simulation_support import completed, policy_scenario, record, scenario
 from tests.unit.test_intent_lab import mailbox_settings, payload  # noqa: F401
 
 pytestmark = pytest.mark.skipif(
@@ -59,14 +59,15 @@ async def sessions():
         scripts = ScriptDirectory.from_config(config)
         with sync.begin() as connection:
             connection.execute(text(f'SET LOCAL search_path TO "{schema}"'))
+            # ORM models follow head (ADR-028 migration 0030: claim_attempts, outbox created_at).
             with EnvironmentContext(
-                config, scripts, fn=lambda rev, _: scripts._upgrade_revs("0014", rev)
+                config, scripts, fn=lambda rev, _: scripts._upgrade_revs("head", rev)
             ) as context:
                 context.configure(connection=connection)
                 context.run_migrations()
             assert (
                 connection.scalar(text("SELECT version_num FROM alembic_version"))
-                == "0014"
+                == scripts.get_current_head()
             )
         engine = create_async_engine(
             url.set(drivername="postgresql+asyncpg"),
@@ -90,8 +91,11 @@ async def seed(sessions, row=None):
 
 
 async def claim(sessions):
+    # ADR-028: the repository never commits; the caller (worker) owns the unit of work.
     async with sessions() as db:
-        return await SimulationRepository(db).claim()
+        row = await SimulationRepository(db).claim()
+        await db.commit()
+        return row
 
 
 async def test_concurrent_claim_expiry_and_stale_batch_fenced(sessions):
@@ -113,10 +117,15 @@ async def test_concurrent_claim_expiry_and_stale_batch_fenced(sessions):
         assert not await SimulationRepository(db).finish_batch(
             old, checkpoint=checkpoint, run_output=output(scenario(), checkpoint)
         )
+        await db.rollback()
     async with sessions() as db:
         assert await SimulationRepository(db).finish_batch(
             new, checkpoint=checkpoint, run_output=output(scenario(), checkpoint)
         )
+        await db.commit()
+    async with sessions() as db:
+        current = await db.get(Simulation, new.simulation_id)
+        assert current.revision == new.revision + 1 and current.lease_token is None
 
 
 async def test_pause_during_worker_batch_atomic_and_resume_equivalent(
@@ -205,26 +214,38 @@ async def test_outbox_crash_replays_entire_stable_envelope_in_order(sessions):
         await db.commit()
     published = []
 
+    async def unlocked(envelope):
+        # Persistence F28: the claim transaction committed before Redis I/O, so another
+        # session can lock the row immediately (NOWAIT raises if a lock is still held).
+        async with sessions() as probe:
+            assert await probe.scalar(select(SimulationOutbox.event_id).where(
+                SimulationOutbox.event_id == uuid.UUID(envelope["event_id"]),
+            ).with_for_update(nowait=True)) is not None
+            await probe.rollback()
+
     async def lost_ack(stream, envelope):
+        await unlocked(envelope)
         published.append((stream, copy.deepcopy(envelope)))
         raise ConnectionError("Lost Redis ack")
 
+    async def delivered(stream, envelope):
+        await unlocked(envelope)
+        published.append((stream, copy.deepcopy(envelope)))
+
     redis = AsyncMock()
     redis.xadd.side_effect = lost_ack
-    async with sessions() as db:
-        with pytest.raises(ConnectionError):
-            await SimulationRepository(db).publish_one(redis)
-    redis.xadd.side_effect = lambda stream, envelope: published.append(
-        (stream, copy.deepcopy(envelope))
-    )
-    async with sessions() as db:
-        assert await SimulationRepository(db).publish_one(redis)
-    async with sessions() as db:
-        assert await SimulationRepository(db).publish_one(redis)
+    worker = SimulationWorker(sessions=sessions, redis=redis)
+    with pytest.raises(ConnectionError):
+        await worker.publish_one()
+    redis.xadd.side_effect = delivered
+    assert await worker.publish_one()
+    assert await worker.publish_one()
     assert published[0] == published[1]
     assert published[2][1]["event_type"] == "simulation.paused"
+    assert not await worker.publish_one()
     async with sessions() as db:
-        assert not await SimulationRepository(db).publish_one(redis)
+        assert await db.scalar(select(func.count()).select_from(SimulationOutbox).where(
+            SimulationOutbox.published_at.is_(None))) == 0
 
 
 async def test_completion_gate_failure_is_completed_not_cancelled(sessions):
@@ -252,9 +273,11 @@ async def test_completion_gate_failure_is_completed_not_cancelled(sessions):
 async def accepted_execution(sessions, monkeypatch, mailbox_settings, fake_redis):  # noqa: F811
     """Real acceptance/ORM/evidence service; trusted observation and auth are test doubles, no lab."""
     intent_id, workspace_id, network_id, actor_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4(), str(uuid.uuid4())
+    requester = str(uuid.uuid4())  # ADR-028 four-eyes: approver != requester
     plan = LabIntent.model_validate(payload()).normalize()
     binding = SimpleNamespace(topology_id="test-only", model_dump=lambda **_: {"network_id": str(network_id)})
-    snapshot_value = {"run_id": str(uuid.uuid4()), "sequence": 7, "observed_at": "now"}
+    snapshot_value = {"run_id": str(uuid.uuid4()), "sequence": 7, "observed_at": "now",
+                      "links": [{"src_dpid": "a", "src_port": 1, "dst_dpid": "b", "dst_port": 2}]}
     snapshot = SimpleNamespace(run_id=uuid.UUID(snapshot_value["run_id"]), model_dump=lambda **_: copy.deepcopy(snapshot_value))
     prepare = AsyncMock(return_value=(plan, binding, snapshot))
     monkeypatch.setattr("app.modules.intent.execution.prepare_plan", prepare)
@@ -264,18 +287,22 @@ async def accepted_execution(sessions, monkeypatch, mailbox_settings, fake_redis
                         AsyncMock(return_value=SimpleNamespace(org_id=uuid.uuid4())))
     monkeypatch.setattr("app.modules.network.service.NetworkService.assert_network_workspace_access", AsyncMock())
     now = datetime.now(UTC)
-    config = scenario(action_binding={"intent_id": str(intent_id), "plan_sha256": digest(plan.model_dump(mode="json")),
+    # C18: limits must respect the server policy floors to count as evidence.
+    config = policy_scenario(action_binding={"intent_id": str(intent_id), "plan_sha256": digest(plan.model_dump(mode="json")),
         "network_state_sha256": current_network_state_hash(binding=binding, snapshot=snapshot)})
     simulation = record(config, complete=True, workspace_id=workspace_id, network_id=network_id)
     async with sessions() as db:
         db.add(Intent(intent_id=intent_id, workspace_id=workspace_id, network_id=network_id, intent_kind="reroute_path",
             intent_payload=payload(), status="validated", validation_result={}, execution_provenance={}, explainability={},
-            correlation_id=uuid.uuid4(), requested_by_user_id=actor_id, requested_at=now))
+            correlation_id=uuid.uuid4(), requested_by_user_id=requester, requested_at=now))
         db.add(simulation)
         await db.commit()
     args = {"workspace_id": workspace_id, "intent_id": intent_id, "idempotency_key": "bound-test",
         "correlation_id": uuid.uuid4(), "actor_id": actor_id, "permissions": ["write:config", "execute:rollback"],
-        "manual_approval": True, "cancel": False, "simulation_id": simulation.simulation_id}
+        "manual_approval": True, "cancel": False, "simulation_id": simulation.simulation_id,
+        "approval_binding": {"plan_hash": digest(plan.model_dump(mode="json")),
+                             "binding_digest": digest({"network_id": str(network_id)}),
+                             "run_id": snapshot_value["run_id"]}}
     async with sessions() as db:
         await accept_execution(db=db, redis=fake_redis, **args)
         job = await db.scalar(select(IntentExecution))
@@ -283,7 +310,10 @@ async def accepted_execution(sessions, monkeypatch, mailbox_settings, fake_redis
         assert original_evidence["network_state_sha256"] == config.action_binding.network_state_sha256
         assert original_evidence["evidence_expires_at"] == simulation.evidence_expires_at.isoformat()
         assert original_evidence["checkpoint_sha256"] == simulation.checkpoint["checkpoint_sha256"]
-        assert (await db.get(Intent, intent_id)).execution_provenance["approved_plan"] == job.command["plan"]
+        provenance = (await db.get(Intent, intent_id)).execution_provenance
+        assert provenance["approved_plan"] == job.command["plan"]
+        assert provenance["simulation_id"] == str(simulation.simulation_id)
+        assert original_evidence["policy_floors"]["max_loss_pct"] == 1.0
     worker = ExecutionWorker(settings=mailbox_settings, sessions=sessions, redis=fake_redis)
     worker.mailbox = MagicMock()
     worker.mailbox.read = AsyncMock(side_effect=OSError("test stops after publication, no lab"))
@@ -291,11 +321,15 @@ async def accepted_execution(sessions, monkeypatch, mailbox_settings, fake_redis
         sessions=sessions, redis=fake_redis, simulation=simulation, prepare=prepare)
 
 
-@pytest.mark.parametrize("fault", ["sequence", "expiry", "state", "output", "command", "missing_command", "lost_lease", "none"])
+@pytest.mark.parametrize("fault", ["topology", "expiry", "state", "output", "command", "missing_command", "lost_lease",
+                                   "none", "counters_only"])
 async def test_bound_execution_revalidates_before_first_mailbox(accepted_execution, fault):
     ctx = accepted_execution
-    if fault == "sequence":
-        ctx.snapshot["sequence"] += 1
+    if fault == "topology":
+        ctx.snapshot["links"].append({"src_dpid": "b", "src_port": 2, "dst_dpid": "c", "dst_port": 3})
+    elif fault == "counters_only":
+        # ADR-028: the v2 state hash is a stable projection; new samples do not stale evidence.
+        ctx.snapshot.update(sequence=ctx.snapshot["sequence"] + 5, observed_at="later")
     async with ctx.sessions() as db:
         simulation = await db.get(Simulation, ctx.simulation.simulation_id)
         job = await db.get(IntentExecution, ctx.job.execution_id)
@@ -313,6 +347,7 @@ async def test_bound_execution_revalidates_before_first_mailbox(accepted_executi
             job.command = {}
         await db.commit()
         claimed = await ExecutionRepository(db).claim(ctx.worker.owner, 15)
+        await db.commit()
     lost = LeaseAuthority(time.monotonic() + 10)
     if fault == "lost_lease":
         lost.set()
@@ -320,7 +355,7 @@ async def test_bound_execution_revalidates_before_first_mailbox(accepted_executi
     async with ctx.sessions() as db:
         job = await db.get(IntentExecution, ctx.job.execution_id)
         assert job.simulation_evidence == ctx.evidence
-        if fault == "none":
+        if fault in {"none", "counters_only"}:
             ctx.worker.mailbox.write.assert_called_once()
             sent = ctx.worker.mailbox.write.call_args.args[0]
             assert sent.dispatch_expires_at <= datetime.fromisoformat(ctx.evidence["evidence_expires_at"])
@@ -364,6 +399,7 @@ async def test_expired_reference_does_not_block_cancellation(accepted_execution)
     async with ctx.sessions() as db:
         await accept_execution(db=db, redis=ctx.redis, **{**ctx.args, "cancel": True})
         job = await ExecutionRepository(db).claim(ctx.worker.owner, 15)
+        await db.commit()
     await ctx.worker._reconcile(job, LeaseAuthority(time.monotonic() + 10))
     ctx.worker.mailbox.write.assert_not_called()
     async with ctx.sessions() as db:
@@ -385,7 +421,7 @@ async def test_approved_plan_projection_is_deep_copy_not_editable_intent(accepte
 
 async def test_stale_reference_also_blocks_same_idempotent_replay(accepted_execution):
     ctx = accepted_execution
-    ctx.snapshot["sequence"] += 1
+    ctx.snapshot["links"].clear()  # topology changed since the evidence was produced
     async with ctx.sessions() as db:
         with pytest.raises(HTTPException) as error:
             await accept_execution(db=db, redis=ctx.redis, **ctx.args)
@@ -397,6 +433,7 @@ async def test_delayed_mailbox_callback_cannot_outlive_evidence(accepted_executi
     ctx = accepted_execution
     async with ctx.sessions() as db:
         claimed = await ExecutionRepository(db).claim(ctx.worker.owner, 15)
+        await db.commit()
     observed = []
 
     async def delayed_thread(function, command, *, can_publish):
@@ -420,3 +457,29 @@ async def test_delayed_mailbox_callback_cannot_outlive_evidence(accepted_executi
     async with ctx.sessions() as db:
         job = await db.get(IntentExecution, claimed.execution_id)
         assert job.dispatched_at is not None and job.phase == "dispatching"
+
+
+async def test_fair_claim_interleaves_workspaces(sessions):
+    busy, quiet = uuid.uuid4(), uuid.uuid4()
+    for _ in range(3):
+        await seed(sessions, record(workspace_id=busy))
+    lone = await seed(sessions, record(workspace_id=quiet))
+    first, second = await claim(sessions), await claim(sessions)
+    # Global FIFO would have served all three busy-workspace jobs first.
+    assert {first.workspace_id, second.workspace_id} == {busy, quiet}
+    assert lone.simulation_id in {first.simulation_id, second.simulation_id}
+
+
+async def test_claim_attempts_cap_marks_poison_job_failed(sessions):
+    row = await seed(sessions)
+    async with sessions() as db:
+        await db.execute(update(Simulation).values(claim_attempts=5))
+        await db.commit()
+    async with sessions() as db:
+        assert await SimulationRepository(db).claim(max_attempts=5) is None
+        await db.commit()  # the worker persists exhaustions even when nothing is runnable
+    async with sessions() as db:
+        current = await db.get(Simulation, row.simulation_id)
+        assert (current.state, current.warning) == ("failed", "attempts_exhausted")
+        event = await db.scalar(select(SimulationOutbox))
+        assert event.envelope["event_type"] == "simulation.cancelled"

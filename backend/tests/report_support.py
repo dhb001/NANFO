@@ -33,3 +33,23 @@ def snapshot(req=None):
             }
         },
     }
+
+
+REPORT_ORG = uuid.UUID(int=0xC26)
+
+
+def authorized_workspace(org_id=REPORT_ORG):
+    """What ``ReportService.authorize_generation`` returns: the workspace and its organisation."""
+    from types import SimpleNamespace
+
+    return SimpleNamespace(org_id=org_id)
+
+
+def stub_org_admission(service, *, workspaces=(), used=0):
+    """Mock-DB stand-ins for the C26 organisation storage admission (owner reads + usage)."""
+    from unittest.mock import AsyncMock
+
+    service._workspace_svc.list_accessible_workspace_ids = AsyncMock(return_value=list(workspaces))
+    service._repo.lock_org_storage = AsyncMock()
+    service._repo.storage_usage = AsyncMock(return_value=used)
+    return service

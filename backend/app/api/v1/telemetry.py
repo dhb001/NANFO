@@ -24,11 +24,13 @@ from app.core.dependencies import (
     require_permissions,
     require_roles,
 )
+from app.core.pagination import PageNumber
 from app.core.responses import APIResponse, success_response
 from app.modules.network.service import NetworkService
 from app.modules.organization.service import OrgService, WorkspaceService
 from app.modules.telemetry.counters import TelemetryHealthCounterService
 from app.modules.telemetry.cursor import TelemetryCursorService
+from app.modules.telemetry.repository import HISTORY_COUNT_CAP
 from app.modules.telemetry.schemas import (
     TelemetryAggregation,
     TelemetryAggregationResponse,
@@ -143,7 +145,7 @@ async def get_telemetry_history(
     network_id: uuid.UUID | None = None,
     workspace_id: uuid.UUID | None = None,
     metric: str | None = None,
-    page: int = Query(default=1, ge=1),
+    page: PageNumber = 1,
     page_size: int = Query(default=50, ge=1, le=200),
     start_time: AwareDatetime | None = None,
     end_time: AwareDatetime | None = None,
@@ -152,6 +154,7 @@ async def get_telemetry_history(
     pagination: Literal["page", "cursor"] = "page",
     cursor: str | None = Query(default=None, min_length=1, max_length=4096),
 ):
+    """Raw/aggregated history. Page mode totals are capped (``total_capped``); cursor mode has none."""
     started = time.monotonic()
     try:
         TelemetryCursorRequest(
@@ -184,6 +187,7 @@ async def get_telemetry_history(
         **query.model_dump(),
         page=page,
         page_size=page_size,
+        count_cap=HISTORY_COUNT_CAP,
     )
     return success_response(result, meta.request_id, started, meta.timestamp)
 
@@ -196,7 +200,7 @@ async def get_device_telemetry(
     db: Annotated[AsyncSession, Depends(get_db)],
     redis: Annotated[aioredis.Redis, Depends(get_redis)],
     metric: str | None = None,
-    page: int = Query(default=1, ge=1),
+    page: PageNumber = 1,
     page_size: int = Query(default=50, ge=1, le=200),
     start_time: AwareDatetime | None = None,
     end_time: AwareDatetime | None = None,
@@ -221,6 +225,7 @@ async def get_device_telemetry(
         metric=metric,
         page=page,
         page_size=page_size,
+        count_cap=HISTORY_COUNT_CAP,
     )
     return success_response(result, meta.request_id, started, meta.timestamp)
 
@@ -237,7 +242,8 @@ async def get_telemetry_health(
 ):
     started = time.monotonic()
     await _enforce_health_scope(claims=claims, db=db, redis=redis)
-    counter_service = TelemetryHealthCounterService(redis)
-    svc = TelemetryQueryService(db=db, counter_service=counter_service, event_redis=redis)
+    # Read-only (ADR-028 C12): no event Redis is handed to the read path; SLO
+    # windows are evaluated by collector workers and only projected here.
+    svc = TelemetryQueryService(db=db, counter_service=TelemetryHealthCounterService(redis))
     result = await svc.get_health()
     return success_response(result, meta.request_id, started, meta.timestamp)

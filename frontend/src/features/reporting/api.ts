@@ -12,14 +12,14 @@ export function generateReport(token: string, body: GenerateReportRequest, idemp
   });
 }
 
-export function getReport(token: string, reportId: string, workspaceId: string) {
+export function getReport(token: string, reportId: string, workspaceId: string, signal?: AbortSignal) {
   const params = new URLSearchParams({ workspace_id: workspaceId });
   return apiRequest<ReportRecord>(`/api/v1/reports/${encodeURIComponent(reportId)}?${params.toString()}`, {
-    token,
+    token, signal,
   });
 }
 
-export function listReports(token: string, workspaceId: string, page: number) {
+export function listReports(token: string, workspaceId: string, page: number, signal?: AbortSignal) {
   const params = new URLSearchParams({ workspace_id: workspaceId, page: String(page), page_size: "20" });
-  return apiRequest<ReportHistoryResult>(`/api/v1/reports?${params}`, { token });
+  return apiRequest<ReportHistoryResult>(`/api/v1/reports?${params}`, { token, signal });
 }

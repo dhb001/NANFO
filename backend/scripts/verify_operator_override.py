@@ -26,17 +26,20 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.core.config import Settings, get_settings
 from app.core.logging import configure_logging
+from app.core.schema_version import CURRENT_SCHEMA
 from app.core.security import hash_password
 from app.modules.identity.repository import UserRepository
 from app.modules.intent.lab import digest
 from scripts.bind_emulation import bind_emulation, save_binding
 from scripts.verify_execution import (
     _READBACK,
+    ApprovalFlow,
     VerificationError,
     assert_lab_idle,
     check,
     external,
     intent_payload,
+    policy_limits,
     port,
     private_json,
     stop,
@@ -197,18 +200,19 @@ async def verify(directory, artifact):
             except Exception:
                 return False
         await until(database_ready)
-        await external(sys.executable, '-m', 'alembic', '-c', 'alembic/alembic.ini', 'upgrade', '0016', env=env, cwd=backend)
+        # Current code needs the current schema; 0016 (overrides) is part of it.
+        await external(sys.executable, '-m', 'alembic', '-c', 'alembic/alembic.ini', 'upgrade', CURRENT_SCHEMA, env=env, cwd=backend)
         sessions = async_sessionmaker(engine, expire_on_commit=False)
         users = {}
         async with sessions() as db:
-            check(await db.scalar(text('SELECT version_num FROM alembic_version')) == '0016', 'Migration0016 missing')
+            check(await db.scalar(text('SELECT version_num FROM alembic_version')) == CURRENT_SCHEMA, 'Migration head missing')
             for name in ('operator', 'supervisor'):
                 password = secrets.token_urlsafe(32)
                 user = await UserRepository(db).create(f'{name}@override.example', hash_password(password), name)
                 await UserRepository(db).assign_role(user.user_id, 'Admin')
                 users[name] = (str(user.user_id), password)
             await db.commit()
-        artifact['checks']['migration'] = '0016'
+        artifact['checks']['migration'] = CURRENT_SCHEMA
         import redis.asyncio as aioredis
         from neo4j import AsyncGraphDatabase
 
@@ -285,8 +289,15 @@ async def verify(directory, artifact):
             artifact['checks']['baseline_capture'] = baseline_capture
             intent_worker = await spawn('run_execution_worker')
             autonomy_worker = await spawn('run_autonomy_worker')
+            # C18 pre-execution evidence for the high-impact reroute (never touches the lab).
+            await spawn('run_simulation_worker')
             scope = {'network_id': str(binding.network_id)}
             workspace = str(binding.workspace_id)
+            # ADR-028 four-eyes rule: the supervisor requests each reroute and the operator
+            # approves it, so the operator stays the execution actor that enrolls the
+            # override and whose revocation the actor_revocation case exercises.
+            flow = ApprovalFlow(requester=supervisor, approver=client, workspace_id=workspace,
+                                network_id=str(binding.network_id), limits=policy_limits(isolated))
             async def control():
                 return await request('GET', '/api/v1/autonomy', actor=supervisor, params=scope)
             async def physical():
@@ -314,12 +325,15 @@ async def verify(directory, artifact):
             for case, duration in CASES:
                 artifact['stage'] = case
                 await asyncio.sleep(3.2)
-                validated = await request('POST', '/api/v1/intents/validate', json={**scope, 'workspace_id': workspace, 'intent': intent_payload('reroute')})
+                validated = await flow.validate(intent_payload('reroute'))
                 check(validated['status'] == 'validated', 'Real manual reroute validation failed')
                 intent_id = validated['intent_id']
-                execute_body = {'workspace_id': workspace, 'intent_id': intent_id, 'manual_approval': True, 'idempotency_key': intent_id}
+                # Stored key, approval binding and the bound passing simulation (ADR-028).
+                execute_body = flow.body(intent_id, simulation_id=await flow.evidence(intent_id))
                 accepted = await request('POST', '/api/v1/intents/execute', expected=202, json=execute_body)
                 execution_id = accepted['execution_provenance']['execution_id']
+                check(accepted['execution_provenance']['approved_by_user_id'] == users['operator'][0],
+                      'Execution approved by the requester')
                 async def detail():
                     return await request('GET', f'/api/v1/intents/{intent_id}', actor=supervisor, params={'workspace_id': workspace})
                 await until(detail, lambda row: row['execution_provenance'].get('phase') == 'completed', timeout=60)

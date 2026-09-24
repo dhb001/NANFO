@@ -13,6 +13,7 @@ import pytest
 from fastapi import HTTPException
 from pydantic import ValidationError
 
+from app.modules.network.device_types import matches_functional_group
 from app.modules.network.models import Device, Network
 from app.modules.network.schemas import (
     CreateDeviceRequest,
@@ -30,7 +31,6 @@ from app.modules.network.service import (
     DeviceGroupService,
     DeviceService,
     NetworkService,
-    _device_matches_functional_group,
     _normalize_group_token,
 )
 from app.modules.organization.models import Workspace
@@ -127,6 +127,24 @@ def _make_device_group_row(network_id: uuid.UUID | None = None):
     row.created_at = MagicMock()
     row.updated_at = MagicMock()
     return row
+
+
+def _building_input(**changes) -> UpsertCampusBuildingInput:
+    values = dict(
+        building_id="campus-a:building-1", campus_key="campus-a", building_key="building-1",
+        label="Building 1", geometry="box", x=4.0, z=-3.0, base_y=-2.3, width=12.0, depth=9.0,
+        height=8.5, floors=3, footprint=[[-1.0, -1.0], [1.0, -1.0], [1.0, 1.0], [-1.0, 1.0]],
+        wall_material="concrete", attenuation_db=14.0, source="geojson",
+    )
+    values.update(changes)
+    return UpsertCampusBuildingInput(**values)
+
+
+@pytest.fixture
+def audit(monkeypatch):
+    mock = AsyncMock()
+    monkeypatch.setattr("app.modules.network.service.append_audit_log", mock)
+    return mock
 
 
 def _build_valid_model_asset_request(
@@ -294,7 +312,8 @@ class TestNetworkService:
                 page_size=20,
             )
 
-        mock_ws.assert_awaited_once_with(workspace_id=workspace_id, user_id=actor_user_id)
+        # The single NetworkAccessGuard always states the (read) intent explicitly.
+        mock_ws.assert_awaited_once_with(workspace_id=workspace_id, user_id=actor_user_id, require_write=False)
         mock_list.assert_awaited_once_with(workspace_id, page=1, page_size=20)
         assert result.total == 0
 
@@ -448,7 +467,7 @@ class TestDeviceService:
         with (
             patch.object(dev_svc._network_repo, "get_by_id", return_value=network),
             patch(
-                "app.modules.network.service.OrgWorkspaceService.assert_workspace_membership",
+                "app.modules.organization.service.WorkspaceService.assert_workspace_membership",
                 new_callable=AsyncMock,
                 return_value=_make_workspace(network.workspace_id),
             ),
@@ -481,7 +500,7 @@ class TestDeviceService:
         with (
             patch.object(dev_svc._network_repo, "get_by_id", return_value=network),
             patch(
-                "app.modules.network.service.OrgWorkspaceService.assert_workspace_membership",
+                "app.modules.organization.service.WorkspaceService.assert_workspace_membership",
                 new_callable=AsyncMock,
                 return_value=_make_workspace(network.workspace_id),
             ),
@@ -512,7 +531,7 @@ class TestDeviceService:
         with (
             patch.object(dev_svc._network_repo, "get_by_id", return_value=network),
             patch(
-                "app.modules.network.service.OrgWorkspaceService.assert_workspace_membership",
+                "app.modules.organization.service.WorkspaceService.assert_workspace_membership",
                 new_callable=AsyncMock,
                 return_value=_make_workspace(network.workspace_id),
             ),
@@ -555,7 +574,7 @@ class TestDeviceService:
         with (
             patch.object(dev_svc._network_repo, "get_by_id", return_value=network),
             patch(
-                "app.modules.network.service.OrgWorkspaceService.assert_workspace_membership",
+                "app.modules.organization.service.WorkspaceService.assert_workspace_membership",
                 new_callable=AsyncMock,
                 return_value=_make_workspace(network.workspace_id),
             ),
@@ -596,94 +615,103 @@ class TestCampusBuildingService:
         assert result.items[0].building_id == "campus-a:building-1"
 
     @pytest.mark.asyncio
-    async def test_upsert_buildings_success_replace_existing(self, campus_svc):
+    async def test_upsert_buildings_replace_updates_in_place_and_retires_absent(self, campus_svc, audit):
         network = _make_network()
         actor_id = str(uuid.uuid4())
         workspace = _make_workspace(network.workspace_id)
         row = _make_campus_building_row(network.network_id)
-        req = UpsertCampusBuildingsRequest(
-            replace_existing=True,
-            buildings=[
-                UpsertCampusBuildingInput(
-                    building_id="campus-a:building-1",
-                    campus_key="campus-a",
-                    building_key="building-1",
-                    label="Building 1",
-                    geometry="box",
-                    x=4.0,
-                    z=-3.0,
-                    base_y=-2.3,
-                    width=12.0,
-                    depth=9.0,
-                    height=8.5,
-                    floors=3,
-                    footprint=[[-1.0, -1.0], [1.0, -1.0], [1.0, 1.0], [-1.0, 1.0]],
-                    wall_material="concrete",
-                    attenuation_db=14.0,
-                    source="geojson",
-                )
-            ],
-        )
+        req = UpsertCampusBuildingsRequest(replace_existing=True, buildings=[_building_input()])
 
         with (
             patch.object(campus_svc._network_repo, "get_by_id", return_value=network),
             patch.object(campus_svc._workspace_svc, "assert_workspace_membership", return_value=workspace),
-            patch.object(campus_svc._repo, "soft_delete_for_network", return_value=0) as mock_soft_delete,
-            patch.object(campus_svc._repo, "get_active_by_network_and_building_id", return_value=None),
-            patch.object(campus_svc._repo, "create", return_value=row) as mock_create,
+            patch.object(campus_svc._repo, "active_building_ids",
+                         return_value={"campus-a:building-1", "campus-a:retired"}),
+            patch.object(campus_svc._repo, "upsert_many") as mock_upsert,
+            patch.object(campus_svc._repo, "soft_delete_absent", return_value=1) as mock_retire,
+            patch.object(campus_svc._repo, "list_active_by_building_ids",
+                         return_value={"campus-a:building-1": row}) as mock_reload,
         ):
             result = await campus_svc.upsert_buildings(
                 network_id=network.network_id,
                 req=req,
                 actor_id=actor_id,
-                correlation_id=str(uuid.uuid4()),
+                correlation_id="building-request",
             )
 
-        mock_soft_delete.assert_awaited_once_with(network.network_id)
-        mock_create.assert_awaited_once()
+        # One set-based upsert keyed by the active unique index; no soft-delete churn.
+        mock_upsert.assert_awaited_once()
+        values = mock_upsert.await_args.kwargs["buildings"]
+        assert [value["building_id"] for value in values] == ["campus-a:building-1"]
+        assert values[0]["footprint"] == [[-1.0, -1.0], [1.0, -1.0], [1.0, 1.0], [-1.0, 1.0]]
+        mock_retire.assert_awaited_once_with(network.network_id, ["campus-a:building-1"])
+        mock_reload.assert_awaited_once_with(network.network_id, ["campus-a:building-1"])
         assert result.total == 1
+        assert result.items[0].campus_building_id == row.campus_building_id
+        audit.assert_awaited_once()
+        kwargs = audit.await_args.kwargs
+        assert kwargs["event_type"] == "network.campus_buildings.upserted"
+        assert kwargs["org_id"] == workspace.org_id
+        assert kwargs["correlation_id"] == "building-request"
+        assert kwargs["metadata"]["retired"] == 1 and kwargs["metadata"]["updated"] == 1
+        assert kwargs["metadata"]["created"] == 0 and kwargs["metadata"]["replace_existing"] is True
+        campus_svc._db.commit.assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_upsert_buildings_event_publish_failure_is_fail_open(self, campus_svc):
+    async def test_upsert_buildings_without_replace_keeps_absent_rows_and_dedupes(self, campus_svc, audit):
         network = _make_network()
         actor_id = str(uuid.uuid4())
         workspace = _make_workspace(network.workspace_id)
         row = _make_campus_building_row(network.network_id)
         req = UpsertCampusBuildingsRequest(
             replace_existing=False,
-            buildings=[
-                UpsertCampusBuildingInput(
-                    building_id="campus-a:building-1",
-                    campus_key="campus-a",
-                    building_key="building-1",
-                    label="Building 1",
-                    geometry="box",
-                    x=4.0,
-                    z=-3.0,
-                    base_y=-2.3,
-                    width=12.0,
-                    depth=9.0,
-                    height=8.5,
-                    floors=3,
-                    footprint=[[-1.0, -1.0], [1.0, -1.0], [1.0, 1.0], [-1.0, 1.0]],
-                )
-            ],
+            buildings=[_building_input(label="First"), _building_input(label="Last")],
         )
 
         with (
             patch.object(campus_svc._network_repo, "get_by_id", return_value=network),
             patch.object(campus_svc._workspace_svc, "assert_workspace_membership", return_value=workspace),
-            patch.object(campus_svc._repo, "get_active_by_network_and_building_id", return_value=None),
-            patch.object(campus_svc._repo, "create", return_value=row),
+            patch.object(campus_svc._repo, "active_building_ids", return_value=set()),
+            patch.object(campus_svc._repo, "upsert_many") as mock_upsert,
+            patch.object(campus_svc._repo, "soft_delete_absent") as mock_retire,
+            patch.object(campus_svc._repo, "list_active_by_building_ids",
+                         return_value={"campus-a:building-1": row}),
         ):
             result = await campus_svc.upsert_buildings(
                 network_id=network.network_id,
                 req=req,
                 actor_id=actor_id,
-                correlation_id=str(uuid.uuid4()),
             )
 
+        values = mock_upsert.await_args.kwargs["buildings"]
+        assert len(values) == 1 and values[0]["label"] == "Last"
+        mock_retire.assert_not_awaited()
         assert result.total == 1
+        assert audit.await_args.kwargs["metadata"]["created"] == 1
+
+    @pytest.mark.asyncio
+    async def test_upsert_buildings_authorizes_before_inventory_lock(self, campus_svc, audit):
+        network = _make_network()
+        with (
+            patch.object(campus_svc._network_repo, "get_by_id", return_value=network),
+            patch.object(campus_svc._workspace_svc, "assert_workspace_membership",
+                         side_effect=HTTPException(status_code=403, detail="Insufficient permissions.")),
+            patch("app.modules.network.outbox.NetworkOutboxRepository.lock_inventory",
+                  new_callable=AsyncMock) as mock_lock,
+            patch.object(campus_svc._repo, "upsert_many") as mock_upsert,
+            pytest.raises(HTTPException) as exc_info,
+        ):
+            await campus_svc.upsert_buildings(
+                network_id=network.network_id,
+                req=UpsertCampusBuildingsRequest(buildings=[_building_input()]),
+                actor_id=str(uuid.uuid4()),
+            )
+
+        assert exc_info.value.status_code == 403
+        mock_lock.assert_not_awaited()
+        mock_upsert.assert_not_awaited()
+        audit.assert_not_awaited()
+        campus_svc._db.commit.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_upsert_buildings_workspace_scope_mismatch_raises_403(self, campus_svc):
@@ -718,7 +746,7 @@ class TestCampusBuildingService:
         with (
             patch.object(dev_svc._network_repo, "get_by_id", return_value=network),
             patch(
-                "app.modules.network.service.OrgWorkspaceService.assert_workspace_membership",
+                "app.modules.organization.service.WorkspaceService.assert_workspace_membership",
                 new_callable=AsyncMock,
                 return_value=_make_workspace(network.workspace_id),
             ),
@@ -746,7 +774,7 @@ class TestCampusBuildingService:
         with (
             patch.object(dev_svc._network_repo, "get_by_id", return_value=network),
             patch(
-                "app.modules.network.service.OrgWorkspaceService.assert_workspace_membership",
+                "app.modules.organization.service.WorkspaceService.assert_workspace_membership",
                 new_callable=AsyncMock,
                 return_value=_make_workspace(network.workspace_id),
             ),
@@ -783,7 +811,7 @@ class TestCampusBuildingService:
         with (
             patch.object(dev_svc._network_repo, "get_by_id", return_value=network),
             patch(
-                "app.modules.network.service.OrgWorkspaceService.assert_workspace_membership",
+                "app.modules.organization.service.WorkspaceService.assert_workspace_membership",
                 new_callable=AsyncMock,
                 return_value=_make_workspace(network.workspace_id),
             ),
@@ -816,7 +844,7 @@ class TestCampusBuildingService:
         with (
             patch.object(dev_svc._network_repo, "get_by_id", return_value=network),
             patch(
-                "app.modules.network.service.OrgWorkspaceService.assert_workspace_membership",
+                "app.modules.organization.service.WorkspaceService.assert_workspace_membership",
                 new_callable=AsyncMock,
                 return_value=_make_workspace(network.workspace_id),
             ),
@@ -861,7 +889,7 @@ class TestCampusBuildingService:
         with (
             patch.object(dev_svc._network_repo, "get_by_id", return_value=network),
             patch(
-                "app.modules.network.service.OrgWorkspaceService.assert_workspace_membership",
+                "app.modules.organization.service.WorkspaceService.assert_workspace_membership",
                 new_callable=AsyncMock,
                 return_value=_make_workspace(network.workspace_id),
             ),
@@ -886,7 +914,7 @@ class TestCampusBuildingService:
         with (
             patch.object(dev_svc._network_repo, "get_by_id", return_value=network),
             patch(
-                "app.modules.network.service.OrgWorkspaceService.assert_workspace_membership",
+                "app.modules.organization.service.WorkspaceService.assert_workspace_membership",
                 new_callable=AsyncMock,
                 return_value=_make_workspace(network.workspace_id),
             ),
@@ -909,7 +937,7 @@ class TestCampusBuildingService:
         with (
             patch.object(dev_svc._network_repo, "get_by_id", return_value=network),
             patch(
-                "app.modules.network.service.OrgWorkspaceService.assert_workspace_membership",
+                "app.modules.organization.service.WorkspaceService.assert_workspace_membership",
                 new_callable=AsyncMock,
                 side_effect=HTTPException(status_code=403, detail="Insufficient permissions."),
             ),
@@ -934,7 +962,7 @@ class TestCampusBuildingService:
         with (
             patch.object(dev_svc._network_repo, "get_by_id", return_value=network),
             patch(
-                "app.modules.network.service.OrgWorkspaceService.assert_workspace_membership",
+                "app.modules.organization.service.WorkspaceService.assert_workspace_membership",
                 new_callable=AsyncMock,
                 return_value=workspace,
             ),
@@ -960,7 +988,7 @@ class TestCampusBuildingService:
         with (
             patch.object(dev_svc._network_repo, "get_by_id", return_value=network),
             patch(
-                "app.modules.network.service.OrgWorkspaceService.assert_workspace_membership",
+                "app.modules.organization.service.WorkspaceService.assert_workspace_membership",
                 new_callable=AsyncMock,
                 return_value=workspace,
             ),
@@ -980,7 +1008,7 @@ class TestCampusBuildingService:
 class TestCampusModelAssetService:
 
     @pytest.mark.asyncio
-    async def test_list_assets_success(self, campus_model_asset_svc):
+    async def test_list_assets_defaults_to_metadata_pages(self, campus_model_asset_svc):
         network = _make_network()
         actor_id = str(uuid.uuid4())
         workspace = _make_workspace(network.workspace_id)
@@ -989,19 +1017,65 @@ class TestCampusModelAssetService:
         with (
             patch.object(campus_model_asset_svc._network_repo, "get_by_id", return_value=network),
             patch.object(campus_model_asset_svc._workspace_svc, "assert_workspace_membership", return_value=workspace),
-            patch.object(campus_model_asset_svc._repo, "list_for_network", return_value=[row]) as mock_list,
+            patch.object(campus_model_asset_svc._repo, "list_metadata_for_network", return_value=([row], 1)) as mock_meta,
+            patch.object(campus_model_asset_svc._repo, "list_for_network") as mock_full,
         ):
             result = await campus_model_asset_svc.list_assets(
                 network_id=network.network_id,
                 actor_user_id=actor_id,
             )
 
-        mock_list.assert_awaited_once_with(network.network_id)
+        mock_meta.assert_awaited_once_with(network.network_id, page=1, page_size=20)
+        mock_full.assert_not_awaited()
         assert result.total == 1
         assert result.items[0].model_file_name == "campus.glb"
+        assert "model_data_base64" not in result.items[0].model_dump()
 
     @pytest.mark.asyncio
-    async def test_upsert_asset_success_replace_existing(self, campus_model_asset_svc):
+    async def test_list_assets_include_data_is_bounded(self, campus_model_asset_svc):
+        network = _make_network()
+        workspace = _make_workspace(network.workspace_id)
+        row = _make_campus_model_asset_row(network.network_id)
+        big = _make_campus_model_asset_row(network.network_id)
+        big.model_size_bytes = 8 * 1024 * 1024
+
+        def sizes(*rows):
+            return [{"model_size_bytes": item.model_size_bytes} for item in rows], len(rows)
+
+        with (
+            patch.object(campus_model_asset_svc._network_repo, "get_by_id", return_value=network),
+            patch.object(campus_model_asset_svc._workspace_svc, "assert_workspace_membership", return_value=workspace),
+            patch.object(campus_model_asset_svc._repo, "list_metadata_for_network") as mock_sizes,
+            patch.object(campus_model_asset_svc._repo, "list_page_for_network") as mock_page,
+        ):
+            with pytest.raises(HTTPException) as too_large_page:
+                await campus_model_asset_svc.list_assets(
+                    network_id=network.network_id, actor_user_id=str(uuid.uuid4()), include_data=True,
+                )
+            assert too_large_page.value.status_code == 400
+            assert too_large_page.value.detail["code"] == "CAMPUS_MODEL_ASSET_INLINE_PAGE_TOO_LARGE"
+            mock_page.assert_not_awaited()
+
+            # ADR-028: the page is sized from metadata, so no body is loaded when over 32 MiB.
+            mock_sizes.return_value = sizes(*[big] * 5)
+            with pytest.raises(HTTPException) as too_many_bytes:
+                await campus_model_asset_svc.list_assets(
+                    network_id=network.network_id, actor_user_id=str(uuid.uuid4()), include_data=True, page_size=5,
+                )
+            assert too_many_bytes.value.status_code == 400
+            assert too_many_bytes.value.detail["code"] == "CAMPUS_MODEL_ASSET_INLINE_LIMIT_EXCEEDED"
+            mock_page.assert_not_awaited()
+
+            mock_sizes.return_value = sizes(row)
+            mock_page.return_value = ([row], 1)
+            result = await campus_model_asset_svc.list_assets(
+                network_id=network.network_id, actor_user_id=str(uuid.uuid4()), include_data=True, page_size=10,
+            )
+        assert result.items[0].model_data_base64 == row.model_data_base64
+        assert (result.page, result.page_size) == (1, 10)
+
+    @pytest.mark.asyncio
+    async def test_upsert_asset_success_replace_existing(self, campus_model_asset_svc, audit):
         network = _make_network()
         actor_id = str(uuid.uuid4())
         workspace = _make_workspace(network.workspace_id)
@@ -1025,6 +1099,7 @@ class TestCampusModelAssetService:
                 "list_device_ids_for_network",
                 return_value={uuid.UUID(device_id)},
             ) as mock_known,
+            patch.object(campus_model_asset_svc._repo, "active_usage", return_value=(0, 0)),
             patch.object(campus_model_asset_svc._repo, "soft_delete_for_network", return_value=0) as mock_soft_delete,
             patch.object(campus_model_asset_svc._repo, "create", return_value=row) as mock_create,
         ):
@@ -1032,6 +1107,7 @@ class TestCampusModelAssetService:
                 network_id=network.network_id,
                 req=req,
                 actor_id=actor_id,
+                correlation_id="asset-request",
             )
 
         mock_known.assert_awaited_once()
@@ -1042,9 +1118,16 @@ class TestCampusModelAssetService:
         assert create_kwargs["model_size_bytes"] == req.model_size_bytes
         assert create_kwargs["mapping_by_device_id"] == req.mapping_by_device_id
         assert result.total == 1
+        # C4: upload responses are metadata only.
+        assert result.items[0].model_data_base64 is None
+        assert "model_data_base64" not in result.model_dump()["items"][0]
+        campus_model_asset_svc._db.refresh.assert_awaited_once_with(row)
+        assert audit.await_args.kwargs["event_type"] == "network.campus_model_asset.uploaded"
+        assert audit.await_args.kwargs["org_id"] == workspace.org_id
+        assert audit.await_args.kwargs["correlation_id"] == "asset-request"
 
     @pytest.mark.asyncio
-    async def test_upsert_asset_success_updates_latest_when_replace_existing_false(self, campus_model_asset_svc):
+    async def test_upsert_asset_success_updates_latest_when_replace_existing_false(self, campus_model_asset_svc, audit):
         network = _make_network()
         actor_id = str(uuid.uuid4())
         workspace = _make_workspace(network.workspace_id)
@@ -1058,6 +1141,7 @@ class TestCampusModelAssetService:
             patch.object(campus_model_asset_svc._network_repo, "get_by_id", return_value=network),
             patch.object(campus_model_asset_svc._workspace_svc, "assert_workspace_membership", return_value=workspace),
             patch.object(campus_model_asset_svc._repo, "get_latest_for_network", return_value=existing),
+            patch.object(campus_model_asset_svc._repo, "active_usage", return_value=(req.model_size_bytes, 1)),
             patch.object(campus_model_asset_svc._repo, "update", return_value=existing) as mock_update,
             patch.object(campus_model_asset_svc._repo, "create") as mock_create,
         ):
@@ -1069,7 +1153,34 @@ class TestCampusModelAssetService:
 
         mock_create.assert_not_called()
         mock_update.assert_awaited_once()
+        # The in-place update path reloads server-side updated_at before serializing.
+        campus_model_asset_svc._db.refresh.assert_awaited_once_with(existing)
         assert result.total == 1
+        assert result.items[0].model_data_base64 is None
+
+    @pytest.mark.asyncio
+    async def test_upsert_asset_network_quota_uses_active_accounting(self, campus_model_asset_svc, audit):
+        network = _make_network()
+        workspace = _make_workspace(network.workspace_id)
+        req = _build_valid_model_asset_request(replace_existing=False)
+        limit = campus_model_asset_svc._asset_store.settings.network_max_active_bytes
+
+        with (
+            patch.object(campus_model_asset_svc._network_repo, "get_by_id", return_value=network),
+            patch.object(campus_model_asset_svc._workspace_svc, "assert_workspace_membership", return_value=workspace),
+            patch.object(campus_model_asset_svc._repo, "get_latest_for_network", return_value=None),
+            patch.object(campus_model_asset_svc._repo, "active_usage", return_value=(limit, 1)),
+            patch.object(campus_model_asset_svc._repo, "create") as mock_create,
+            pytest.raises(HTTPException) as exc_info,
+        ):
+            await campus_model_asset_svc.upsert_asset(
+                network_id=network.network_id, req=req, actor_id=str(uuid.uuid4()),
+            )
+
+        assert exc_info.value.status_code == 507
+        assert exc_info.value.detail["code"] == "CAMPUS_MODEL_ASSET_QUOTA_EXCEEDED"
+        mock_create.assert_not_called()
+        assert list(campus_model_asset_svc._asset_store.settings.root.iterdir()) == []
 
     def test_upsert_asset_invalid_mapping_device_id_rejected_before_service(self):
         with pytest.raises(ValidationError, match="valid device UUIDs"):
@@ -1131,7 +1242,7 @@ class TestDeviceGroupService:
         assert set(result.items[0].device_ids) == set(member_device_ids)
 
     @pytest.mark.asyncio
-    async def test_upsert_groups_selector_resolves_devices_and_creates_group(self, device_group_svc):
+    async def test_upsert_groups_selector_resolves_devices_and_creates_group(self, device_group_svc, audit):
         network = _make_network()
         actor_id = str(uuid.uuid4())
         workspace = _make_workspace(network.workspace_id)
@@ -1177,35 +1288,41 @@ class TestDeviceGroupService:
             patch.object(device_group_svc._network_repo, "get_by_id", return_value=network),
             patch.object(device_group_svc._workspace_svc, "assert_workspace_membership", return_value=workspace),
             patch.object(device_group_svc._device_repo, "list_active_for_network", return_value=[ap, explicit]),
-            patch.object(device_group_svc._repo, "get_active_by_group_key", return_value=None),
-            patch.object(device_group_svc._repo, "create_group", return_value=row) as mock_create,
-            patch.object(device_group_svc._repo, "replace_members") as mock_replace,
+            patch.object(device_group_svc._repo, "get_active_by_keys", return_value={}),
+            patch.object(device_group_svc._repo, "upsert_group", return_value=row.device_group_id) as mock_create,
+            patch.object(device_group_svc._repo, "apply_member_diff") as mock_diff,
+            patch.object(device_group_svc._repo, "update_group") as mock_update,
+            patch.object(device_group_svc._repo, "get_groups_by_ids", return_value={row.device_group_id: row}),
             patch.object(
                 device_group_svc._repo,
                 "list_members_for_group_ids",
-                return_value={row.device_group_id: [ap.device_id, explicit.device_id]},
+                side_effect=[{}, {}, {row.device_group_id: [ap.device_id, explicit.device_id]}],
             ),
         ):
             result = await device_group_svc.upsert_groups(
                 network_id=network.network_id,
                 req=req,
                 actor_id=actor_id,
+                correlation_id="group-request",
             )
 
         mock_create.assert_awaited_once()
-        mock_replace.assert_awaited_once()
-        replaced_device_ids = mock_replace.await_args.kwargs["device_ids"]
-        assert set(replaced_device_ids) == {ap.device_id, explicit.device_id}
+        mock_update.assert_not_awaited()
+        mock_diff.assert_awaited_once()
+        assert set(mock_diff.await_args.kwargs["add"]) == {ap.device_id, explicit.device_id}
+        assert mock_diff.await_args.kwargs["remove"] == []
         assert result.total == 1
         assert set(result.items[0].device_ids) == {ap.device_id, explicit.device_id}
+        assert audit.await_args.kwargs["event_type"] == "network.device_groups.upserted"
+        assert audit.await_args.kwargs["metadata"]["created"] == 1
+        assert audit.await_args.kwargs["org_id"] == workspace.org_id
 
     @pytest.mark.asyncio
-    async def test_upsert_groups_replace_existing_soft_deletes_then_updates_group(self, device_group_svc):
+    async def test_upsert_groups_replace_existing_updates_in_place_with_member_diff(self, device_group_svc, audit):
         network = _make_network()
         actor_id = str(uuid.uuid4())
         workspace = _make_workspace(network.workspace_id)
-        device = _make_device(network_id=network.network_id, spatial_ref_id="strathmore/sbs/f01/access/sw-1")
-        device.device_type = "access_switch"
+        kept, removed, added = (_make_device(network_id=network.network_id) for _ in range(3))
 
         req = UpsertDeviceGroupsRequest(
             replace_existing=True,
@@ -1214,8 +1331,7 @@ class TestDeviceGroupService:
                     group_key="sbs-f01-access",
                     name="SBS F01 Access",
                     group_type="operational",
-                    selector={"site_prefix": "strathmore/sbs/f01"},
-                    device_ids=[device.device_id],
+                    device_ids=[kept.device_id, added.device_id],
                 )
             ],
         )
@@ -1224,20 +1340,28 @@ class TestDeviceGroupService:
         existing.group_key = "sbs-f01-access"
         existing.name = "SBS F01 Access"
         existing.group_type = "operational"
+        reloaded = _make_device_group_row(network.network_id)
+        reloaded.device_group_id = existing.device_group_id
+        reloaded.group_key = existing.group_key
 
         with (
             patch.object(device_group_svc._network_repo, "get_by_id", return_value=network),
             patch.object(device_group_svc._workspace_svc, "assert_workspace_membership", return_value=workspace),
-            patch.object(device_group_svc._device_repo, "list_active_for_network", return_value=[device]),
-            patch.object(device_group_svc._repo, "soft_delete_for_network", return_value=1) as mock_soft_delete,
-            patch.object(device_group_svc._repo, "get_active_by_group_key", return_value=existing),
-            patch.object(device_group_svc._repo, "update_group", return_value=existing) as mock_update,
-            patch.object(device_group_svc._repo, "create_group") as mock_create,
-            patch.object(device_group_svc._repo, "replace_members"),
+            patch.object(device_group_svc._device_repo, "list_active_for_network", return_value=[kept, removed, added]),
+            patch.object(device_group_svc._repo, "get_active_by_keys", return_value={"sbs-f01-access": existing}),
+            patch.object(device_group_svc._repo, "upsert_group") as mock_create,
+            patch.object(device_group_svc._repo, "apply_member_diff") as mock_diff,
+            patch.object(device_group_svc._repo, "update_group") as mock_update,
+            patch.object(device_group_svc._repo, "soft_delete_absent", return_value=[uuid.uuid4()]) as mock_retire,
+            patch.object(device_group_svc._repo, "get_groups_by_ids",
+                         return_value={existing.device_group_id: reloaded}),
             patch.object(
                 device_group_svc._repo,
                 "list_members_for_group_ids",
-                return_value={existing.device_group_id: [device.device_id]},
+                side_effect=[
+                    {existing.device_group_id: [kept.device_id, removed.device_id]},
+                    {existing.device_group_id: [kept.device_id, added.device_id]},
+                ],
             ),
         ):
             result = await device_group_svc.upsert_groups(
@@ -1246,10 +1370,124 @@ class TestDeviceGroupService:
                 actor_id=actor_id,
             )
 
-        mock_soft_delete.assert_awaited_once_with(network.network_id)
-        mock_update.assert_awaited_once()
         mock_create.assert_not_called()
+        mock_diff.assert_awaited_once_with(existing.device_group_id, add=[added.device_id], remove=[removed.device_id])
+        mock_update.assert_awaited_once()
+        mock_retire.assert_awaited_once_with(network.network_id, ["sbs-f01-access"])
         assert result.total == 1
+        # Responses are built from the reloaded row, never the pre-update instance.
+        assert result.items[0].device_group_id == existing.device_group_id
+        assert result.items[0].name == reloaded.name
+        metadata = audit.await_args.kwargs["metadata"]
+        assert (metadata["updated"], metadata["members_added"], metadata["members_removed"], metadata["retired"]) == (1, 1, 1, 1)
+
+    @pytest.mark.asyncio
+    async def test_upsert_groups_unchanged_group_writes_nothing(self, device_group_svc, audit):
+        network = _make_network()
+        workspace = _make_workspace(network.workspace_id)
+        device = _make_device(network_id=network.network_id)
+        existing = _make_device_group_row(network.network_id)
+        existing.group_key = "manual"
+        existing.name = "Manual"
+        existing.group_type = "custom"
+        existing.description = None
+        existing.selector = {}
+        req = UpsertDeviceGroupsRequest(groups=[UpsertDeviceGroupInput(
+            group_key="manual", name="Manual", group_type="custom", device_ids=[device.device_id],
+        )])
+
+        with (
+            patch.object(device_group_svc._network_repo, "get_by_id", return_value=network),
+            patch.object(device_group_svc._workspace_svc, "assert_workspace_membership", return_value=workspace),
+            patch.object(device_group_svc._device_repo, "list_active_for_network", return_value=[device]),
+            patch.object(device_group_svc._repo, "get_active_by_keys", return_value={"manual": existing}),
+            patch.object(device_group_svc._repo, "apply_member_diff") as mock_diff,
+            patch.object(device_group_svc._repo, "update_group") as mock_update,
+            patch.object(device_group_svc._repo, "get_groups_by_ids", return_value={existing.device_group_id: existing}),
+            patch.object(device_group_svc._repo, "list_members_for_group_ids",
+                         return_value={existing.device_group_id: [device.device_id]}),
+        ):
+            result = await device_group_svc.upsert_groups(
+                network_id=network.network_id, req=req, actor_id=str(uuid.uuid4()),
+            )
+
+        mock_diff.assert_awaited_once_with(existing.device_group_id, add=[], remove=[])
+        mock_update.assert_not_awaited()
+        assert result.items[0].device_ids == [device.device_id]
+        assert audit.await_args.kwargs["metadata"]["unchanged"] == 1
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("state", ["stale", "missing"])
+    async def test_upsert_groups_expected_updated_at_conflict_returns_409(self, device_group_svc, audit, state):
+        from datetime import UTC, datetime, timedelta
+
+        network = _make_network()
+        workspace = _make_workspace(network.workspace_id)
+        device = _make_device(network_id=network.network_id)
+        current = datetime(2026, 9, 23, 12, 0, 0, 123456, tzinfo=UTC)
+        existing = _make_device_group_row(network.network_id)
+        existing.group_key = "manual"
+        existing.updated_at = current
+        req = UpsertDeviceGroupsRequest(groups=[UpsertDeviceGroupInput(
+            group_key="manual", name="Manual", group_type="custom", device_ids=[device.device_id],
+            expected_updated_at=current - timedelta(microseconds=1),
+        )])
+
+        with (
+            patch.object(device_group_svc._network_repo, "get_by_id", return_value=network),
+            patch.object(device_group_svc._workspace_svc, "assert_workspace_membership", return_value=workspace),
+            patch.object(device_group_svc._device_repo, "list_active_for_network", return_value=[device]),
+            patch.object(device_group_svc._repo, "get_active_by_keys",
+                         return_value={} if state == "missing" else {"manual": existing}),
+            patch.object(device_group_svc._repo, "upsert_group") as mock_create,
+            patch.object(device_group_svc._repo, "apply_member_diff") as mock_diff,
+            patch.object(device_group_svc._repo, "update_group") as mock_update,
+            pytest.raises(HTTPException) as exc_info,
+        ):
+            await device_group_svc.upsert_groups(
+                network_id=network.network_id, req=req, actor_id=str(uuid.uuid4()),
+            )
+
+        assert exc_info.value.status_code == 409
+        assert exc_info.value.detail["code"] == "DEVICE_GROUP_CONFLICT"
+        mock_create.assert_not_awaited()
+        mock_diff.assert_not_awaited()
+        mock_update.assert_not_awaited()
+        audit.assert_not_awaited()
+        device_group_svc._db.commit.assert_not_awaited()
+        device_group_svc._db.rollback.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_upsert_groups_matching_expected_updated_at_is_accepted(self, device_group_svc, audit):
+        from datetime import UTC, datetime
+
+        network = _make_network()
+        workspace = _make_workspace(network.workspace_id)
+        device = _make_device(network_id=network.network_id)
+        current = datetime(2026, 9, 23, 12, 0, 0, 123456, tzinfo=UTC)
+        existing = _make_device_group_row(network.network_id)
+        existing.group_key = "manual"
+        existing.updated_at = current
+        req = UpsertDeviceGroupsRequest.model_validate({"groups": [{
+            "group_key": "manual", "name": "Renamed", "group_type": "custom", "device_ids": [str(device.device_id)],
+            "expected_updated_at": "2026-09-23T15:00:00.123456+03:00",
+        }]})
+
+        with (
+            patch.object(device_group_svc._network_repo, "get_by_id", return_value=network),
+            patch.object(device_group_svc._workspace_svc, "assert_workspace_membership", return_value=workspace),
+            patch.object(device_group_svc._device_repo, "list_active_for_network", return_value=[device]),
+            patch.object(device_group_svc._repo, "get_active_by_keys", return_value={"manual": existing}),
+            patch.object(device_group_svc._repo, "apply_member_diff"),
+            patch.object(device_group_svc._repo, "update_group") as mock_update,
+            patch.object(device_group_svc._repo, "get_groups_by_ids", return_value={existing.device_group_id: existing}),
+            patch.object(device_group_svc._repo, "list_members_for_group_ids",
+                         return_value={existing.device_group_id: [device.device_id]}),
+        ):
+            await device_group_svc.upsert_groups(network_id=network.network_id, req=req, actor_id=str(uuid.uuid4()))
+
+        mock_update.assert_awaited_once()
+        assert mock_update.await_args.kwargs["name"] == "Renamed"
 
     @pytest.mark.asyncio
     async def test_upsert_groups_unknown_device_id_raises_422(self, device_group_svc):
@@ -1288,7 +1526,7 @@ class TestDeviceGroupService:
         assert exc_info.value.detail["code"] == "DEVICE_GROUP_DEVICE_NOT_FOUND"
 
     @pytest.mark.asyncio
-    async def test_upsert_groups_without_selector_filters_keeps_explicit_members_only(self, device_group_svc):
+    async def test_upsert_groups_without_selector_filters_keeps_explicit_members_only(self, device_group_svc, audit):
         network = _make_network()
         actor_id = str(uuid.uuid4())
         workspace = _make_workspace(network.workspace_id)
@@ -1321,13 +1559,14 @@ class TestDeviceGroupService:
             patch.object(device_group_svc._network_repo, "get_by_id", return_value=network),
             patch.object(device_group_svc._workspace_svc, "assert_workspace_membership", return_value=workspace),
             patch.object(device_group_svc._device_repo, "list_active_for_network", return_value=[explicit, other]),
-            patch.object(device_group_svc._repo, "get_active_by_group_key", return_value=None),
-            patch.object(device_group_svc._repo, "create_group", return_value=row),
-            patch.object(device_group_svc._repo, "replace_members") as mock_replace,
+            patch.object(device_group_svc._repo, "get_active_by_keys", return_value={}),
+            patch.object(device_group_svc._repo, "upsert_group", return_value=row.device_group_id),
+            patch.object(device_group_svc._repo, "apply_member_diff") as mock_diff,
+            patch.object(device_group_svc._repo, "get_groups_by_ids", return_value={row.device_group_id: row}),
             patch.object(
                 device_group_svc._repo,
                 "list_members_for_group_ids",
-                return_value={row.device_group_id: [explicit.device_id]},
+                side_effect=[{}, {}, {row.device_group_id: [explicit.device_id]}],
             ),
         ):
             result = await device_group_svc.upsert_groups(
@@ -1336,8 +1575,7 @@ class TestDeviceGroupService:
                 actor_id=actor_id,
             )
 
-        replaced_device_ids = mock_replace.await_args.kwargs["device_ids"]
-        assert replaced_device_ids == [explicit.device_id]
+        assert mock_diff.await_args.kwargs["add"] == [explicit.device_id]
         assert result.items[0].device_ids == [explicit.device_id]
 
 
@@ -1349,9 +1587,9 @@ class TestDeviceGroupHelpers:
         assert _normalize_group_token(None) is None
 
     def test_device_matches_functional_group_aliases(self):
-        assert _device_matches_functional_group(device_type="router", functional_group="core")
-        assert _device_matches_functional_group(device_type="dist", functional_group="distribution")
-        assert _device_matches_functional_group(device_type="wireless_ap", functional_group="wireless")
-        assert _device_matches_functional_group(device_type="nextgen_firewall", functional_group="security")
-        assert _device_matches_functional_group(device_type="application_server", functional_group="server")
-        assert not _device_matches_functional_group(device_type="access_switch", functional_group="server")
+        assert matches_functional_group(device_type="router", functional_group="core")
+        assert matches_functional_group(device_type="dist", functional_group="distribution")
+        assert matches_functional_group(device_type="wireless_ap", functional_group="wireless")
+        assert matches_functional_group(device_type="nextgen_firewall", functional_group="security")
+        assert matches_functional_group(device_type="application_server", functional_group="server")
+        assert not matches_functional_group(device_type="access_switch", functional_group="server")

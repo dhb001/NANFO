@@ -1,4 +1,12 @@
-"""Private durable content-addressed archive. Never accepts caller-chosen paths."""
+"""Private durable content-addressed archive. Never accepts caller-chosen paths.
+
+Retention writes one *segment* per batch (ADR-028): a header line followed by
+one canonical record per line, content-addressed by the segment SHA-256 and made
+durable with a single data fsync plus one directory fsync (was two per record).
+Every receipt of the batch references the segment digest; restore reads the
+segment, verifies its digest and extracts the record by identity. Legacy
+per-record objects remain readable unchanged.
+"""
 
 import hashlib
 import json
@@ -11,6 +19,9 @@ from datetime import datetime
 from pathlib import Path
 
 MAX_RECORD_BYTES = 2 * 1024 * 1024
+MAX_SEGMENT_BYTES = 32 * 1024 * 1024
+SEGMENT_FORMAT = "nanfo.telemetry.archive-segment.v1"
+_SEGMENT_PREFIX = b'{"count":'
 
 
 def canonical_record(record):
@@ -26,6 +37,36 @@ def canonical_record(record):
     if len(data) > MAX_RECORD_BYTES:
         raise ValueError("archive record exceeds bound")
     return data
+
+
+def build_segment(records: list[bytes]) -> bytes:
+    """Deterministic segment bytes for canonical record lines (no raw newlines)."""
+    if not records:
+        raise ValueError("empty archive segment")
+    header = json.dumps({"count": len(records), "format": SEGMENT_FORMAT},
+                        sort_keys=True, separators=(",", ":")).encode()
+    data = b"\n".join([header, *records]) + b"\n"
+    if len(data) > MAX_SEGMENT_BYTES:
+        raise ValueError("archive segment exceeds bound")
+    return data
+
+
+def extract_record(data: bytes, record_id) -> bytes:
+    """Return the canonical bytes of ``record_id`` from a segment or legacy object."""
+    if not data.startswith(_SEGMENT_PREFIX):
+        return data
+    lines = data.split(b"\n")
+    try:
+        header = json.loads(lines[0])
+    except ValueError as exc:
+        raise ValueError("archive segment header invalid") from exc
+    if header != {"count": len(lines) - 2, "format": SEGMENT_FORMAT} or lines[-1] != b"":
+        raise ValueError("archive segment header invalid")
+    wanted = str(record_id)
+    for line in lines[1:-1]:
+        if json.loads(line).get("record_id") == wanted:
+            return line
+    raise ValueError("archive segment does not contain record")
 
 
 class TelemetryArchiveStore:
@@ -87,8 +128,9 @@ class TelemetryArchiveStore:
             yield descriptors[-1]
             self._validate_binding(descriptors)
 
-    def write(self, data):
-        if not 0 < len(data) <= MAX_RECORD_BYTES:
+    def write(self, data, *, max_bytes=MAX_RECORD_BYTES):
+        """Durably publish ``data`` under its SHA-256: one data fsync, one directory fsync."""
+        if not 0 < len(data) <= max_bytes:
             raise ValueError("archive size outside bound")
         digest = hashlib.sha256(data).hexdigest()
         temporary = ".pending-" + uuid.uuid4().hex
@@ -115,11 +157,18 @@ class TelemetryArchiveStore:
                     pass
         return digest
 
-    def read(self, digest, size):
-        if not re.fullmatch(r"[0-9a-f]{64}", digest) or not 0 < size <= MAX_RECORD_BYTES:
+    def write_segment(self, data):
+        return self.write(data, max_bytes=MAX_SEGMENT_BYTES)
+
+    def read(self, digest, size, *, max_bytes=MAX_RECORD_BYTES):
+        if not re.fullmatch(r"[0-9a-f]{64}", digest) or not 0 < size <= max_bytes:
             raise ValueError("invalid archive receipt")
         with self._directory() as directory:
             return self._read(directory, digest, size)
+
+    def read_record(self, digest, size, record_id):
+        """Canonical bytes of one record from a segment (or legacy per-record) object."""
+        return extract_record(self.read(digest, size, max_bytes=MAX_SEGMENT_BYTES), record_id)
 
     @staticmethod
     def _read(directory, digest, size):
@@ -129,7 +178,7 @@ class TelemetryArchiveStore:
             if (not stat.S_ISREG(info.st_mode) or stat.S_IMODE(info.st_mode) not in {0o400, 0o600}
                     or info.st_uid != os.geteuid() or info.st_size != size):
                 raise ValueError("archive file protection or size invalid")
-            data = source.read(MAX_RECORD_BYTES + 1)
+            data = source.read(size + 1)
         if len(data) != size or hashlib.sha256(data).hexdigest() != digest:
             raise ValueError("archive checksum mismatch")
         return data

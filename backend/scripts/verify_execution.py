@@ -125,6 +125,148 @@ def intent_payload(operation, *, dscp=None):
                 "rate_mbps": 5 if operation in {"shape", "police"} else None}}
 
 
+# ADR-028 execution contract shared by the live verifiers and demo tooling:
+#  * C3: a fresh Idempotency-Key per validate; execute/cancel reuse the intent's stored key;
+#  * four-eyes: a user other than the requester approves (executes) a manual lab change,
+#    echoing the validate/detail ``approval_binding`` (the exact approved lab identity);
+#  * C18: high-impact actions first run a completed, passing simulation whose limits respect
+#    the server policy floors and whose ``scenario_config.action_binding`` is the intent's
+#    ``simulation_action_binding`` verbatim; its id is sent as ``simulation_id``.
+POLICY_LIMITS = {"max_loss_pct": 1.0, "max_latency_ms": 1000.0, "min_throughput_mbps": 0.1}
+TERMINAL_SIMULATION_STATES = frozenset({"completed", "cancelled", "failed"})
+
+
+def policy_limits(settings=None) -> dict:
+    """Scenario limits equal to the server policy floors (stricter is allowed, weaker is not)."""
+    if settings is None:
+        return dict(POLICY_LIMITS)
+    return {"max_loss_pct": float(settings.SIMULATION_POLICY_MAX_LOSS_PCT),
+            "max_latency_ms": float(settings.SIMULATION_POLICY_MAX_LATENCY_MS),
+            # The scenario's own flow must still clear a positive throughput objective.
+            "min_throughput_mbps": max(float(settings.SIMULATION_POLICY_MIN_THROUGHPUT_MBPS),
+                                       POLICY_LIMITS["min_throughput_mbps"])}
+
+
+def policy_scenario_config(action_binding: dict, *, limits: dict | None = None) -> dict:
+    """Small under-capacity modeled scenario (0.5 of 1 Mbps: no loss, no queueing) bound to an intent."""
+    return {
+        "version": 1, "seed": 7, "tick_ms": 100, "duration_ticks": 10,
+        "links": [{"link_id": "ab", "source": "a", "target": "b", "capacity_mbps": 1.0,
+                   "buffer_bytes": 25000.0, "delay_ms": 0.0, "initial_queue_bytes": 0.0}],
+        "flows": [{"flow_id": "f", "source": "a", "target": "b", "path": ["ab"], "demand_mbps": [0.5]}],
+        "action_binding": dict(action_binding),
+        "limits": dict(limits or POLICY_LIMITS),
+    }
+
+
+def validation_of(intent: dict) -> dict:
+    """Validation state of a validate response (``validation``) or detail (``validation_result``)."""
+    value = intent.get("validation") or intent.get("validation_result")
+    return value if isinstance(value, dict) else {}
+
+
+def requires_simulation(intent: dict) -> bool:
+    """The server requires, and can bind, pre-execution simulation evidence for this intent."""
+    return bool(validation_of(intent).get("simulation_required")) and bool(intent.get("simulation_action_binding"))
+
+
+def execute_body(intent: dict, *, workspace_id: str, simulation_id: str | None = None, **extra) -> dict:
+    """Approval request: stored idempotency key, echoed approval binding and bound evidence."""
+    body = {"workspace_id": workspace_id, "intent_id": intent["intent_id"], "manual_approval": True}
+    if intent.get("idempotency_key"):
+        body["idempotency_key"] = intent["idempotency_key"]
+    if intent.get("approval_binding"):
+        body["approval_binding"] = dict(intent["approval_binding"])
+    if simulation_id is not None:
+        body["simulation_id"] = str(simulation_id)
+    body.update(extra)
+    return body
+
+
+async def api_data(client, method: str, path: str, *, expected: int = 200, execution_mode: str | None = None,
+                   **kwargs):
+    """Canonical envelope: ``data`` for success statuses, ``errors`` for expected failures."""
+    response = await client.request(method, path, **kwargs)
+    check(response.status_code == expected, f"HTTP contract failed at {method} {path.split('?')[0]}")
+    envelope = response.json()
+    check(envelope.get("success") is (expected < 400), "Canonical envelope mismatch")
+    if execution_mode is not None:
+        check(envelope["meta"]["execution_mode"] == execution_mode, "Canonical execution mode missing")
+    return envelope["data"] if expected < 400 else envelope["errors"]
+
+
+async def run_bound_simulation(client, *, network_id: str, action_binding: dict, limits: dict | None = None,
+                               timeout: float = 60, execution_mode: str | None = None) -> dict:
+    """Start a policy-compliant modeled simulation bound to ``action_binding``; await a pass."""
+    started = await api_data(client, "POST", "/api/v1/simulations/start", expected=202,
+                             execution_mode=execution_mode, json={
+                                 "network_id": network_id,
+                                 "scenario_name": f"Pre-execution evidence {action_binding['intent_id']}",
+                                 "scenario_config": policy_scenario_config(action_binding, limits=limits)})
+    simulation_id = started["simulation_id"]
+    done = await until(lambda: api_data(client, "GET", f"/api/v1/simulations/{simulation_id}",
+                                        execution_mode=execution_mode),
+                       lambda row: row["state"] in TERMINAL_SIMULATION_STATES, timeout=timeout,
+                       message="Bound pre-execution simulation did not finish")
+    check(done["state"] == "completed" and done["risk_gate"] == "passed",
+          "Bound pre-execution simulation did not pass its limits")
+    check((done.get("execution_policy") or {}).get("limits_respect_policy") is True,
+          "Bound simulation limits are weaker than the server policy floors")
+    return done
+
+
+class ApprovalFlow:
+    """Requester validates; a distinct approver runs bound evidence and executes (ADR-028)."""
+
+    def __init__(self, *, requester, approver, workspace_id: str, network_id: str, limits: dict | None = None,
+                 execution_mode: str | None = None, simulation_timeout: float = 60):
+        self.requester, self.approver = requester, approver
+        self.workspace_id, self.network_id = workspace_id, network_id
+        self.limits, self.execution_mode, self.simulation_timeout = limits, execution_mode, simulation_timeout
+        self.validated: dict[str, dict] = {}
+        self._evidence: dict[str, asyncio.Future] = {}
+
+    async def validate(self, intent: dict) -> dict:
+        key = "verify-" + uuid.uuid4().hex  # C3: fresh per submission, <= 120 characters
+        value = await api_data(self.requester, "POST", "/api/v1/intents/validate", execution_mode=self.execution_mode,
+                               headers={"Idempotency-Key": key},
+                               json={"workspace_id": self.workspace_id, "network_id": self.network_id, "intent": intent})
+        check(value.get("idempotency_key") == key, "Validate did not store the submitted idempotency key")
+        self.validated[value["intent_id"]] = value
+        return value
+
+    async def evidence(self, intent_id: str) -> str | None:
+        """One bound simulation per intent, shared by concurrent identical approvals."""
+        validated = self.validated[intent_id]
+        if not requires_simulation(validated):
+            return None
+        future = self._evidence.get(intent_id)
+        if future is None:
+            future = self._evidence[intent_id] = asyncio.ensure_future(run_bound_simulation(
+                self.approver, network_id=self.network_id, action_binding=validated["simulation_action_binding"],
+                limits=self.limits, timeout=self.simulation_timeout, execution_mode=self.execution_mode))
+        return (await asyncio.shield(future))["simulation_id"]
+
+    def body(self, intent_id: str, *, simulation_id: str | None = None, **extra) -> dict:
+        return execute_body(self.validated[intent_id], workspace_id=self.workspace_id,
+                            simulation_id=simulation_id, **extra)
+
+    async def execute(self, intent_id: str, *, actor=None, expected: int = 202, **extra):
+        simulation_id = await self.evidence(intent_id)
+        return await api_data(actor or self.approver, "POST", "/api/v1/intents/execute", expected=expected,
+                              execution_mode=self.execution_mode,
+                              json=self.body(intent_id, simulation_id=simulation_id, **extra))
+
+    async def cancel(self, intent_id: str, *, actor=None, expected: int = 202):
+        """Cancellation is a safety action: the stored key only, no approval or evidence."""
+        validated = self.validated[intent_id]
+        body = {"workspace_id": self.workspace_id, "intent_id": intent_id, "manual_approval": False, "cancel": True}
+        if validated.get("idempotency_key"):
+            body["idempotency_key"] = validated["idempotency_key"]
+        return await api_data(actor or self.approver, "POST", "/api/v1/intents/execute", expected=expected,
+                              execution_mode=self.execution_mode, json=body)
+
+
 def verify_result(command: dict, result: dict, *, status="completed") -> dict:
     from app.modules.intent.lab import (
         LabCommand,
@@ -259,6 +401,7 @@ async def verify(directory: Path, artifact: dict):
 
     from app.core.config import get_settings
     from app.core.logging import configure_logging
+    from app.core.schema_version import CURRENT_SCHEMA
     from app.core.security import hash_password
     from app.modules.identity.repository import UserRepository
     from app.modules.intent.lab import digest
@@ -291,7 +434,7 @@ async def verify(directory: Path, artifact: dict):
     admin = create_engine(settings.POSTGRES_SYNC_DSN, isolation_level="AUTOCOMMIT", echo=False)
     db_created = False
     containers = []
-    api = worker = None
+    api = worker = simulation_worker = None
     engine = redis = None
     try:
         artifact["stage"] = "preflight"
@@ -305,20 +448,27 @@ async def verify(directory: Path, artifact: dict):
             connection.execute(text(f'CREATE DATABASE "{database}"'))
         db_created = True
         artifact["stage"] = "migrations"
+        # The current API/worker code needs the current schema (ADR-028 reads 0014+ columns).
         await external(sys.executable, "-m", "alembic", "-c", str(backend / "alembic/alembic.ini"),
-                       "upgrade", "0012", env=env, cwd=backend)
+                       "upgrade", CURRENT_SCHEMA, env=env, cwd=backend)
         from app.core.config import Settings
 
         isolated = Settings(_env_file=None, **{key: env[key] for key in Settings.model_fields})
         engine = create_async_engine(isolated.POSTGRES_DSN, echo=False)
         sessions = async_sessionmaker(engine, expire_on_commit=False)
         async with sessions() as db:
-            check(await db.scalar(text("SELECT version_num FROM alembic_version")) == "0012", "Migration version mismatch")
+            check(await db.scalar(text("SELECT version_num FROM alembic_version")) == CURRENT_SCHEMA, "Migration version mismatch")
             user = await UserRepository(db).create("execution-verifier@example.com", hash_password(password := secrets.token_urlsafe(36)),
                                                    "Disposable execution verifier")
             await UserRepository(db).assign_role(user.user_id, "Admin")
+            # ADR-028 four-eyes rule: a second, distinct operator approves manual lab changes.
+            approver_user = await UserRepository(db).create(
+                "execution-approver@example.com", hash_password(approver_password := secrets.token_urlsafe(36)),
+                "Disposable execution approver")
+            await UserRepository(db).assign_role(approver_user.user_id, "Operator")
             await db.commit()
         artifact["checks"]["migrations_0011_0012"] = True
+        artifact["checks"]["schema"] = CURRENT_SCHEMA
 
         # Private config holds Redis authentication; neither password appears in
         # Docker argv. Dedicated instances isolate all hardcoded stream/group keys.
@@ -360,7 +510,13 @@ async def verify(directory: Path, artifact: dict):
             return await asyncio.create_subprocess_exec(sys.executable, str(backend / "scripts/run_execution_worker.py"),
                 cwd=backend, env=env, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
 
-        async with httpx.AsyncClient(base_url=f"http://127.0.0.1:{api_port}", timeout=30, trust_env=False) as client:
+        async def start_simulation_worker():
+            # Independent modeled-simulation worker: evaluates the C18 pre-execution evidence.
+            return await asyncio.create_subprocess_exec(sys.executable, str(backend / "scripts/run_simulation_worker.py"),
+                cwd=backend, env=env, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
+
+        async with httpx.AsyncClient(base_url=f"http://127.0.0.1:{api_port}", timeout=30, trust_env=False) as client, \
+                httpx.AsyncClient(base_url=f"http://127.0.0.1:{api_port}", timeout=30, trust_env=False) as approver:
             async def api_ready():
                 check(api.returncode is None, "Isolated API process exited during startup")
                 try:
@@ -376,6 +532,17 @@ async def verify(directory: Path, artifact: dict):
             check(login.status_code == 200, "Verifier login failed")
             client.headers["Authorization"] = "Bearer " + login.json()["data"]["access_token"]
             workspace = str(binding.workspace_id)
+            orgs = await api_data(client, "GET", "/api/v1/organizations")
+            org_id = next(org["org_id"] for org in orgs["items"] if org["slug"] == "execution-verifier")
+            await api_data(client, "POST", f"/api/v1/organizations/{org_id}/members", expected=201,
+                           json={"user_id": str(approver_user.user_id), "org_role": "Operator"})
+            approver_login = await client.post("/api/v1/auth/login", json={
+                "email": "execution-approver@example.com", "password": approver_password})
+            check(approver_login.status_code == 200, "Approver login failed")
+            approver.headers["Authorization"] = "Bearer " + approver_login.json()["data"]["access_token"]
+            flow = ApprovalFlow(requester=client, approver=approver, workspace_id=workspace,
+                                network_id=str(binding.network_id), limits=policy_limits(isolated),
+                                execution_mode="emulation")
             lab_env = {"PATH": os.environ["PATH"], "EMULATION_CONTROL_ENABLED": "true",
                        "EMULATION_BINDING_DIGEST": digest(binding.model_dump(mode="json"))}
             artifact["stage"] = "lab_start"
@@ -400,6 +567,7 @@ async def verify(directory: Path, artifact: dict):
 
             await until(lab_ready, timeout=100, message="Owned lab startup failed")
             worker = await start_worker()
+            simulation_worker = await start_simulation_worker()
 
             async def request(path, body=None, *, expected=200):
                 response = await client.get(path, params={"workspace_id": workspace}) if body is None else await client.post(path, json=body)
@@ -410,14 +578,17 @@ async def verify(directory: Path, artifact: dict):
 
             async def validate(operation, dscp=None):
                 await asyncio.sleep(3.2)  # Lab hold-down, not a bypass of the driver policy.
-                value = await request("/api/v1/intents/validate", {"workspace_id": workspace,
-                    "network_id": str(binding.network_id), "intent": intent_payload(operation, dscp=dscp)})
+                value = await flow.validate(intent_payload(operation, dscp=dscp))
                 check(value["status"] == "validated", "Fresh bound manual plan rejected")
+                check(value.get("approval_binding") is not None, "Validated lab plan lacks its approval binding")
                 return value["intent_id"]
 
             async def execute(intent_id, **extra):
-                return await request("/api/v1/intents/execute", {"workspace_id": workspace,
-                    "intent_id": intent_id, "manual_approval": True, "idempotency_key": intent_id, **extra}, expected=202)
+                # Distinct approver, stored key, approval binding and (high-impact) bound evidence.
+                return await flow.execute(intent_id, **extra)
+
+            async def cancel(intent_id):
+                return await flow.cancel(intent_id)
 
             async def detail(intent_id):
                 return await request(f"/api/v1/intents/{intent_id}")
@@ -472,6 +643,18 @@ async def verify(directory: Path, artifact: dict):
             first = await validate("reroute")
             denied = await client.post("/api/v1/intents/execute", json={"workspace_id": workspace, "intent_id": first})
             check(denied.status_code == 409, "Missing manual approval was not rejected")
+            # ADR-028: the requester cannot approve its own change; reroute needs bound evidence;
+            # the approver must echo the current approval binding. None of these create a job.
+            own = await flow.execute(first, actor=client, expected=409)
+            check(own["code"] == "DISTINCT_APPROVER_REQUIRED", "Requester approved its own manual lab change")
+            unsimulated = await api_data(approver, "POST", "/api/v1/intents/execute", expected=409, json=flow.body(first))
+            check(unsimulated["code"] == "SIMULATION_REQUIRED", "High-impact change accepted without simulation")
+            unbound = flow.body(first, simulation_id=await flow.evidence(first))
+            unbound.pop("approval_binding", None)
+            mismatch = await api_data(approver, "POST", "/api/v1/intents/execute", expected=409, json=unbound)
+            check(mismatch["code"] == "APPROVAL_BINDING_MISMATCH", "Approval without the approved lab identity accepted")
+            artifact["checks"]["four_eyes_simulation_and_binding_gates"] = {
+                "distinct_approver_required": True, "simulation_required": True, "approval_binding_required": True}
             accepted = await asyncio.gather(*(execute(first) for _ in range(4)))
             ids = {row["execution_provenance"]["execution_id"] for row in accepted}
             check(len(ids) == 1, "Concurrent duplicate requests created multiple jobs")
@@ -485,7 +668,7 @@ async def verify(directory: Path, artifact: dict):
                 owned = [line for line in flows.splitlines() if "0x4e414e4600000001" in line]
                 check(len(owned) == 2 and all(int(re.search(r"n_packets=(\d+)", line)[1]) > 0 for line in owned),
                       "Reroute forward/return traffic did not exercise every approved switch")
-            await execute(first, cancel=True, manual_approval=False)
+            await cancel(first)
             await terminal(first, expected="cancelled")
             artifact["checks"]["late_cancel_compensation"] = True
 
@@ -544,7 +727,7 @@ async def verify(directory: Path, artifact: dict):
             restore_b, _ = await action("restore")
             policy_c, (c_detail, c_before) = await action("reroute")
             c_execution = c_detail["execution_provenance"]["execution_id"]
-            await execute(policy_a, cancel=True, manual_approval=False)
+            await cancel(policy_a)
             _, cancelled_a = await terminal(policy_a, expected="cancelled")
             check(cancelled_a["result"]["verification"].get("already_restored") is True,
                   "Cancelling restored policy did not acknowledge actual no-mutation proof")
@@ -617,11 +800,12 @@ async def verify(directory: Path, artifact: dict):
             check(value["execution_provenance"]["rollback"]["verified"] is True, "Deadline did not verify compensation")
             artifact["checks"]["deadline_compensation"] = True
             await client.post("/api/v1/auth/logout")
+            await approver.post("/api/v1/auth/logout")
         artifact["passed"] = True
         artifact["stage"] = "complete"
     finally:
         cleanup_errors = []
-        for process in (worker, api):
+        for process in (worker, simulation_worker, api):
             try:
                 await stop(process)
             except Exception:  # noqa: BLE001

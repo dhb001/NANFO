@@ -1,13 +1,14 @@
 import { Euler, Matrix4, Quaternion, Vector3, type InstancedMesh } from "three";
-import type { TwinNode } from "./sceneAdapter";
+import type { TwinCongestion, TwinNode } from "./sceneAdapter";
 import { resolveDeviceVisual, selectDeviceLabels, type ResolvedDeviceVisual } from "./deviceVisuals";
 
-export interface DeviceBatch { key: string; visual: ResolvedDeviceVisual; nodes: TwinNode[] }
+type BatchNode = TwinNode & { congestion?: TwinCongestion };
+export interface DeviceBatch { key: string; visual: ResolvedDeviceVisual; nodes: BatchNode[] }
 
-export function buildDeviceBatches(nodes: readonly TwinNode[], selectedId: string | null, alerts: ReadonlySet<string>, showCongestion: boolean): DeviceBatch[] {
+export function buildDeviceBatches(nodes: readonly BatchNode[], selectedId: string | null, alerts: ReadonlySet<string>, showCongestion: boolean): DeviceBatch[] {
   const batches = new Map<string, DeviceBatch>();
   for (const node of nodes) {
-    const visual = resolveDeviceVisual({ deviceType: node.type, status: node.status, congestionSeverity: node.congestion.severity,
+    const visual = resolveDeviceVisual({ deviceType: node.type, status: node.status, congestionSeverity: node.congestion?.severity ?? "neutral",
       selected: node.id === selectedId, alerting: alerts.has(node.id), colorMode: "type", showCongestionRing: showCongestion });
     const key = [visual.definition.geometry, visual.radius, visual.color, visual.emissive, visual.emissiveIntensity, visual.ringColor, visual.outlineColor].join(":");
     const batch = batches.get(key) ?? { key, visual, nodes: [] };

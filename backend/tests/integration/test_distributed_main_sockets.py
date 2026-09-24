@@ -63,6 +63,8 @@ async def main_cluster(tmp_path):
             "API_REALTIME_COLLECTOR_WATCHDOG_SECONDS": "0.1", "TELEMETRY_FLEET_ENABLED": "false",
             "TELEMETRY_RUNTIME_ADAPTER_MODE": "stub", "REPORTS_STORAGE_PATH": str(tmp_path),
             "EVENT_RECLAIM_IDLE_MS": "1000", "LOG_LEVEL": "ERROR",
+            # Immediate revocation assertions below; the <=15 s cache is unit-tested (C1).
+            "WS_AUTH_CACHE_SECONDS": "0",
         }
         async def start():
             sock = socket.socket()

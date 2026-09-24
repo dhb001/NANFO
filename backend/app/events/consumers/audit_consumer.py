@@ -3,7 +3,14 @@
 Consumes network.*, org.*, and selected telemetry collector
 runtime transition events, then writes to the audit_logs table.
 Owned by Identity module (audit_logs is an Identity module table).
-Identity persists event_id atomically with the audit row for durable replay safety.
+
+* Writes go through Identity's public append boundary (``append_audit_log``),
+  which persists event_id atomically with the audit row for durable replay
+  safety (replays of an already-audited event are no-ops).
+* Only an allowlisted, size-capped projection of each payload is persisted
+  (``identity.audit.project_event_metadata``), never the whole payload.
+* Correlation identifiers are mapped with ``app.core.correlation``.
+
 AuthService already appends auth audits synchronously; do not append them again.
 """
 
@@ -11,10 +18,11 @@ from __future__ import annotations
 
 import uuid
 
+from app.core.correlation import normalize_audit_correlation
 from app.core.logging import get_logger
 from app.db.postgres import AsyncSessionLocal
-from app.modules.identity.repository import AuditLogRepository
-from app.modules.identity.service import normalize_audit_correlation
+from app.modules.identity.audit import project_event_metadata
+from app.modules.identity.service import append_audit_log
 
 logger = get_logger(__name__)
 
@@ -59,6 +67,8 @@ _AUDIT_MAP: dict[str, dict] = {
     "alert.acknowledged": {"resource_type": "alert"},
     "alert.resolved": {"resource_type": "alert"},
 }
+# Every audited type has a declared projection (tests enforce the parity);
+# an undeclared type would persist no payload fields at all.
 
 # Resource identity follows the event entity, not whichever payload ID is first.
 _RESOURCE_KEYS = {
@@ -85,6 +95,13 @@ def _first(payload: dict, keys: tuple[str, ...]):
     return next((payload[key] for key in keys if payload.get(key)), None)
 
 
+def _optional_uuid(value) -> uuid.UUID | None:
+    try:
+        return uuid.UUID(str(value)) if value else None
+    except (ValueError, TypeError, AttributeError):
+        return None
+
+
 async def handle_audit_event(event: dict) -> None:
     """Write an audit log entry for any mapped event type."""
     event_type = event.get("event_type", "")
@@ -92,36 +109,24 @@ async def handle_audit_event(event: dict) -> None:
     if config is None:
         return
 
+    # A missing/invalid event identity is a deterministic failure (KeyError/ValueError).
+    event_id = uuid.UUID(str(event["event_id"]))
     payload_raw = event.get("payload")
     payload = payload_raw if isinstance(payload_raw, dict) else {}
     correlation_id, metadata = normalize_audit_correlation(
-        event.get("correlation_id", event["event_id"]), payload,
+        event.get("correlation_id", event["event_id"]), project_event_metadata(event_type, payload),
     )
 
-    actor_id_raw = _first(payload, _EVENT_ACTOR_KEYS.get(
+    actor_id = _optional_uuid(_first(payload, _EVENT_ACTOR_KEYS.get(
         event_type, _ACTOR_KEYS[event_type.split(".")[0]],
-    ))
-    try:
-        actor_id = uuid.UUID(str(actor_id_raw)) if actor_id_raw else None
-    except (ValueError, TypeError, AttributeError):
-        actor_id = None
-
-    resource_id_raw = _first(payload, _RESOURCE_KEYS[config["resource_type"]])
-    try:
-        resource_id = uuid.UUID(str(resource_id_raw)) if resource_id_raw else None
-    except (ValueError, TypeError, AttributeError):
-        resource_id = None
-
-    org_id_raw = payload.get("org_id")
-    try:
-        org_id = uuid.UUID(str(org_id_raw)) if org_id_raw else None
-    except (ValueError, TypeError, AttributeError):
-        org_id = None
+    )))
+    resource_id = _optional_uuid(_first(payload, _RESOURCE_KEYS[config["resource_type"]]))
+    org_id = _optional_uuid(payload.get("org_id"))
 
     async with AsyncSessionLocal() as db:
-        repo = AuditLogRepository(db)
-        await repo.append(
-            event_id=uuid.UUID(str(event["event_id"])),
+        await append_audit_log(
+            db=db,
+            event_id=event_id,
             event_type=event_type,
             actor_id=actor_id,
             resource_type=config["resource_type"],

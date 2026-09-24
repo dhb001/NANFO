@@ -27,6 +27,10 @@ class TelemetryHealthCounterService:
     def __init__(self, redis: aioredis.Redis):
         self._redis = redis
 
+    @property
+    def redis(self) -> aioredis.Redis:
+        return self._redis
+
     async def increment_ingested(self) -> int:
         return int(await self._redis.incr(COUNTER_INGESTED_EVENTS))
 
