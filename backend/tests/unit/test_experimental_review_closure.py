@@ -124,6 +124,7 @@ async def test_deadline_crossing_final_authority_reports_action_expiry(monkeypat
     run = SimpleNamespace(run_id=c.policy.run_id, stopped=False, released=False,
         policy_sha256="a"*64, fence=1, lease_token=uuid4())
     repo = SimpleNamespace(lock=AsyncMock(return_value=(object(), run)), owned=lambda *_: None,
+        renew=lambda *_: None,
         pending=AsyncMock(return_value=SimpleNamespace(command=command.model_dump(mode="json"))))
     monkeypatch.setattr(core, "LabRepository", lambda _: repo)
     clock = [now]

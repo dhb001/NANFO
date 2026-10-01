@@ -12,9 +12,11 @@ from uuid import uuid4
 from app.modules.autonomy.live_schemas import MeasuredFeatures, PassiveSnapshot
 from app.modules.autonomy.schemas import Observation
 from emulation.experimental_lab_contract import (
-    IMAGE, MODEL, RESPONSE_LIMIT, SOURCE, VERSION, canonical, decode, protected_read,
+    IMAGE, MODEL, RESPONSE_LIMIT, SOURCE, THRESHOLD_FIELDS, VERSION, canonical, decode, protected_read,
+    thresholds,
 )
 
+from .constants import CONTRACT_HASH, ROUTE_PATHS, validate_route_readback
 from .schemas import (
     ExecutionReceipt, MeasuredFrame, PreparedAction, RecoveryReceipt, VerificationRecord, contract_digest,
 )
@@ -72,9 +74,15 @@ class ExperimentalLabAdapter:
                 or policy.runtime.wrapper_sha256 != p["wrapper_sha256"]
                 or policy.runtime.container_id != p["container_id"] or policy.max_actions != 1):
             raise ValueError("experimental_adapter_policy_binding_invalid")
-        paths = {"route0": ("access1", "dist1", "access2"),
-                 "route1": ("access1", "dist2", "access2")}
-        if any(route.action_id not in paths or route.path != paths[route.action_id]
+        # ADR-028: one versioned threshold schema; the receiver must enforce exactly
+        # the thresholds the controller verifies (UDP loss and probe loss separately).
+        try:
+            same = thresholds(p) == {name: getattr(policy.verification, name) for name in THRESHOLD_FIELDS}
+        except KeyError:
+            same = False
+        if not same:
+            raise ValueError("experimental_adapter_threshold_mismatch")
+        if any(route.action_id not in ROUTE_PATHS or route.path != ROUTE_PATHS[route.action_id]
                or set(route.device_ids) != set(route.path)
                for route in policy.routes):
             raise ValueError("experimental_adapter_route_scope_invalid")
@@ -207,7 +215,7 @@ class ExperimentalLabAdapter:
             self.keepalive = None
 
     # Exact frozen contract, not a model loader override.
-    receiver_contract_hash = "bbcbbadec55792fa3f01bef511c1e38b0e433e125f896cdc3e64f823325e0fe6"
+    receiver_contract_hash = CONTRACT_HASH
 
     @staticmethod
     def _times(evidence):
@@ -218,7 +226,7 @@ class ExperimentalLabAdapter:
 
     async def prepare(self, command):
         if (self.baseline is None or command.policy_sha256 != contract_digest(self.policy)
-                or command.runtime != self.policy.runtime or command.route.action_id not in ("route0", "route1")):
+                or command.runtime != self.policy.runtime or command.route.action_id not in ROUTE_PATHS):
             raise ValueError("experimental_prepare_binding_invalid")
         baseline = self.baseline["baseline"]
         if contract_digest(baseline) != self.baseline["binding"]["baseline_sha256"]:
@@ -244,9 +252,10 @@ class ExperimentalLabAdapter:
         obs, ev = data["observation"], data["evidence"]
         observed, started = self._times(evidence)
         wanted = int(action.command.route.action_id[-1])
-        paths = evidence["readback"]["paths"]
-        verified = (obs["previous_action"] == wanted and
-                    all(paths[key]["action"] == wanted for key in ("h1->h3", "h3->h1")))
+        # Shared lab route validator: both foreground directions report the action AND
+        # its exact kernel node path (ADR-028 lab_contracts), not the action label alone.
+        verified = (obs["previous_action"] == wanted
+                    and validate_route_readback(evidence["readback"]["paths"], wanted))
         return VerificationRecord(request_id=action.command.request_id, action_sha256=contract_digest(action),
             run_id=self.policy.run_id, action_id=action.command.route.action_id if verified else None,
             route_verified=verified, observed_at=observed, window_started_at=started,

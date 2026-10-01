@@ -1,4 +1,4 @@
-"""Real Ryu packet/parser tests run in the pinned image, never require a network."""
+"""Real os-ken packet/parser tests run in the successor image, never require a network."""
 
 import importlib.util
 import unittest
@@ -8,11 +8,12 @@ from unittest.mock import Mock
 from emulation.topology import HOSTS
 
 
-@unittest.skipUnless(importlib.util.find_spec("ryu"), "Ryu is installed only in the lab image")
+@unittest.skipUnless(importlib.util.find_spec("os_ken"), "os-ken is installed only in the lab image")
 class ControllerTests(unittest.TestCase):
     def setUp(self):
+        from os_ken.ofproto import ofproto_v1_3, ofproto_v1_3_parser
+
         from emulation.controller import CampusController
-        from ryu.ofproto import ofproto_v1_3, ofproto_v1_3_parser
 
         self.app = CampusController.__new__(CampusController)
         self.app.hosts = {}
@@ -22,7 +23,7 @@ class ControllerTests(unittest.TestCase):
         )
 
     def event(self, port, ethertype=0x0800, source=None):
-        from ryu.lib.packet import ethernet, ipv4, packet
+        from os_ken.lib.packet import ethernet, ipv4, packet
 
         source = source or HOSTS[0]
         frame = packet.Packet()

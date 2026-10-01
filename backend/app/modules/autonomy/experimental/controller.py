@@ -131,8 +131,9 @@ class ExperimentalController:
                             raise ValueError("experimental_execute_phase_closed")
                         frame_allowed(p, MeasuredFrame.model_validate(action.frame),
                                       measurement_run_id=await self._measurement_identity(db))
-            run.lease_until = utcnow() + timedelta(seconds=p.lease_seconds)
-            deadline = min(run.lease_until, p.expires_at)
+            # Durable lease on the database clock; this process's deadline on its own clock.
+            repo.renew(run, p.lease_seconds)
+            deadline = min(utcnow() + timedelta(seconds=p.lease_seconds), p.expires_at)
             if not recovery and pending is not None and pending.command is not None:
                 deadline = min(deadline, ActionCommand.model_validate(pending.command).expires_at)
                 if fresh_frame:
@@ -252,7 +253,7 @@ class ExperimentalController:
                     await service.pin(EvidenceReference(network_id=self.policy.network_id, record_id=record_id,
                         reference_id=uuid5(request_id, str(record_id))))
             action.phase = run.phase = phase
-            run.lease_until = utcnow() + timedelta(seconds=self.policy.lease_seconds)
+            repo.renew(run, self.policy.lease_seconds)
             repo.receipt(run, action, phase, record.model_dump(mode="json") if record else {"phase": phase})
 
     async def _begin_action(self):
@@ -356,7 +357,7 @@ class ExperimentalController:
                 return
             prepared = PreparedAction.model_validate(action.prepared)
             action.phase = run.phase = "recovering"
-            run.lease_until = utcnow() + timedelta(seconds=self.policy.lease_seconds)
+            repo.renew(run, self.policy.lease_seconds)
             repo.receipt(run, action, "recovering", {"action_sha256": contract_digest(prepared)})
 
         async def checkpoint():

@@ -7,19 +7,28 @@ import os
 import re
 import stat
 import tempfile
+import time
 import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
 VERSION = "nanfo.experimental-lab/v1"
-POLICY_VERSION = "nanfo.experimental-receiver-policy/v1"
+# v2 (ADR-028): unified measured thresholds (UDP loss and ICMP probe loss are separate
+# streams; minimum probe count and traffic bytes) and a lifetime cap relative to now.
+POLICY_VERSION = "nanfo.experimental-receiver-policy/v2"
+POLICY_MAX_LIFETIME_SECONDS = 3600
 IMAGE = "sha256:954462c0f00d5bbaa72ea144f6064936b399c430e6ab94bffcf1c00d134ea0d7"
 SOURCE = "08c312c64154c9aedcd3b22eeb3573783590e0eb7183bc999cb8ef39b958dbbd"
 MODEL = "77dae44acab722a5a6a2e87d952a6cca65e1c4eea102a089830a8401b521d614"
 REQUEST_LIMIT = 8192
 RESPONSE_LIMIT = 2 * 1024 * 1024
 OPERATIONS = ("bootstrap", "bind", "observe", "execute", "verify", "restore", "status", "stop", "recover", "heartbeat")
+# Authenticated operations whose lost response leaves the controller uncertain of state.
+STATE_CHANGING = frozenset({"bootstrap", "bind", "execute", "verify", "restore", "recover"})
+# One versioned threshold schema shared with the backend ExperimentalPolicy.verification.
+THRESHOLD_FIELDS = ("min_goodput_mbps", "max_loss_fraction", "max_probe_loss_fraction",
+                    "max_rtt_ms", "min_probe_sent", "min_traffic_bytes")
 
 
 def require(ok, reason):
@@ -200,7 +209,13 @@ class Request:
         require(type(value) is dict and set(value) == set(cls.__dataclass_fields__),
                 "exact_request_fields_required")
         require(value["version"] == VERSION, "wrong_version")
-        require(str(uuid.UUID(value["request_id"])) == value["request_id"], "invalid_request_id")
+        request_id = value["request_id"]
+        try:
+            canonical_id = (str(uuid.UUID(request_id))
+                            if type(request_id) is str and len(request_id) == 36 else None)
+        except ValueError:
+            canonical_id = None
+        require(canonical_id is not None and canonical_id == request_id, "invalid_request_id")
         require(type(value["fence"]) is int and 0 < value["fence"] < 2**63, "invalid_fence")
         require(type(value["policy_sha256"]) is str
                 and re.fullmatch(r"[a-f0-9]{64}", value["policy_sha256"]), "invalid_policy_hash")
@@ -221,15 +236,14 @@ class Request:
         return {key: value for key, value in self.__dict__.items() if key != "token"}
 
 
-def load_policy(path, sha256):
+def load_policy(path, sha256, now=None):
     raw = protected_read(path)
     require(hashlib.sha256(raw).hexdigest() == sha256, "policy_hash_mismatch")
     value = decode(raw)
     fields = {"version", "image_id", "source_sha256", "model_sha256", "container_id",
               "owner_label", "seed", "scenario", "expires_at", "max_duration_seconds",
               "heartbeat_seconds", "min_dwell_seconds", "max_observation_age_seconds",
-              "min_goodput_mbps", "max_loss_fraction", "max_rtt_ms", "wrapper_sha256",
-              "controller_policy_sha256"}
+              "wrapper_sha256", "controller_policy_sha256", *THRESHOLD_FIELDS}
     require(type(value) is dict and set(value) == fields, "exact_policy_fields_required")
     require(value["version"] == POLICY_VERSION and value["image_id"] == IMAGE
             and value["source_sha256"] == SOURCE and value["model_sha256"] == MODEL,
@@ -245,10 +259,33 @@ def load_policy(path, sha256):
                            ("heartbeat_seconds", 2, 60), ("min_dwell_seconds", 0, 120),
                            ("max_observation_age_seconds", 1, 30),
                            ("min_goodput_mbps", 0, 20), ("max_loss_fraction", 0, 1),
-                           ("max_rtt_ms", 0, 1000)):
+                           ("max_probe_loss_fraction", 0, 1), ("max_rtt_ms", 0, 1000)):
         require(number(value[key], low, high), "invalid_policy_" + key)
+    for key, high in (("min_probe_sent", 10000), ("min_traffic_bytes", 2**40)):
+        require(type(value[key]) is int and 1 <= value[key] <= high, "invalid_policy_" + key)
     require(value["min_dwell_seconds"] <= value["max_duration_seconds"], "invalid_dwell")
+    # Expiry itself is enforced by every authority check; a far-future policy is never valid.
+    now = time.time() if now is None else now
+    require(value["expires_at"] <= now + POLICY_MAX_LIFETIME_SECONDS, "policy_lifetime_exceeds_cap")
     return value
+
+
+def thresholds(policy):
+    """The exact threshold projection compared with the backend verification policy."""
+    return {key: policy[key] for key in THRESHOLD_FIELDS}
+
+
+def thresholds_pass(observation, ping, traffic_bytes, policy):
+    """UDP delivery and ICMP probe loss are independent measured streams (ADR-028)."""
+    sent, received = ping.get("sent"), ping.get("received")
+    latency = observation.get("latency_ms")
+    return (type(sent) is int and type(received) is int and 0 <= received <= sent
+            and sent >= policy["min_probe_sent"]
+            and 1 - received / sent <= policy["max_probe_loss_fraction"]
+            and type(traffic_bytes) is int and traffic_bytes >= policy["min_traffic_bytes"]
+            and number(observation.get("goodput_mbps"), policy["min_goodput_mbps"], math.inf)
+            and number(observation.get("loss_fraction"), 0, policy["max_loss_fraction"])
+            and latency is not None and number(latency, 0, policy["max_rtt_ms"]))
 
 
 def wrapper_digest():

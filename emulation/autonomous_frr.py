@@ -10,11 +10,12 @@ import json
 
 from emulation.autonomous_contract import RUNTIME, action_map
 from emulation.autonomous_driver import finish_thread, readback_digest
+from emulation.lab_contracts import RESERVED_TABLES, ROUTE_PAIRS
 from emulation.measurements import parsePing, utcNow
 from emulation.ospf import PATHS, ROUTERS, linkPlan
 
-TABLES = (19110, 19111)
-PAIRS = (("h1", "h3"), ("h3", "h1"), ("h2", "h4"), ("h4", "h2"))
+TABLES = RESERVED_TABLES
+PAIRS = ROUTE_PAIRS
 
 
 def validate_plan(plan):

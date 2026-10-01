@@ -2,15 +2,20 @@
 
 import hashlib
 import importlib
+import importlib.abc
+import importlib.util
 import json
 import os
+import re
+import stat
+import sys
 import time
 from pathlib import Path
 
 try:
-    from .experimental_lab_contract import IMAGE, SOURCE, digest, require, snapshot
+    from .experimental_lab_contract import IMAGE, SOURCE, digest, require, snapshot, thresholds_pass
 except ImportError:
-    from experimental_lab_contract import IMAGE, SOURCE, digest, require, snapshot
+    from experimental_lab_contract import IMAGE, SOURCE, digest, require, snapshot, thresholds_pass
 
 
 class GuardedRuntime:
@@ -27,8 +32,12 @@ class GuardedRuntime:
         self.baseline = None
         self.calls = {"mutation_attempted": 0, "mutation_completed": 0,
                       "authority_checks": 0, "original_change_calls": 0,
-                      "compensation_mutations": 0}
+                      "compensation_mutations": 0, "state_mutation_attempted": 0,
+                      "state_mutation_completed": 0, "state_authority_checks": 0,
+                      "state_compensations": 0}
         self.transcript = []
+        self.state_transcript = []
+        self.state_baseline = {}
         self.frames = []
         self.namespace_identities = {}
         self.frame_action = None
@@ -68,6 +77,8 @@ class GuardedRuntime:
         return snapshot({"owned": self.routing.owned, "original": self.routing.original,
                 "action": self.routing.action, "baseline": self.baseline,
                 "calls": dict(self.calls), "transcript": list(self.transcript),
+                "state_transcript": list(self.state_transcript),
+                "state_baseline": dict(self.state_baseline),
                 "frame_hashes": [digest(frame) for frame in self.frames],
                 "namespace_identities": self.namespace_identities})
 
@@ -117,9 +128,14 @@ class GuardedRuntime:
                 self.validate_slot(node, table, owned.get((node, table)))
 
     def command(self, node, args, timeout=5):
-        # All original shape/readback calls pass through unchanged. Only the exact
-        # matched-owned rule/table mutations are admitted by this wrapper.
-        mutation = args[:2] in (["ip", "route"], ["ip", "rule"])
+        # ADR-028: every command is classified. Readbacks pass through unchanged; the
+        # exact matched-owned rule/table mutations keep their frozen checks below; any
+        # other lab-state mutation (tc/sysctl/ip link/addr/...) is authority/STOP
+        # checked, WAL-recorded with its before-state and restored by restore().
+        kind = classify_command(args)
+        if kind == "state":
+            return self.state_command(node, args, timeout)
+        mutation = kind == "route"
         if mutation:
             require(len(args) > 2 and args[2] in ("add", "del"), "unexpected_mutation")
             allowed = []
@@ -166,6 +182,75 @@ class GuardedRuntime:
             self.persist()
             self.boundary("after", entry)
         return result
+
+    def state_command(self, node, args, timeout):
+        require(not self.restoring, "recovery_cannot_mutate_lab_state")
+        for key, before in self.state_resources(node, list(args)):
+            if key not in self.state_baseline:
+                self.state_baseline[key] = before()
+        entry = {"node": node, "argv": list(args), "began": time.monotonic(), "completed": None}
+        self.state_transcript.append(entry)
+        self.calls["state_mutation_attempted"] += 1
+        self.persist()  # before-state and command are durable before the write
+        self.calls["state_authority_checks"] += 1
+        self.authority()
+        result = self.original_command(node, args, timeout=timeout)
+        entry["completed"] = time.monotonic()
+        self.calls["state_mutation_completed"] += 1
+        self.persist()
+        return result
+
+    def state_resources(self, node, args):
+        """Supported state mutations and their exact before-state readers."""
+        if (len(args) == 14 and args[:3] == ["tc", "class", "change"] and args[3] == "dev"
+                and args[5] == "parent" and args[7] == "classid" and args[9] == "htb"
+                and args[10] == "rate" and args[12] == "ceil"):
+            dev, parent, classid = args[4], args[6], args[8]
+            return [(f"{node}|tc-class|{dev}|{classid}",
+                     lambda: {"node": node, "kind": "tc-class", "dev": dev, "parent": parent,
+                              "classid": classid, **self.read_class(node, dev, classid)})]
+        if args[:1] == ["sysctl"] and len(args) >= 3 and args[1] in ("-w", "-qw"):
+            settings = [item.split("=", 1) for item in args[2:]]
+            require(all(len(item) == 2 and SYSCTL_NAME.fullmatch(item[0]) for item in settings),
+                    "unsupported_state_mutation")
+            return [(f"{node}|sysctl|{name}",
+                     lambda name=name: {"node": node, "kind": "sysctl", "name": name,
+                                        "value": self.read_sysctl(node, name)})
+                    for name, _ in settings]
+        raise ValueError("unsupported_state_mutation")
+
+    def read_class(self, node, dev, classid):
+        text = self.original_command(node, ["tc", "class", "show", "dev", dev, "classid", classid])
+        match = re.search(r"\brate (\S+) ceil (\S+)", text)
+        require(match is not None, "state_readback_unavailable")
+        return {"rate": match.group(1), "ceil": match.group(2)}
+
+    def read_sysctl(self, node, name):
+        return self.original_command(node, ["sysctl", "-n", name]).strip()
+
+    def restore_state(self):
+        """Return every WAL-recorded lab-state resource to its captured before-state."""
+        restored = []
+        for key, before in self.state_baseline.items():
+            node = before["node"]
+            if before["kind"] == "tc-class":
+                current = self.read_class(node, before["dev"], before["classid"])
+                wanted = {"rate": before["rate"], "ceil": before["ceil"]}
+                if current != wanted:
+                    self.calls["state_compensations"] += 1
+                    self.original_command(node, ["tc", "class", "change", "dev", before["dev"], "parent",
+                        before["parent"], "classid", before["classid"], "htb", "rate", before["rate"],
+                        "ceil", before["ceil"]])
+                    current = self.read_class(node, before["dev"], before["classid"])
+            else:
+                current, wanted = self.read_sysctl(node, before["name"]), before["value"]
+                if current != wanted:
+                    self.calls["state_compensations"] += 1
+                    self.original_command(node, ["sysctl", "-qw", before["name"] + "=" + wanted])
+                    current = self.read_sysctl(node, before["name"])
+            require(current == wanted, "original_lab_state_not_restored")
+            restored.append(key)
+        return restored
 
     def capture_baseline(self):
         require(self.baseline is None and not self.routing.owned, "baseline_already_owned")
@@ -256,9 +341,10 @@ class GuardedRuntime:
             require(readback["tables"] == self.baseline["tables"] and
                     all(readback["paths"][k]["nodes"] == v["nodes"]
                         for k, v in self.baseline["paths"].items()), "original_forwarding_not_restored")
+            state_restored = self.restore_state()
             return snapshot({"baseline": self.baseline, "baseline_sha256": digest(self.baseline),
                     "readback": readback, "owned_empty": not self.routing.owned,
-                    "original_forwarding_verified": True,
+                    "original_forwarding_verified": True, "lab_state_restored": state_restored,
                     "duration_seconds": time.monotonic() - began})
         finally:
             self.restoring = False
@@ -266,26 +352,119 @@ class GuardedRuntime:
 
     def thresholds(self, evidence, policy):
         data = evidence["frame"]["response"]["data"]
-        obs = data["observation"]
-        ping = data["evidence"]["ping"]
-        return (obs["goodput_mbps"] >= policy["min_goodput_mbps"]
-                and obs["loss_fraction"] <= policy["max_loss_fraction"]
-                and ping["sent"] > 0 and 1 - ping["received"] / ping["sent"] <= policy["max_loss_fraction"]
-                and obs["latency_ms"] is not None and obs["latency_ms"] <= policy["max_rtt_ms"])
+        received = data["evidence"].get("udp_received")
+        traffic = (received[0].get("bytes") if isinstance(received, list) and received
+                   and isinstance(received[0], dict) else None)
+        return thresholds_pass(data["observation"], data["evidence"]["ping"], traffic, policy)
+
+
+MUTATING_VERBS = frozenset({"add", "del", "delete", "change", "replace", "set", "flush", "append",
+                            "prepend", "save", "restore", "exec", "attach", "detach"})
+SYSCTL_NAME = re.compile(r"net\.ipv4\.(ip_forward|conf\.[A-Za-z0-9_.-]{1,40}\.(rp_filter|send_redirects))")
+
+
+def classify_command(args):
+    """'route' (exact owned ip route/rule), 'readback', or 'state' (any other write)."""
+    args = list(args)
+    if args[:2] in (["ip", "route"], ["ip", "rule"]):
+        return "route"
+    head, rest = (args[0], args[1:]) if args else ("", [])
+    if head in ("ip", "tc"):
+        read = "show" in rest or "list" in rest or (head == "ip" and "get" in rest)
+        return "readback" if read and not MUTATING_VERBS.intersection(rest) else "state"
+    if head == "sysctl":
+        writes = any("=" in item for item in rest) or any(
+            item.startswith("-") and "w" in item for item in rest)
+        return "state" if writes else "readback"
+    if head == "vtysh":
+        commands = [rest[index + 1] for index, item in enumerate(rest[:-1]) if item == "-c"]
+        return "readback" if commands and all(c.startswith("show ") for c in commands) else "state"
+    return "state"
 
 
 def load_original(source_directory):
-    """Must run with frozen source parent on PYTHONPATH, wrapper in separate mount."""
+    """Must run with frozen source parent on PYTHONPATH, wrapper in separate mount.
+
+    ADR-028: every frozen file is read once and hashed BEFORE any of it executes; the
+    import system then executes only those verified bytes (no re-read/TOCTOU), and
+    any unverified ``emulation.*`` module is refused for the process lifetime.
+    """
     directory = Path(source_directory).resolve()
+    require(os.environ.get("NANFO_LAB_IMAGE_ID") == IMAGE, "image_binding_mismatch")
+    require("emulation" not in sys.modules, "emulation_package_already_imported")
+    sources = {name: _read_frozen(directory, name) for name in (*FROZEN_SOURCE_FILES, "__init__.py")}
+    hashes = {name: hashlib.sha256(sources[name]).hexdigest() for name in FROZEN_SOURCE_FILES}
+    require(hashlib.sha256(sources["__init__.py"]).hexdigest() == FROZEN_PACKAGE_INIT_SHA256,
+            "frozen_package_mismatch")
+    require(source_digest(hashes) == SOURCE, "frozen_source_mismatch")
+    sys.meta_path.insert(0, VerifiedSourceFinder(directory, {
+        name: data for name, data in sources.items() if name.endswith(".py")}))
     module = importlib.import_module("emulation.experiment")
     require(Path(module.__file__).resolve().parent == directory, "wrong_loaded_source_directory")
     spec, spec_hash = module.environmentSpec("matched")
-    require(spec["source_sha256"] == SOURCE and spec["version"] == 4, "frozen_source_mismatch")
-    require(os.environ.get("NANFO_LAB_IMAGE_ID") == IMAGE, "image_binding_mismatch")
-    for name, expected in spec["source_files"].items():
-        require(hashlib.sha256((directory / name).read_bytes()).hexdigest() == expected,
-                "frozen_file_mismatch")
+    require(spec["source_sha256"] == SOURCE and spec["version"] == 4
+            and spec["source_files"] == hashes, "frozen_source_mismatch")
     require(digest(spec) == spec_hash, "spec_hash_mismatch")
     matched = importlib.import_module("emulation.matched")
     require(Path(matched.__file__).resolve().parent == directory, "wrong_matched_source")
     return module
+
+
+# Exact frozen v4 experiment.SOURCE_FILES order/content (drift-tested against the archive).
+FROZEN_SOURCE_FILES = ("experiment.py", "workloads.py", "actions.py", "topology.py", "ospf.py",
+                       "matched.py", "measurements.py", "runner.py", "controller.py",
+                       "experiment_client.py", "Dockerfile", "requirements.txt", "compose.yaml")
+FROZEN_PACKAGE_INIT_SHA256 = "9f0ac359983701c537e4ebde9b412a3b8de66de3264321784b0fbab409ed89d5"
+FROZEN_FILE_LIMIT = 4 * 1024 * 1024
+
+
+def source_digest(hashes):
+    """Frozen experiment.environmentSpec source digest over {name: sha256}."""
+    return hashlib.sha256(json.dumps(hashes, sort_keys=True, separators=(",", ":"))
+                          .encode("ascii")).hexdigest()
+
+
+def _read_frozen(directory, name):
+    try:
+        fd = os.open(str(directory / name), os.O_RDONLY | os.O_NOFOLLOW)
+    except OSError:
+        raise ValueError("frozen_source_unavailable") from None
+    try:
+        info = os.fstat(fd)
+        require(stat.S_ISREG(info.st_mode) and info.st_nlink == 1
+                and info.st_size <= FROZEN_FILE_LIMIT, "frozen_source_not_regular")
+        chunks, size = [], 0
+        while True:
+            part = os.read(fd, 1 << 20)
+            if not part:
+                break
+            size += len(part)
+            require(size <= FROZEN_FILE_LIMIT, "frozen_source_not_regular")
+            chunks.append(part)
+        return b"".join(chunks)
+    finally:
+        os.close(fd)
+
+
+class VerifiedSourceFinder(importlib.abc.MetaPathFinder, importlib.abc.Loader):
+    """Serves the frozen ``emulation`` package only from pre-hashed in-memory bytes."""
+
+    def __init__(self, directory, sources):
+        self.directory, self.sources = directory, dict(sources)
+
+    def find_spec(self, name, path=None, target=None):
+        if name != "emulation" and not name.startswith("emulation."):
+            return None
+        filename = "__init__.py" if name == "emulation" else name[len("emulation."):] + ".py"
+        if "/" in filename or filename.count(".") != 1 or filename not in self.sources:
+            raise ImportError("unverified_frozen_module:" + name)
+        return importlib.util.spec_from_file_location(
+            name, str(self.directory / filename), loader=self,
+            submodule_search_locations=[str(self.directory)] if name == "emulation" else None)
+
+    def create_module(self, spec):
+        return None
+
+    def exec_module(self, module):
+        filename = Path(module.__spec__.origin).name
+        exec(compile(self.sources[filename], module.__spec__.origin, "exec"), module.__dict__)

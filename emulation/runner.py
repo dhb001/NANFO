@@ -18,6 +18,11 @@ from emulation.topology import HOSTS, LINKS, SWITCHES, TOPOLOGY_ID, expectedLink
 
 STATE = Path("/run/nanfo")
 SOCKET = str(STATE / "control.sock")
+# ADR-028 C23 successor capability profile (linux/capability.h bit numbers).
+CAPABILITIES = {"CAP_NET_BIND_SERVICE": 10, "CAP_NET_ADMIN": 12, "CAP_NET_RAW": 13, "CAP_SYS_ADMIN": 21}
+SUCCESSOR_CAPABILITIES = ("CAP_NET_ADMIN", "CAP_NET_RAW", "CAP_SYS_ADMIN")
+# FRR's ospfd narrows itself to a compiled capability set that includes NET_BIND_SERVICE.
+FRR_CAPABILITIES = (*SUCCESSOR_CAPABILITIES, "CAP_NET_BIND_SERVICE")
 
 
 def runCommand(args, timeout=10):
@@ -34,11 +39,46 @@ def stopProcess(process):
             process.wait(timeout=3)
 
 
-def requireContainer():
+def capabilityStatus(text):
+    """Parse /proc/self/status capability sets and the no-new-privileges flag."""
+    fields = dict(line.split(":", 1) for line in text.splitlines() if ":" in line)
+    try:
+        return {
+            "bounding": int(fields["CapBnd"].strip(), 16),
+            "effective": int(fields["CapEff"].strip(), 16),
+            "no_new_privs": fields.get("NoNewPrivs", "").strip() == "1",
+        }
+    except (KeyError, ValueError) as error:
+        raise RuntimeError("Capability status unavailable") from error
+
+
+def requireSuccessorProfile(frr=False, status=None):
+    """Refuse privileged or over-capable containers; the successor never runs privileged."""
+    if os.environ.get("NANFO_LAB_FROZEN", "") not in ("", "0"):
+        raise RuntimeError("NANFO_LAB_FROZEN applies only to the recorded frozen image")
+    if status is None:
+        status = Path("/proc/self/status").read_text()
+    profile = capabilityStatus(status)
+    names = FRR_CAPABILITIES if frr else SUCCESSOR_CAPABILITIES
+    allowed = sum(1 << CAPABILITIES[name] for name in names)
+    if profile["bounding"] & ~allowed:
+        raise RuntimeError(
+            "C23: successor lab refuses privileged/extra capabilities; use cap_drop ALL and "
+            + ", ".join(name[4:] for name in names)
+        )
+    if profile["effective"] & allowed != allowed:
+        raise RuntimeError("C23: successor lab requires " + ", ".join(name[4:] for name in names))
+    if not profile["no_new_privs"]:
+        raise RuntimeError("C23: successor lab requires security_opt no-new-privileges:true")
+    return profile
+
+
+def requireContainer(frr=False):
     if os.environ.get("NANFO_ISOLATED_LAB") != "1" or not Path("/.dockerenv").exists():
         raise RuntimeError("Runner is container-only; use emulation/control.py")
     if os.geteuid() != 0:
         raise RuntimeError("The disposable container requires root namespace privileges")
+    requireSuccessorProfile(frr)
     # Refuse accidental Docker --network host/bridge overrides before creating links.
     interfaces = {p.name for p in Path("/sys/class/net").iterdir()}
     if interfaces != {"lo"}:
@@ -73,7 +113,7 @@ class Lab:
         STATE.mkdir(exist_ok=True)
         self.output.mkdir(exist_ok=True)
         self.outputLock = os.open(
-            str(self.output / ".producer.lock"), os.O_CREAT | os.O_RDWR, 0o644
+            str(self.output / ".producer.lock"), os.O_CREAT | os.O_RDWR, 0o600
         )
         try:
             fcntl.flock(self.outputLock, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -90,18 +130,9 @@ class Lab:
         # Kernel module loading is intentionally not attempted. The host kernel
         # must already support OVS; userspace dummy networking would fake the lab.
         runCommand(["ovs-vswitchd", "--pidfile", "--detach"])
+        # os-ken 4 has no manager CLI; this fixed launcher is the old ryu-manager argv.
         self.controller = subprocess.Popen(
-            [
-                "ryu-manager",
-                "--observe-links",
-                "--ofp-listen-host",
-                "127.0.0.1",
-                "--ofp-tcp-listen-port",
-                "6653",
-                "--log-config-file",
-                "/opt/nanfo/emulation/logging.conf",
-                "emulation.controller",
-            ],
+            [sys.executable, "-m", "emulation.controller_main"],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.STDOUT,
         )
@@ -125,7 +156,7 @@ class Lab:
             autoSetMacs=False,
             autoStaticArp=False,
         )
-        self.net.addController("ryu", controller=RemoteController, ip="127.0.0.1", port=6653)
+        self.net.addController("controller", controller=RemoteController, ip="127.0.0.1", port=6653)
         for switch in SWITCHES:
             self.net.addSwitch(
                 switch["name"], dpid=switch["dpid"], protocols="OpenFlow13", failMode="secure"
@@ -198,7 +229,7 @@ class Lab:
     def checkController(self):
         if self.controller is not None and self.controller.poll() is not None:
             raise RuntimeError(
-                "Ryu exited; diagnostic log is container-internal /run/nanfo/controller.log"
+                "Controller exited; diagnostic log is container-internal /run/nanfo/controller.log"
             )
         if self.stopping:
             raise RuntimeError("Lab stopping")
@@ -482,6 +513,45 @@ class Lab:
             os.close(self.outputLock)
 
 
+def dispatch(lab, command):
+    if command == "status":
+        return {"passed": lab.ready(lab.controllerState()), "run_id": lab.runId, "sequence": lab.sequence}
+    if command == "smoke":
+        return lab.verify()
+    if command == "traffic":
+        return lab.traffic()
+    if command == "paths":
+        from emulation.probe_paths import CaptureInterrupted, capturePaths
+
+        try:
+            return capturePaths(lab)
+        except CaptureInterrupted:
+            return {
+                "passed": False,
+                "status": "partial",
+                "error": "Probe capture interrupted by controls; no new path artifact",
+            }
+        except (RuntimeError, OSError, ValueError, subprocess.SubprocessError):
+            return {"passed": False, "error": "Probe capture unavailable"}
+    return {"passed": False, "error": "Unknown command"}
+
+
+def answer(lab, connection):
+    """One control request -> one bounded envelope; a failed request never closes the lab.
+
+    Lab-fatal conditions (controller exit, stop) still end the service loop through the
+    polling path and lab.stopping; a request error is reported only to its own caller.
+    """
+    try:
+        connection.settimeout(2)
+        command = connection.recv(32).decode("ascii").strip()
+        return dispatch(lab, command)
+    except Exception as error:
+        detail = " ".join(str(error).split())[:160]
+        print(f"Control request failed: {type(error).__name__}: {detail}", file=sys.stderr, flush=True)
+        return {"passed": False, "error": f"{type(error).__name__}: {detail}"}
+
+
 def request(command):
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
         client.settimeout(3 if command == "status" else 90)
@@ -525,7 +595,7 @@ def main():
         parser.error("Manual journal exists; never remove a live journal to enable experiments")
     if not args.experiment and args.mode != "sdn":
         parser.error("OSPF requires explicit --experiment")
-    requireContainer()
+    requireContainer(frr=args.experiment and args.mode in ("matched", "ospf"))
     if args.output.resolve() != Path("/output"):
         parser.error("Container output must be the dedicated /output mount")
     if args.experiment and args.mode in ("matched", "ospf"):
@@ -573,34 +643,8 @@ def main():
                 except socket.timeout:
                     continue
                 with connection:
-                    connection.settimeout(2)
-                    command = connection.recv(32).decode("ascii").strip()
-                    if command == "status":
-                        result = {
-                            "passed": lab.ready(lab.controllerState()),
-                            "run_id": lab.runId,
-                            "sequence": lab.sequence,
-                        }
-                    elif command == "smoke":
-                        result = lab.verify()
-                    elif command == "traffic":
-                        result = lab.traffic()
-                    elif command == "paths":
-                        from emulation.probe_paths import CaptureInterrupted, capturePaths
-
-                        try:
-                            result = capturePaths(lab)
-                        except CaptureInterrupted:
-                            result = {
-                                "passed": False,
-                                "status": "partial",
-                                "error": "Probe capture interrupted by controls; no new path artifact",
-                            }
-                        except (RuntimeError, OSError, ValueError, subprocess.SubprocessError):
-                            result = {"passed": False, "error": "Probe capture unavailable"}
-                    else:
-                        result = {"passed": False, "error": "Unknown command"}
-                    with suppress(BrokenPipeError, socket.timeout):
+                    result = answer(lab, connection)
+                    with suppress(OSError):
                         connection.sendall(json.dumps(result).encode("ascii"))
         return 0
     except (RuntimeError, OSError, ValueError, subprocess.SubprocessError) as error:

@@ -4,6 +4,7 @@ import copy
 import json
 import multiprocessing
 import os
+import stat
 import threading
 import time
 import uuid
@@ -88,10 +89,18 @@ def test_manual_approval_and_cancel_are_explicit_booleans(value):
             ExecuteIntentRequest(workspace_id=uuid.uuid4(), intent_id=uuid.uuid4(), **{field: value})
 
 
+LAB_KEY = b"c15-test-key-" + b"0123456789abcdef" * 3
+
+
 @pytest.fixture
-def mailbox_settings(tmp_path):
+def mailbox_settings(tmp_path, monkeypatch):
     for name in ("commands", "results", "telemetry", "binding"):
         (tmp_path / name).mkdir()
+    # ADR-028 C15: the execution worker's protected mailbox HMAC key (0400, owner-only).
+    key = tmp_path / "lab_command_key"
+    key.write_bytes(LAB_KEY)
+    key.chmod(0o400)
+    monkeypatch.setenv("NANFO_LAB_COMMAND_KEY_FILE", str(key))
     return SimpleNamespace(**{**{key: value for key, value in get_settings().model_dump().items()
                                if key.startswith("EMULATION_")}, "EXECUTION_MODE": "emulation",
         "EMULATION_CONTROL_ENABLED": True,
@@ -101,11 +110,14 @@ def mailbox_settings(tmp_path):
 
 
 async def test_mailbox_is_atomic_bounded_immutable_and_symlink_refusing(mailbox_settings, tmp_path):
+    from emulation.lab_contracts import verify_command
+
     mailbox = Mailbox(mailbox_settings)
     cmd = command()
     mailbox.write(cmd)
     path = mailbox.commands / f"{cmd.execution_id}.json"
-    assert json.loads(path.read_bytes()) == cmd.model_dump(mode="json")
+    assert verify_command(LAB_KEY, json.loads(path.read_bytes())) == cmd.model_dump(mode="json")
+    assert stat.S_IMODE(path.stat().st_mode) == 0o640
     assert list(mailbox.commands.glob("*.json")) == [path]
     mailbox.write(cmd)
     with pytest.raises(ValueError, match="immutable"):
@@ -326,10 +338,78 @@ def test_pause_after_final_sender_check_exposes_expired_not_renewed_authorizatio
         released.set()
         thread.join(3)
     assert not thread.is_alive() and not failures
-    published = LabCommand.model_validate_json((Mailbox(mailbox_settings).commands / f"{cmd.execution_id}.json").read_bytes())
+    from emulation.lab_contracts import verify_command
+
+    wire = json.loads((Mailbox(mailbox_settings).commands / f"{cmd.execution_id}.json").read_bytes())
+    published = LabCommand.model_validate_json(json.dumps(verify_command(LAB_KEY, wire)))
     assert published.dispatch_expires_at == cmd.dispatch_expires_at
     assert published.deadline > datetime.now(UTC)
     with pytest.raises(ValueError, match="expired"):
         published.assert_new_dispatch(datetime.now(UTC))
     # Cancellation still carries the same expired authorization, for compensation.
     Mailbox(mailbox_settings).write(published.model_copy(update={"operation": "cancel"}))
+
+
+def test_c15_written_envelope_is_canonical_and_authenticated_by_the_lab_reader(mailbox_settings):
+    """The backend writer and the lab reader share one MAC contract (emulation.lab_contracts)."""
+    from unittest.mock import Mock
+
+    from emulation.lab_contracts import canonical
+    from emulation.mailbox import Mailbox as LabMailbox
+
+    writer = Mailbox(mailbox_settings)
+    cmd = command()
+    writer.write(cmd)
+    path = writer.commands / f"{cmd.execution_id}.json"
+    raw = path.read_bytes()
+    envelope = json.loads(raw)
+    assert set(envelope) == {*cmd.model_dump(mode="json"), "hmac_sha256"}
+    assert raw == canonical(envelope)
+    reader = LabMailbox(Mock(), str(cmd.run_id), cmd.binding_digest, writer.commands, writer.results,
+                        command_key=LAB_KEY)
+    try:
+        assert reader.readCommand(path) == cmd.model_dump(mode="json")
+        wrong = LabMailbox(Mock(), str(cmd.run_id), cmd.binding_digest, writer.commands, writer.results,
+                           command_key=b"w" * 32)
+        with pytest.raises(ValueError, match="command_mac_invalid"):
+            wrong.readCommand(path)
+        wrong.close()
+    finally:
+        reader.close()
+
+
+def test_c15_writer_fails_closed_without_a_protected_key(mailbox_settings, monkeypatch, tmp_path):
+    cmd = command()
+    monkeypatch.delenv("NANFO_LAB_COMMAND_KEY_FILE")
+    with pytest.raises(ValueError, match="lab_command_key_unconfigured"):
+        Mailbox(mailbox_settings).write(cmd)
+    loose = tmp_path / "loose_key"
+    loose.write_bytes(LAB_KEY)
+    loose.chmod(0o640)
+    monkeypatch.setenv("NANFO_LAB_COMMAND_KEY_FILE", str(loose))
+    with pytest.raises(ValueError, match="unprotected"):
+        Mailbox(mailbox_settings).write(cmd)
+    short = tmp_path / "short_key"
+    short.write_bytes(b"k" * 31)
+    short.chmod(0o400)
+    monkeypatch.setenv("NANFO_LAB_COMMAND_KEY_FILE", str(short))
+    with pytest.raises(ValueError):
+        Mailbox(mailbox_settings).write(cmd)
+    assert not list(Mailbox(mailbox_settings).commands.iterdir())
+
+
+@pytest.mark.parametrize("forged", ["unsigned", "wrong_mac", "wrong_key"])
+def test_c15_writer_never_overwrites_an_unauthenticated_existing_command(mailbox_settings, forged):
+    from emulation.lab_contracts import sign_command
+
+    mailbox = Mailbox(mailbox_settings)
+    cmd = command()
+    body = cmd.model_dump(mode="json")
+    value = {"unsigned": body, "wrong_mac": {**body, "hmac_sha256": "0" * 64},
+             "wrong_key": sign_command(b"x" * 32, body)}[forged]
+    path = mailbox.commands / f"{cmd.execution_id}.json"
+    path.write_bytes(json.dumps(value).encode())
+    before = path.read_bytes()
+    with pytest.raises(ValueError, match="command_mac"):
+        mailbox.write(cmd.model_copy(update={"operation": "cancel"}))
+    assert path.read_bytes() == before

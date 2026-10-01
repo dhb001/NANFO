@@ -174,6 +174,9 @@ def capture_endpoint(network, spec, *, clock=time):
 
 
 def observation_envelope(raw_capture):
-    """Detached canonical clock for a passive native feed; raw bytes stay intact."""
+    """Detached canonical clock for a passive native feed; raw bytes stay intact.
+
+    Host-only (backend interpreter): the clock moved to the backend (ADR-028).
+    """
     from emulation.native_qualification_clock import endpoint_clock_binding
     return {"raw_capture": raw_capture, "clock_binding": endpoint_clock_binding(raw_capture)}

@@ -3,6 +3,7 @@
 import fcntl
 import json
 import os
+import secrets
 import subprocess
 import time
 import uuid
@@ -10,7 +11,9 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from emulation.actions import COOKIE, Actions, cli
-from emulation.mailbox import Mailbox, planHash, safeWrite
+from emulation.lab_contracts import sign_command
+from emulation.mailbox import Mailbox, planHash
+from emulation.mailbox import safeWrite as publishFile
 from emulation.measurements import atomicJson, utcNow
 
 
@@ -22,7 +25,16 @@ def verifyActions(lab):
     results.mkdir()
     driver = Actions(lab)
     digest = planHash({"local_verifier": lab.runId})
-    mailbox = Mailbox(driver, lab.runId, digest, commands, results)
+    # C15: an ephemeral harness key signs this isolated mailbox; never the service key.
+    harnessKey = secrets.token_bytes(32)
+
+    def safeWrite(path, value):
+        publishFile(path, sign_command(harnessKey, value))
+
+    def box(commandsPath=commands, resultsPath=results):
+        return Mailbox(driver, lab.runId, digest, commandsPath, resultsPath, command_key=harnessKey)
+
+    mailbox = box()
     report = {"run_id": lab.runId, "observed_at": utcNow(), "passed": False, "checks": {}}
     checks = report["checks"]
 
@@ -149,7 +161,7 @@ def verifyActions(lab):
         reroute = command("reroute", path)
         execute(reroute)
         mailbox.poll()
-        second = Mailbox(driver, lab.runId, digest, commands, results)
+        second = box()
         try:
             fcntl.flock(mailbox.lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             try:
@@ -171,7 +183,7 @@ def verifyActions(lab):
         beforeDuplicate = counters()
         (results / (reroute["execution_id"] + ".json")).unlink()
         mailbox.close()
-        mailbox = Mailbox(driver, lab.runId, digest, commands, results)
+        mailbox = box()
         recovered = mailbox.handle({**reroute, "fence": 2})
         if recovered["status"] != "completed" or recovered["fence"] != 2:
             raise RuntimeError("Lost-result recovery failed")
@@ -320,7 +332,7 @@ def verifyActions(lab):
         safeWrite(commands / (cmd["execution_id"] + ".json"), cmd)
         pid = os.fork()
         if pid == 0:
-            child = Mailbox(driver, lab.runId, digest, commands, results)
+            child = box()
             calls = [0]
 
             def die():
@@ -334,7 +346,7 @@ def verifyActions(lab):
         if os.waitstatus_to_exitcode(status) != 77:
             raise RuntimeError("Crash injection boundary not reached")
         mailbox.close()
-        mailbox = Mailbox(driver, lab.runId, digest, commands, results)
+        mailbox = box()
         recovered = mailbox.handle({**cmd, "fence": 2})
         if recovered["status"] != "failed" or not recovered["rollback"]["verified"]:
             raise RuntimeError("Crash recovery did not compensate")
@@ -371,7 +383,7 @@ def verifyActions(lab):
         oldResults.mkdir()
         oldCommands = directory / "old-run-commands"
         oldCommands.mkdir()
-        oldBox = Mailbox(driver, lab.runId, digest, oldCommands, oldResults)
+        oldBox = box(oldCommands, oldResults)
         try:
             prepared = mailbox.load()["records"][active["execution_id"]]["prepared"]
             oldCommand = {

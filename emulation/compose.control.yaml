@@ -1,0 +1,11 @@
+# C15 overlay for manual controls (EMULATION_CONTROL_ENABLED=true): the lab's copy of
+# the mailbox HMAC key. The directory holds only lab_command_key, owned by root, 0400.
+services:
+  lab:
+    volumes:
+      - type: bind
+        source: ${NANFO_LAB_COMMAND_KEY_DIR:?Set the directory holding the root-owned 0400 lab_command_key}
+        target: /run/nanfo-lab-key
+        read_only: true
+        bind:
+          create_host_path: false

@@ -1,0 +1,53 @@
+name: nanfo-emulation
+# HISTORICAL REPRODUCTION ONLY (ADR-028 C23). Privileged, end-of-life Debian 11 /
+# Python 3.9 frozen image, pinned by its recorded image ID. Used INSTEAD of
+# compose.yaml, only through `NANFO_LAB_FROZEN=1 python3 emulation/control.py ...`.
+# Never build it here and never use it for new qualification claims. The frozen code
+# predates C15 command MACs, so it receives no key material.
+services:
+  lab:
+    image: ${NANFO_EMULATION_IMAGE:?Set the recorded frozen lab image ID (sha256:...)}
+    privileged: true
+    # Privilege is only for this disposable namespace/OVS lab. Never add host PID,
+    # host networking, a Docker socket, a physical interface, or credential mounts.
+    network_mode: none
+    labels:
+      org.nanfo.lab.frozen-acknowledged: ${NANFO_LAB_FROZEN:?Set NANFO_LAB_FROZEN=1 to run the frozen privileged EOL lab}
+    environment:
+      EMULATION_CONTROL_ENABLED: ${EMULATION_CONTROL_ENABLED:-false}
+      EMULATION_BINDING_DIGEST: ${EMULATION_BINDING_DIGEST:-}
+    volumes:
+      - type: bind
+        source: ./output
+        target: /output
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./commands
+        target: /commands
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./results
+        target: /results
+        bind:
+          create_host_path: false
+    tmpfs:
+      - /run:exec,size=64m
+      - /tmp:exec,size=64m
+    pids_limit: 256
+    mem_limit: 768m
+    cpus: 2
+    stop_grace_period: 20s
+    healthcheck:
+      test: ["CMD", "python", "-c", "from pathlib import Path; import subprocess,sys; sys.exit(0 if Path('/run/nanfo/experiment.sock').is_socket() else subprocess.call(['python','-m','emulation.runner','--request','status']))"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    logging:
+      driver: json-file
+      options:
+        max-size: 2m
+        max-file: "2"

@@ -41,34 +41,79 @@ def ai_interpreter():
     return Path(read(marker)["ai_interpreter"]["path"]) if marker.exists() else ROOT / "ai-engine/.venv/bin/python"
 
 
+# ADR-028: a runtime snapshot copies ONLY git-tracked source under these roots plus the
+# explicitly allowlisted, hash-pinned preserved-model closure. A directory walk swept ignored
+# private files (deploy/state/**) into nanfo-experimental-campaign-014; that snapshot stays as
+# recorded, but no ignored, untracked or other private path is ever copied again.
+SNAPSHOT_SOURCE_ROOTS = ("backend", "emulation", "scripts", "deploy")
+SNAPSHOT_SUFFIXES = frozenset({".py", ".toml", ".lock", ".txt", ".json", ".jsonl", ".yaml", ".yml",
+                               ".ini", ".cfg", ".sql", ".sh", ".md"})
+SNAPSHOT_PRIVATE_SUFFIXES = frozenset({".pyc", ".log", ".pem", ".key", ".p12", ".pfx"})
+# Defense in depth on top of "tracked only": never generated/lab/deployment-state trees.
+SNAPSHOT_EXCLUDED_PARTS = frozenset({".venv", "__pycache__", ".pytest_cache", ".ruff_cache", "node_modules",
+                                     ".git", "output", "htmlcov", "test-results", "state", "results",
+                                     "commands"})
+SNAPSHOT_MODEL_REQUIRED = ("plan.json", "lineage.json")
+
+
+def git_paths(root, *selection):
+    """Paths git lists under the snapshot roots; any git failure refuses the snapshot."""
+    command = ["git", "-c", "core.fsmonitor=false", "-C", str(root), "ls-files", "-z", *selection,
+               "--", *SNAPSHOT_SOURCE_ROOTS]
+    try:
+        listed = subprocess.run(command, capture_output=True, check=True, timeout=60).stdout
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise ValueError("snapshot_requires_git_tracked_source") from exc
+    return sorted(Path(os.fsdecode(item)) for item in listed.split(b"\0") if item)
+
+
+def snapshot_candidate(relative):
+    """Runnable source by name; dotfiles, credentials, caches and lab/deploy state never qualify."""
+    parts = relative.parts
+    return (bool(parts) and parts[0] in SNAPSHOT_SOURCE_ROOTS
+            and not SNAPSHOT_EXCLUDED_PARTS.intersection(parts)
+            and not any(part.startswith(".") for part in parts)
+            and relative.name != "redis.conf" and relative.suffix not in SNAPSHOT_PRIVATE_SUFFIXES
+            and (relative.suffix in SNAPSHOT_SUFFIXES or relative.name.startswith("Dockerfile")))
+
+
+def snapshot_files(root, model):
+    """Tracked source + the pinned model closure; untracked source or ignored tracked files refuse."""
+    stray = [path for path in git_paths(root, "--others", "--exclude-standard") if snapshot_candidate(path)]
+    if stray:
+        raise ValueError("snapshot_untracked_source:" + str(stray[0]))
+    ignored = [path for path in git_paths(root, "--cached", "--ignored", "--exclude-standard")
+               if snapshot_candidate(path)]
+    if ignored:
+        raise ValueError("snapshot_tracked_file_is_ignored:" + str(ignored[0]))
+    files = []
+    for relative in git_paths(root, "--cached"):
+        if not snapshot_candidate(relative):
+            continue
+        path = root / relative
+        if path.is_symlink():
+            raise ValueError("snapshot_symlink_input:" + str(relative))
+        if not path.is_file():
+            raise ValueError("snapshot_tracked_source_missing:" + str(relative))
+        files.append(path)
+    # The only non-tracked inputs: the registry template's hash-pinned closure (model_identity
+    # verifies every referenced file and the frozen client source), never the evidence tree.
+    closure = set(model_identity(model)["files"]) | set(SNAPSHOT_MODEL_REQUIRED)
+    for name in sorted(closure):
+        path = model / name
+        if path.is_symlink() or not path.is_file() or not path.resolve().is_relative_to(model.resolve()):
+            raise ValueError("snapshot_model_input:" + name)
+        files.append(path)
+    return files
+
+
 def freeze_runtime(output):
-    """Copy the entire runnable source family and preserved model, never symlinks/env."""
+    """Copy tracked runnable source and the pinned preserved model, never private state/env."""
     if output.resolve().is_relative_to(ROOT) and not (
             output.parent.resolve()==(ROOT/"ai-engine/artifacts").resolve()
             and output.name.startswith("adr025-runtime-")):
         raise ValueError("snapshot_requires_external_or_dedicated_ignored_artifact_root")
-    files = []
-    excluded = {".venv", "__pycache__", ".pytest_cache", ".ruff_cache", "node_modules",
-                ".git", "output", "htmlcov", "test-results"}
-    for relative in ("backend", "emulation", "scripts", "deploy",
-                     "ai-engine/artifacts/adr024-qualified-001"):
-        base = ROOT / relative
-        for directory, dirs, names in os.walk(base, followlinks=False):
-            parent = Path(directory)
-            dirs[:] = sorted(d for d in dirs if d not in excluded and not (parent/d).is_symlink())
-            for name in sorted(names):
-                path = parent/name
-                if (name.startswith(".") or name in {"redis.conf"}
-                        or path.suffix in {".pyc", ".log", ".pem", ".key", ".p12", ".pfx"}):
-                    continue
-                if relative != "ai-engine/artifacts/adr024-qualified-001" and path.suffix not in {
-                    ".py",".toml",".lock",".txt",".json",".jsonl",".yaml",".yml",".ini",".cfg",".sql",".sh",".md"
-                } and not name.startswith("Dockerfile"):
-                    continue
-                if path.is_symlink():
-                    raise ValueError("snapshot_symlink_input:"+str(path.relative_to(ROOT)))
-                if path.is_file():
-                    files.append(path)
+    files = snapshot_files(ROOT, MODEL)
     if sum(p.stat().st_size for p in files) > 512 * 1024**2:
         raise ValueError("snapshot_size_bound")
     pins = {str(p.relative_to(ROOT)): digest(p) for p in files}
@@ -91,7 +136,10 @@ def freeze_runtime(output):
         seed_inventory_origins=[str(p) for p in history_roots()],
         model_origin=str(MODEL), model_snapshot=str(output / MODEL.relative_to(ROOT)),
         source_policy="execute-only-this-snapshot; workspace never searched for executable imports",
-        excluded="credentials/.env, caches, generated output, symlink directories, bytecode")
+        source_selection="git-tracked files under backend/emulation/scripts/deploy only; model: pinned "
+                         "live-registry template closure",
+        excluded="untracked/ignored paths (deploy/state, lab output/results/commands, credentials/.env), "
+                 "caches, symlinks, bytecode, the private evidence tree")
     # A producer changing any copied source during publication invalidates this snapshot.
     if any(digest(path) != pins[str(path.relative_to(ROOT))] for path in files):
         write(output/"snapshot-invalid.json",dict(reason="source_changed_during_snapshot",candidate_manifest=marker))
@@ -603,9 +651,11 @@ def receiver_main(directory, policy_hash):
         return module
     owner.load_original = load
     owner.Receiver = campaign_receiver_class()
+    # Fault campaigns inject protected failpoint handshakes; the receiver honours them
+    # only when explicitly armed (ADR-028), and records that in its journal.
     return owner.main(["--directory", directory, "--policy", directory + "/receiver-policy.json",
         "--policy-sha256", policy_hash, "--token", directory + "/receiver-token",
-        "--source-directory", "/opt/nanfo/emulation"])
+        "--source-directory", "/opt/nanfo/emulation", "--failpoints"])
 
 
 def simulation_policy():
@@ -1182,7 +1232,7 @@ async def intervene(case, directory, receiver, child, sessions, redis, policy, p
         event["receiver_stop"] = await receiver.request("stop")
     elif fault.startswith("revoke"):
         async with sessions() as db:
-            await db.execute(text("UPDATE org_members SET org_role='Viewer' WHERE user_id=:actor"),
+            await db.execute(text("UPDATE org_members SET org_role='Read-Only' WHERE user_id=:actor"),
                              {"actor": uuid.UUID(policy.actor_id)})
             await db.commit()
         try:
@@ -1592,6 +1642,8 @@ async def joined_case(directory, plan, case, sessions, redis, actor):
             max_duration_seconds=plan["max_action_seconds"], heartbeat_seconds=10,
             min_dwell_seconds=plan["minimum_dwell_seconds"], max_observation_age_seconds=30,
             min_goodput_mbps=limits["min_goodput_mbps"], max_loss_fraction=limits["max_udp_loss_fraction"],
+            max_probe_loss_fraction=limits["max_probe_loss_fraction"], min_probe_sent=limits["min_probe_sent"],
+            min_traffic_bytes=limits["min_traffic_bytes"],
             max_rtt_ms=limits["max_probe_rtt_ms"], wrapper_sha256=wrapper_digest(),
             controller_policy_sha256=None)
         validate_native_projection(projection)

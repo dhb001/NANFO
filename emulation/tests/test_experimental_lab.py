@@ -17,8 +17,12 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 from uuid import uuid4
 
+from emulation.tests.frozen_v4 import frozen_emulation
+
 ROOT = Path(__file__).resolve().parents[2]
-FROZEN = ROOT / "ai-engine/artifacts/adr024-qualified-001/recovery/emulation"
+# Tracked frozen v4 source (emulation/frozen archive, pin-checked), byte-identical to the
+# private recovery copy under ai-engine/artifacts (ADR-028: no private evidence needed).
+FROZEN = frozen_emulation()
 # Load the original MatchedRouting bytes directly, without touching its source.
 spec = importlib.util.spec_from_file_location("_adr025_original_matched", FROZEN / "matched.py")
 original = importlib.util.module_from_spec(spec)
@@ -509,8 +513,9 @@ class ContractTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as root:
             receiver, _, _, _ = self.receiver(Path(root))
             try:
-                receiver.phase = "holding"
-                path = Path(root) / "authority.json"
+                receiver.phase = "bootstrapping"
+                receiver.bootstrap_request_id = str(uuid4())
+                path = Path(root) / "bootstrap-admission.json"
                 atomic_write(path, {"secret": "never-retain-this"})
                 path.chmod(0o644)
                 with self.assertRaisesRegex(ValueError, "protected_regular"):
@@ -519,7 +524,7 @@ class ContractTests(unittest.TestCase):
                 receiver.persist()
                 journal = json.loads(receiver.journal_path.read_bytes())
                 diagnostic = journal["protected_read_failure"]
-                self.assertEqual(diagnostic["file_role"], "authority.json")
+                self.assertEqual(diagnostic["file_role"], "bootstrap-admission.json")
                 self.assertEqual(diagnostic["opened"]["mode"], 0o644)
                 self.assertNotIn("never-retain-this", json.dumps(journal))
                 reply = receiver.handle(canonical(self.wire(receiver, "heartbeat")))
@@ -527,33 +532,37 @@ class ContractTests(unittest.TestCase):
             finally:
                 os.close(receiver.claim)
 
-    def test_replaced_revoked_authority_and_stop_during_retry_never_admitted(self):
+    def test_authority_file_is_audit_only_and_stop_during_read_is_never_admitted(self):
         from emulation import experimental_lab_contract as contract
-        for stop in (False, True):
-            with self.subTest(stop=stop), tempfile.TemporaryDirectory() as root:
-                receiver, _, _, _ = self.receiver(Path(root))
-                try:
-                    receiver.phase = "holding"
-                    path = Path(root) / "authority.json"
-                    grant = dict(policy_sha256=receiver.policy_hash, fence=2,
-                                 expires_at=time.time() + 9, authorized=True)
-                    atomic_write(path, grant)
-                    real = os.open
-                    changed = []
-                    def opening(name, flags, *args, real=real, changed=changed,
-                                path=path, grant=grant, stop=stop, receiver=receiver, **kwargs):
-                        fd = real(name, flags, *args, **kwargs)
-                        if name == "authority.json" and flags & os.O_NONBLOCK and not changed:
-                            changed.append(True)
-                            atomic_write(path, {**grant, "authorized": False})
-                            if stop:
-                                receiver.latch_stop("test-stop", "stop")
-                        return fd
-                    with patch.object(contract.os, "open", side_effect=opening), self.assertRaisesRegex(
-                            ValueError, "authority_changed|current_actor_authority"):
-                        receiver.authority()
-                finally:
-                    os.close(receiver.claim)
+        with tempfile.TemporaryDirectory() as root:
+            receiver, _, _, _ = self.receiver(Path(root))
+            try:
+                receiver.phase = "holding"
+                forged = dict(policy_sha256=receiver.policy_hash, fence=99,
+                              expires_at=time.time() + 9, authorized=True)
+                atomic_write(Path(root) / "authority.json", forged)
+                with self.assertRaisesRegex(ValueError, "current_actor_authority_unavailable"):
+                    receiver.authority()
+                self.grant(receiver)
+                receiver.authority()
+                audit = json.loads((Path(root) / "authority.json").read_bytes())
+                self.assertTrue(audit["audit_only"])
+                atomic_write(Path(root) / "authority.json", {**audit, "authorized": False})
+                receiver.authority()  # the audit copy never revokes or grants
+                real = os.open
+
+                def opening(name, flags, *args, real=real, receiver=receiver, **kwargs):
+                    fd = real(name, flags, *args, **kwargs)
+                    if name == "policy.json" and flags & os.O_NONBLOCK:
+                        receiver.latch_stop("test-stop", "stop")
+                    return fd
+
+                with patch.object(contract.os, "open", side_effect=opening), self.assertRaisesRegex(
+                        ValueError, "authority_changed_during_read"):
+                    receiver.authority()
+            finally:
+                os.close(receiver.claim)
+
     def test_first_stop_cause_survives_secondary_stop_and_bound_heartbeat(self):
         with tempfile.TemporaryDirectory() as root:
             receiver, _, _, _ = self.receiver(Path(root))
@@ -582,13 +591,13 @@ class ContractTests(unittest.TestCase):
             finally:
                 os.close(receiver.claim)
 
-    def receiver(self, directory, receiver_class=Receiver):
+    def receiver(self, directory, receiver_class=Receiver, failpoints=False):
         policy = dict(version=POLICY_VERSION, image_id=IMAGE, source_sha256=SOURCE, model_sha256=MODEL,
             container_id="c" * 64, owner_label="test-owner", seed=9001, scenario="path0",
             expires_at=time.time() + 100, max_duration_seconds=30, heartbeat_seconds=10,
             min_dwell_seconds=0, max_observation_age_seconds=30, min_goodput_mbps=0,
-            max_loss_fraction=1, max_rtt_ms=1000, wrapper_sha256=wrapper_digest(),
-            controller_policy_sha256=None)
+            max_loss_fraction=1, max_probe_loss_fraction=1, min_probe_sent=1, min_traffic_bytes=1,
+            max_rtt_ms=1000, wrapper_sha256=wrapper_digest(), controller_policy_sha256=None)
         atomic_write(directory / "policy.json", policy)
         sha = hashlib.sha256((directory / "policy.json").read_bytes()).hexdigest()
         (directory / "token").write_text("b" * 64)
@@ -598,8 +607,13 @@ class ContractTests(unittest.TestCase):
         runtime.network.command = runtime.original_command
         runtime.experiment.lab.checkController = Mock()
         receiver = receiver_class(directory, directory / "policy.json", sha,
-                            directory / "token", runtime.experiment)
+                            directory / "token", runtime.experiment, failpoints=failpoints)
         return receiver, rules, routes, commands
+
+    def grant(self, receiver, fence=1, seconds=9):
+        """The only lease source (ADR-028): an authenticated in-memory heartbeat."""
+        request = {**self.wire(receiver, "heartbeat", fence), "expires_at": time.time() + seconds}
+        self.assertEqual(receiver.handle(canonical(request))["status"], "ok")
 
     def test_stop_during_bootstrap_admission_read_denies_original_write(self):
         from emulation import experimental_lab_receiver as receiver_module
@@ -769,13 +783,12 @@ class ContractTests(unittest.TestCase):
 
     def test_pause_boundary_stop_ack_is_prompt_and_prevents_original_add(self):
         with tempfile.TemporaryDirectory() as root:
-            receiver, rules, routes, commands = self.receiver(Path(root))
+            receiver, rules, routes, commands = self.receiver(Path(root), failpoints=True)
             receiver.runtime.capture_baseline()
             receiver.phase = "executing"
             receiver.current = Request.parse(canonical({**self.request(), "policy_sha256": receiver.policy_hash}))
             receiver.operation_start = 0
-            atomic_write(Path(root) / "authority.json", {"policy_sha256": receiver.policy_hash,
-                "fence": 2, "expires_at": time.time() + 9, "authorized": True})
+            self.grant(receiver)
             atomic_write(Path(root) / "failpoint.json", {"policy_sha256": receiver.policy_hash,
                 "operation": "execute", "ordinal": 1, "when": "before", "effect": "pause", "timeout_seconds": 2})
             failures = []
@@ -825,8 +838,8 @@ class ContractTests(unittest.TestCase):
                 container_id="c" * 64, owner_label="test-owner", seed=9001, scenario="path0",
                 expires_at=time.time() + 100, max_duration_seconds=30, heartbeat_seconds=10,
                 min_dwell_seconds=0, max_observation_age_seconds=30, min_goodput_mbps=0,
-                max_loss_fraction=1, max_rtt_ms=1000, wrapper_sha256=wrapper_digest(),
-                controller_policy_sha256="d" * 64)
+                max_loss_fraction=1, max_probe_loss_fraction=1, min_probe_sent=1, min_traffic_bytes=1,
+                max_rtt_ms=1000, wrapper_sha256=wrapper_digest(), controller_policy_sha256="d" * 64)
             atomic_write(directory / "policy.json", policy)
             sha = hashlib.sha256((directory / "policy.json").read_bytes()).hexdigest()
             (directory / "token").write_text("b" * 64)

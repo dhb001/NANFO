@@ -269,7 +269,7 @@ def native_restoration(native, baseline):
 
 def verification_metrics(record, policy):
     from app.modules.autonomy.experimental.simulation import FrozenMeasuredFrame
-    from app.modules.autonomy.experimental.verification import measured_metrics
+    from app.modules.autonomy.experimental.metrics import measured_metrics
     raw = record.provenance["frame"]["response"]["data"]
     frame = FrozenMeasuredFrame(network_id=policy.network_id, workspace_id=policy.workspace_id,
         runtime_sha256=canonical(policy.runtime.model_dump(mode="json")), raw=raw, raw_sha256=canonical(raw),
@@ -299,7 +299,7 @@ def raw_performance(frame, policy):
     """Evaluate actual counts against identical gates, not an applied/rejected flag."""
     from datetime import datetime,timedelta
     from app.modules.autonomy.experimental.simulation import FrozenMeasuredFrame
-    from app.modules.autonomy.experimental.verification import measured_metrics
+    from app.modules.autonomy.experimental.metrics import measured_metrics
     response=frame["response"]
     require(response.get("ok") is True,"original_response_invalid")
     raw=response["data"]

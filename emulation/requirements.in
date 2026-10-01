@@ -1,0 +1,8 @@
+# ADR-028 C23 successor lab: maintained OpenFlow controller (os-ken, the OpenStack
+# fork of the unmaintained Ryu) and its complete runtime closure, hash-pinned.
+# Regenerate with uv 0.12.10 from the repository root (never edit requirements.txt):
+#   uv pip compile emulation/requirements.in --generate-hashes --python-version 3.12 \
+#     --python-platform x86_64-manylinux_2_28 --no-header -o emulation/requirements.txt
+#   uv pip compile emulation/requirements-build.in --generate-hashes --python-version 3.12 \
+#     --python-platform x86_64-manylinux_2_28 --no-header -o emulation/requirements-build.txt
+os-ken==4.2.2

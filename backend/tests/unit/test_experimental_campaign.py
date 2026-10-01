@@ -10,6 +10,18 @@ import pytest
 from scripts import audit_experimental_lab as auditor
 from scripts import verify_experimental_lab as runner
 
+# Tracked byte-identical copy of the preserved live frame (ai-engine/qualified, ADR-028).
+QUALIFIED = runner.ROOT / "ai-engine/qualified/adr024-qualified-001"
+SNAPSHOT_SHA256 = "3c35103deee0224fe1d79e95855fbb9c2bd4ffb15d31c03e7f3b3b66c850498f"
+
+
+def preserved_snapshot():
+    """The qualified path0 frame, pinned twice (constant and SHA256SUMS), never the private store."""
+    path = QUALIFIED / "live/path0/snapshot-0.json"
+    sums = dict(reversed(line.split()) for line in (QUALIFIED / "SHA256SUMS").read_text().splitlines())
+    assert runner.digest(path) == sums["live/path0/snapshot-0.json"] == SNAPSHOT_SHA256
+    return runner.read(path)
+
 
 def test_typed_seed_fields_exclude_counts_hashes_domains_not_reservations():
     assert runner.seed_values({"reserved_seed_count": 1342}) == set()
@@ -307,7 +319,7 @@ def test_real_preserved_frame_matches_campaign_capacity_interfaces_and_metric_se
     from app.modules.autonomy.experimental.verification import measured_metrics
     from datetime import datetime
     from uuid import uuid4
-    snapshot = runner.read(runner.MODEL.parent / "live/path0/snapshot-0.json")
+    snapshot = preserved_snapshot()
     raw = snapshot["history"]["frames"][0]["response"]["data"]
     frame = FrozenMeasuredFrame(network_id=snapshot["network_id"], workspace_id=snapshot["workspace_id"],
         runtime_sha256="a" * 64, window_started_at=snapshot["window_started_at"],
@@ -439,7 +451,7 @@ async def test_auditor_replays_full_owner_chain_with_real_configured_simulator(t
     from app.modules.autonomy.schemas import Observation, Proposal, Qualification
     from tests.experimental_lab_support import case
     fixture = case()
-    snapshot = PassiveSnapshot.model_validate(runner.read(runner.MODEL.parent / "live/path0/snapshot-0.json"))
+    snapshot = PassiveSnapshot.model_validate(preserved_snapshot())
     now = snapshot.published_at
     configured = runner.simulation_policy()
     policy = ExperimentalPolicy.model_validate({**fixture.policy.model_dump(mode="json"),
@@ -693,18 +705,56 @@ def test_receiver_original_lab_start_uses_frr_readable_umask_then_restores(monke
         os.umask(prior)
 
 
+def scratch_repository(root):
+    """Throwaway git work tree inside tmp_path; never the project repository."""
+    import subprocess
+    root.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["git", "init", "-q", str(root)], check=True, capture_output=True)
+    return root
+
+
+def track(root, *paths, force=False):
+    import subprocess
+    subprocess.run(["git", "-C", str(root), "add", *(["-f"] if force else []), "--", *paths],
+                   check=True, capture_output=True)
+
+
+def pinned_model(model, monkeypatch):
+    """Minimal preserved-model closure: registry template pins checkpoint/report/plan/lineage/client."""
+    import hashlib
+    model.mkdir(parents=True, exist_ok=True)
+    (model / "source").mkdir(exist_ok=True)
+    contents = {"checkpoint.ptz": b"exact weights", "test-report.json": b'{"report":true}',
+                "plan.json": b'{"image_id":"sha256:' + b"1" * 64 + b'"}',
+                "lineage.json": b'{"tensor_payload_sha256":"' + b"2" * 64 + b'"}',
+                "source/client.py": b"CLIENT = 1\n"}
+    for name, data in contents.items():
+        (model / name).write_bytes(data)
+    pins = {name: hashlib.sha256(data).hexdigest() for name, data in contents.items()}
+    reference = {name: dict(path=name, sha256=pins[name], size_bytes=len(contents[name]))
+                 for name in ("checkpoint.ptz", "test-report.json", "plan.json", "lineage.json")}
+    template = dict(checkpoint=reference["checkpoint.ptz"], report=reference["test-report.json"],
+                    evidence=[reference["plan.json"], reference["lineage.json"]],
+                    source_directory="source", source_sha256={"client.py": pins["source/client.py"]})
+    (model / "live-registry.template.json").write_text(json.dumps(template))
+    monkeypatch.setattr(runner, "CHECKPOINT", pins["checkpoint.ptz"])
+    monkeypatch.setattr(runner, "REPORT", pins["test-report.json"])
+    return {*contents, "live-registry.template.json"}
+
+
 def test_frozen_source_runs_independent_of_workspace_and_rebases_model(tmp_path,monkeypatch):
     import subprocess
     import sys
-    source=tmp_path/"workspace"
+    source=scratch_repository(tmp_path/"workspace")
     for relative in ("backend","emulation","scripts","deploy","ai-engine/artifacts/adr024-qualified-001/model"):
         (source/relative).mkdir(parents=True,exist_ok=True)
     (source/"backend/module.py").write_text("VALUE='frozen'\n")
+    track(source, "backend/module.py")
     (source/"backend/.env").write_text("SECRET=excluded")
     (source/"backend/__pycache__").mkdir()
     (source/"backend/__pycache__/bad.pyc").write_bytes(b"excluded")
     (source/"backend/alias").symlink_to(source/"backend",target_is_directory=True)
-    (source/"ai-engine/artifacts/adr024-qualified-001/model/checkpoint.ptz").write_bytes(b"exact weights")
+    pinned_model(source/"ai-engine/artifacts/adr024-qualified-001/model", monkeypatch)
     monkeypatch.setattr(runner,"ROOT",source)
     monkeypatch.setattr(runner,"MODEL",source/"ai-engine/artifacts/adr024-qualified-001/model")
     monkeypatch.setattr(runner,"ai_interpreter",lambda:runner.Path(sys.executable))
@@ -714,6 +764,7 @@ def test_frozen_source_runs_independent_of_workspace_and_rebases_model(tmp_path,
     (source/"backend/module.py").write_text("VALUE='changed'\n")
     manifest=runner.verify_runtime_snapshot(frozen)
     assert manifest["model_snapshot"]==str(frozen/"ai-engine/artifacts/adr024-qualified-001/model")
+    assert (frozen/"ai-engine/artifacts/adr024-qualified-001/model/checkpoint.ptz").read_bytes()==b"exact weights"
     assert not (frozen/"backend/.env").exists() and not (frozen/"backend/alias").exists()
     out=subprocess.run([sys.executable,"-c","import module; print(module.VALUE)"],cwd=frozen/"backend",
                        env={"PATH":os.environ["PATH"]},capture_output=True,check=True,text=True)
@@ -721,6 +772,75 @@ def test_frozen_source_runs_independent_of_workspace_and_rebases_model(tmp_path,
     (frozen/"backend/module.py").write_text("VALUE='tampered'\n")
     with pytest.raises(ValueError,match="payload_changed"):
         runner.verify_runtime_snapshot(frozen)
+
+
+def test_runtime_snapshot_copies_only_tracked_source_and_the_pinned_model_closure(tmp_path, monkeypatch):
+    """Regression (campaign-014 swept deploy/state/** and private evidence): tracked files only."""
+    import sys
+    source = scratch_repository(tmp_path / "workspace")
+    tracked = ["backend/app/core.py", "backend/pyproject.toml", "emulation/runner.py", "emulation/Dockerfile",
+               "scripts/tool.py", "deploy/manage.py", "deploy/compose.lab.yaml"]
+    for name in tracked:
+        (source / name).parent.mkdir(parents=True, exist_ok=True)
+        (source / name).write_text("# tracked " + name + "\n")
+    (source / ".gitignore").write_text("deploy/state/\nemulation/results/*\nbackend/.env\nnotes.json\n")
+    track(source, ".gitignore", *tracked)
+    private = {
+        "deploy/state/adr023-private-evidence/relocation-nanfo-deploy-verify-x.json": "{}",
+        "deploy/state/secrets/lab_command_key.json": '{"key":"secret"}',
+        "emulation/results/verify-run/results/journal.json": "{}",
+        "backend/.env": "SECRET=1",
+        "backend/app/notes.json": "{}",
+        "ai-engine/artifacts/adr024-qualified-001/live/path0/snapshot-0.json": "{}",
+        "ai-engine/artifacts/adr024-qualified-001/recovery/emulation/matched.py": "PRIVATE = 1\n",
+        "ai-engine/artifacts/adr024-qualified-001/model/ppo-lab-output/evidence.json": "{}",
+        "ai-engine/artifacts/adr024-qualified-001/model/outcome.json": "{}",
+    }
+    for name, text in private.items():
+        (source / name).parent.mkdir(parents=True, exist_ok=True)
+        (source / name).write_text(text)
+    model = source / "ai-engine/artifacts/adr024-qualified-001/model"
+    closure = pinned_model(model, monkeypatch)
+    monkeypatch.setattr(runner, "ROOT", source)
+    monkeypatch.setattr(runner, "MODEL", model)
+    monkeypatch.setattr(runner, "ai_interpreter", lambda: runner.Path(sys.executable))
+    monkeypatch.setattr(runner, "history_roots", lambda: [source])
+    frozen = tmp_path / "frozen"
+    runner.freeze_runtime(frozen)
+    copied = {str(path.relative_to(frozen)) for path in frozen.rglob("*") if path.is_file()} - {"frozen-runtime.json"}
+    expected = set(tracked) | {"ai-engine/artifacts/adr024-qualified-001/model/" + name for name in closure}
+    assert copied == expected
+    manifest = runner.verify_runtime_snapshot(frozen)
+    assert set(manifest["files"]) == expected
+    assert not any(name.startswith(("deploy/state", "emulation/results")) or name.endswith(".env")
+                   for name in copied)
+    assert "tracked" in manifest["source_selection"]
+    # Untracked source (not yet committed) and non-git trees refuse instead of guessing.
+    (source / "backend/app/stray.py").write_text("STRAY = 1\n")
+    with pytest.raises(ValueError, match="snapshot_untracked_source:backend/app/stray.py"):
+        runner.freeze_runtime(tmp_path / "frozen-2")
+    (source / "backend/app/stray.py").unlink()
+    track(source, "backend/app/notes.json", force=True)
+    with pytest.raises(ValueError, match="snapshot_tracked_file_is_ignored:backend/app/notes.json"):
+        runner.freeze_runtime(tmp_path / "frozen-3")
+    monkeypatch.setattr(runner, "ROOT", tmp_path / "no-git")
+    (tmp_path / "no-git").mkdir()
+    with pytest.raises(ValueError, match="snapshot_requires_git_tracked_source"):
+        runner.snapshot_files(tmp_path / "no-git", model)
+    assert not (tmp_path / "frozen-2").exists() and not (tmp_path / "frozen-3").exists()
+
+
+def test_repository_snapshot_selection_never_names_private_or_ignored_paths():
+    """Read-only check on this checkout: tracked candidates exclude deploy/state and ignored files."""
+    import shutil
+    if shutil.which("git") is None or not (runner.ROOT / ".git").exists():
+        pytest.skip("git checkout required")
+    candidates = [path for path in runner.git_paths(runner.ROOT, "--cached") if runner.snapshot_candidate(path)]
+    assert candidates
+    assert not [path for path in candidates if path.parts[:2] == ("deploy", "state")
+                or path.parts[:2] in {("emulation", "output"), ("emulation", "results"), ("emulation", "commands")}]
+    assert not [path for path in runner.git_paths(runner.ROOT, "--cached", "--ignored", "--exclude-standard")
+                if runner.snapshot_candidate(path)]
 
 
 def test_complete_denominator_contains_rejection_outcomes_and_nulls():

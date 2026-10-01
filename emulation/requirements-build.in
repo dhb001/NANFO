@@ -1,0 +1,4 @@
+# Build backend for the sdist-only `ovs` Python binding (installed first, hash-pinned;
+# the lab then installs requirements.txt with --no-build-isolation so no unpinned
+# build dependency is ever fetched). Keep equal to the setuptools pin in requirements.txt.
+setuptools==84.0.0
