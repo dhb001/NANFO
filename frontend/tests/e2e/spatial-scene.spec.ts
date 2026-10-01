@@ -4,6 +4,7 @@ import { expect, test, type Page } from "@playwright/test";
 import type { PutSpatialScene, SpatialSceneSnapshot } from "../../src/shared/types/spatial";
 import { createDefaultSessionState, installSessionMocks, loginFromUi } from "./support/session";
 import { rfFixture, rfFixtureScene } from "../../src/features/digitalTwin/rfFixture.test-data";
+import { expectInspectedNode, inspectNode } from "./support/twin";
 
 const device = "00000000-0000-0000-0000-000000000444";
 const envelope = (data: unknown) => ({ success: true, data, meta: { next_cursor: null }, errors: null });
@@ -63,7 +64,7 @@ test("canonical fixture GET/PUT retains a conflicted draft and selection until e
     await route.fulfill({ json: envelope(server) });
   });
   await openTwin(page);
-  await page.getByLabel("Inspect node").selectOption(device);
+  await inspectNode(page, device);
   await expect(page.getByText(/Position: canonical \(placement-0\)/)).toBeVisible();
   const initial = scene();
   const draftScene = { version: initial.version, coordinate_system: initial.coordinate_system, objects: initial.objects };
@@ -81,7 +82,7 @@ test("canonical fixture GET/PUT retains a conflicted draft and selection until e
   expect(writes).toHaveLength(1);
   await page.getByRole("button", { name: "Save scene replacement" }).click();
   await expect(page.getByText("Saved revision 5.")).toBeVisible();
-  await expect(page.getByLabel("Inspect node")).toHaveValue(device);
+  await expectInspectedNode(page, device);
   await expect(page.getByText(/\(12.00, 0.00, 0.00\) m/)).toBeVisible();
   expect(writes).toEqual([{ expected_revision: 3, scene: draftScene }, { expected_revision: 4, scene: draftScene }]);
   expect(errors).toEqual([]);
@@ -203,26 +204,35 @@ test("bounded 1024-device fixture benchmark and actual instanced canvas picking"
   const box = (await canvas.boundingBox())!;
   // The isolated origin device is at the initial orbit target; labels don't intercept picking.
   await canvas.click({ position: { x: box.width / 2, y: box.height / 2 } });
-  await expect(page.getByLabel("Inspect node")).toHaveValue(device);
-  await expect.poll(() => page.locator("[data-device-label]").count()).toBeLessThanOrEqual(24);
+  await expectInspectedNode(page, device);
+  await expect.poll(() => page.locator(".twin-label--device, .twin-label--alert").count()).toBeLessThanOrEqual(24);
   await canvas.scrollIntoViewIfNeeded();
   const measured = await page.evaluate(async () => {
     const metrics = (window as unknown as { spatialBenchmark: { draws: number; instances: number } }).spatialBenchmark;
     const gl = document.querySelector("canvas")!.getContext("webgl2")!;
     const debug = gl.getExtension("WEBGL_debug_renderer_info");
     const renderer = debug ? gl.getParameter(debug.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER);
+    const canvas = document.querySelector("canvas")!;
     const start = performance.now(); const startDraws = metrics.draws; const startInstances = metrics.instances;
     const deltas: number[] = []; let previous = start;
     await new Promise<void>((resolve) => {
       function sample(now: number) {
         deltas.push(now - previous); previous = now;
+        // The Canvas renders on demand (FE-Twin fix 3): an orbit/zoom interaction is what redraws it.
+        canvas.dispatchEvent(new WheelEvent("wheel", { deltaY: deltas.length % 2 ? 4 : -4, bubbles: true, cancelable: true }));
         if (deltas.length >= 90 || now - start >= 6000) resolve(); else requestAnimationFrame(sample);
       }
       requestAnimationFrame(sample);
     });
+    const interactiveDraws = metrics.draws - startDraws; const interactiveInstances = metrics.instances - startInstances;
+    // Reference only: draws once the interaction stops and damping settles.
+    await new Promise<void>((resolve) => setTimeout(resolve, 1500));
+    const idleStart = metrics.draws;
+    await new Promise<void>((resolve) => { let frames = 0; const tick = () => { if (++frames >= 30) resolve(); else requestAnimationFrame(tick); }; requestAnimationFrame(tick); });
     const sorted = [...deltas].sort((a, b) => a - b);
     return { frames: deltas.length, elapsedMs: previous - start, medianFrameMs: sorted[Math.floor(sorted.length / 2)], p95FrameMs: sorted[Math.floor(sorted.length * 0.95)],
-      instancedDraws: metrics.draws - startDraws, submittedInstances: metrics.instances - startInstances, renderer, userAgent: navigator.userAgent, dpr: devicePixelRatio };
+      instancedDraws: interactiveDraws, submittedInstances: interactiveInstances, idleDrawsOver30Frames: metrics.draws - idleStart,
+      renderer, userAgent: navigator.userAgent, dpr: devicePixelRatio };
   });
   expect(measured.frames).toBeGreaterThan(1);
   expect(measured.instancedDraws).toBeGreaterThan(0);

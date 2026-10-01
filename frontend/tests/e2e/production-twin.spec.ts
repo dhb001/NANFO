@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { createDefaultSessionState, installSessionMocks, loginFromUi } from "./support/session";
+import { inspectNode } from "./support/twin";
 
 test("Twin renders canonical geometry and loads glTF through production-safe public UI", async ({ page }) => {
   const errors: string[] = [];
@@ -27,12 +28,14 @@ test("Twin renders canonical geometry and loads glTF through production-safe pub
   await page.getByRole("button", { name: /Network A/, pressed: true }).click();
   await page.getByRole("link", { name: "Digital Twin", exact: true }).click();
   await expect(page.locator("canvas")).toBeVisible();
-  await expect(page.locator('[data-geometry-label="wall"]')).toContainText("brick");
+  // Scene labels render in one shared layer (FE-Twin fix 3); canonical labels use the geometry variant.
+  const wallLabel = page.locator(".twin-label--geometry", { hasText: "Fixture wall" });
+  await expect(wallLabel).toContainText("brick");
   await page.getByLabel("Canonical floor", { exact: true }).selectOption("floor");
   await page.getByLabel("Clip above floor (m)", { exact: true }).fill("2");
-  await expect(page.locator('[data-geometry-label="wall"]')).toHaveCount(0);
+  await expect(wallLabel).toHaveCount(0);
   await page.getByLabel("Canonical floor", { exact: true }).selectOption("");
-  await page.getByLabel("Inspect node").selectOption(device);
+  await inspectNode(page, device);
   await expect(page.getByText(/Position: canonical \(switch\)/)).toBeVisible();
 
   // Self-contained triangle exercises real GLTFLoader geometry/material creation.

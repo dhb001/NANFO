@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { Link, MemoryRouter, useLocation, useNavigate } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { RouteErrorBoundary } from "./RouteErrorBoundary";
+import { noteServerRequestId, onUiIncident, type UiIncident } from "@/shared/lib/errorReporting";
 
 function BrokenPage({ error = new Error("private internal details") }: { error?: unknown }): never {
   throw error;
@@ -153,5 +154,19 @@ describe("route error recovery", () => {
     expect(screen.getByRole("alert")).toBeInTheDocument();
     expect(reload).not.toHaveBeenCalled();
     expect(request).not.toHaveBeenCalled();
+  });
+
+  it("reports each failure with a quotable reference and the last server request id, never the message (ADR-028)", () => {
+    const incidents: UiIncident[] = [];
+    const stop = onUiIncident((incident) => incidents.push(incident));
+    noteServerRequestId("req-42");
+    render(<MemoryRouter><RouteErrorBoundary><BrokenPage error={new RangeError("token=secret private detail")} /></RouteErrorBoundary></MemoryRouter>);
+    stop();
+    expect(incidents).toHaveLength(1);
+    expect(incidents[0]).toMatchObject({ kind: "render", errorName: "RangeError", lastRequestId: "req-42" });
+    expect(screen.getByText(`Reference: ${incidents[0].incidentId} · last server request req-42`)).toBeInTheDocument();
+    const logged = JSON.stringify(vi.mocked(console.error).mock.calls.filter(([label]) => label === "[nanfo] ui incident"));
+    expect(logged).toContain(incidents[0].incidentId);
+    expect(logged).not.toContain("secret");
   });
 });

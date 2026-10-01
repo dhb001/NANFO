@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { expect, test } from "@playwright/test";
-import { api, apiOrigin, fixture, login, loopback, pathResponse, selectNetwork, session, triangle } from "./support";
+import { api, apiOrigin, fixture, login, loopback, origins, pathResponse, selectNetwork, session, triangle } from "./support";
 
 test.beforeEach(async ({ page }) => {
   page.on("pageerror", (error) => { throw error; });
@@ -143,7 +143,7 @@ test("independent report worker produces a persisted downloadable verified CSV",
   const stream = await download.createReadStream();
   expect(stream).not.toBeNull();
   const chunks: Buffer[] = [];
-  for await (const chunk of stream!) chunks.push(Buffer.from(chunk));
+  for await (const chunk of stream) chunks.push(Buffer.from(chunk));
   const bytes = Buffer.concat(chunks);
   expect(bytes.length).toBeGreaterThan(0);
   expect(bytes).toEqual(await (await response).body());
@@ -185,7 +185,9 @@ test("real socket reconnect, current membership revocation and UI logout deny ol
   });
   let subscribed = 0;
   let denied = 0;
+  const socketOrigins = new Set<string>();
   page.on("websocket", (socket) => {
+    socketOrigins.add(new URL(socket.url()).origin);
     if (new URL(socket.url()).pathname !== "/ws/topology") return;
     socket.on("framereceived", ({ payload }) => {
       const frame = JSON.parse(String(payload));
@@ -196,6 +198,8 @@ test("real socket reconnect, current membership revocation and UI logout deny ol
   await login(page, "member");
   await selectNetwork(page);
   await expect.poll(() => subscribed).toBeGreaterThan(0);
+  // C22: sockets use the same origin as the API (the gateway origin unless overridden), never a baked-in loopback.
+  expect([...socketOrigins]).toEqual([origins.ws]);
   const before = subscribed;
   await page.evaluate(() => (window as unknown as { r09Disconnect: () => void }).r09Disconnect());
   await expect.poll(() => subscribed).toBeGreaterThan(before);

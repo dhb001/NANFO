@@ -10,8 +10,8 @@ export interface LiveAlertItem {
   event_type: string;
   source: string;
   payload: Record<string, unknown>;
-  correlation_id?: string;
-  timestamp?: string;
+  correlation_id?: string | undefined;
+  timestamp?: string | undefined;
 }
 
 export type RealtimeChannel = "topology" | "telemetry" | "alerts" | "digitalTwin";
@@ -25,10 +25,10 @@ type SceneScope = { workspaceId: string; networkId: string };
 
 /** Frames queued by the bridge and applied together in one store update (ADR-028 burst batching). */
 export interface LiveDeltaBatch {
-  topology?: Array<{ delta: TopologyDeltaData; timestamp?: string }>;
+  topology?: Array<{ delta: TopologyDeltaData; timestamp?: string | undefined }>;
   telemetry?: TelemetryDeltaData[];
-  digitalTwin?: Array<{ delta: DigitalTwinDeltaData; timestamp?: string; scope?: SceneScope }>;
-  alerts?: Array<{ delta: AlertDeltaData; context: { correlation_id?: string; timestamp?: string } }>;
+  digitalTwin?: Array<{ delta: DigitalTwinDeltaData; timestamp?: string | undefined; scope?: SceneScope | undefined }>;
+  alerts?: Array<{ delta: AlertDeltaData; context: { correlation_id?: string | undefined; timestamp?: string | undefined } }>;
 }
 
 interface LiveState {
@@ -47,7 +47,7 @@ interface LiveState {
   sceneObjectAvailability: Record<string, "pending" | "stale" | "reconciled">;
   sceneObjectServerRevisions: Record<string, number>;
   sceneReconciliation: { known: number; attempted: number; unavailable: number; omitted: number } | null;
-  reconcileSceneObject: (id: string, expected: DigitalTwinDeltaData["scene_object"], epoch: number, result: { object: DigitalTwinDeltaData["scene_object"]; timestamp: string; revision?: number } | "remove" | "stale") => void;
+  reconcileSceneObject: (id: string, expected: DigitalTwinDeltaData["scene_object"], epoch: number, result: { object: DigitalTwinDeltaData["scene_object"]; timestamp: string; revision?: number | undefined } | "remove" | "stale") => void;
   reconcileTopologySnapshot: (ids: string[], epoch: number, revision: number) => void;
   reset: () => void;
   topologyByDeviceId: Record<string, TopologyDeltaData["node"]>;
@@ -62,10 +62,10 @@ interface LiveState {
   digitalTwinStatus: "connecting" | "open" | "closed";
   /** Apply many queued frames with a single `set` (one render per flush). */
   applyDeltaBatch: (batch: LiveDeltaBatch) => void;
-  applyTopologyDelta: (delta: TopologyDeltaData, timestamp?: string) => void;
+  applyTopologyDelta: (delta: TopologyDeltaData, timestamp?: string  ) => void;
   applyTelemetryDelta: (delta: TelemetryDeltaData) => void;
-  applyDigitalTwinDelta: (delta: DigitalTwinDeltaData, timestamp?: string, scope?: SceneScope) => void;
-  applyAlertDelta: (delta: AlertDeltaData, context: { correlation_id?: string; timestamp?: string }) => void;
+  applyDigitalTwinDelta: (delta: DigitalTwinDeltaData, timestamp?: string  , scope?: SceneScope  ) => void;
+  applyAlertDelta: (delta: AlertDeltaData, context: { correlation_id?: string | undefined; timestamp?: string | undefined }) => void;
   setConnectionStatus: (
     channel: RealtimeChannel,
     status: "connecting" | "open" | "closed",

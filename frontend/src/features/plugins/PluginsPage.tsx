@@ -3,6 +3,7 @@ import { FormEvent, useState } from "react";
 import { useDisablePlugin, useEnablePlugin, useInstallPlugin, usePluginsQuery, useUninstallPlugin } from "@/features/plugins/hooks";
 import { canAccessRoute, hasPermission } from "@/features/auth/permissions";
 import { toErrorMessage } from "@/shared/lib/errors";
+import { pluginStatusTone, statusLabel } from "@/shared/lib/statusTones";
 import { useAuthStore } from "@/shared/state/auth-store";
 import { useWorkspaceStore } from "@/shared/state/workspace-store";
 import { AsyncState } from "@/shared/ui/AsyncState";
@@ -10,6 +11,10 @@ import { Badge } from "@/shared/ui/Badge";
 import { Button } from "@/shared/ui/Button";
 import { Panel } from "@/shared/ui/Panel";
 import { QueryState } from "@/shared/ui/QueryState";
+import type { PluginRecord } from "@/shared/types/plugins";
+
+// Backend list filter values (plugin/service.py _PLUGIN_STATUSES).
+const PLUGIN_REGISTRY_STATUSES: PluginRecord["status"][] = ["installed", "enabled", "disabled", "failed", "uninstalled"];
 
 export function PluginsPage() {
   const generation = useAuthStore((state) => state.generation);
@@ -21,7 +26,7 @@ function Registry() {
   const token = useAuthStore((state) => state.accessToken);
   const allowed = useAuthStore((state) => canAccessRoute(state.profile, "/ops/plugins") && hasPermission(state.profile, "write:config"));
   const [fields, setFields] = useState({ plugin_key: "", name: "", version: "1.0.0", signer: "", signature: "", requires: "", permissions: "read:telemetry" });
-  const [status, setStatus] = useState<"installed" | "enabled" | "disabled" | "failed" | undefined>();
+  const [status, setStatus] = useState<PluginRecord["status"] | undefined>();
   const [search, setSearch] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
@@ -89,7 +94,7 @@ function Registry() {
       action={<div style={{ display: "flex", gap: "0.4rem", flexWrap: "wrap" }}>
         <input aria-label="Filter plugins" placeholder="Search plugins" value={search} onChange={(event) => setSearch(event.target.value)} />
         <select aria-label="Registry status" value={status ?? ""} onChange={(event) => setStatus(event.target.value as typeof status || undefined)}>
-          <option value="">All</option>{["installed", "enabled", "disabled", "failed"].map((value) => <option key={value}>{value}</option>)}
+          <option value="">All</option>{PLUGIN_REGISTRY_STATUSES.map((value) => <option key={value}>{value}</option>)}
         </select>
       </div>}>
       <QueryState query={plugins} hasData={(data) => data.items.length > 0} emptyTitle="No plugins in registry">
@@ -97,7 +102,7 @@ function Registry() {
           {data.items.map((plugin) => <article key={plugin.plugin_id} style={{ border: "1px solid var(--line-soft)", borderRadius: 10, padding: "0.6rem", display: "grid", gap: "0.4rem", overflowWrap: "anywhere" }}>
             <strong>{plugin.name} {plugin.version}</strong>
             <div style={{ display: "flex", gap: "0.3rem", flexWrap: "wrap" }}>
-              <Badge text={`registry ${plugin.status}`} tone={plugin.status === "failed" ? "danger" : "info"} />
+              <Badge text={`registry ${statusLabel(plugin.status)}`} tone={pluginStatusTone(plugin.status)} />
               <Badge text="signature declared_unverified" tone="warn" /><Badge text="dependencies declared_unverified" tone="warn" /><Badge text="permissions declared_unverified" tone="warn" /><Badge text="sandbox not_executed" tone="neutral" />
             </div>
             <span className="mono">{plugin.plugin_key} | queue {plugin.queue_status}</span>

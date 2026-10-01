@@ -14,6 +14,7 @@ import { Button } from "@/shared/ui/Button";
 import { QueryState } from "@/shared/ui/QueryState";
 import { Badge } from "@/shared/ui/Badge";
 import { formatNumber } from "@/shared/lib/format";
+import { simulationQueueStatusTone, simulationRiskGateTone, simulationStateTone, statusLabel } from "@/shared/lib/statusTones";
 import { useLiveStore } from "@/features/realtime/store";
 import { useIsNarrowViewport } from "@/shared/lib/viewport";
 import { AsyncState } from "@/shared/ui/AsyncState";
@@ -280,10 +281,11 @@ function SimulationPageContent() {
             {(detail) => (
               <div style={{ display: "grid", gap: "0.5rem" }}>
                 <div style={{ display: "flex", gap: "0.5rem" }}>
-                  <Badge text={detail.status} tone={detail.status === "completed" ? "ok" : detail.status === "cancelled" ? "danger" : "warn"} />
-                  <Badge text={detail.queue_status} tone={detail.queue_status === "queued" ? "ok" : "warn"} />
-                  <Badge text={detail.risk_gate} tone={detail.risk_gate === "passed" ? "ok" : "warn"} />
+                  <Badge text={statusLabel(detail.status)} tone={simulationStateTone(detail.status)} />
+                  <Badge text={statusLabel(detail.queue_status)} tone={simulationQueueStatusTone(detail.queue_status)} />
+                  <Badge text={statusLabel(detail.risk_gate)} tone={simulationRiskGateTone(detail.risk_gate)} />
                 </div>
+                {detail.status === "failed" ? <AsyncState title="Simulation failed" description={`A failed run cannot authorize execution. Reason: ${typeof detail.validation.failure_reason === "string" ? detail.validation.failure_reason : "not reported"}. Check the scenario and workers, then start a new run.`} /> : null}
                 <div className="mono" style={{ color: "var(--ink-3)", fontSize: "0.75rem" }}>
                   simulation_id: {detail.simulation_id}
                 </div>
@@ -344,7 +346,7 @@ function SimulationPageContent() {
               >
                 <div style={{ display: "flex", justifyContent: "space-between" }}>
                   <strong>{item.id}</strong>
-                  <Badge text={String(item.status ?? item.state ?? "unknown")} tone="info" />
+                  <Badge text={statusLabel(item.state ?? item.status)} tone={simulationStateTone(item.state ?? item.status)} />
                 </div>
                 <div className="mono" style={{ fontSize: "0.74rem", color: "var(--ink-3)" }}>
                   simulation: {String(item.simulation_id ?? "-")}

@@ -16,7 +16,7 @@ const refresh = vi.hoisted(() => vi.fn());
 vi.mock("@/features/auth/session", () => ({ refreshSession: refresh }));
 const download = (value = report, verify = true) => downloadReport(value, value.artifacts[0], new AbortController().signal, verify);
 function response(body: Uint8Array = bytes, headers: Record<string, string> = {}) {
-  return new Response(body as BodyInit, { headers: { "Content-Type": "text/csv", "Content-Length": String(body.length), ETag: `"${hash}"`, ...headers } });
+  return new Response(body as BodyInit, { headers: { "Content-Type": "text/csv", "Content-Length": String(body.length), ETag: `"sha256:${hash}"`, ...headers } });
 }
 
 beforeEach(() => {
@@ -39,7 +39,7 @@ it.each(["length", "hash", "mime", "etag", "empty", "overflow"])("rejects %s mis
   if (kind === "length") fetchMock.mockResolvedValue(response(bytes, { "Content-Length": "1" }));
   if (kind === "hash") fetchMock.mockResolvedValue(response(new Uint8Array(bytes.length)));
   if (kind === "mime") fetchMock.mockResolvedValue(response(bytes, { "Content-Type": "text/html" }));
-  if (kind === "etag") fetchMock.mockResolvedValue(response(bytes, { ETag: '"changed"' }));
+  if (kind === "etag") fetchMock.mockResolvedValue(response(bytes, { ETag: `"sha256:${"0".repeat(64)}"` }));
   if (kind === "empty") fetchMock.mockResolvedValue(response(new Uint8Array(), { "Content-Length": String(bytes.length) }));
   if (kind === "overflow") fetchMock.mockResolvedValue(response(new Uint8Array(bytes.length + 1), { "Content-Length": String(bytes.length) }));
   await expect(download()).rejects.toThrow();
@@ -92,4 +92,35 @@ it("rejects oversized metadata before allocating or fetching bytes", async () =>
 it.each(["../../bad.exe", "C:\\secret\\evil.html", "CON", "\u202eevil.pdf", "\r\nname.csv", ""])("sanitizes server filename %s and enforces the media extension", (value) => {
   expect(safeReportFilename(value, "text/csv")).toMatch(/^[a-zA-Z0-9_-]+\.csv$/);
   expect(safeReportFilename(value, "application/pdf")).toMatch(/^[a-zA-Z0-9_-]+\.pdf$/);
+});
+
+it.each([
+  ["current", () => `"sha256:${hash}"`],
+  ["weak current", () => `W/"sha256:${hash}"`],
+  ["legacy", () => `"${hash}"`],
+  ["weak legacy", () => `W/"${hash}"`],
+  ["upper-case digest", () => `"sha256:${hash.toUpperCase()}"`],
+  ["opaque proxy validator", () => '"a1b2-proxy"'],
+  ["absent", () => null],
+])("accepts a %s ETag and still verifies the body SHA-256 (ADR-028 C5)", async (_name, etag) => {
+  const value = etag();
+  const headers = { "Content-Type": "text/csv", "Content-Length": String(bytes.length), ...(value === null ? {} : { ETag: value }) };
+  fetchMock.mockResolvedValue(new Response(bytes as BodyInit, { headers }));
+  await expect(download()).resolves.toMatchObject({ checksumVerified: true, size: bytes.length });
+});
+
+it.each([
+  ["legacy", `"${"f".repeat(64)}"`],
+  ["weak", `W/"sha256:${"e".repeat(64)}"`],
+])("rejects a mismatching %s digest ETag before reading the body", async (_name, etag) => {
+  fetchMock.mockResolvedValue(response(bytes, { ETag: etag }));
+  await expect(download()).rejects.toThrow("Artifact header mismatch");
+});
+
+it("rejects a tampered body even when an opaque or matching validator is present", async () => {
+  const tampered = new Uint8Array(bytes.length).fill(65);
+  fetchMock.mockResolvedValue(response(tampered, { ETag: `W/"sha256:${hash}"` }));
+  await expect(download()).rejects.toThrow("Artifact checksum mismatch");
+  fetchMock.mockResolvedValue(response(tampered, { ETag: '"opaque"' }));
+  await expect(download()).rejects.toThrow("Artifact checksum mismatch");
 });

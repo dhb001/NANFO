@@ -8,7 +8,7 @@ function secondsUntil(retryAt: number, now: number) {
 }
 
 /** Transient refresh failure: the session is kept and retried; say so instead of logging out. */
-export function useSessionRecoveryText() {
+function useSessionRecoveryText() {
   const recovery = useAuthStore((state) => state.recovery);
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {

@@ -3,8 +3,8 @@ import { hasPermission } from "@/features/auth/permissions";
 import { useGenerateReport, useReportDetail, useReportHistory } from "./hooks";
 import { ReportDownload } from "./ReportDownload";
 import { hasGeneratedArtifact, inferReportErrorMessage, mapQueueTone, mapReportStatusTone } from "./logic";
-import { ApiClientError, toErrorMessage } from "@/shared/lib/errors";
-import { formatTimestamp } from "@/shared/lib/format";
+import { ApiClientError, describeApiError } from "@/shared/lib/errors";
+import { displayValue, formatTimestamp } from "@/shared/lib/format";
 import { randomId } from "@/shared/lib/uid";
 import { useAuthStore } from "@/shared/state/auth-store";
 import { useUiStore } from "@/shared/state/ui-store";
@@ -60,7 +60,7 @@ function ReportWorkspace({ workspaceId, networkId }: { workspaceId: string | nul
       pushToast({ title: result.status === "failed" ? "Report failed: no artifacts generated" : hasGeneratedArtifact(result) ? "Generated artifact available" : "Report request accepted",
         description: `Status ${result.status} | queue ${result.queue_status}`, tone: result.status === "failed" ? "danger" : "info" });
     } catch (cause) {
-      setError(toErrorMessage(cause));
+      setError(describeApiError(cause));
       if (cause instanceof ApiClientError && cause.code === "REPORT_IDEMPOTENCY_CONFLICT") setIdempotencyKey(randomId("report"));
     }
   }
@@ -123,7 +123,7 @@ function ReportWorkspace({ workspaceId, networkId }: { workspaceId: string | nul
           {report.snapshot_summary && Object.entries(report.snapshot_summary).map(([name, raw]) => {
             if (!["telemetry", "alerts", "simulation", "intent"].includes(name) || !raw || typeof raw !== "object") return null;
             const section = raw as Record<string, unknown>;
-            return <p key={name}>{name}: {typeof section.row_count === "number" ? section.row_count : "unavailable"} rows; total {typeof section.total === "number" ? section.total : "unknown"}; {section.truncated === true ? "truncated" : "not truncated"}; time field {String(section.time_field ?? "unavailable")}; omissions: {Array.isArray(section.omissions) ? section.omissions.filter((item) => typeof item === "string").join(", ") || "none" : "unavailable"}</p>;
+            return <p key={name}>{name}: {typeof section.row_count === "number" ? section.row_count : "unavailable"} rows; total {typeof section.total === "number" ? section.total : "unknown"}; {section.truncated === true ? "truncated" : "not truncated"}; time field {displayValue(section.time_field)}; omissions: {Array.isArray(section.omissions) ? section.omissions.filter((item) => typeof item === "string").join(", ") || "none" : "unavailable"}</p>;
           })}
           {inferReportErrorMessage(report) ? <AsyncState title="Report generation failed" description={inferReportErrorMessage(report) ?? undefined} /> : null}
           {!hasGeneratedArtifact(report) ? <AsyncState title={report.status === "requested" ? "Artifacts pending" : "No verified artifacts available"} /> : <>

@@ -1,5 +1,6 @@
 import { apiUrl } from "@/shared/lib/env";
 import { ApiClientError } from "@/shared/lib/errors";
+import { etagSha256 } from "@/shared/lib/etag";
 import { useAuthStore } from "@/shared/state/auth-store";
 import { useWorkspaceStore } from "@/shared/state/workspace-store";
 import { ApiEnvelope } from "@/shared/types/api";
@@ -45,9 +46,10 @@ export async function downloadReport(report: ReportRecord, artifact: ReportArtif
   }
   const type = response.headers.get("Content-Type")?.split(";")[0].trim();
   const length = response.headers.get("Content-Length");
-  const etag = response.headers.get("ETag");
+  // A digest ETag (any accepted form) must name this artifact; opaque validators are ignored.
+  const etagDigest = etagSha256(response.headers.get("ETag"));
   if (type !== artifact.media_type || (length !== null && Number(length) !== artifact.size_bytes)
-      || (etag !== null && etag !== `"${artifact.checksum_sha256}"`)) {
+      || (etagDigest !== null && etagDigest !== artifact.checksum_sha256.toLowerCase())) {
     await response.body?.cancel();
     throw new Error("Artifact header mismatch. Refresh status.");
   }

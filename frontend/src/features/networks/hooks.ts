@@ -92,7 +92,7 @@ export function useCreateDevice(token: string | null, networkId: string | null) 
       const response = await createDevice(credential, networkId, "device_type" in input ? input : {
         hostname: input.hostname,
         device_type: input.deviceType,
-        spatial_ref_id: input.spatialRefId,
+        spatial_ref_id: input.spatialRefId ?? null,
       });
       return response.data;
     },

@@ -9,6 +9,8 @@ import { Panel } from "@/shared/ui/Panel";
 import { QueryState } from "@/shared/ui/QueryState";
 import { Pagination } from "@/shared/ui/Pagination";
 import { Badge } from "@/shared/ui/Badge";
+import { deviceStatusTone, statusLabel } from "@/shared/lib/statusTones";
+import { rememberFocus } from "@/shared/lib/focusRestore";
 import { Button } from "@/shared/ui/Button";
 import { useScopeState } from "@/features/organizations/useScopeState";
 import type { Device, Network } from "@/shared/types/network";
@@ -42,7 +44,7 @@ export function InventoryPanel({ canWrite }: { canWrite: boolean }) {
         }} /></details>
         <QueryState query={networks} hasData={(d) => d.items.length > 0} emptyTitle="No networks" emptyDescription="Create a network in this workspace.">
           {(data) => <div style={{ display: "grid", gap: "0.5rem" }}>{data.items.map((network, index) => <div key={network.network_id}>
-            <button className="network-choice" aria-pressed={network.network_id === networkId} onClick={() => { setSelected(network); selectNetwork(network.network_id); }}>
+            <button className="network-choice" data-focus-key={`network-choice:${network.network_id}`} aria-pressed={network.network_id === networkId} onClick={() => { setSelected(network); rememberFocus(`network-choice:${network.network_id}`); selectNetwork(network.network_id); }}>
               <span className="network-choice-index">{String((page - 1) * 20 + index + 1).padStart(2, "0")}</span>
               <span><strong>{network.name}</strong><small>{network.network_id}</small></span>
               <span aria-hidden="true">{network.network_id === networkId ? "●" : "↗"}</span>
@@ -86,7 +88,7 @@ function DeviceInventory({ canWrite }: { canWrite: boolean }) {
     <details><summary>Add a device</summary><DeviceForm disabled={!networkId || !canWrite} onRefresh={() => devices.refetch()} onSave={async (input) => { setSelected(await create.mutateAsync(input)); }} /></details>
     <QueryState query={devices} hasData={(d) => d.items.length > 0} emptyTitle="No devices" emptyDescription="Add a device to the selected network.">
       {(data) => <div style={{ display: "grid", gap: "0.5rem" }}>{data.items.map((device) => <div className="device-entry" key={device.device_id}>
-        <div style={{ display: "flex", justifyContent: "space-between" }}><strong>{device.hostname}</strong><Badge text={device.status} tone={device.status === "active" ? "ok" : "warn"} /></div>
+        <div style={{ display: "flex", justifyContent: "space-between" }}><strong>{device.hostname}</strong><Badge text={statusLabel(device.status)} tone={deviceStatusTone(device.status)} /></div>
         <div className="device-reference">{device.device_id}</div>
         <div className="device-reference">{device.device_type} · {device.ip_address ?? "IP unknown"} · {device.spatial_ref_id ?? "Location unknown"}</div>
         <Button permission="write:config" tone="ghost" disabled={!canWrite} onClick={() => { setSelected(device); setEditing(device); }}>Edit {device.hostname}</Button>

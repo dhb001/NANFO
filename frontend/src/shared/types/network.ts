@@ -119,7 +119,13 @@ export interface TopologyReconcileResult {
   checked_edges: number;
   missing_workspace_nodes: number;
   workspace_backfilled_nodes: number;
-  warning: string | null;
+  warning?: string | null;
+  /** Inventory-driven projection repair (C13): counts and the outbox sequence it reached. */
+  active_devices?: number;
+  upserted_nodes?: number;
+  tombstoned_nodes?: number;
+  skipped_newer_nodes?: number;
+  watermark_sequence?: number;
 }
 
 export interface CampusBuildingRecord {
@@ -181,7 +187,8 @@ export interface AssetRegistration {
 
 export interface CampusModelAssetRecord {
   registration?: AssetRegistration | null;
-  storage_backend?: "inline" | "local_cas";
+  /** Backend-defined storage label (for example "inline" or "local_cas"); informational only. */
+  storage_backend?: string;
   download_path?: string | null;
   campus_model_asset_id: string;
   network_id: string;

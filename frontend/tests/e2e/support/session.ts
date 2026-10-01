@@ -3,6 +3,7 @@ import { reportBytes, reportHash } from "./report-bytes";
 import "./runtime-errors";
 import type { SimulationHistory } from "../../../src/shared/types/simulation";
 import type { IntentHistory } from "../../../src/shared/types/intent";
+import type { Schema } from "./contracts";
 
 export interface MockNetwork {
   network_id: string;
@@ -44,18 +45,23 @@ export interface MockAlertRecord {
 }
 
 export interface MockPluginRecord {
+  registry_only: true;
+  execution_supported: false;
+  lifecycle_semantics: "registry_flags_only";
+  permissions_status: "declared_unverified";
+  uninstalled_at?: string | null;
   plugin_id: string;
   plugin_key: string;
   name: string;
   version: string;
   manifest: Record<string, unknown>;
-  signature_status: string;
-  dependency_status: string;
-  sandbox_status: string;
-  status: "installed" | "enabled" | "disabled" | "failed";
+  signature_status: "declared_unverified";
+  dependency_status: "declared_unverified";
+  sandbox_status: "not_executed";
+  status: "installed" | "enabled" | "disabled" | "failed" | "uninstalled";
   enabled: boolean;
   failure_reason: string | null;
-  queue_status: "queued" | "replayed" | "deferred";
+  queue_status: "queued" | "replayed" | "deferred" | "not_applicable";
   stream_entry_id: string | null;
   warning: string | null;
   installed_at: string;
@@ -73,9 +79,9 @@ export interface MockReportArtifactRef {
 }
 
 export interface MockReportRecord {
-  artifact_version?: number;
-  status_version?: number;
-  snapshot_sha256?: string;
+  artifact_version: number;
+  status_version: number;
+  snapshot_sha256?: string | null;
   snapshot_summary?: Record<string, unknown>;
   report_id: string;
   workspace_id: string;
@@ -555,6 +561,7 @@ export async function installSessionMocks(page: Page, state: SessionMockState): 
               name: "Org A",
               slug: "org-a",
               created_at: "2026-08-13T09:00:00Z",
+              caller_role: "Admin",
             },
           ],
           total: 1,
@@ -563,6 +570,13 @@ export async function installSessionMocks(page: Page, state: SessionMockState): 
         errors: null,
       }),
     });
+  });
+
+  // C6: the caller's own role comes from GET /organizations/{id} (no member crawl).
+  await page.route(`**/api/v1/organizations/${state.orgId}`, async (route) => {
+    if (route.request().method() !== "GET") return route.fallback();
+    const organization: Schema<"OrgResponse"> = { org_id: state.orgId, name: "Org A", slug: "org-a", created_at: "2026-08-13T09:00:00Z", caller_role: "Admin" };
+    await route.fulfill({ json: { success: true, data: organization, meta: { request_id: "req-org", timestamp: "2026-08-13T10:00:02Z" }, errors: null } });
   });
 
   await page.route(`**/api/v1/organizations/${state.orgId}/workspaces?page=1&page_size=20`, async (route) => {
@@ -1063,6 +1077,10 @@ export async function installSessionMocks(page: Page, state: SessionMockState): 
           sandbox: manifest.sandbox,
           metadata: manifest.metadata,
         },
+        registry_only: true,
+        execution_supported: false,
+        lifecycle_semantics: "registry_flags_only",
+        permissions_status: "declared_unverified",
         signature_status: "declared_unverified",
         dependency_status: "declared_unverified",
         sandbox_status: "not_executed",
@@ -1123,7 +1141,7 @@ export async function installSessionMocks(page: Page, state: SessionMockState): 
       }
 
       const manifest = typeof target.manifest === "object" && target.manifest !== null
-        ? target.manifest as Record<string, unknown>
+        ? target.manifest
         : {};
 
       const signatureFailure = validatePluginSignature(
@@ -1151,15 +1169,8 @@ export async function installSessionMocks(page: Page, state: SessionMockState): 
         target.stream_entry_id = `plugin-${Date.now()}`;
         target.warning = null;
         target.updated_at = now;
-        if (signatureFailure) {
-          target.signature_status = "invalid";
-        }
-        if (dependencyFailure) {
-          target.dependency_status = "incompatible";
-        }
-        if (sandboxFailure) {
-          target.sandbox_status = "blocked";
-        }
+        // The backend never verifies declarations: signature/dependency/sandbox statuses stay
+        // declared_unverified/not_executed; a failure is status "failed" + failure_reason.
 
         await route.fulfill({
           status: failure.status,
@@ -1280,7 +1291,7 @@ export async function installSessionMocks(page: Page, state: SessionMockState): 
         await route.fulfill({ status: 409, json: { success: false, data: null, meta: {}, errors: { code: "REPORT_ARTIFACT_UNAVAILABLE", message: "No verified generated artifact." } } });
       } else {
         const bytes = reportBytes(record.format);
-        await route.fulfill({ body: bytes, headers: { "Content-Type": record.format === "pdf" ? "application/pdf" : "text/csv", "Content-Length": String(bytes.length), ETag: `"${reportHash(bytes)}"`, "Content-Disposition": `attachment; filename="fixture-report.${record.format}"` } });
+        await route.fulfill({ body: bytes, headers: { "Content-Type": record.format === "pdf" ? "application/pdf" : "text/csv", "Content-Length": String(bytes.length), ETag: `"sha256:${reportHash(bytes)}"`, "Content-Disposition": `attachment; filename="fixture-report.${record.format}"` } });
       }
       return;
     }
@@ -1424,6 +1435,8 @@ export async function installSessionMocks(page: Page, state: SessionMockState): 
           report_type: payload.report_type,
           format: payload.format,
           status: queuedStatus,
+          artifact_version: 0,
+          status_version: 0,
           date_range: payload.date_range,
           scope: payload.scope,
           filters: payload.filters,

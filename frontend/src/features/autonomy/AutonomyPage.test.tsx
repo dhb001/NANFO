@@ -12,6 +12,9 @@ import { operatorProfile } from "@/test/profile";
 import { ApiClientError } from "@/shared/lib/errors";
 import { getModelDiagnostics, diagnoseModel } from "./modelApi";
 import { modelFixture, modelRecordFixture } from "./operatorFixtures";
+import type { AutonomyStatus, AutonomyUpdateResult } from "./types";
+
+const applied = (status: AutonomyStatus): AutonomyUpdateResult => ({ status, pendingApproval: false, pendingApprovalExpiresAt: null });
 
 vi.mock("./api", () => ({ getAutonomy: vi.fn(), stopAutonomy: vi.fn(), updateAutonomy: vi.fn() }));
 vi.mock("./modelApi", () => ({ getModelDiagnostics: vi.fn(), diagnoseModel: vi.fn() }));
@@ -37,7 +40,7 @@ describe("governed autonomy operator page", () => {
     useWorkspaceStore.setState({ organizationId: "org", workspaceId: initial.workspace_id, networkId: initial.network_id });
     read.mockResolvedValue(initial);
     stop.mockResolvedValue(autonomyFixture({ emergency_stopped: true, cancellation_status: "requested" }));
-    update.mockResolvedValue(initial);
+    update.mockResolvedValue(applied(initial));
   });
   afterEach(() => { client.clear(); focusManager.setFocused(undefined); vi.useRealTimers(); });
 
@@ -79,7 +82,7 @@ describe("governed autonomy operator page", () => {
 
   it("keeps mode authoritative during recommendation save and after autonomous rejection", async () => {
     read.mockResolvedValue(ready());
-    let resolveUpdate!: (value: typeof initial) => void;
+    let resolveUpdate!: (value: AutonomyUpdateResult) => void;
     update.mockImplementationOnce(() => new Promise((resolve) => { resolveUpdate = resolve; }));
     mount();
     await loaded();
@@ -89,7 +92,7 @@ describe("governed autonomy operator page", () => {
     expect(update).toHaveBeenCalledWith("token", initial.workspace_id, {
       network_id: initial.network_id, expected_revision: initial.revision, mode: "recommend", checkpoint_sha256: null, approval_expires_at: null,
     });
-    await act(async () => resolveUpdate(ready()));
+    await act(async () => resolveUpdate(applied(ready())));
     await loaded();
     await userEvent.selectOptions(screen.getByLabelText("Requested mode"), "autonomous");
     fireEvent.change(screen.getByLabelText("Checkpoint SHA-256"), { target: { value: "a".repeat(64) } });
@@ -157,7 +160,7 @@ describe("governed autonomy operator page", () => {
   });
 
   it("allows emergency stop during a pending mode update and suppresses its late success notice", async () => {
-    let resolveUpdate!: (value: typeof initial) => void;
+    let resolveUpdate!: (value: AutonomyUpdateResult) => void;
     update.mockImplementationOnce(() => new Promise((resolve) => { resolveUpdate = resolve; }));
     mount();
     await loaded();
@@ -167,7 +170,7 @@ describe("governed autonomy operator page", () => {
     stop.mockResolvedValue(stopped);
     read.mockResolvedValue(stopped);
     await userEvent.click(screen.getByRole("button", { name: "Emergency stop" }));
-    await act(async () => resolveUpdate(initial));
+    await act(async () => resolveUpdate(applied(initial)));
     expect(screen.queryByText(/Configuration response received/)).not.toBeInTheDocument();
     expect(screen.getByText(/Backend confirmed the emergency latch/)).toBeInTheDocument();
     expect(screen.getByText(/Last reported latch/)).not.toHaveTextContent("not latched");
@@ -196,7 +199,7 @@ describe("governed autonomy operator page", () => {
     expect(screen.getByText(/No automatic retry or reapproval/)).toBeInTheDocument();
     expect(update).toHaveBeenCalledTimes(1);
     const changed = autonomyFixture({ revision: 9, mode: "recommend" });
-    update.mockResolvedValue(changed);
+    update.mockResolvedValue(applied(changed));
     read.mockResolvedValue(changed);
     await userEvent.click(screen.getByRole("button", { name: "Apply configuration" }));
     await loaded();
@@ -274,4 +277,66 @@ describe("governed autonomy operator page", () => {
     expect(screen.queryByText(/Recorded diagnostic 10000000/)).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Status and decisions" })).toHaveAttribute("aria-pressed", "true");
   });
+
+  describe("ADR-028 C17/C25 governance", () => {
+    it("says a first autonomous request is pending a second approver instead of claiming the mode changed", async () => {
+      const pending = { requested_by_user_id: operatorProfile.user_id, mode: "autonomous" as const, expected_revision: 0, checkpoint_sha256: "a".repeat(64),
+        approval_expires_at: null, requested_at: "2026-09-09T12:00:00Z", expires_at: "2026-09-09T13:00:00Z" };
+      useAuthStore.setState({ userId: operatorProfile.user_id });
+      read.mockResolvedValue(ready());
+      update.mockResolvedValueOnce({ status: { ...ready(), pending_approval: pending }, pendingApproval: true, pendingApprovalExpiresAt: "2026-09-09T13:00:00Z" });
+      mount();
+      await loaded();
+      await userEvent.selectOptions(screen.getByLabelText("Requested mode"), "autonomous");
+      await userEvent.type(screen.getByLabelText("Checkpoint SHA-256"), "a".repeat(64));
+      fireEvent.change(screen.getByLabelText("Approval expiry (local time)"), { target: { value: toLocalInput(Date.now() + 30 * 60_000) } });
+      await userEvent.click(screen.getByRole("button", { name: "Apply configuration" }));
+      expect(await screen.findByText(/Recorded as a pending autonomous request \(two-person rule\)\. The mode is unchanged/)).toBeInTheDocument();
+      expect(screen.getByTestId("autonomy-mode")).toHaveTextContent("monitor");
+      read.mockResolvedValue({ ...ready(), pending_approval: pending });
+      await userEvent.click(screen.getByRole("button", { name: "Refresh status" }));
+      expect(await screen.findByText(/autonomous requested by you \(a different user must confirm\) at revision 0/)).toBeInTheDocument();
+    });
+
+    it.each([
+      ["AUTONOMY_DISTINCT_APPROVER_REQUIRED", 409, /a different authorized user must confirm the identical request/],
+      ["AUTONOMY_STOP_CLEAR_REQUIRES_ADMIN", 403, /Only an organization Admin can clear the emergency stop/],
+    ] as const)("explains %s", async (code, status, text) => {
+      update.mockRejectedValueOnce(new ApiClientError("refused", code, status));
+      mount();
+      await loaded();
+      await userEvent.click(screen.getByRole("button", { name: "Apply configuration" }));
+      expect(await screen.findByText(text)).toBeInTheDocument();
+    });
+
+    it("tells the operator to press stop again when the latch stays busy", async () => {
+      stop.mockRejectedValueOnce(new ApiClientError("busy", "AUTONOMY_STOP_BUSY", 503, { retryAfterMs: 1000 }));
+      mount();
+      await loaded();
+      await userEvent.click(screen.getByRole("button", { name: "Emergency stop" }));
+      expect(await screen.findByText(/latch stayed busy after automatic retries\. Press Emergency stop again now/)).toBeInTheDocument();
+    });
+
+    it("shows uncalibrated confidence honestly and calibrated confidence with its calibration", async () => {
+      read.mockResolvedValue(autonomyFixture({ decisions: [
+        decisionFixture({ decision_id: "00000000-0000-0000-0000-000000000556", confidence: { value: 0.8123, method: "policy_action_probability", calibrated: false, calibration_id: null }, repeat_count: 4, last_seen_at: "2026-09-09T12:05:00Z" }),
+        decisionFixture({ decision_id: "00000000-0000-0000-0000-000000000557", confidence: { value: 0.97, method: "isotonic_v1", calibrated: true, calibration_id: "cal-2026-09" } }),
+        decisionFixture({ decision_id: "00000000-0000-0000-0000-000000000558" }),
+      ] }));
+      mount();
+      await loaded();
+      expect(screen.getByText(/Confidence 0\.812 \(policy_action_probability\), UNCALIBRATED: a raw model output that cannot authorize autonomous dispatch/)).toBeInTheDocument();
+      expect(screen.getAllByText("uncalibrated").some((element) => element.classList.contains("badge--warn"))).toBe(true);
+      expect(screen.getAllByText("calibrated").some((element) => element.classList.contains("badge--info"))).toBe(true);
+      expect(screen.getByText(/Confidence 0\.970 \(isotonic_v1\), calibrated by cal-2026-09/)).toBeInTheDocument();
+      expect(screen.getByText(/Confidence not reported/)).toBeInTheDocument();
+      expect(screen.getByText(/Stands for 4 identical no-change cycles/)).toBeInTheDocument();
+    });
+  });
 });
+
+function toLocalInput(epochMs: number) {
+  const date = new Date(epochMs);
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}

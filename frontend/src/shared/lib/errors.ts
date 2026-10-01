@@ -14,7 +14,7 @@ export interface ApiClientErrorExtra {
 
 export class ApiClientError extends Error {
   public readonly code: string;
-  public readonly status?: number;
+  public readonly status: number | undefined;
   public readonly requestId: string | null;
   public readonly details: ApiErrorDetail[];
   public readonly retryAfterMs: number | null;
@@ -53,6 +53,7 @@ export function describeApiError(error: unknown): string {
   if (!(error instanceof ApiClientError)) return toErrorMessage(error);
   const parts = [error.message];
   if (error.status === 413) parts.push("Reduce the size of the submitted content and try again.");
+  if (error.status === 507) parts.push("The storage quota is exhausted. Remove unused items or ask an administrator to raise the quota; retrying will not help.");
   if (error.status === 503 || error.status === 429) {
     parts.push(error.retryAfterMs !== null ? `Retry in about ${Math.max(1, Math.ceil(error.retryAfterMs / 1000))} s.` : "Retry shortly.");
   }

@@ -29,11 +29,14 @@ export function modelFixture(): ModelDiagnostics {
 
 export function configurationFixture(): Configuration {
   return { network_id: scope.network_id, workspace_id: scope.workspace_id, revision: 1, control_revision: 0,
-    operational: { max_observation_age_seconds: 30, decision_interval_seconds: 10, min_route_hold_seconds: 3, max_changes_per_minute: 10 },
+    operational: { max_observation_age_seconds: 30, decision_interval_seconds: 10, min_route_hold_seconds: 3, max_changes_per_minute: 10,
+      min_confidence: 0.95, allow_uncalibrated_confidence: false },
     requested_training: { reward_weights: { goodput: 1 } }, effective_training: null, training_status: "retraining_required",
     effective_training_status: "model_owned_unavailable", safety_merge: "stricter_than_calibrated_policy", history_limit: 100,
+    allow_uncalibrated_confidence_honoured: false,
     history: [{ revision: 1, actor_id: "operator", reason: "Initial requested settings", content_sha256: "a".repeat(64), created_at: "2026-09-10T12:00:00Z",
-      operational: { max_observation_age_seconds: 30, decision_interval_seconds: 10, min_route_hold_seconds: 3, max_changes_per_minute: 10 }, training: { reward_weights: { goodput: 1 } } }] };
+      operational: { max_observation_age_seconds: 30, decision_interval_seconds: 10, min_route_hold_seconds: 3, max_changes_per_minute: 10,
+        min_confidence: 0.95, allow_uncalibrated_confidence: false }, training: { reward_weights: { goodput: 1 } } }] };
 }
 export function overrideFixture(patch: Partial<TimedOverride> = {}): TimedOverride {
   return { override_id: "20000000-0000-4000-8000-000000000001", network_id: scope.network_id, workspace_id: scope.workspace_id,

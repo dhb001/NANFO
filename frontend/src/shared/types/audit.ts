@@ -2,13 +2,13 @@
 export type AuditScope = "org" | "platform";
 
 export interface AuditLogParams {
-  scope?: AuditScope;
-  actorId?: string;
-  orgId?: string;
-  resourceType?: string;
-  search?: string;
-  page?: number;
-  pageSize?: number;
+  scope?: AuditScope | undefined;
+  actorId?: string | undefined;
+  orgId?: string | undefined;
+  resourceType?: string | undefined;
+  search?: string | undefined;
+  page?: number | undefined;
+  pageSize?: number | undefined;
 }
 
 export interface AuditLogEntry {

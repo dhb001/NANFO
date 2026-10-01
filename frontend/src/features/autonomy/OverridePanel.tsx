@@ -27,13 +27,13 @@ export function OverridePanel({ now, control, controlFresh, stopPending, refresh
   const [notice, setNotice] = useState<string | null>(null);
   const busy = useRef(false);
   const query = useQuery({ queryKey: ["autonomy-operator", ...session.identity, "overrides"],
-    queryFn: ({ signal }) => { session.assertCurrent(); return getOverrides(session.token!, session.networkId!, session.workspaceId!, signal); },
+    queryFn: ({ signal }) => { session.assertCurrent(); return getOverrides(session.token, session.networkId!, session.workspaceId!, signal); },
     enabled: session.enabled, retry: false, gcTime: 0, refetchIntervalInBackground: false,
     refetchInterval: (q) => q.state.error instanceof ApiClientError && [401, 403].includes(q.state.error.status ?? 0) ? false : AUTONOMY_POLL_MS });
   const detail = useQuery({ queryKey: ["autonomy-operator", ...session.identity, "override-intent", selected],
     queryFn: async ({ signal }) => {
       session.assertCurrent();
-      const { data } = await getIntentDetail(session.token!, selected!.intent, session.workspaceId!, signal);
+      const { data } = await getIntentDetail(session.token, selected!.intent, session.workspaceId!, signal);
       if (data.network_id !== session.networkId || data.workspace_id !== session.workspaceId || data.intent_id !== selected?.intent ||
           !uuid(data.execution_provenance.execution_id) || data.execution_provenance.execution_id !== selected.execution) throw new Error("Selected intent/execution does not match this network.");
       return data;
@@ -54,11 +54,11 @@ export function OverridePanel({ now, control, controlFresh, stopPending, refresh
     session.assertCurrent(true);
     if (request.action === "enroll") {
       if (!fresh || stopped || unresolved || !selectedVerified || !selected || (returnMode === "autonomous" && !autonomousApproval)) throw new Error("Fresh verified selection, control revision and approval gates are required.");
-      return createOverride(session.token!, session.workspaceId!, { network_id: session.networkId!, intent_id: selected.intent,
-        execution_id: selected.execution, expected_revision: control!.revision, reason: reason.trim(), duration_seconds: duration, return_mode: returnMode });
+      return createOverride(session.token, session.workspaceId!, { network_id: session.networkId!, intent_id: selected.intent,
+        execution_id: selected.execution, expected_revision: control.revision, reason: reason.trim(), duration_seconds: duration, return_mode: returnMode });
     }
     if (request.action === "return" && (!fresh || stopped || !request.row.restored_at || !["restored", "return_blocked"].includes(request.row.status))) throw new Error("STOP or unresolved restoration blocks return. Refresh status.");
-    return actOnOverride(session.token!, session.networkId!, session.workspaceId!, request.row.override_id, request.action,
+    return actOnOverride(session.token, session.networkId!, session.workspaceId!, request.row.override_id, request.action,
       request.action === "return" ? { expected_revision: control!.revision, reason: returnReason.trim() } : undefined);
   }, retry: false, onSettled: session.reconcile });
   async function request(input: Parameters<typeof mutation.mutateAsync>[0], event?: FormEvent) {

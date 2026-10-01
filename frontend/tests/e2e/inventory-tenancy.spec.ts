@@ -130,6 +130,12 @@ async function tenancyFixture(page: Page, orgRole = "Admin", memberCount = 21) {
     const req = route.request(); const url = new URL(req.url()); const parts = url.pathname.split("/");
     const isWorkspace = parts[5] === "workspaces"; const isMember = parts[5] === "members";
     const items: any[] = isWorkspace ? workspaces : isMember ? members : orgs;
+    if (req.method() === "GET" && !isWorkspace && !isMember && parts[4]) {
+      // C6: GET /organizations/{id} carries the caller's own role.
+      const org = orgs.find((item) => item.org_id === parts[4]);
+      if (!org) return route.fulfill({ status: 404, json: { success: false, data: null, meta: {}, errors: { code: "ORGANIZATION_NOT_FOUND", message: "Organization not found" } } });
+      return send(route, { ...org, caller_role: org.org_id === state.orgId ? orgRole : "Read-Only" });
+    }
     if (req.method() === "GET") {
       const p = Number(url.searchParams.get("page") ?? 1); const size = Number(url.searchParams.get("page_size") ?? 20);
       return send(route, { items: items.slice((p - 1) * size, p * size), total: items.length });

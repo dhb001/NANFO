@@ -4,13 +4,14 @@ import {
   installSessionMocks,
   loginFromUi,
 } from "./support/session";
+import { inspectNode } from "./support/twin";
 
 test.describe("VS5 digital twin realtime resilience", () => {
   test("renders topology scene, congestion legend, and configure handoff", async ({ page }) => {
     const state = createDefaultSessionState();
     await installSessionMocks(page, state);
 
-    await page.route("**/api/v1/topology/graph?network_id=00000000-0000-0000-0000-000000000333&limit=200", async (route) => {
+    await page.route("**/api/v1/topology/graph?network_id=00000000-0000-0000-0000-000000000333&limit=500", async (route) => {
       await route.fulfill({
         status: 200,
         contentType: "application/json",
@@ -78,9 +79,10 @@ test.describe("VS5 digital twin realtime resilience", () => {
     await expect(page.getByText(/topology\s+(open|connecting|closed)/i)).toBeVisible();
     await expect(page.getByText(/digital twin\s+(open|connecting|closed)/i)).toBeVisible();
     await expect(page.getByText("Congestion legend")).toBeVisible();
-    await expect(page.getByText(/priority loss>latency>util>cpu/i)).toBeVisible();
+    // The invented congestion policy is gone (FE-Twin fix 2): backend alerts are authoritative.
+    await expect(page.getByText("Authoritative severity: backend alerts.", { exact: false })).toBeVisible();
 
-    await page.getByLabel("Inspect node").selectOption("00000000-0000-0000-0000-000000000444");
+    await inspectNode(page, "00000000-0000-0000-0000-000000000444");
     await page.getByRole("button", { name: "Configure in Intent Workflow" }).click();
     await expect(page).toHaveURL(/\/ops\/intent(\?.*)?$/);
   });
@@ -93,7 +95,7 @@ test.describe("VS5 digital twin realtime resilience", () => {
       "00000000-0000-0000-0000-000000000444": null,
     };
 
-    await page.route("**/api/v1/topology/graph?network_id=00000000-0000-0000-0000-000000000333&limit=200", async (route) => {
+    await page.route("**/api/v1/topology/graph?network_id=00000000-0000-0000-0000-000000000333&limit=500", async (route) => {
       const persistedSpatialRef = persistedSpatialRefByDeviceId["00000000-0000-0000-0000-000000000444"];
       await route.fulfill({
         status: 200,
@@ -209,7 +211,7 @@ test.describe("VS5 digital twin realtime resilience", () => {
     await expect(page.getByText("unmatched 1", { exact: true })).toBeVisible();
     await expect(page.getByText("duplicates 1", { exact: true })).toBeVisible();
 
-    await page.getByLabel("Inspect node").selectOption("00000000-0000-0000-0000-000000000444");
+    await inspectNode(page, "00000000-0000-0000-0000-000000000444");
     await expect(page.getByRole("button", { name: "Persist Mapping to Device" })).toBeVisible();
     await page.getByRole("button", { name: "Persist Mapping to Device" }).click();
     await expect(page.getByRole("button", { name: "Persist Mapping to Device" })).toBeDisabled();
@@ -219,7 +221,7 @@ test.describe("VS5 digital twin realtime resilience", () => {
     const state = createDefaultSessionState();
     await installSessionMocks(page, state);
 
-    await page.route("**/api/v1/topology/graph?network_id=00000000-0000-0000-0000-000000000333&limit=200", async (route) => {
+    await page.route("**/api/v1/topology/graph?network_id=00000000-0000-0000-0000-000000000333&limit=500", async (route) => {
       await route.fulfill({
         status: 200,
         contentType: "application/json",

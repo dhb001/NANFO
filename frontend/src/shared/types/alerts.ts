@@ -1,12 +1,12 @@
 export interface AlertListParams {
-  status?: "active" | "acknowledged" | "resolved";
-  severity?: string;
-  source?: string;
-  correlationId?: string;
-  search?: string;
-  limit?: number;
-  workspaceId?: string;
-  networkId?: string;
+  status?: "active" | "acknowledged" | "resolved" | undefined;
+  severity?: string | undefined;
+  source?: string | undefined;
+  correlationId?: string | undefined;
+  search?: string | undefined;
+  limit?: number | undefined;
+  workspaceId?: string | undefined;
+  networkId?: string | undefined;
 }
 
 export interface AlertRecord {

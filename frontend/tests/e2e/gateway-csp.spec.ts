@@ -1,10 +1,22 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { expect, test } from "@playwright/test";
 import { createDefaultSessionState, installSessionMocks, loginFromUi } from "./support/session";
 
-const nginx = readFileSync(new URL("../../../deploy/nginx.conf", import.meta.url), "utf8");
-const policy = nginx.match(/add_header Content-Security-Policy "([^"]+)" always;/)?.[1];
+// The gateway keeps its security headers in an include shared by every location
+// (deploy/nginx-security-headers.conf); older layouts inline them in nginx.conf.
+const gatewayFiles = ["../../../deploy/nginx-security-headers.conf", "../../../deploy/nginx.conf"]
+  .map((file) => new URL(file, import.meta.url)).filter((file) => existsSync(file));
+const policy = gatewayFiles.map((file) => readFileSync(file, "utf8").match(/add_header Content-Security-Policy "([^"]+)" always;/)?.[1])
+  .find((value) => value !== undefined);
 if (!policy) throw new Error("Gateway CSP missing");
+
+test("gateway CSP serves fonts, scripts and connections from the same origin only (ADR-028 item 12)", () => {
+  const directives = Object.fromEntries(policy.split(";").map((part) => part.trim().split(/\s+/)).filter((part) => part[0]).map(([name, ...values]) => [name, values]));
+  expect(directives["font-src"]).toEqual(["'self'"]);
+  expect(directives["script-src"]).toEqual(["'self'"]);
+  expect(directives["connect-src"]).toContain("'self'");
+  expect(policy).not.toMatch(/fonts\.(googleapis|gstatic)\.com/);
+});
 
 test("gateway CSP permits React login, Twin, inline styles and blob resources", async ({ page }) => {
   await page.route("**/*", async (route) => {

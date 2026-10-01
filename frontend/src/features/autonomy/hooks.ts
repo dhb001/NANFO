@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getAutonomy, stopAutonomy, updateAutonomy } from "./api";
-import type { AutonomyStatus, AutonomyUpdate } from "./types";
+import type { AutonomyStatus, AutonomyUpdate, AutonomyUpdateResult } from "./types";
 import { ApiClientError } from "@/shared/lib/errors";
 import { useAuthStore } from "@/shared/state/auth-store";
 import { useWorkspaceStore } from "@/shared/state/workspace-store";
@@ -69,13 +69,14 @@ export function useAutonomy() {
       current && current.revision > result.revision ? current : result);
   };
   const update = useMutation({
-    mutationFn: (input: AutonomyUpdate) => {
+    mutationFn: (input: AutonomyUpdate): Promise<AutonomyUpdateResult> => {
       assertCurrent();
       if (input.network_id !== networkId) throw new Error("Selected network changed.");
       return session.request((credential) => updateAutonomy(credential, workspaceId!, input));
     },
     retry: false,
-    onSuccess: confirm,
+    // A 202 pending approval returns the unchanged control (with pending_approval): confirm it as well.
+    onSuccess: (result) => confirm(result.status),
     onSettled: reconcile,
   });
   const stop = useMutation({

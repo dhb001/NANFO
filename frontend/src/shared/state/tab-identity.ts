@@ -115,7 +115,7 @@ export function createTabIdentity({ storage, openChannel, probeWindowMs = TAB_PR
 }
 
 function browserChannel(name: string): ChannelLike | null {
-  return typeof BroadcastChannel === "function" ? new BroadcastChannel(name) as unknown as ChannelLike : null;
+  return typeof BroadcastChannel === "function" ? new BroadcastChannel(name) : null;
 }
 
 function browserStorage(): StorageLike | null {

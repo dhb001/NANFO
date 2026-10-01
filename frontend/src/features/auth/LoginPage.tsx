@@ -56,7 +56,7 @@ export function LoginPage() {
         });
         return;
       }
-      navigate("/ops/overview");
+      void navigate("/ops/overview");
       if (revocationUnconfirmed) {
         pushToast({
           title: "Previous session not confirmed revoked",

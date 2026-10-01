@@ -46,10 +46,10 @@ function isDigitalTwinFrame(frame: WebSocketEnvelope<unknown>): frame is WebSock
 }
 
 type QueuedFrame =
-  | { channel: "topology"; delta: TopologyDeltaData; timestamp?: string }
+  | { channel: "topology"; delta: TopologyDeltaData; timestamp?: string | undefined }
   | { channel: "telemetry"; delta: TelemetryDeltaData }
-  | { channel: "alerts"; delta: AlertDeltaData; context: { correlation_id?: string; timestamp?: string } }
-  | { channel: "digitalTwin"; delta: DigitalTwinDeltaData; timestamp?: string; scope: { workspaceId: string; networkId: string } };
+  | { channel: "alerts"; delta: AlertDeltaData; context: { correlation_id?: string | undefined; timestamp?: string | undefined } }
+  | { channel: "digitalTwin"; delta: DigitalTwinDeltaData; timestamp?: string | undefined; scope: { workspaceId: string; networkId: string } };
 
 interface CachedGraph { data: TopologyGraph; nextCursor: string | null }
 

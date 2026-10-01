@@ -2,7 +2,7 @@ import { ReactNode } from "react";
 
 interface AsyncStateProps {
   title: string;
-  description?: string;
+  description?: string | undefined;
   action?: ReactNode;
 }
 

@@ -10,12 +10,15 @@ test("CSS palette entry, exit, reopening and reduced motion preserve keyboard na
   await expect(dialog).toBeVisible();
   await expect(dialog).toHaveCSS("animation-name", "palette-backdrop-enter");
   await expect(page.getByLabel("Search commands")).toBeFocused();
+  // Combobox pattern: options are not tab stops, focus stays in the search input.
   await page.keyboard.press("Shift+Tab");
-  await expect(dialog.getByRole("button").last()).toBeFocused();
+  await expect(page.getByLabel("Search commands")).toBeFocused();
   await page.keyboard.press("Tab");
   await expect(page.getByLabel("Search commands")).toBeFocused();
   await page.keyboard.press("ArrowDown");
-  await expect(dialog.getByRole("button", { name: /Go to Tenancy/ })).toHaveAttribute("data-active", "true");
+  const tenancy = dialog.getByRole("option", { name: /Go to Tenancy/ });
+  await expect(tenancy).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByRole("combobox", { name: "Search commands" })).toHaveAttribute("aria-activedescendant", (await tenancy.getAttribute("id"))!);
   await page.keyboard.press("Escape");
   await expect(dialog).toHaveCount(0);
   await expect(page.locator(".command-palette-backdrop")).toHaveCount(0);

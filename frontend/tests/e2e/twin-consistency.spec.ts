@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
 import { expect, test, type WebSocketRoute } from "@playwright/test";
 import { createDefaultSessionState, installSessionMocks, loginFromUi } from "./support/session";
+import { inspectNode, nodeOptions } from "./support/twin";
+import type { Schema } from "./support/contracts";
 
 const network = "00000000-0000-0000-0000-000000000333";
 const device = "00000000-0000-0000-0000-000000000444";
@@ -36,13 +38,23 @@ test("valid GLB persistence and explicit restore validate hash, retain groups, a
     await route.fulfill({ json: envelope({ items: [{ ...record, model_data_base64: undefined }], total: 1, page: 1, page_size: 20 }) });
   });
   await page.route("**/campus-model-assets/asset/download", (route) => route.fulfill({ body: bytes, contentType: "application/octet-stream", headers: { ETag: `"sha256:${record.model_sha256}"`, "Content-Length": String(bytes.length) } }));
-  const unrelated = { group_key: "other-campus", name: "Other campus", group_type: "custom" };
-  let groups = [unrelated];
+  // Real DeviceGroupResponse records (typed against the generated backend schema).
+  const groupRecord = (group: { group_key: string; name: string; group_type: string; description?: string | null; selector?: Record<string, string>; device_ids?: string[] }): Schema<"DeviceGroupResponse"> => ({
+    device_group_id: `00000000-0000-4000-8000-${String(groups.length + 1).padStart(12, "0")}`, network_id: network, description: null, selector: {}, device_ids: [],
+    created_at: "2026-09-10T00:00:00Z", updated_at: "2026-09-10T00:00:00Z", ...group, ...(group.description === undefined ? { description: null } : {}),
+  });
+  let groups: Schema<"DeviceGroupResponse">[] = [];
+  const unrelated = groupRecord({ group_key: "other-campus", name: "Other campus", group_type: "custom" });
+  groups = [unrelated];
   await page.route("**/device-groups", async (route) => {
     if (route.request().method() === "POST") {
-      const body = route.request().postDataJSON();
+      const body = route.request().postDataJSON() as { replace_existing: boolean; groups: Parameters<typeof groupRecord>[0][] };
       expect(body.replace_existing).toBe(false);
-      groups = [...(body.replace_existing ? [] : groups), ...body.groups];
+      // Upsert answers with the upserted records only, each with a real updated_at (C8).
+      const upserted = body.groups.map((group) => ({ ...groupRecord(group), updated_at: "2026-09-10T00:05:00Z" }));
+      groups = [...groups.filter((group) => !upserted.some((item) => item.group_key === group.group_key)), ...upserted];
+      await route.fulfill({ json: envelope({ items: upserted, total: upserted.length }) });
+      return;
     }
     await route.fulfill({ json: envelope({ items: groups, total: groups.length }) });
   });
@@ -57,9 +69,11 @@ test("valid GLB persistence and explicit restore validate hash, retain groups, a
   await page.getByRole("button", { name: "Restore Persisted Model" }).focus();
   await page.keyboard.press("Enter");
   await expect(page.getByText("model ready", { exact: true })).toBeVisible({ timeout: 15_000 });
-  await page.getByLabel("Inspect node").selectOption(device);
+  await inspectNode(page, device);
   await expect(page.getByText("spatial_ref_id: campus/building/f1", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Persist Device Groups" }).click();
+  // Persisting opens a reviewed preview dialog (FE-Twin C8).
+  await page.getByRole("dialog").getByRole("button", { name: "Confirm and persist groups" }).click();
   await expect.poll(() => groups.length).toBe(3);
   expect(groups).toContainEqual(unrelated);
   await page.getByLabel("Campus model file").setInputFiles({ name: "local.glb", mimeType: "model/gltf-binary", buffer: bytes });
@@ -102,20 +116,20 @@ test("subscribed reconnect reconciles deleted REST nodes and ignores stale pushe
   await page.locator(".network-choice").filter({ hasText: "Network A" }).click();
   await page.getByRole("link", { name: "Digital Twin" }).click();
   await expect(page.getByText("topology open", { exact: true })).toBeVisible();
-  await expect(page.getByLabel("Inspect node").locator("option", { hasText: "edge-1" })).toHaveCount(1);
+  await expect(await nodeOptions(page, "edge-1")).toHaveCount(1);
   await expect.poll(() => Boolean(topology)).toBe(true);
   topology!.send(JSON.stringify({ event: "topology.device.removed", timestamp: "2026-09-10T00:02:00Z", data: { delta_type: "remove", node: { device_id: device } } }));
   topology!.send(JSON.stringify({ event: "topology.device.added", timestamp: "2026-09-10T00:01:00Z", data: { delta_type: "add", node } }));
-  await expect(page.getByLabel("Inspect node").locator("option", { hasText: "edge-1" })).toHaveCount(0);
+  await expect(await nodeOptions(page, "edge-1")).toHaveCount(0);
   nodes = [];
   const previousReads = graphReads;
   const oldSocket = topology!;
-  oldSocket.close({ code: 1012, reason: "restart" });
+  await oldSocket.close({ code: 1012, reason: "restart" });
   await expect.poll(() => topology !== oldSocket).toBe(true);
   await expect.poll(() => graphReads).toBeGreaterThan(previousReads);
   await expect(page.getByText("Topology graph is empty")).toBeVisible();
   topology!.send(JSON.stringify({ event: "topology.device.added", timestamp: "2026-09-10T00:01:00Z", data: { delta_type: "add", node } }));
-  await expect(page.getByLabel("Inspect node").locator("option", { hasText: "edge-1" })).toHaveCount(0);
+  await expect(await nodeOptions(page, "edge-1")).toHaveCount(0);
 });
 
 test("Twin-only lifecycle overlays reconcile known details after reconnect/backpressure and retire denied IDs", async ({ page }) => {
@@ -151,7 +165,7 @@ test("Twin-only lifecycle overlays reconcile known details after reconnect/backp
   await expect(region.getByText("running", { exact: true })).toBeVisible();
   await expect.poll(() => reads).toBeGreaterThan(0);
   status = "completed";
-  const old = twin!; old.close({ code: 1012, reason: "restart" });
+  const old = twin!; await old.close({ code: 1012, reason: "restart" });
   await expect.poll(() => twin !== old).toBe(true);
   await expect(region.getByText("completed", { exact: true })).toBeVisible();
   await expect(region.getByText(/Detail reconciliation: reconciled/).first()).toBeVisible();

@@ -1,5 +1,7 @@
-/** Organization roles (backend `OrgRole`). */
-export type OrgRole = "Admin" | "Operator" | "Read-Only";
+import type { Schema } from "@/shared/types/contracts";
+
+/** Organization roles (backend `OrgRole`, generated from `OrgResponse.caller_role`). */
+export type OrgRole = NonNullable<Schema<"OrgResponse">["caller_role"]>;
 
 export interface Organization {
   org_id: string;

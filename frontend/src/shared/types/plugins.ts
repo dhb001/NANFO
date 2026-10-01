@@ -1,3 +1,5 @@
+import type { Schema } from "@/shared/types/contracts";
+
 export interface PluginManifest {
   plugin_key: string;
   name: string;
@@ -9,8 +11,8 @@ export interface PluginManifest {
   metadata: Record<string, unknown>;
 }
 
-/** Backend `PluginRecordResponse.status` value set. */
-export type PluginStatus = "installed" | "enabled" | "disabled" | "failed" | "uninstalled";
+/** Backend `PluginRecordResponse.status` value set (generated from the OpenAPI Literal). */
+export type PluginStatus = Schema<"PluginRecordResponse">["status"];
 
 export interface PluginRecord {
   registry_only?: true;

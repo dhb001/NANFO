@@ -7,11 +7,11 @@ import { scopedKey } from "@/shared/lib/queryKeys";
 import type { PluginStatus } from "@/shared/types/plugins";
 
 interface UsePluginsQueryOptions {
-  status?: PluginStatus;
-  enabled?: boolean;
-  search?: string;
-  limit?: number;
-  pollMs?: number;
+  status?: PluginStatus | undefined;
+  enabled?: boolean | undefined;
+  search?: string | undefined;
+  limit?: number | undefined;
+  pollMs?: number | undefined;
 }
 
 export function usePluginsQuery(token: string | null, options: UsePluginsQueryOptions = {}) {

@@ -3,6 +3,7 @@ import { formatTimestamp } from "@/shared/lib/format";
 import { useAuthStore } from "@/shared/state/auth-store";
 import { QueryState } from "@/shared/ui/QueryState";
 import { Button } from "@/shared/ui/Button";
+import { EvaluationWindowSummary } from "./EvaluationWindowSummary";
 
 function Evidence({ payload }: { payload: Record<string, unknown> }) {
   const text = (value: unknown) => typeof value === "string" || typeof value === "number" || typeof value === "boolean" ? String(value) : "Unavailable";
@@ -16,6 +17,7 @@ function Evidence({ payload }: { payload: Record<string, unknown> }) {
       <p>Recovery scope: {(["org_id", "workspace_id", "network_id", "device_id", "port_no", "peer_host", "run_id", "rule_version"] as const).map((key) => `${key}: ${text(payload[key])}`).join("; ")}</p>
       <p>Missing, stale, duplicate, out-of-order, unknown-unit or synthetic data cannot establish recovery.</p>
     </> : <p>No measured detector evidence.</p>}
+    {payload.evaluation_window ? <EvaluationWindowSummary payload={payload} /> : null}
     {payload.resolution_reason ? <p>Resolution reason: {text(payload.resolution_reason)}</p> : null}
     {payload.acknowledged_by_user_id ? <p>Acknowledged by {text(payload.acknowledged_by_user_id)}</p> : null}
     {payload.resolved_by_user_id ? <p>Resolved by {text(payload.resolved_by_user_id)} (operator action, not measured recovery)</p> : null}

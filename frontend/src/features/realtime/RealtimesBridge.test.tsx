@@ -238,7 +238,7 @@ describe("RealtimeBridge", () => {
     expect(client.getQueryState(legacyTokenKeyed)?.isInvalidated).toBe(false);
     expect(client.getQueryState(otherHistory)?.isInvalidated).toBe(false);
     act(() => { getSocket("/ws/topology").onSubscribed?.(); useWorkspaceStore.getState().setNetworkId("other"); });
-    act(() => vi.advanceTimersByTime(1000));
+    act(() => { vi.advanceTimersByTime(1000); });
     expect(invalidation).toHaveBeenCalledTimes(1);
     unmount();
     vi.useRealTimers();
@@ -331,5 +331,63 @@ describe("RealtimeBridge", () => {
       "Realtime temporarily unavailable", "Realtime subscription timed out", "Realtime temporarily unavailable",
     ]);
     vi.useRealTimers();
+  });
+  it("applies a burst with one store update, patches the cached graph, and resyncs only on gaps (ADR-028)", () => {
+    vi.useFakeTimers();
+    const scope = useWorkspaceStore.getState();
+    const graphKey = ["topology", stableScope(), authorityKey(), scope.networkId];
+    const nodes = Array.from({ length: 50 }, (_, index) => ({ device_id: `d-${index}`, hostname: `h-${index}`, device_type: "router", status: "up", spatial_ref_id: null }));
+    client.setQueryData(graphKey, { data: { nodes, edges: [{ source_id: "d-0", target_id: "d-1", edge_type: "link", metadata: {} }] }, nextCursor: null, snapshot: { epoch: 0, revision: 0 } });
+    const invalidation = vi.spyOn(client, "invalidateQueries");
+    const { unmount } = render(<RealtimeBridge />);
+    const telemetry = getSocket("/ws/telemetry");
+    const topology = getSocket("/ws/topology");
+    const updates = vi.fn();
+    const unsubscribe = useLiveStore.subscribe(updates);
+    const metric = { event_id: "m", device_id: "d-0", metric: "cpu", workspace_id: scope.workspaceId, network_id: scope.networkId, value: 1, unit: "%", source: "plugin", tags: {} };
+    act(() => {
+      for (let index = 0; index < 3_000; index++) {
+        telemetry.onFrame({ event: "telemetry.received", data: { metric: { ...metric, device_id: `d-${index % 50}`, value: index, observed_at: new Date(Date.UTC(2026, 8, 20) + index).toISOString() } } });
+      }
+      for (let index = 0; index < 50; index++) {
+        topology.onFrame({ event: "network.device.updated", timestamp: new Date(Date.UTC(2026, 8, 20) + index).toISOString(), data: { delta_type: "update", node: { device_id: `d-${index}`, status: "down" } } });
+      }
+      expect(updates).not.toHaveBeenCalled();
+      flushRealtimeFrames();
+    });
+    // One store update for 3,050 frames.
+    expect(updates).toHaveBeenCalledTimes(1);
+    expect(Object.keys(useLiveStore.getState().telemetryByDeviceMetric)).toHaveLength(50);
+    expect(useLiveStore.getState().topologyRevision).toBe(50);
+    // Updates of known nodes patch the REST cache in place: no crawl, no invalidation.
+    const cached = client.getQueryData<{ data: { nodes: { status: string }[] } }>(graphKey)!;
+    expect(cached.data.nodes.every((node) => node.status === "down")).toBe(true);
+    act(() => { vi.advanceTimersByTime(1_000); });
+    expect(invalidation).not.toHaveBeenCalled();
+    // A removal (membership change) is a gap for inventory totals: one coalesced resync.
+    act(() => {
+      topology.onFrame({ event: "network.device.deleted", timestamp: "2026-09-21T00:00:00Z", data: { delta_type: "remove", node: { device_id: "d-1" } } });
+      topology.onFrame({ event: "network.device.updated", timestamp: "2026-09-21T00:00:01Z", data: { delta_type: "update", node: { device_id: "unknown", status: "down" } } });
+      flushRealtimeFrames();
+      vi.advanceTimersByTime(600);
+    });
+    expect(invalidation).toHaveBeenCalledTimes(1);
+    expect(client.getQueryData<{ data: { nodes: unknown[]; edges: unknown[] } }>(graphKey)!.data).toMatchObject({ edges: [] });
+    expect(client.getQueryState(graphKey)?.isInvalidated).toBe(true);
+    unsubscribe();
+    unmount();
+    vi.useRealTimers();
+  });
+
+  it("drops frames queued for a previous scope instead of applying them after a switch", () => {
+    const { unmount } = render(<RealtimeBridge />);
+    const scope = useWorkspaceStore.getState();
+    act(() => {
+      getSocket("/ws/telemetry").onFrame({ event: "telemetry.received", data: { metric: { event_id: "m", device_id: "d", metric: "cpu", workspace_id: scope.workspaceId, network_id: scope.networkId, value: 1, unit: "%", source: "plugin", observed_at: "2026-09-20T00:00:00Z", tags: {} } } });
+      useWorkspaceStore.getState().setNetworkId("00000000-0000-0000-0000-000000000999");
+      flushRealtimeFrames();
+    });
+    expect(useLiveStore.getState().telemetryKeysNewestFirst).toEqual([]);
+    unmount();
   });
 });

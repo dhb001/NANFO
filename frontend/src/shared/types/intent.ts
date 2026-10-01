@@ -1,28 +1,33 @@
-export interface IntentValidationReason {
-  code: string;
-  message: string;
-  path?: string;
-}
+import type { Schema } from "@/shared/types/contracts";
+
+export type IntentValidationReason = Schema<"ValidationReason">;
+
+/** Exact lab identity an operator approves; echo it verbatim on execute (ADR-028 C3). */
+export type ApprovalBinding = Schema<"ApprovalBinding">;
+
+/** Copy verbatim into `scenario_config.action_binding` for the pre-execution simulation (C18). */
+export type SimulationActionBinding = Schema<"SimulationActionBinding">;
 
 export interface IntentValidationState {
   is_valid: boolean;
-  reasons: IntentValidationReason[];
-  required_checks: string[];
+  reasons?: IntentValidationReason[];
+  required_checks?: string[];
   capability_match: string;
   dependency_analysis: string;
   simulation_required: boolean;
   policy_reference: string;
   validated_at: string;
+  /** "baseline_schema_only" unless model-backed validation actually ran; disclose it. */
+  validation_kind?: string;
+  /** "unavailable" when no model evidence backs the validation. */
+  model_evidence?: string;
 }
 
 export interface IntentExplainability {
   summary: string;
-  evidence: string[];
-  alternatives_considered: string[];
+  evidence?: string[];
+  alternatives_considered?: string[];
   policy_reference: string;
-  execution_posture?: string;
-  execution_summary?: string;
-  failure_reason?: string;
 }
 
 export interface IntentConfidenceState {
@@ -44,8 +49,12 @@ export interface ValidateIntentResult {
   correlation_id: string;
   requested_at: string;
   queue_status: string;
-  stream_entry_id: string | null;
-  warning: string | null;
+  stream_entry_id?: string | null;
+  warning?: string | null;
+  /** The stored intent was returned for a repeated Idempotency-Key (C3). */
+  idempotent_replay?: boolean;
+  approval_binding?: ApprovalBinding | null;
+  simulation_action_binding?: SimulationActionBinding | null;
 }
 
 export interface ExecuteIntentResult {
@@ -67,6 +76,7 @@ export interface ExecuteIntentResult {
   requested_at: string;
   updated_at: string;
   idempotent_replay: boolean;
+  approval_binding?: ApprovalBinding | null;
 }
 
 export interface IntentDetailResult {
@@ -89,6 +99,8 @@ export interface IntentDetailResult {
   requested_at: string;
   created_at: string;
   updated_at: string;
+  approval_binding?: ApprovalBinding | null;
+  simulation_action_binding?: SimulationActionBinding | null;
 }
 
 export interface ValidateIntentRequest {
@@ -101,9 +113,12 @@ export interface ExecuteIntentRequest {
   simulation_id?: string;
   workspace_id: string;
   intent_id: string;
+  /** The selected intent's stored key (or omitted); a different key is 409 INTENT_IDEMPOTENCY_CONFLICT. */
   idempotency_key?: string;
   manual_approval?: boolean;
   cancel?: boolean;
+  /** Current server binding from validate/detail; stale values are 409 APPROVAL_BINDING_MISMATCH. */
+  approval_binding?: ApprovalBinding | null;
 }
 export interface IntentSummary {
   intent_id: string;

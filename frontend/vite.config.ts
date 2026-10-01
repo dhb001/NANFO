@@ -11,6 +11,11 @@ function devProxy(): Record<string, ProxyOptions> | undefined {
   return { "/api": { target }, "/ws": { target, ws: true } };
 }
 
+function devServer(): { proxy?: Record<string, ProxyOptions> } {
+  const proxy = devProxy();
+  return proxy ? { proxy } : {};
+}
+
 export default defineConfig(({ command, mode }) => {
   assertProductionBaseUrls({
     command,
@@ -31,6 +36,7 @@ export default defineConfig(({ command, mode }) => {
           if (source === "three" && importer?.endsWith("/@react-three/fiber/dist/react-three-fiber.esm.js")) {
             return fileURLToPath(new URL("./src/features/digitalTwin/threeCatalogue.ts", import.meta.url));
           }
+          return null;
         },
       },
     ],
@@ -39,7 +45,7 @@ export default defineConfig(({ command, mode }) => {
         "@": fileURLToPath(new URL("./src", import.meta.url)),
       },
     },
-    server: { proxy: devProxy() },
+    server: devServer(),
     build: {
       // Maps are emitted for symbolication but never referenced from served bundles.
       sourcemap: mode === "development" ? true : "hidden",

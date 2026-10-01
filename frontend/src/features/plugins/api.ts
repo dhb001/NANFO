@@ -7,10 +7,10 @@ import type {
 } from "@/shared/types/plugins";
 
 interface ListPluginsParams {
-  status?: PluginStatus;
-  enabled?: boolean;
-  search?: string;
-  limit?: number;
+  status?: PluginStatus | undefined;
+  enabled?: boolean | undefined;
+  search?: string | undefined;
+  limit?: number | undefined;
 }
 
 function buildListPluginsQuery(params: ListPluginsParams): string {

@@ -51,7 +51,13 @@ const FRONTEND_ROOT = process.cwd();
 const DIST_ASSETS_DIR = path.join(FRONTEND_ROOT, "dist", "assets");
 
 export const CONTINUITY_LIMITS = {
-  totalJsGzipBytesMax: 420000,
+  // Rebaselined for ADR-028 (2026-09-24): the remediation adds required client code in the
+  // Twin (+~15 KB gzip: reviewed group/building dialogs, backend-alert severity, virtualized
+  // combobox, 2D fallback, instancing/labels) and the platform (+~14 KB: WebSocket C1
+  // transport, session recovery/duplicate-tab handling, burst batching, contract/status
+  // maps, intent C3 identities, autonomy C17/C25). Measured 432,466 B; the previous
+  // 420,000 B cap kept the same ~4% headroom over its baseline. Per-chunk caps are unchanged.
+  totalJsGzipBytesMax: 450000,
   largestChunkGzipBytesMax: 260000,
   largestNonThreeChunkGzipBytesMax: 60000,
   threeChunkGzipBytesMax: 260000,

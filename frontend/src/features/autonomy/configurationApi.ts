@@ -7,11 +7,16 @@ export const operationalBounds = {
   max_observation_age_seconds: [1, 30], decision_interval_seconds: [1, 3600],
   min_route_hold_seconds: [3, 3600], max_changes_per_minute: [1, 10],
 } as const;
+/** C17 confidence gate: the floor is the constitution's automatic-execution tier; operators may only tighten it. */
+export const MIN_CONFIDENCE_BOUNDS = [0.95, 1] as const;
+const CONFIDENCE_KEYS = ["min_confidence", "allow_uncalibrated_confidence"] as const;
 export function validOperational(value: OperationalSettings, strict = false): boolean {
-  return Boolean(value && (!strict || Object.keys(value).every((key) => Object.hasOwn(operationalBounds, key))) &&
+  // Every PUT carries the confidence gate explicitly: omitting it would silently reset a tightened threshold.
+  return Boolean(value && (!strict || Object.keys(value).every((key) => Object.hasOwn(operationalBounds, key) || (CONFIDENCE_KEYS as readonly string[]).includes(key))) &&
     Object.entries(operationalBounds).every(([key, [min, max]]) => {
-      const number = value[key as keyof OperationalSettings]; return Number.isInteger(number) && finite(number, min, max);
-    }));
+      const number = value[key as keyof typeof operationalBounds]; return Number.isInteger(number) && finite(number, min, max);
+    }) && finite(value.min_confidence, MIN_CONFIDENCE_BOUNDS[0], MIN_CONFIDENCE_BOUNDS[1]) &&
+    typeof value.allow_uncalibrated_confidence === "boolean");
 }
 export function validTraining(value: TrainingSettings): boolean {
   return Boolean(value && typeof value === "object" && Object.keys(value).every((key) => key === "reward_weights") &&
@@ -22,7 +27,8 @@ export function validateConfiguration(data: Configuration, networkId: string, wo
   if (data.network_id !== networkId || data.workspace_id !== workspaceId || !revision(data.revision) || !revision(data.control_revision) ||
       !validOperational(data.operational) || !validTraining(data.requested_training) || data.effective_training !== null ||
       data.effective_training_status !== "model_owned_unavailable" || !["not_requested", "retraining_required"].includes(data.training_status) ||
-      data.safety_merge !== "stricter_than_calibrated_policy" || !Number.isInteger(data.history_limit) || !finite(data.history_limit, 1, 100) ||
+      data.safety_merge !== "stricter_than_calibrated_policy" || typeof data.allow_uncalibrated_confidence_honoured !== "boolean" ||
+      !Number.isInteger(data.history_limit) || !finite(data.history_limit, 1, 100) ||
       !Array.isArray(data.history) || data.history.length > data.history_limit || !data.history.every((item) => item && revision(item.revision) &&
         item.revision <= data.revision && typeof item.actor_id === "string" && typeof item.reason === "string" && validOperational(item.operational) &&
         validTraining(item.training) && hash(item.content_sha256) && timestamp(item.created_at))) {

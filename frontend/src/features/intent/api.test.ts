@@ -17,7 +17,9 @@ describe("manual intent execute contract", () => {
     expect(result.data.status).toBe("execution_started");
     // Identical retries apart from each request's own timeout signal.
     const withoutSignal = (call: unknown[]) => {
-      const [url, { signal: _signal, ...options }] = call as [string, RequestInit];
+      const [url, init] = call as [string, RequestInit];
+      const options: RequestInit = { ...init };
+      delete options.signal;
       return [url, options];
     };
     expect(withoutSignal(fetchMock.mock.calls[0])).toEqual(withoutSignal(fetchMock.mock.calls[1]));

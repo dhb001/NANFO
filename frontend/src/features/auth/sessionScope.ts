@@ -71,4 +71,3 @@ export function useSessionScope() {
   return { key, urlScope, authority, token, request, read, assertCurrent };
 }
 
-export type SessionScope = ReturnType<typeof useSessionScope>;

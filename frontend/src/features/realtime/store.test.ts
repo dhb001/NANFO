@@ -49,6 +49,7 @@ describe("realtime store", () => {
     apply({ delta_type: "metric", metric: sample });
     const before = useLiveStore.getState();
     for (const invalid of [{ value: Infinity }, { value: NaN }, { observed_at: "invalid" }, { observed_at: "2026-09-18T00:00:00Z" }, { value: 1 }, { tags: [] }]) {
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion -- deliberately malformed fixture; the assertion is required by tsc
       apply({ delta_type: "metric", metric: { ...sample, ...invalid } as typeof sample });
     }
     expect(useLiveStore.getState()).toBe(before);

@@ -276,7 +276,19 @@ pre { padding: 1rem; border: 1px solid var(--line-soft); border-radius: var(--ra
   box-shadow: var(--shadow-mid);
   padding: 0.85rem 2.5rem 0.85rem 1rem;
   animation: toast-enter 200ms ease-out both;
+  /* Open toasts take the pointer so hovering pauses auto-dismissal. */
+  pointer-events: auto;
 }
+
+.toast--danger { border-left: 4px solid var(--danger); }
+.toast--warn { border-left: 4px solid var(--warn); }
+.toast--ok { border-left: 4px solid var(--ok); }
+.toast--info { border-left: 4px solid var(--info); }
+.toast-tone { font-weight: 700; }
+.toast--danger .toast-tone { color: var(--danger); }
+.toast--warn .toast-tone { color: var(--warn); }
+.toast--ok .toast-tone { color: var(--ok); }
+.toast--info .toast-tone { color: var(--info); }
 
 .toast-center { position: fixed; right: 16px; bottom: 16px; display: grid; gap: 0.6rem; z-index: 1100; pointer-events: none; max-height: 50vh; overflow-y: auto; }
 .toast-dismiss { position: absolute; right: 4px; top: 4px; width: 32px; height: 32px; font-size: 1.3rem; pointer-events: auto; }
@@ -312,7 +324,7 @@ pre { padding: 1rem; border: 1px solid var(--line-soft); border-radius: var(--ra
 .command-search { padding: 1rem; border-bottom: 1px solid var(--line-soft); }
 .command-search input { width: 100%; border: 1px solid var(--line-soft); border-radius: 4px; padding: 0.65rem; background: white; }
 .command-results { max-height: min(380px, 60vh); overflow: auto; display: grid; }
-.command-result { display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; padding: 0.8rem 1rem; border-bottom: 1px solid var(--line-soft); text-align: left; }
+.command-result { display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; padding: 0.8rem 1rem; border-bottom: 1px solid var(--line-soft); text-align: left; cursor: pointer; }
 .command-result[data-active="true"] { background: #edf2ff; box-shadow: inset 3px 0 var(--brand); }
 .command-result strong { font-weight: 500; }
 .command-group { margin-left: 0.45rem; color: var(--ink-3); font-size: 0.75rem; }

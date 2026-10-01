@@ -143,7 +143,7 @@ export function upsertDeviceGroups(
         description: group.description ?? null,
         selector: group.selector ?? {},
         device_ids: group.device_ids ?? [],
-        ...(group.expected_updated_at ? { expected_updated_at: group.expected_updated_at } : {}),
+        ...(group.expected_updated_at != null ? { expected_updated_at: group.expected_updated_at } : {}),
       })),
     },
     token,

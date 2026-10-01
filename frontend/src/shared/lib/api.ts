@@ -2,6 +2,7 @@ import { apiUrl } from "@/shared/lib/env";
 import type { ApiEnvelope, ApiMeta, ApiSuccess } from "@/shared/types/api";
 import { ApiClientError, parseErrorDetails } from "@/shared/lib/errors";
 import { retryAfterMs } from "@/shared/lib/backoff";
+import { noteServerRequestId } from "@/shared/lib/errorReporting";
 import { useExecutionModeStore } from "@/shared/state/execution-mode-store";
 import { useAuthStore } from "@/shared/state/auth-store";
 import { useWorkspaceStore } from "@/shared/state/workspace-store";
@@ -12,13 +13,14 @@ type Method = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 /** Default bound for one API round trip; long uploads pass `timeoutMs`. */
 export const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 
+// Option bags accept explicit `undefined` (callers forward optional arguments as-is).
 export interface RequestOptions {
-  method?: Method;
+  method?: Method | undefined;
   body?: unknown;
-  token?: string | null;
-  headers?: Record<string, string>;
-  signal?: AbortSignal;
-  timeoutMs?: number;
+  token?: string | null | undefined;
+  headers?: Record<string, string> | undefined;
+  signal?: AbortSignal | undefined;
+  timeoutMs?: number | undefined;
 }
 
 function createHeaders(options: RequestOptions): Record<string, string> {
@@ -60,9 +62,9 @@ async function send(path: string, options: RequestOptions): Promise<Response> {
   const timeout = AbortSignal.timeout(options.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS);
   try {
     return await fetch(apiUrl(path), {
-      method: options.method,
+      ...(options.method ? { method: options.method } : {}),
       headers: createHeaders(options),
-      body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
+      ...(options.body !== undefined ? { body: JSON.stringify(options.body) } : {}),
       signal: options.signal ? anySignal([options.signal, timeout]) : timeout,
     });
   } catch (error) {
@@ -76,6 +78,10 @@ async function send(path: string, options: RequestOptions): Promise<Response> {
     }
     throw error;
   }
+}
+
+function requestIdHeader(response: Response): string | null {
+  try { return response.headers.get("X-Request-ID"); } catch { return null; }
 }
 
 function errorFrom(response: Response, payload: ApiEnvelope<unknown> | null, fallback: string): ApiClientError {
@@ -107,6 +113,7 @@ export async function apiRequest<T, M extends ApiMeta = ApiMeta>(
       if (response.ok) throw new ApiClientError("API returned an unreadable response. Mutation outcome may be unknown; inspect history before retrying.", "API_INVALID_RESPONSE", response.status);
     }
   }
+  noteServerRequestId(payload?.meta?.request_id ?? requestIdHeader(response));
 
   if (token && token === session.accessToken &&
       (session.generation !== useAuthStore.getState().generation ||

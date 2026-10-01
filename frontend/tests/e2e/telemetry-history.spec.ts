@@ -52,6 +52,7 @@ test("bounded telemetry aggregation preserves ports and pagination on desktop an
   expect(queries.some((params) => params.get("metric") === "flow_byte_count" && params.has("aggregation"))).toBe(false);
   await page.getByLabel("Aggregation", { exact: true }).selectOption("");
   await expect(page.getByText("No telemetry history")).toBeVisible();
-  expect(queries.at(-1)?.get("metric")).toBe("flow_byte_count");
+  // The metric filter is debounced (ADR-028): the raw query follows once typing settles.
+  await expect.poll(() => queries.at(-1)?.get("metric")).toBe("flow_byte_count");
   expect(queries.at(-1)?.has("aggregation")).toBe(false);
 });

@@ -25,7 +25,7 @@ export function useValidateIntent(token: string | null) {
   const session = useSessionScope();
   const client = useQueryClient();
   return useMutation({
-    mutationFn: (input: { request: ValidateIntentRequest; idempotencyKey?: string }) =>
+    mutationFn: (input: { request: ValidateIntentRequest; idempotencyKey?: string | undefined }) =>
       session.request((credential) => validateIntent(credential || token!, input.request, input.idempotencyKey)).then((response) => response.data),
     retry: false,
     onSuccess: () => client.invalidateQueries({ queryKey: ["intent", session.key] }),
@@ -36,7 +36,7 @@ export function useExecuteIntent(token: string | null) {
   const session = useSessionScope();
   const client = useQueryClient();
   return useMutation({
-    mutationFn: (input: { request: ExecuteIntentRequest; idempotencyKey?: string }) =>
+    mutationFn: (input: { request: ExecuteIntentRequest; idempotencyKey?: string | undefined }) =>
       session.request((credential) => executeIntent(credential || token!, input.request, input.idempotencyKey)).then((response) => response.data),
     retry: false,
     // A long-idle validated view may have exhausted its polling budget before dispatch.

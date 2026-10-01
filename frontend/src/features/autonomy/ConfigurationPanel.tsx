@@ -6,7 +6,7 @@ import { toErrorMessage } from "@/shared/lib/errors";
 import { formatTimestamp } from "@/shared/lib/format";
 import { useOperatorSession } from "./operatorSession";
 import { AUTONOMY_FRESH_MS } from "./hooks";
-import { getConfiguration, operationalBounds, putConfiguration, validTraining } from "./configurationApi";
+import { getConfiguration, MIN_CONFIDENCE_BOUNDS, operationalBounds, putConfiguration, validTraining } from "./configurationApi";
 import type { Configuration, ConfigurationUpdate, OperationalSettings } from "./configurationTypes";
 
 export function ConfigurationPanel({ now }: { now: number }) {
@@ -19,7 +19,7 @@ export function ConfigurationPanel({ now }: { now: number }) {
   const queryKey = ["autonomy-operator", ...session.identity, "configuration"];
   const query = useQuery({ queryKey, queryFn: async ({ signal }) => {
     session.assertCurrent();
-    const result = await getConfiguration(session.token!, session.networkId!, session.workspaceId!, signal);
+    const result = await getConfiguration(session.token, session.networkId!, session.workspaceId!, signal);
     const current = client.getQueryData<Configuration>(queryKey);
     if (current && result.revision < current.revision) throw new Error("Older configuration revision received. Refresh before editing.");
     return result;
@@ -28,7 +28,7 @@ export function ConfigurationPanel({ now }: { now: number }) {
   const mutation = useMutation({ mutationFn: (input: ConfigurationUpdate) => {
     session.assertCurrent(true);
     if (!fresh || input.expected_revision !== query.data?.revision) throw new Error("Configuration revision changed. Reload the draft and explicitly resubmit.");
-    return putConfiguration(session.token!, session.workspaceId!, input);
+    return putConfiguration(session.token, session.workspaceId!, input);
   }, retry: false, onSuccess: async (result) => {
     session.assertCurrent(); await client.cancelQueries({ queryKey, exact: true }); session.assertCurrent();
     client.setQueryData<Configuration>(queryKey, (current) => current && current.revision > result.revision ? current : result);
@@ -54,7 +54,13 @@ export function ConfigurationPanel({ now }: { now: number }) {
       {data && !fresh && <p role="status">Configuration is stale or refreshing. Editing requires a fresh read.</p>}
       {data && <>
         <p>Effective operational revision: <strong>{data.revision}</strong>. Control revision: {data.control_revision}. Safety merge: {data.safety_merge}.</p>
-        <dl>{Object.entries(data.operational).filter(([key]) => key in operationalBounds).map(([key, value]) => <div key={key}><dt>{key}</dt><dd>{value}</dd></div>)}</dl>
+        <dl>{Object.entries(data.operational).filter(([key]) => key in operationalBounds).map(([key, value]) => <div key={key}><dt>{key}</dt><dd>{String(value)}</dd></div>)}</dl>
+        <p role="note" aria-label="Confidence gate">Confidence gate (C17): autonomous dispatch requires <strong>calibrated</strong> confidence of at least {data.operational.min_confidence}.
+          {" "}Uncalibrated confidence: {data.operational.allow_uncalibrated_confidence
+            ? data.allow_uncalibrated_confidence_honoured
+              ? "allowed by this policy and honoured here (experimental lab only; results are not calibrated evidence)."
+              : "allowed by this policy but NOT honoured in this deployment; uncalibrated proposals are still refused."
+            : "refused."}</p>
         <p>Requested training: <strong>{data.training_status}</strong>. Effective training: <strong>{data.effective_training_status}</strong>.</p>
         <pre className="autonomy-evidence">{JSON.stringify(data.requested_training, null, 2)}</pre>
         <p>Reward changes require separate retraining and qualification. Effective frozen model reward settings are unavailable, not equal to the requested values. No online learning or autonomy activation.</p>
@@ -68,8 +74,15 @@ export function ConfigurationPanel({ now }: { now: number }) {
         <p>Draft expected revision: {draft.revision}. {draft.revision !== data?.revision ? "Revision conflict: reload this draft; no silent rebase." : "Every save records a new immutable revision."}</p>
         <fieldset disabled={!session.canWrite || !fresh || mutation.isPending} className="autonomy-stack"><legend>Bounded operational settings</legend>
           {Object.entries(operationalBounds).map(([key, [min, max]]) => <label key={key}>{key}<input type="number" required min={min} max={max} step={1}
-            value={Number.isNaN(draft.operational[key as keyof OperationalSettings]) ? "" : draft.operational[key as keyof OperationalSettings]}
+            value={Number.isNaN(draft.operational[key as keyof typeof operationalBounds]) ? "" : draft.operational[key as keyof typeof operationalBounds]}
             onChange={(event) => setDraft({ ...draft, operational: { ...draft.operational, [key]: event.target.valueAsNumber } })} /></label>)}
+          <label>min_confidence (calibrated, {MIN_CONFIDENCE_BOUNDS[0]} to {MIN_CONFIDENCE_BOUNDS[1]}; may only be tightened)<input type="number" required
+            min={MIN_CONFIDENCE_BOUNDS[0]} max={MIN_CONFIDENCE_BOUNDS[1]} step={0.01}
+            value={Number.isNaN(draft.operational.min_confidence) ? "" : draft.operational.min_confidence}
+            onChange={(event) => setDraft({ ...draft, operational: { ...draft.operational, min_confidence: event.target.valueAsNumber } })} /></label>
+          <label><input type="checkbox" checked={draft.operational.allow_uncalibrated_confidence}
+            onChange={(event) => setDraft({ ...draft, operational: { ...draft.operational, allow_uncalibrated_confidence: event.target.checked } })} />
+            {" "}Allow uncalibrated confidence (experimental lab only; {data?.allow_uncalibrated_confidence_honoured ? "honoured in this deployment" : "ignored in this deployment"})</label>
           <label>Requested reward weights (JSON)<textarea value={draft.rewards} onChange={(event) => setDraft({ ...draft, rewards: event.target.value })} rows={5} spellCheck={false} /></label>
           <label>Configuration change reason<input required maxLength={1000} value={reason} onChange={(event) => setReason(event.target.value)} /></label>
         </fieldset>

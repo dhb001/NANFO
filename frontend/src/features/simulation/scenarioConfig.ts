@@ -60,8 +60,8 @@ export function parseScenarioConfig(text: string): ScenarioConfig {
     pathWork += flow.path.length;
     let node = flow.source;
     const visited = new Set([node]);
-    for (const linkId of flow.path) {
-      const link = links.get(linkId);
+    for (const linkId of flow.path as unknown[]) {
+      const link = typeof linkId === "string" ? links.get(linkId) : undefined;
       if (!link || link.source !== node || visited.has(link.target)) throw new Error("flow.path must be connected, directed, acyclic and use configured links.");
       node = link.target;
       visited.add(node);
@@ -79,7 +79,7 @@ export function parseScenarioConfig(text: string): ScenarioConfig {
   if (config.action_binding !== null) {
     const binding = object(config.action_binding, ["intent_id", "plan_sha256", "network_state_sha256"], "action_binding");
     if (typeof binding.intent_id !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(binding.intent_id)) throw new Error("action_binding.intent_id: UUID required.");
-    for (const key of ["plan_sha256", "network_state_sha256"]) if (typeof binding[key] !== "string" || !/^[a-f0-9]{64}$/.test(binding[key] as string)) throw new Error(`action_binding.${key}: lowercase SHA-256 required.`);
+    for (const key of ["plan_sha256", "network_state_sha256"]) if (typeof binding[key] !== "string" || !/^[a-f0-9]{64}$/.test(binding[key])) throw new Error(`action_binding.${key}: lowercase SHA-256 required.`);
   }
   return config as unknown as ScenarioConfig;
 }

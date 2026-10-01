@@ -165,6 +165,54 @@ describe("telemetry diagnostic boundaries", () => {
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes("flow_byte_count"))).toBe(false);
     fireEvent.change(screen.getByLabelText("Aggregation"), { target: { value: "" } });
     await screen.findByText("No telemetry history");
-    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("flow_byte_count") && !String(url).includes("aggregation="))).toBe(true);
+    // The metric filter is debounced (ADR-028): the raw fallback request follows once typing settles.
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => String(url).includes("flow_byte_count") && !String(url).includes("aggregation="))).toBe(true));
+  });
+
+  it("debounces the metric filter: one history request for the settled value, not one per keystroke (ADR-028)", async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(<QueryClientProvider client={client}><TelemetryPage /></QueryClientProvider>);
+    await screen.findByText("No telemetry history");
+    const metricRequests = () => fetchMock.mock.calls.map(([url]) => new URL(String(url), "http://localhost"))
+      .filter((url) => url.pathname.endsWith("/telemetry") || url.pathname.endsWith("/telemetry/history"))
+      .map((url) => url.searchParams.get("metric"));
+    const input = screen.getByLabelText("Filter telemetry metric");
+    for (const prefix of ["l", "la", "lat", "late", "laten", "latenc", "latency", "latency_", "latency_m", "latency_ms"]) {
+      fireEvent.change(input, { target: { value: prefix } });
+    }
+    expect(input).toHaveValue("latency_ms");
+    await waitFor(() => expect(metricRequests()).toContain("latency_ms"));
+    expect(metricRequests().filter((metric) => metric && metric !== "latency_ms")).toEqual([]);
+    client.clear();
+  });
+
+  it("presents capped history totals as lower bounds and estimated totals as estimates (ADR-028 C12)", async () => {
+    useAuthStore.getState().setProfile({ ...operatorProfile, roles: ["Admin"] });
+    fetchMock.mockImplementation(async (input) => {
+      const url = new URL(String(input), "http://localhost");
+      if (url.pathname.endsWith("/health")) return response({
+        status: "ok", ingest_lag_ms: 5, dropped_events: 0, latest_observed_at: null, total_records: 123456, total_records_estimated: true,
+        slo: { status: "ok", stale: true, evaluated_at: "2026-09-08T00:00:00Z", alert_active: false, anomaly_streak: 0, evaluation_interval_seconds: 30 },
+      });
+      if (url.pathname.endsWith("/devices")) return response({ items: [], total: 0, page: 1, page_size: 20 });
+      const page = Number(url.searchParams.get("page") ?? 1);
+      return response({
+        items: Array.from({ length: 120 }, (_, index) => ({
+          record_id: `r-${page}-${index}`, event_id: `e-${page}-${index}`, correlation_id: "c", device_id: "d", network_id: "network", workspace_id: "workspace",
+          metric: "latency_ms", value: index, unit: "ms", observed_at: "2026-09-08T00:00:00Z", source: "emulation", tags: {}, created_at: "2026-09-08T00:00:00Z",
+        })),
+        total: 10_000, page, page_size: 120, total_capped: true,
+      });
+    });
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(<QueryClientProvider client={client}><TelemetryPage /></QueryClientProvider>);
+    expect(await screen.findByText("≈ 123456")).toBeInTheDocument();
+    expect(screen.getByText("Planner estimate, not an exact count")).toBeInTheDocument();
+    // A stale SLO evaluation is never shown as current.
+    expect(screen.getByText("OK (STALE)")).toBeInTheDocument();
+    expect(await screen.findByText("Page 1 / ≥ 84 | ≥ 10000 records")).toBeInTheDocument();
+    // The count stopped at the cap: a full page may be followed by more rows.
+    expect(screen.getByRole("button", { name: "Next" })).toBeEnabled();
+    client.clear();
   });
 });

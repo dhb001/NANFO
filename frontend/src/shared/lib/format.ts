@@ -15,16 +15,18 @@ export function formatNumber(value: number, digits = 2): string {
   }).format(value);
 }
 
-export function formatPercent(value: number): string {
-  return `${formatNumber(value, 2)}%`;
-}
-
-export function severityColor(score: number): "ok" | "warn" | "danger" {
-  if (score >= 0.8) {
-    return "ok";
+/**
+ * Text for a loosely typed backend value (tags, provenance, payload fields): primitives as
+ * text, absent values as `missing`, structured values as bounded JSON (never "[object Object]").
+ */
+export function displayValue(value: unknown, missing = "unavailable"): string {
+  if (value === null || value === undefined || value === "") return missing;
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean" || typeof value === "bigint") return String(value);
+  try {
+    const text = JSON.stringify(value);
+    return text === undefined ? missing : text.length > 200 ? `${text.slice(0, 199)}…` : text;
+  } catch {
+    return missing;
   }
-  if (score >= 0.6) {
-    return "warn";
-  }
-  return "danger";
 }

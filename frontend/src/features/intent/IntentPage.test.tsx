@@ -1,7 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { act, render, screen, waitFor } from "@testing-library/react";
+import type { ReactElement, ReactNode } from "react";
+import { act, render as rtlRender, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { MemoryRouter } from "react-router-dom";
 import { IntentPage } from "@/features/intent/IntentPage";
+import { intentHandoffState } from "@/features/intent/handoff";
+import { ApiClientError } from "@/shared/lib/errors";
 import { useAuthStore } from "@/shared/state/auth-store";
 import { operatorProfile } from "@/test/profile";
 import { useWorkspaceStore } from "@/shared/state/workspace-store";
@@ -30,6 +34,9 @@ vi.mock("@/features/intent/hooks", () => ({
   }),
   useIntentDetail: (...args: unknown[]) => mockUseIntentDetail(...args),
 }));
+
+// The page reads router state (Digital Twin handoff), so it renders inside a router.
+const render = (ui: ReactElement) => rtlRender(ui, { wrapper: ({ children }: { children: ReactNode }) => <MemoryRouter>{children}</MemoryRouter> });
 
 function detailQuery(data: unknown) {
   return {
@@ -96,6 +103,22 @@ describe("IntentPage", () => {
     expect(screen.getByText("No intent selected")).toBeInTheDocument();
   });
 
+  it("shows the exact backend status with an explicit tone and never an invented alias (ADR-028)", () => {
+    mockUseIntentDetail.mockReturnValue(detailQuery({ ...validatedDetail, status: "execution_compensated", queue_status: "outbox_pending",
+      confidence: { score: 0.97, band: "95-100", approval_required: false } }));
+    const { unmount } = render(<IntentPage />);
+    expect(screen.getByText("execution_compensated")).toHaveClass("badge--warn");
+    expect(screen.getByText("confidence 95-100")).toHaveClass("badge--ok");
+    expect(screen.getByText("outbox_pending")).toHaveClass("badge--info");
+    unmount();
+    // "completed" is not a backend intent status: shown verbatim and neutral, not as execution_completed.
+    mockUseIntentDetail.mockReturnValue(detailQuery({ ...validatedDetail, status: "completed", queue_status: "queued" }));
+    render(<IntentPage />);
+    expect(screen.getByText("completed")).toHaveClass("badge--neutral");
+    expect(screen.queryByText("execution_completed")).not.toBeInTheDocument();
+    expect(screen.getByText("confidence unavailable")).toHaveClass("badge--neutral");
+  });
+
   it("reports failed execution responses without an accepted or completed claim", async () => {
     authorizeLab();
     mockExecuteAsync.mockResolvedValueOnce({ status: "execution_failed", queue_status: "blocked",
@@ -118,14 +141,14 @@ describe("IntentPage", () => {
     await userEvent.click(screen.getByRole("checkbox", { name: /explicitly approve/ }));
     await userEvent.click(screen.getByRole("button", { name: "Execute" }));
     expect(screen.getByText(/Request outcome unknown/)).toBeInTheDocument();
-    expect(screen.getByLabelText("Idempotency Key")).toBeDisabled();
+    expect(screen.getByLabelText("Execution idempotency key")).toHaveAttribute("readonly");
     const first = mockExecuteAsync.mock.calls[0][0];
-    expect(first.request).toMatchObject({ manual_approval: true, cancel: false, intent_id: "lab-intent" });
+    expect(first.request).toMatchObject({ manual_approval: true, cancel: false, intent_id: "lab-intent", idempotency_key: "persisted-key" });
     expect(first.request).not.toHaveProperty("simulation_id");
     expect(first.idempotencyKey).toBe(first.request.idempotency_key);
     act(() => useAuthStore.getState().replaceTokens({ accessToken: "rotated", refreshToken: "rotated-refresh" }));
     expect(screen.getByLabelText("Intent ID")).toHaveValue("lab-intent");
-    expect(screen.getByLabelText("Idempotency Key")).toHaveValue(first.idempotencyKey);
+    expect(screen.getByLabelText("Execution idempotency key")).toHaveValue(first.idempotencyKey);
     expect(screen.getByRole("checkbox", { name: /explicitly approve/ })).toBeChecked();
     await userEvent.click(screen.getByRole("button", { name: "Execute" }));
     expect(mockExecuteAsync.mock.calls[1][0]).toEqual(first);
@@ -145,13 +168,13 @@ describe("IntentPage", () => {
     const request = mockExecuteAsync.mock.calls[0][0];
     act(() => useAuthStore.getState().replaceTokens({ accessToken: "rotated", refreshToken: "new-refresh" }));
     expect(screen.getByLabelText("Scope JSON")).toHaveValue("draft in progress");
-    expect(screen.getByLabelText("Idempotency Key")).toHaveValue(request.idempotencyKey);
+    expect(screen.getByLabelText("Execution idempotency key")).toHaveValue(request.idempotencyKey);
     await act(async () => finish({ status: "execution_started", queue_status: "queued" }));
     expect(screen.getByText(/Execution accepted, not completed/)).toBeInTheDocument();
     act(() => useAuthStore.getState().setProfile({ ...useAuthStore.getState().profile!, roles: ["Admin"] }));
     expect(screen.getByRole("checkbox", { name: /explicitly approve/ })).not.toBeChecked();
     expect(screen.getByLabelText("Scope JSON")).toHaveValue("draft in progress");
-    expect(screen.getByLabelText("Idempotency Key")).toHaveValue(request.idempotencyKey);
+    expect(screen.getByLabelText("Execution idempotency key")).toHaveValue(request.idempotencyKey);
     expect(mockExecuteAsync).toHaveBeenCalledTimes(1);
   });
   it("sends only an explicit valid simulation UUID, preserves it on retry, and omits it for cancel", async () => {
@@ -311,7 +334,7 @@ describe("IntentPage", () => {
     expect(mockExecuteAsync).not.toHaveBeenCalled();
   });
 
-  it("prefills intent form from digital twin handoff query params", () => {
+  it("marks a URL-prefilled intent form as untrusted and strips the link parameters", () => {
     const scope = JSON.stringify({
       source: "digital_twin",
       device_id: "device-1",
@@ -332,7 +355,10 @@ describe("IntentPage", () => {
     expect(screen.getByDisplayValue("throttle_qos")).toBeInTheDocument();
     expect(screen.getByDisplayValue(scope)).toBeInTheDocument();
     expect(screen.getByDisplayValue(constraints)).toBeInTheDocument();
-    expect(screen.getByText(/Prefilled from Digital Twin:/)).toBeInTheDocument();
+    // URL content can be crafted by anyone: it is marked untrusted, never presented as the Twin's own handoff.
+    expect(screen.getByRole("alert")).toHaveTextContent("Prefilled from a link (untrusted)");
+    expect(screen.getByRole("alert")).toHaveTextContent("Link summary (unverified): device=edge-1");
+    expect(screen.queryByText(/^Prefilled from Digital Twin:/)).not.toBeInTheDocument();
     expect(window.location.search).toBe("");
   });
 
@@ -469,6 +495,152 @@ describe("IntentPage", () => {
 
     await waitFor(() => {
       expect(mockDetailRefetch).toHaveBeenCalled();
+    });
+  });
+
+  describe("ADR-028 C3 identities, bindings and conflicts", () => {
+    const binding = { plan_hash: "a".repeat(64), binding_digest: "b".repeat(64), run_id: "00000000-0000-0000-0000-00000000c0de" };
+    const validated = (overrides: Record<string, unknown> = {}) => ({
+      intent_id: "lab-intent", workspace_id: "00000000-0000-0000-0000-000000000222", network_id: "00000000-0000-0000-0000-000000000333",
+      status: "validated", confidence: { score: 0, band: "below_60", approval_required: true }, idempotency_key: "k", idempotent_replay: false,
+      validation: { validation_kind: "baseline_schema_only" }, ...overrides,
+    });
+
+    it("uses a fresh validation key per submission and reuses it only to retry an unconfirmed submission of the same draft", async () => {
+      authorizeLab();
+      mockValidateAsync
+        .mockRejectedValueOnce(new ApiClientError("The request timed out.", "API_TIMEOUT", 0))
+        .mockResolvedValueOnce(validated({ idempotent_replay: true }))
+        .mockResolvedValueOnce(validated());
+      render(<IntentPage />);
+      await userEvent.click(screen.getByRole("button", { name: "Validate" }));
+      expect(screen.getByLabelText("Validation request key")).toHaveTextContent(/retries with key intent-/);
+      await userEvent.click(screen.getByRole("button", { name: "Validate" }));
+      const [first, retry] = mockValidateAsync.mock.calls.map(([input]) => input.idempotencyKey as string);
+      expect(first).toMatch(/^intent-/);
+      expect(retry).toBe(first);
+      expect(useUiStore.getState().toasts.at(-1)).toMatchObject({ title: "Existing intent returned" });
+      expect(useUiStore.getState().toasts.at(-1)?.description).toContain("schema-only validation");
+      await userEvent.click(screen.getByRole("button", { name: "Validate" }));
+      expect(mockValidateAsync.mock.calls[2][0].idempotencyKey).not.toBe(first);
+      expect(screen.getByLabelText("Validation request key")).toHaveTextContent("Each Validate submission uses a new request key.");
+    });
+
+    it("mints a new key after the draft changes, another intent is selected, or the key was reused elsewhere", async () => {
+      authorizeLab();
+      mockValidateAsync
+        .mockRejectedValueOnce(new Error("Connection lost"))
+        .mockRejectedValueOnce(new Error("Connection lost"))
+        .mockRejectedValueOnce(new ApiClientError("Idempotency-Key already identifies a different intent submission", "IDEMPOTENCY_KEY_REUSED", 409))
+        .mockResolvedValueOnce(validated());
+      render(<IntentPage />);
+      await userEvent.click(screen.getByRole("button", { name: "Validate" }));
+      await userEvent.type(screen.getByLabelText("Constraints JSON"), " ");
+      await userEvent.click(screen.getByRole("button", { name: "Validate" }));
+      await userEvent.type(screen.getByLabelText("Intent ID"), "x");
+      await userEvent.click(screen.getByRole("button", { name: "Validate" }));
+      expect(screen.getByRole("alert")).toHaveTextContent("Request key already used (IDEMPOTENCY_KEY_REUSED)");
+      await userEvent.click(screen.getByRole("button", { name: "Validate" }));
+      const keys = mockValidateAsync.mock.calls.map(([input]) => input.idempotencyKey);
+      expect(new Set(keys).size).toBe(4);
+    });
+
+    it("executes with the selected intent's stored key and the detail's current approval binding", async () => {
+      authorizeLab();
+      mockUseIntentDetail.mockReturnValue(detailQuery({ ...validatedDetail, approval_binding: binding,
+        validation_result: { validation_kind: "manual_lab_plan", simulation_required: false } }));
+      mockExecuteAsync.mockResolvedValue({ status: "execution_started", queue_status: "queued" });
+      render(<IntentPage />);
+      await userEvent.type(screen.getByLabelText("Intent ID"), "lab-intent");
+      expect(screen.getByLabelText("Execution idempotency key")).toHaveValue("persisted-key");
+      expect(screen.getByText(`plan_hash: ${binding.plan_hash}`)).toBeInTheDocument();
+      expect(screen.getByText(/Validated against the trusted manual lab plan/)).toBeInTheDocument();
+      await userEvent.click(screen.getByRole("checkbox", { name: /explicitly approve/ }));
+      await userEvent.click(screen.getByRole("button", { name: "Execute" }));
+      expect(mockExecuteAsync).toHaveBeenCalledWith({
+        request: { workspace_id: validatedDetail.workspace_id, intent_id: "lab-intent", idempotency_key: "persisted-key",
+          manual_approval: true, cancel: false, approval_binding: binding },
+        idempotencyKey: "persisted-key",
+      });
+    });
+
+    it("gives a legacy intent without a stored key one stable execution identity", async () => {
+      authorizeLab();
+      mockUseIntentDetail.mockReturnValue(detailQuery({ ...validatedDetail, idempotency_key: null }));
+      mockExecuteAsync.mockRejectedValueOnce(new Error("lost")).mockResolvedValue({ status: "execution_started", queue_status: "queued" });
+      render(<IntentPage />);
+      await userEvent.type(screen.getByLabelText("Intent ID"), "lab-intent");
+      expect(screen.getByText(/No stored key yet/)).toBeInTheDocument();
+      await userEvent.click(screen.getByRole("checkbox", { name: /explicitly approve/ }));
+      await userEvent.click(screen.getByRole("button", { name: "Execute" }));
+      await userEvent.click(screen.getByRole("button", { name: "Execute" }));
+      const [first, retry] = mockExecuteAsync.mock.calls.map(([input]) => input.request.idempotency_key);
+      expect(first).toMatch(/^intent-exec-/);
+      expect(retry).toBe(first);
+    });
+
+    it("re-reads the detail and revokes approval on APPROVAL_BINDING_MISMATCH", async () => {
+      authorizeLab();
+      mockUseIntentDetail.mockReturnValue(detailQuery({ ...validatedDetail, approval_binding: binding }));
+      mockExecuteAsync.mockRejectedValueOnce(new ApiClientError("approval_binding must equal the current plan_hash", "APPROVAL_BINDING_MISMATCH", 409));
+      render(<IntentPage />);
+      await userEvent.type(screen.getByLabelText("Intent ID"), "lab-intent");
+      await userEvent.click(screen.getByRole("checkbox", { name: /explicitly approve/ }));
+      await userEvent.click(screen.getByRole("button", { name: "Execute" }));
+      expect(mockDetailRefetch).toHaveBeenCalled();
+      expect(screen.getByRole("alert")).toHaveTextContent("Lab identity changed since approval (APPROVAL_BINDING_MISMATCH)");
+      expect(screen.getByRole("checkbox", { name: /explicitly approve/ })).not.toBeChecked();
+      expect(screen.queryByText(/Request outcome unknown/)).not.toBeInTheDocument();
+      // Refused, so nothing is pinned: the operator can change inputs and approve again.
+      expect(screen.getByLabelText("Referenced simulation UUID")).toBeEnabled();
+    });
+
+    it.each([
+      ["DISTINCT_APPROVER_REQUIRED", "A different approver is required", false],
+      ["SIMULATION_REQUIRED", "Simulation required first", false],
+      ["SIMULATION_POLICY_VIOLATION", "Simulation limits weaker than policy", false],
+      ["SIMULATION_EVIDENCE_REJECTED", "Simulation evidence rejected", false],
+      ["INTENT_ALREADY_EXECUTING", "Execution already started", true],
+      ["INTENT_IDEMPOTENCY_CONFLICT", "Execution identity conflict", true],
+    ] as const)("explains 409 %s without claiming an unknown outcome", async (code, title, refetches) => {
+      authorizeLab();
+      mockExecuteAsync.mockRejectedValueOnce(new ApiClientError("refused", code, 409));
+      render(<IntentPage />);
+      await userEvent.type(screen.getByLabelText("Intent ID"), "lab-intent");
+      await userEvent.type(screen.getByLabelText("Referenced simulation UUID"), "00000000-0000-0000-0000-000000000701");
+      await userEvent.click(screen.getByRole("checkbox", { name: /explicitly approve/ }));
+      await userEvent.click(screen.getByRole("button", { name: "Execute" }));
+      expect(screen.getByRole("alert")).toHaveTextContent(`${title} (${code})`);
+      expect(useUiStore.getState().toasts.at(-1)).toMatchObject({ title, tone: "danger" });
+      expect(mockDetailRefetch).toHaveBeenCalledTimes(refetches ? 1 : 0);
+      expect(screen.getByRole("checkbox", { name: /explicitly approve/ })).not.toBeChecked();
+      expect(screen.getByLabelText("Referenced simulation UUID")).toBeEnabled();
+      expect(screen.queryByText(/Request outcome unknown/)).not.toBeInTheDocument();
+    });
+
+    it("discloses schema-only validation and the simulation requirement", () => {
+      mockUseIntentDetail.mockReturnValue(detailQuery({ ...validatedDetail,
+        validation_result: { validation_kind: "baseline_schema_only", model_evidence: "unavailable", simulation_required: true } }));
+      render(<IntentPage />);
+      expect(screen.getByRole("note", { name: "Validation coverage" })).toHaveTextContent("Schema-only validation.");
+      expect(screen.getByRole("note", { name: "Validation coverage" })).toHaveTextContent("model evidence: unavailable");
+      expect(screen.getByRole("note", { name: "Validation coverage" })).toHaveTextContent("Simulation required before execution");
+      // Lab plan without a binding: the refusal is predicted, not hidden.
+      expect(screen.getByText(/No approval binding recorded/)).toBeInTheDocument();
+    });
+
+    it("applies a Digital Twin handoff from router state as in-app content, once", async () => {
+      const prefill = { source: "digital-twin" as const, action: null, scopeJson: '{"device_id":"d-1"}', constraintsJson: '{"max_downtime":0}', contextSummary: "device=edge-1" };
+      const { unmount } = rtlRender(<MemoryRouter initialEntries={[{ pathname: "/ops/intent", state: intentHandoffState(prefill) }]}><IntentPage /></MemoryRouter>);
+      expect(screen.getByDisplayValue('{"device_id":"d-1"}')).toBeInTheDocument();
+      expect(screen.getByText(/Prefilled from Digital Twin: device=edge-1\. Review every field before validating\./)).toBeInTheDocument();
+      expect(screen.queryByText(/untrusted/)).not.toBeInTheDocument();
+      expect(screen.getByDisplayValue("reroute_path")).toBeInTheDocument();
+      // A workspace switch remounts the form; the handoff belongs to the previous context and is not re-applied.
+      act(() => useWorkspaceStore.setState({ workspaceId: "00000000-0000-0000-0000-000000000999" }));
+      expect(screen.queryByDisplayValue('{"device_id":"d-1"}')).not.toBeInTheDocument();
+      expect(screen.queryByText(/Prefilled from Digital Twin/)).not.toBeInTheDocument();
+      unmount();
     });
   });
 });

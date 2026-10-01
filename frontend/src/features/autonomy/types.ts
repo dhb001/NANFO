@@ -9,6 +9,28 @@ export interface AutonomyUpdate {
   approval_expires_at: string | null;
 }
 
+/**
+ * Typed proposal confidence (ADR-028 C17). `calibrated` is authoritative: a raw policy
+ * probability is never calibrated, and `calibration_id` is present exactly when it is.
+ */
+export interface AutonomyConfidence {
+  value: number;
+  method: string;
+  calibrated: boolean;
+  calibration_id?: string | null;
+}
+
+/** C25 two-person switch: a request awaiting a different approver's identical PUT. */
+export interface AutonomyPendingApproval {
+  requested_by_user_id: string;
+  mode: AutonomyMode;
+  expected_revision: number;
+  checkpoint_sha256: string | null;
+  approval_expires_at: string | null;
+  requested_at: string;
+  expires_at: string;
+}
+
 export interface AutonomyProvider {
   provider_id: string;
   status: "ready" | "unavailable" | "incompatible" | "uncalibrated";
@@ -29,6 +51,8 @@ export interface AutonomyObservation {
   evidence: string[];
   samples: { record_id: string; device_id: string; metric: string; value: number; unit: string | null;
     observed_at: string; source: string; run_id: string | null; port_no: string | null }[];
+  /** History summaries omit samples and report their count. */
+  sample_count?: number;
 }
 
 export interface AutonomyDecision {
@@ -42,7 +66,13 @@ export interface AutonomyDecision {
   reasons: string[];
   checkpoint_sha256: string | null;
   observation: AutonomyObservation | null;
-  proposal: { action_id: string; checkpoint_sha256: string; observation_contract: string; evidence: string[] } | null;
+  proposal: { action_id: string; checkpoint_sha256: string; observation_contract: string; evidence: string[]; confidence?: AutonomyConfidence | null } | null;
+  /** The persisted proposal's confidence (absent for pre-C17 history and decisions without a proposal). */
+  confidence?: AutonomyConfidence | null;
+  /** Identical no-change cycles this row stands for. */
+  repeat_count?: number;
+  last_seen_at?: string | null;
+  projection?: "full" | "summary";
   safety: { admissible: boolean; action_id: string | null; model_version: string; reasons: string[]; evidence: string[];
     certificate?: SafetyCertificate | null; binding?: SafetyBinding | null } | null;
   evidence: string[];
@@ -109,4 +139,12 @@ export interface AutonomyStatus {
   decisions: AutonomyDecision[];
   history_limit: number;
   updated_at: string | null;
+  pending_approval?: AutonomyPendingApproval | null;
+}
+
+/** PUT /autonomy result: 202 + meta.pending_approval records the first of two approvals (C25). */
+export interface AutonomyUpdateResult {
+  status: AutonomyStatus;
+  pendingApproval: boolean;
+  pendingApprovalExpiresAt: string | null;
 }

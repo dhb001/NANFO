@@ -67,7 +67,7 @@ export interface DigitalTwinDeltaData {
   delta_type: "update";
   scene_object: {
     id: string;
-    object_type: "simulation_state" | "intent_state" | string;
+    object_type: "simulation_state" | "intent_state" | (string & {});
     simulation_id?: string;
     scenario_id?: string;
     state?: string;
