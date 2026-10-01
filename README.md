@@ -177,10 +177,17 @@ Planned/deferred architecture breadth (for later roadmap phases) remains documen
 
 ## Repository Layout
 
-- `backend/` - FastAPI app, domain modules, migrations, tests
+- `backend/` - FastAPI app, domain modules, migrations, workers, tests
 - `frontend/` - React operator console, tests, perf gates
+- `ai-engine/` - DRL routing training, qualification and the tracked qualified model
+- `emulation/` - isolated SDN/FRR lab, experiment tooling and the frozen lab archive
+- `deploy/` - supervised deployment package, gateway, backup/restore and verification
+- `scripts/` - local environment helpers, evidence hygiene, dependency audits, research tooling
+- `security/` - dependency exceptions and evidence-hygiene fixtures/exceptions
 - `docs/` - architecture, API contracts, feature PRDs, sprint tracking, ADRs
-- `scripts/` - local environment helper scripts (`dev-start.sh`, `dev-stop.sh`)
+- `ISPR2/` - research proposal, report chapters and their diagrams
+- `.github/` - CI workflows, issue forms, PR template, CODEOWNERS, branch ruleset
+- `.agents/` - agent rules, workflows and skills
 
 ## API and Realtime Surfaces
 
@@ -422,3 +429,13 @@ Use these as source-of-truth references:
 - API standards/contracts: `docs/api/`
 - Feature PRDs: `docs/features/`
 - ADRs: `docs/adr/`
+
+## Project Tracking
+
+Work is tracked on GitHub: [issues](https://github.com/dhb001/NANFO/issues),
+[milestones](https://github.com/dhb001/NANFO/milestones) and
+[pull requests](https://github.com/dhb001/NANFO/pulls). Every change starts from an issue,
+is developed on a branch and reaches `main` through a reviewed pull request; see
+[CONTRIBUTING.md](CONTRIBUTING.md#issues-milestones-and-branches). Milestones M1–M14
+(closed) and the issues labelled `retrospective` record the work completed before this
+workflow was adopted.

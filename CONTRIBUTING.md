@@ -93,10 +93,31 @@ Deps(frontend): bump the frontend-minor-patch group
 Dependabot uses the same form (`Deps(actions)`, `Deps(backend)`, `Deps(frontend)`,
 `Deps(ai)`, `Deps(images)`; see `.github/dependabot.yml`).
 
+## Issues, milestones and branches
+
+Every change starts from a GitHub issue, so the history shows why each change was made.
+
+1. **Issue.** Open one with a form (bug, feature or task) or pick one from the backlog.
+   Label it with one type (`bug`, `enhancement`, `documentation`, `security`, `tech-debt`,
+   `research` or `owner-action`), the `area:` labels matching the commit areas above and,
+   once planned, a `priority:` label.
+2. **Milestone.** Milestones group issues by goal. M1–M14 record completed work and are
+   closed; M15 onwards are current goals. [`docs/project/Milestones.md`](docs/project/Milestones.md)
+   mirrors them. Issues labelled `retrospective` record work finished before this workflow
+   was adopted.
+3. **Branch.** Branch from `main` as `<type>/<issue>-<short-slug>`, using the commit type
+   in lower case, for example `fix/123-gateway-lane` or `docs/71-github-workflow`.
+4. **Commits.** Follow the convention above. Use `[#123]` as the finding ID when the issue is
+   the finding, and end the body with `Closes #123` or `Part of #123`.
+5. **Pull request.** Link the issue with `Closes #123` and set the same milestone. Review
+   your own diff first and leave review comments on anything risky; then merge once the
+   checks pass and delete the branch. A change that builds on an unmerged branch targets
+   that branch; GitHub retargets it to `main` once that branch is merged and deleted.
+
 ## Pull requests
 
-1. Branch from `main` (for example `fix/adr-028-c22-gateway-lane`).
-2. Keep the PR to one finding and fill in the pull request template.
+1. Branch from `main` as described above (for example `fix/123-gateway-lane`).
+2. Keep the PR to one finding, link its issue and fill in the pull request template.
 3. Run the commands below for every area you touched and paste the results.
 4. All required checks must pass and the branch must be up to date with `main`.
 
