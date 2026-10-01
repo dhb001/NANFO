@@ -44,6 +44,8 @@ PUT body has exactly `expected_revision` and `scene`. `scene` has exactly `versi
 `coordinate_system`, and `objects`; clients cannot supply `revision` inside it.
 Every field shown below is required, including nullable fields. Unknown fields at
 any level are rejected. Object order is preserved, but parents can occur after children.
+Since ADR-028 the PUT body may be up to 8 MiB (`API_MAX_SPATIAL_SCENE_BYTES`); every
+other route keeps the 1 MiB default. Larger bodies return 413 `REQUEST_TOO_LARGE`.
 
 ```json
 {
@@ -162,8 +164,8 @@ body to remain active; attempting to restore that body does require current vali
 
 `GET /api/v1/networks/{network_id}/spatial-scene/history?page=1&page_size=20`
 
-Query bounds: integer `page`1–1,000,000 and `page_size`1–100. Canonical HTTP200
-envelope with `data`:
+Query bounds: integer `page`1–10,000 (ADR-028 shared `PageNumber`; previously
+1–1,000,000) and `page_size`1–100. Canonical HTTP200 envelope with `data`:
 
 ```json
 {
@@ -224,6 +226,15 @@ transaction as current snapshot replacement and public Identity audit append.
 Conflict, membership denial, history failure, audit failure or rollback leaves all
 three unchanged. Existing post-lock authority refresh remains mandatory. New history
 is append-only even when submitted content is identical to the current scene.
+
+**Delta storage (ADR-028, migration 0030).** New history rows usually store per-object
+changes against the previous revision (`storage_kind='delta'`, `delta`,
+`base_revision = revision - 1`). A full body (`storage_kind='full'`) is written every
+20 revisions, and whenever the delta would not be smaller or the base chain is missing.
+Reads rebuild a revision from the nearest full row (at most 19 deltas). The history list
+and revision-body responses are unchanged. Rows are still immutable. Before 0030, or
+without these columns, every row is a full body as described above. Downgrading 0030 is
+refused while delta rows exist.
 
 Restore uses the existing PUT: GET the selected history body, remove its `revision`
 field, and submit it as `scene` with the **current** `expected_revision`. A successful

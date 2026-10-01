@@ -171,7 +171,7 @@ flowchart TD
 |---|---|---|
 | PostgreSQL | Main relational data | API errors on CRUD operations |
 | Neo4j | Topology graph queries | Topology views are empty or fail |
-| Redis | Event bus, token deny-list, websocket support | Realtime/event behavior breaks |
+| Redis | Event bus, login sessions and rate limits, websocket support | Realtime/event behavior breaks; since ADR-028, authenticated requests return 503 until Redis is back |
 
 ### Frontend dependencies
 

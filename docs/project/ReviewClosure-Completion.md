@@ -6,6 +6,13 @@ for [RepositoryReview-2026-09-21](RepositoryReview-2026-09-21.md), under
 acceptance and research/physical qualification are separate states. The seven rows
 follow the review's recommended order; R01–R12 are finding IDs, not seven new features.
 
+> **Update 2026-09-24:** [ADR-028](../adr/ADR-028-full-stack-review-remediation.md)
+> changed the current source after this matrix: schema **0030**, contract changes C1–C26
+> and new CI/deployment tooling. The ADR-028 status and owner actions are at the top of
+> [CurrentSprint](CurrentSprint.md). This matrix still records the accepted `c8rorfzd`
+> release (schema 0029) and the open evidence obligations. No ADR-028 image or
+> deployment has been accepted.
+
 ## Source and evidence scope
 
 - Base commit: `3f9f1f1fd247cd1af6d66cf38d94155ee32a91e1`, plus the uncommitted

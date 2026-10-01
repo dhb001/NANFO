@@ -2,6 +2,39 @@
 
 Lightweight chronological notes for decisions that do not require a full ADR.
 
+## 2026-09-24: ADR-028 Integration Decisions
+
+ADR-028 is the current authority, above the ADR027 matrix, for the remediation it covers.
+Its status is "implemented, pending owner verification actions". Owner actions are listed
+once, in ADR-028 §8, and mirrored in the CurrentSprint checklist. Contract changes are
+listed once, in `docs/api/ADR028-ContractChanges.md`; only C3, C4, C5 and C10 carry the
+BREAKING label, exactly as ADR-028 assigns it. Integrator decisions (ADR-028 §7):
+
+- `Settings.REPORTS_ARTIFACT_BUCKET` stays, unused. `backend/.env` forbids unknown keys,
+  so removing it would make existing `.env` files fail at startup.
+- Campaign-014's 10 tracked private-evidence files are pinned by that campaign's own
+  plan and gates. The owner chose on 2026-09-24 a narrow, SHA-256-pinned evidence-hygiene
+  exception for exactly those paths instead of deletion or an immediate history rewrite.
+  CI-Repo implements it as its next step.
+- The total bundle cap rises from 420,000 B to 450,000 B for the ADR-028 Twin and
+  Platform features, with per-chunk caps unchanged. This awaits owner confirmation; a veto
+  means trimming features.
+- The model-qualification replay may overlap per-network inference. This was proven safe
+  (private confined stages, identity re-binding, overlapped result equals sequential
+  result) rather than serialised.
+- Experimental retention enumeration is not gated by `NANFO_EXPERIMENTAL_LAB_ENABLED`, so
+  switching the lab off never unpins telemetry that historical lab rows reference.
+- Backend code imports `emulation.*` only lazily; `intent/lab.py` loads
+  `emulation.lab_contracts` inside `Mailbox.write`, so `import app.main` never loads
+  emulation.
+- AI-Emulation (the frozen and research side) and AI-Lab (the active lab and the
+  experimental backend) were split into disjoint owners (ADR-028 §2.2). Frozen identities
+  and historical evidence stay byte-identical; changed runtimes are successors that need
+  fresh qualification.
+
+Test counts in ADR-028 §6 are each owner's targeted runs. Only the integrator's final run
+(ADR-028 "Final verification (integrator)") speaks for the whole tree.
+
 ## 2026-09-21: ADR027 Current Status and Evidence Authority
 
 Use `ReviewClosure-Completion.md` as the seven-workstream master matrix and the top

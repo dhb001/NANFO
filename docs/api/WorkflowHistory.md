@@ -8,7 +8,7 @@ access. Scope is authorized through the owning services before counting/paging.
 |---|---|
 | `workspace_id` | Required UUID |
 | `network_id` | Optional UUID; NetworkService verifies active network in that workspace |
-| `page` | Integer ≥1; default1 |
+| `page` | Integer 1–10000 (ADR-028 shared `PageNumber`); default1 |
 | `page_size` | Integer1–200; default20 |
 
 Canonical success envelope: `success=true`, `data={items,total,page,page_size}`,
@@ -37,6 +37,7 @@ Intent item:
 Intent `network_id` and `action` may be null. `action` is the first120 characters
 of the existing payload action; full payload/evidence remain on detail. Lifecycle
 status is the existing persisted value, not a new summary-only enumeration.
+Since ADR-028 a simulation `status` can also be `failed` (claim attempts exhausted).
 Simulation output/checkpoint and intent execution provenance are not loaded by lists.
 
 Order is `created_at DESC, simulation_id DESC` / `created_at DESC, intent_id DESC`.

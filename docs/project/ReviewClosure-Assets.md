@@ -31,6 +31,11 @@ Implemented and verified 2026-09-21. Authority: ADR027 contracts 1 and 3,
   verified reconstructed base64 bodies. POST retains that response shape and its
   existing input/identity semantics. Page arguments do not paginate legacy mode.
   No migration is required.
+  **Superseded by ADR-028 C4 (2026-09-24, BREAKING default):** the list now defaults to
+  `include_data=false` metadata pages. `include_data=true` needs `page_size <= 10` and at
+  most 32 MiB of bodies per page, and POST responses are metadata only. Downloads
+  additionally answer a matching `If-None-Match` with 304. See
+  `docs/api/ADR028-ContractChanges.md`.
 - Read permission, current Organization membership, token workspace/org narrowing,
   final authority recheck and scoped download/retirement rules remain enforced.
 

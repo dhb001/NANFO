@@ -26,8 +26,15 @@ This feature strictly owns the following tables within the PostgreSQL relational
 * `audit_logs`: Immutable, append-only table for recording login successes, failures, and token issuances[cite: 1].
 
 ## 5. Security & Validation (Edge Cases)
-* **Passwords:** Must never be logged or returned in any API response.
-* **Brute Force:** Implement rate limiting on the `/login` endpoint (e.g., max 5 failed attempts per IP before temporary lockout).
+* **Passwords:** Must never be logged or returned in any API response. bcrypt considers only
+  72 bytes, so passwords over 72 UTF-8 bytes are refused when hashing and always fail login
+  with the generic 401 (ADR-028 C11). Existing accounts with longer passwords need a reset.
+* **Brute Force:** Login is throttled in fixed windows of `RATE_LIMIT_LOGIN_WINDOW_SECONDS`
+  (60) with `RATE_LIMIT_LOGIN_MAX_ATTEMPTS` (5), returning 429 (ADR-028 C11):
+  - a per-IP bucket counts every attempt;
+  - a per-email bucket, keyed by SHA-256 of the normalized address, counts failures only
+    and is cleared on success;
+  - only the first throttled attempt per window is audited.
 * **Validation:** Reject malformed email formats or weak passwords with a `422 Unprocessable Entity` before hitting the Service Layer.
 * **Token Expiration:** Access tokens should have a short lifespan (e.g., 15 minutes); refresh tokens should handle long-lived sessions.
 
@@ -58,6 +65,14 @@ All JWTs issued by `POST /api/v1/auth/login` and `POST /api/v1/auth/refresh` mus
 | `iat` | Unix timestamp | Issued-at time. Set by the token issuer. |
 | `exp` | Unix timestamp | Expiry time. Access tokens: 15 minutes from `iat`. |
 | `jti` | UUID (string) | JWT ID: a unique identifier for this specific token instance. Used for token revocation lookup. |
+| `iss` | string | Always `"nanfo-api"` (ADR-028 C10). Required on decode. |
+| `aud` | string | Always `"nanfo"` (ADR-028 C10). Required on decode. |
+
+Decoding requires `exp`, `iat`, `sub`, `jti`, `iss` and `aud`, allows 30 s leeway and
+accepts only the configured HS256/384/512 algorithm (PyJWT). Tokens issued before
+ADR-028 lack `iss`/`aud` and are rejected (**BREAKING for pre-deploy tokens**).
+Verification also accepts the verify-only `JWT_PREVIOUS_SECRET_KEYS` during a key
+rotation (C19); signing always uses `JWT_SECRET_KEY`.
 
 ### 8.2 Optional Claims
 
@@ -73,18 +88,25 @@ All JWTs issued by `POST /api/v1/auth/login` and `POST /api/v1/auth/refresh` mus
 - **RBAC evaluation order:** The RBAC middleware evaluates `roles` first (coarse-grained route access), then `permissions` (fine-grained capability access). Both arrays must be present in the token; an empty `permissions` array is valid for read-only roles.
 - **Token revocation:** Access and refresh tokens require `sid` (session UUID) and
   `token_type` (`access` or `refresh`). Logout deletes the Redis session family;
-  all its tokens become invalid. Existing access-token deny-list entries are
-  still honored. Sessionless legacy tokens require a fresh login.
+  all its tokens become invalid. ADR-028 removed the access-token deny-list lookup,
+  which had no writer. Deactivation, password change and role downgrade revoke every
+  session of the user through a per-user session index (C9). Sessionless legacy tokens
+  require a fresh login.
 - **Refresh rotation:** Refresh returns a full TokenPair (`access_token`,
-  `refresh_token`, `token_type`, `expires_in`). Refresh tokens are single-use;
-  replay revokes the family. Absolute session expiry is not extended by rotation.
+  `refresh_token`, `token_type`, `expires_in`). Refresh tokens are single-use.
+  Re-presenting a token rotated at most 20 s ago returns the *same* pair while that pair
+  is still the newest in its family (C9 retry grace); any other replay revokes the family
+  (`auth.token.reuse_detected`). Sessions expire after 12 h without a refresh
+  (`AUTH_SESSION_IDLE_TIMEOUT_SECONDS`). Absolute session expiry is not extended by
+  rotation.
 - **Current authorization:** Every authenticated request reloads active identity,
   roles, and permissions; JWT role snapshots cannot preserve removed privileges.
 - **Browser ownership:** Sessions are tab-local (`sessionStorage`); legacy shared
   local-storage credentials are discarded. Logout clears query/realtime/context
   state, and attempts refresh before revocation if the access token has expired.
-- **Availability:** Redis/session failures deny access. Clients must not silently
-  substitute local logout for confirmed backend revocation.
+- **Availability:** Redis/session failures deny access with 503 `DEPENDENCY_UNAVAILABLE`
+  and `Retry-After`, never 401 (ADR-028 C2). Clients keep the session, retry and must not
+  silently substitute local logout for confirmed backend revocation.
 
 ### 8.4 Claims That Must Never Appear in a JWT
 
@@ -105,12 +127,24 @@ platform Admin; organization administration still requires local Admin membershi
 
 `GET /api/v1/audit/logs` retains global Admin authorization, current organization
 membership and narrowing claim checks. Query fields: org_id, actor_id,
-resource_type, page>=1, page_size1..200 (default50), optional search<=200 characters.
-Search is case-insensitive literal substring across event_type, correlation_id,
-resource_type, resource_id and actor_id; whitespace-only search is ignored. Search
-and existing filters apply together before counting/pagination, within the org.
-Ordering is timestamp descending then log_id descending. Success data remains
-`{items,total,page,page_size}` with existing actor/resource/metadata fields.
+resource_type, page 1..10000 (ADR-028 `PageNumber`), page_size1..200 (default50),
+optional search<=200 characters and `scope` (ADR-028 C7):
+
+- `scope=org` (default) requires `org_id` or an org-scoped token, plus current membership
+  of that organization.
+- `scope=platform` returns the unscoped (`org_id IS NULL`) platform events, such as
+  authentication. It is restricted to a global Admin with an unscoped token: combining it
+  with `org_id` is 422, and an org-scoped token is 403.
+- A workspace-scoped token is always denied (403), because audit rows carry no workspace
+  attribution.
+
+Search (ADR-028): a UUID term matches `correlation_id`, `resource_id`, `actor_id`,
+`event_id` or `log_id` exactly; UUID columns are never cast to text. Any other term is a
+case-insensitive literal substring of `event_type` or `resource_type`, or an exact match
+on the correlation UUID that an opaque request id maps to. Whitespace-only search is
+ignored. Search and existing filters apply together before counting/pagination, within
+the selected scope. Ordering is timestamp descending then log_id descending. Success data
+is `{items,total,page,page_size,scope}` with existing actor/resource/metadata fields.
 
 Identity's public `append_audit_log` accepts optional event_id. Organization uses
 this boundary to atomically commit lifecycle audits with its mutations, without a

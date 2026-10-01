@@ -1,5 +1,89 @@
 # Development Journal
 
+## [2026-09-25] - ADR-028 Final Verification
+
+- **Database lanes** (owner-approved throwaway PostgreSQL 17.11 / Redis 7.4.11 containers,
+  loopback-only, no volumes, removed afterwards): migration round trip clean at head 0030;
+  323 database-contract cases and 29 stream-retention cases passed with zero skips.
+- **Two product defects found and fixed** (unit + PostgreSQL regression tests): report
+  creation failed under the 0030 `report_outbox → reports` foreign key (missing ORM
+  relationship, wrong flush order), and the STOP response returned the pre-STOP control
+  (`emergency_stopped=false`) because the session kept a stale object after the raw SQL
+  latch.
+- **CI gaps closed:** 13 PostgreSQL retention tests were invisible to CI's DSN drift guard
+  (inherited `pytestmark`); they now declare `RETENTION_TEST_DSN`, run in
+  `database-contracts`, and the DSN skip budget is 314. Three acceptance scripts no longer
+  demote to the `'Viewer'` role the 0030 CHECK rejects.
+- **Final gates:** backend 5,335 passed / 0 failed with 85.64 % coverage (floor raised to
+  84); private lane 94; portable lane 750 cases with zero skips; ai-engine 520; frontend
+  clean; full evidence scan 0 findings after the campaign-014 SHA-256-pinned exception;
+  gitleaks 0. Details: ADR-028 "Final verification (integrator)".
+
+## [2026-09-24] - ADR-028 Waves 2–3, Integration and Documentation
+
+- **Wave 2** started at 16:17 (ADR-028 §2.1):
+  - BE-Network and BE-AlertReport resumed from their partial diffs;
+  - BE-Autonomy, BE-DB, BE-Followups, FE-Platform, FE-Twin, Deploy-Runtime and CI-Repo
+    started (Deploy-CI was split into the last two);
+  - AI-Emulation started at 20:27.
+  The owner committed the tree as `e55a4f5` at 20:21. The orchestrator aborted at 20:51;
+  **wave 3** (from 21:37) resumed every open workstream from its progress file and split
+  AI-Emulation into AI-Emulation and AI-Lab (§2.2). The implementation workstreams
+  reported done by about 23:50. AI-Lab's two follow-ups (a single metric-formula module
+  and a `freeze_runtime` that copies only git-tracked files) and the Phase 2 integration
+  runs followed around midnight.
+- **Delivered:**
+  - migration `0030` (single head, offline parity test with zero drift);
+  - autonomy C17/C21/C25/C26;
+  - the C23 successor lab image and C15 command MACs;
+  - tracked copies of the qualified checkpoint and frozen lab archive, and the successor
+    protocol;
+  - the C16/C1 frontend, the Twin page split and the generated OpenAPI types;
+  - supervised retention loops and a hardened deployment;
+  - CI workflows, the 13-check ruleset, `CONTRIBUTING.md` and `SECURITY.md`.
+  Per-workstream counts are in ADR-028 §6; the owners did not run the DSN-gated,
+  Compose-CLI, Docker or live-lab lanes.
+- **Integrator:**
+  - moved the `emulation.lab_contracts` import inside `Mailbox.write`, so `import
+    app.main` needs no emulation package;
+  - relayed cross-owner requests;
+  - declined the `REPORTS_ARTIFACT_BUCKET` removal;
+  - recorded the owner's decision to give campaign-014's 10 private files a
+    SHA-256-pinned exception.
+  The bundle-cap raise to 450,000 B awaits owner confirmation (ADR-028 §7).
+- **Documentation:**
+  - ADR-028 status, outcome, decisions and owner actions;
+  - new `docs/api/ADR028-ContractChanges.md`;
+  - updated `API_STANDARD`, `WebSocket`, `Authentication`, `EventAPI`, `Alerts`,
+    `WorkflowHistory`, `SpatialScene` and `OpenAPI`;
+  - CurrentSprint, KnownIssues, TechnicalDebt and DecisionLog;
+  - the stale `AutonomousAcceptance` passages in `CompletionProgram/AutonomousExecution.md`;
+  - the affected feature PRDs;
+  - README test commands now point to `CONTRIBUTING.md`.
+  No historical evidence, source code or the academic ODT/PDF was changed by the
+  documentation task.
+
+## [2026-09-23] - Full-Stack Review and ADR-028 Wave 1
+
+- At the owner's request, eight parallel reviewers covered, from 19:12:
+  - backend core/API/events and the backend modules;
+  - the frontend;
+  - persistence and migrations;
+  - deployment/CI;
+  - AI engine and emulation;
+  - authorization and tenant isolation.
+  The owner directed that every finding be fixed in one coordinated change. ADR-028
+  records contracts C1–C26, the migration 0030 plan and a disjoint file-ownership map.
+- **Wave 1** (21:24–22:56) completed:
+  - BE-Platform: C1 WebSocket transport, C2 error envelope, C14 delivery/DLQ/retention;
+  - BE-Identity: PyJWT, throttling, refresh grace, audit platform scope, org `caller_role`;
+  - BE-Telemetry: read-only health, SLO evaluator, `service.py` split;
+  - BE-Workflows: C3 idempotency, C18 simulation evidence, approval binding.
+  BE-Network and BE-AlertReport were interrupted with partial diffs and resumed on
+  2026-09-24.
+- Every workstream ran only targeted tests and started no services. Cross-team requests
+  were collected for the next wave.
+
 ## [2026-09-21] - Final Core Refresh, Independent018 Review and Corrected Recount
 
 - Latest core **c8rorfzd accepted28pass/0fail/5blocked**, backend image `a2bf67af…`,

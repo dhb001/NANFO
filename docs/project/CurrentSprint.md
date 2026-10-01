@@ -1,6 +1,102 @@
 # Current Sprint State
 
-## Current — ADR027 Repository Review Consolidation (2026-09-21)
+## Current — ADR-028 Full-Stack Review Remediation (2026-09-23/24)
+
+- [ADR-028](../adr/ADR-028-full-stack-review-remediation.md) is **implemented, pending owner
+  verification actions**. All 15 workstreams delivered (ADR-028 §6). Integrator decisions
+  are in §7, owner actions in §8, and the integrator's final run in its
+  "Final verification (integrator)" section.
+- Timeline: review and wave 1 on 2026-09-23; waves 2–3 on 2026-09-24. Base `75b514f`.
+  Part of the change is in the owner's commit `e55a4f5`; the rest, including new untracked
+  files, is uncommitted. The untracked files include `ai-engine/qualified/`,
+  `emulation/frozen/`, the generated `frontend/src/shared/types/generated/openapi.ts` and
+  the governance files.
+- Current schema **0030** (single Alembic head, `CURRENT_SCHEMA = "0030"`). The C1–C26
+  contract changes, with the BREAKING items C3, C4, C5 and C10, are listed in
+  [ADR028-ContractChanges](../api/ADR028-ContractChanges.md).
+- Owner-reported targeted runs, not a full-suite run (details per workstream in ADR-028
+  §6):
+  - frontend: 131 files / 909 vitest tests and 71 Playwright tests; lint, typecheck and
+    build pass; `perf:bundle` passes at 422.34 KiB under the raised cap;
+  - portable lane: 722 cases, zero skips;
+  - deploy: 417 passed, 9 deselected;
+  - ai-engine: 520 passed;
+  - emulation: 197 passed, 6 skipped.
+  The owners did not execute the DSN-gated, Compose-CLI, Docker or live-lab lanes.
+- Owner decision (2026-09-24): campaign-014's 10 tracked private-evidence files get a
+  narrow, SHA-256-pinned evidence-hygiene exception. Until CI-Repo lands it,
+  `evidence-hygiene` reports exactly these 10 findings. The bundle-cap raise (420,000 →
+  450,000 B) awaits owner confirmation.
+- No new image, deployment, backup/restore or lab qualification is claimed. The successor
+  lab image, the receiver successor wrapper and the FRR runtime bindings need fresh
+  qualification. The research and evidence obligations below are unchanged.
+
+## Remaining Work Master Checklist (Current Authority — ADR-028, then ADR027)
+
+### ADR-028 owner actions (ADR-028 §8)
+
+- [ ] Commit and push everything, including the untracked new files. Re-run the full
+  evidence-hygiene scan just before committing.
+- [ ] `git rm --cached` the two tracked `frontend/test-results/` Playwright outputs.
+- [ ] GitHub:
+  - GitHub Pro/Team (or a public repository) for rulesets;
+  - one pull request running the 13 required checks;
+  - import `.github/rulesets/main.json`;
+  - Dependabot alerts and security updates;
+  - read-only workflow permissions;
+  - raise `COVERAGE_FLOOR` after the first green run on `main`.
+- [ ] Rewrite the history holding the 71 expired receiver tokens, re-review
+  `.gitleaksignore`, and choose a licence.
+- [ ] Freshly qualify the successor lab image, the receiver successor wrapper and the FRR
+  runtime bindings before any result claim.
+- [ ] Install the passive-observer helper `/usr/local/libexec/nanfo-proc-timens` and its
+  exact sudoers line.
+- [ ] Install the receiver private key (`${NANFO_STATE_DIR}/receiver/`) on the FRR
+  receiver only.
+- [ ] Write and review the upgrade procedure for pre-ADR-028 (ADR-020–027) deployments.
+- [ ] Confirm or veto the bundle-cap raise.
+
+### ADR-028 integration — completed 25 September 2026
+
+- [x] CI-Repo: campaign-014 SHA-256-pinned location exception, full evidence scan (0 findings)
+  and fixture re-pin.
+- [x] Integrator: final verification recorded in ADR-028 "Final verification (integrator)";
+  two product defects found by the database run were fixed.
+
+### ADR027 items (carried forward)
+
+- [ ] Resolve historical credential exposure/non-reuse/revocation and explicitly
+  authorized history remediation; configure required remote hygiene checks (item1).
+  ADR-028 prepared full-history gitleaks and the ruleset; applying them is listed under
+  the ADR-028 owner actions above.
+- [ ] Execute required remote CI, provision the private historical-evidence lane,
+  resolve exact dependency exceptions before expiry, and audit successor images (item3).
+  ADR-028 removed the ecdsa exception; the frozen exceptions now expire 2026-10-29 …
+  2026-11-26.
+- [ ] Adopt opt-in stream retention with protected archives/backups, capacity
+  monitoring and representative load evidence; retain pending/DLQ safety (item4).
+  ADR-028 made stream retention a supervised deployment loop; capacity monitoring and
+  load evidence remain.
+- [ ] Arrange off-host escrow for accepted c8rorfzd, qualify optional release/recovery
+  scopes and rehearse any separately authorized0027/0028 upgrade (item5).
+- [ ] Resolve the independently confirmed32-value operational-domain deficit through
+  explicit reviewed protocol direction. Preserve genuine reservations and the
+  train/validation/test split; fresh acquisition/admission and measured acceptance
+  remain blocked, not complete (item6).
+- [ ] Collect genuine research evidence: proactive workloads/timing, independent
+  training and safeguards comparison, intended-user study, complete recovery and
+  physical RF only for the broader RF claim (item6; `ReviewClosure-Research.md`).
+- [ ] Address scoped observability/maintainability and repository access/licensing
+  decisions when authorized; broader feature expansion remains deferred (items2/7).
+  ADR-028 added `CONTRIBUTING.md`, `SECURITY.md` and `CODEOWNERS`; the licence is open.
+
+The ADR027 matrix ([ReviewClosure-Completion](ReviewClosure-Completion.md)) records
+delivered repairs and accepted scopes alongside these open obligations. All older
+sections below are dated historical checkpoints. The archived Post-VS8/Post-VS16 plans
+and checked VS checklist do not establish current production readiness, sandboxed plugin
+execution, or scientific/physical qualification.
+
+## Previous checkpoint — ADR027 Repository Review Consolidation (2026-09-21)
 
 - Authoritative seven-workstream status: [ReviewClosure-Completion](ReviewClosure-Completion.md).
   Current schema **0029**; base commit `3f9f1f1` plus uncommitted ADR027 integration.
@@ -36,31 +132,6 @@
   passed. **996/1000 true/preregistered reservations,4 available/36 required,deficit32**
   still blocks a fresh plan. No plan/admission/live pass or split change. Physical RF,
   intended-user study and repeated training remain open.
-
-## Remaining Work Master Checklist (Current Authority — ADR027)
-
-- [ ] Resolve historical credential exposure/non-reuse/revocation and explicitly
-  authorized history remediation; configure required remote hygiene checks (item1).
-- [ ] Execute required remote CI, provision the private historical-evidence lane,
-  resolve exact dependency exceptions before expiry, and audit successor images (item3).
-- [ ] Adopt opt-in stream retention with protected archives/backups, capacity
-  monitoring and representative load evidence; retain pending/DLQ safety (item4).
-- [ ] Arrange off-host escrow for accepted c8rorfzd, qualify optional release/recovery
-  scopes and rehearse any separately authorized0027/0028 upgrade (item5).
-- [ ] Resolve the independently confirmed32-value operational-domain deficit through
-  explicit reviewed protocol direction. Preserve genuine reservations and the
-  train/validation/test split; fresh acquisition/admission and measured acceptance
-  remain blocked, not complete (item6).
-- [ ] Collect genuine research evidence: proactive workloads/timing, independent
-  training and safeguards comparison, intended-user study, complete recovery and
-  physical RF only for the broader RF claim (item6; `ReviewClosure-Research.md`).
-- [ ] Address scoped observability/maintainability and repository access/licensing
-  decisions when authorized; broader feature expansion remains deferred (items2/7).
-
-The matrix records delivered repairs and accepted scopes alongside these open
-obligations. All older sections below are dated historical checkpoints. The archived
-Post-VS8/Post-VS16 plans and checked VS checklist do not establish current production
-readiness, sandboxed plugin execution, or scientific/physical qualification.
 
 ## Historical — ADR026 Parallel Audit Repair — Integrated (2026-09-20)
 

@@ -1,11 +1,24 @@
 # Telemetry Runtime Adapter Runbook
 
 ## Purpose
-Define deterministic operator response playbooks for runtime adapter SLO threshold alerts emitted from telemetry health internals.
+Define deterministic operator response playbooks for runtime adapter SLO threshold alerts emitted by the collector-side telemetry SLO evaluator (ADR-028 C12; before ADR-028 they came from the telemetry health read).
 
 ## Scope
 - Source alerts: `alert.generated` and `alert.resolved` events emitted for runtime adapter SLO state transitions.
-- Signal origin: telemetry health rollup severity and anomaly reason flags.
+- Signal origin: since ADR-028 (C12), the collector-side SLO evaluator. After each poll
+  cycle of the API's telemetry collector, and in the fleet worker
+  (`python -m scripts.run_fleet_collector`), it closes one window when
+  `NANFO_TELEMETRY_SLO_INTERVAL_SECONDS` (30) has elapsed. Windows persist in Redis, and
+  a short Redis lock stops replicas from double-evaluating. `GET /api/v1/telemetry/health`
+  only reads the result (`slo`); it never evaluates or publishes.
+- Alerts are platform-scoped: `alert_scope: "platform"`, no workspace or network. Only a
+  global Admin using an unscoped token can list them, and they cannot be acknowledged or
+  resolved by hand; the evaluator resolves them. `runtime_adapter_slo_snapshot` figures
+  are counter deltas for one `evaluation_window` (`start`, `end`, `seconds`,
+  `counter_reset`), so an alert resolves once failures stop.
+- Settings: `NANFO_TELEMETRY_SLO_ENABLED` (true), `_INTERVAL_SECONDS` (30, 5–3600),
+  `_STALE_AFTER_INTERVALS` (3), `_LOCK_SECONDS` (10). `slo.stale=true` in health means no
+  evaluation within the stale window; check that a collector is running.
 - This runbook is operational guidance only; it does not redefine event/API contracts.
 
 ## Runtime Adapter SLO Threshold Response
@@ -31,7 +44,7 @@ Apply when anomaly-reason pressure is elevated but transition-frequency pressure
    - `dropped_samples_detected`
 2. Validate upstream collector/runtime connectivity and payload quality path.
 3. Confirm no malformed payload bursts from current adapter mode configuration.
-4. If anomaly reason persists across repeated health checks, escalate with payload samples and correlation IDs.
+4. If anomaly reason persists across repeated evaluation windows, escalate with payload samples and correlation IDs.
 
 ### Playbook: runtime_adapter_slo_transition_threshold_response
 Apply when transition-frequency pressure is elevated (stability churn), including sustained-failure critical states.
@@ -46,7 +59,7 @@ Apply on `alert.resolved` transition.
 
 1. Confirm `runtime_adapter_slo_alert_active=false` and `severity=ok` in resolved payload.
 2. Verify anomaly reason flags are cleared.
-3. Validate at least one stable post-recovery health read (no immediate re-activation).
+3. Validate at least one stable post-recovery evaluation window (health `slo.status` stays `ok`; no immediate re-activation).
 4. Close or downgrade incident with final correlation evidence.
 
 ## Notes
