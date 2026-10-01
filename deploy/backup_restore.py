@@ -1426,7 +1426,10 @@ def restore(deployment, directory, key, *, max_bytes, work_dir=None):
         raise OperationError("Duplicate logical volume.")
     fmt = manifest.get("format", 1)
     keys = backup_keys(key, fmt)
-    image = manifest["images"]["api"]["id"]
+
+    def helper(name, is_bind):
+        # Resolved only after every archive validated (never before first mutation).
+        return deployment.helper_args(manifest["images"]["api"]["id"], name, readonly=False, bind=is_bind)
 
     def identity(item):
         return canonical({"project": manifest["project"], "volume": item["logical"], "file": item["file"]})
@@ -1477,7 +1480,7 @@ def restore(deployment, directory, key, *, max_bytes, work_dir=None):
                 is_bind = prepare_target(item, name)
                 handle.seek(0)
                 deployment.stream_into(
-                    deployment.helper_args(image, name, readonly=False, bind=is_bind),
+                    helper(name, is_bind),
                     SegmentReader(handle, keys.encryption, identity(item), max_bytes=max_bytes),
                 )
     else:
@@ -1502,7 +1505,7 @@ def restore(deployment, directory, key, *, max_bytes, work_dir=None):
             for item, name, plain in zip(archives, names, validated, strict=True):
                 is_bind = prepare_target(item, name)
                 deployment.run(
-                    *deployment.helper_args(image, name, readonly=False, bind=is_bind),
+                    *helper(name, is_bind),
                     stdin=plain,
                     timeout=3600,
                 )
@@ -1537,13 +1540,33 @@ def restore(deployment, directory, key, *, max_bytes, work_dir=None):
     }
 
 
+def verify_archives(directory, key, *, max_bytes, work_dir=None):
+    """Authenticate the manifest and every archive without any Docker mutation."""
+    manifest = load_manifest(directory, key)
+    fmt = manifest["format"]
+    keys = backup_keys(key, fmt)
+    archives = manifest["volumes"] + manifest.get("binds", [])
+    if fmt == 1:
+        work = require_local_workspace(work_dir or directory, max((int(i.get("bytes", 0)) for i in archives), default=0))
+    for item in archives:
+        aad = canonical({"project": manifest["project"], "volume": item["logical"], "file": item["file"]})
+        with protected_file(Path(directory) / item["file"]) as source:
+            if fmt == FORMAT:
+                validate_tar_stream(SegmentReader(source, keys.encryption, aad, max_bytes=max_bytes), max_bytes=max_bytes)
+                continue
+            with tempfile.TemporaryFile(dir=work) as plain:
+                decrypt_stream(source, plain, keys.encryption, aad, max_bytes=max_bytes)
+                validate_tar(plain, max_bytes=max_bytes)
+    return {"status": "authenticated", "format": fmt, "volumes": len(manifest["volumes"])}
+
+
 def add_deployment_arguments(parser):
     parser.add_argument("--project", required=True)
     parser.add_argument("--compose-file", action="append", required=True)
     parser.add_argument("--env-file", required=True)
 
 
-def main():
+def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("action", choices=["backup", "restore", "verify"])
     add_deployment_arguments(parser)
@@ -1560,46 +1583,34 @@ def main():
         help="Separately stored operator-owned 0600 file containing exactly 32 random raw bytes",
     )
     parser.add_argument("--max-volume-bytes", type=int, default=100 * 1024**3)
-    args = parser.parse_args()
+    parser.add_argument(
+        "--work-dir",
+        type=Path,
+        help="Private local 0700 directory for format-1 plaintext staging and diagnostics "
+        "(format 2 streams without staging)",
+    )
+    args = parser.parse_args(argv)
     os.umask(0o077)
     stage, deployment = "arguments", None
     try:
         if not 1024 <= args.max_volume_bytes <= 1024**4:
             raise OperationError("Volume cap must be between 1 KiB and 1 TiB.")
-        if args.encryption_key_file.resolve().is_relative_to(args.directory.resolve()):
-            raise OperationError(
-                "Encryption key must be stored outside the backup directory."
-            )
+        check_key_location(args.encryption_key_file, args.directory, warn=lambda line: print(line, file=sys.stderr))
         stage = "key"
         with protected_file(args.encryption_key_file, size=32) as source:
             key = source.read()
         if args.action == "verify":
             stage = "archive_validation"
-            manifest = load_manifest(args.directory, key)
-            for item in manifest["volumes"] + manifest.get("binds", []):
-                with tempfile.TemporaryFile(
-                    dir=private_directory(args.directory)
-                ) as plain:
-                    aad = canonical(
-                        {
-                            "project": manifest["project"],
-                            "volume": item["logical"],
-                            "file": item["file"],
-                        }
-                    )
-                    with protected_file(args.directory / item["file"]) as source:
-                        decrypt_stream(
-                            source, plain, key, aad, max_bytes=args.max_volume_bytes
-                        )
-                    validate_tar(plain, max_bytes=args.max_volume_bytes)
-            result = {"status": "authenticated", "volumes": len(manifest["volumes"])}
+            result = verify_archives(args.directory, key, max_bytes=args.max_volume_bytes, work_dir=args.work_dir)
         else:
             stage = "configuration"
             deployment = Deployment(args.project, args.compose_file, args.env_file)
-            deployment.diagnostic_dir = private_directory(args.directory.parent)
-            result = (backup if args.action == "backup" else restore)(
-                deployment, args.directory, key, max_bytes=args.max_volume_bytes
-            )
+            deployment.diagnostic_dir = private_directory(args.work_dir or args.directory.parent)
+            if args.action == "backup":
+                result = backup(deployment, args.directory, key, max_bytes=args.max_volume_bytes)
+            else:
+                result = restore(deployment, args.directory, key, max_bytes=args.max_volume_bytes,
+                                 work_dir=args.work_dir)
         print(json.dumps(result, sort_keys=True))
     except (
         OperationError,

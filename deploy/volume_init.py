@@ -22,7 +22,6 @@ VOLUMES = Path("/volumes")
 APP = 10001
 LAB_KEY = "lab_command_key"
 RECEIVER_PUBLIC = "receiver_health_public_key.pem"
-RECEIVER_PRIVATE = "receiver_health_private_key.pem"
 INIT_SECRETS = frozenset({
     "postgres_admin_password",
     "postgres_owner_password",
@@ -33,9 +32,10 @@ INIT_SECRETS = frozenset({
     "jwt_secret",
     "bootstrap_password",
 })
-# The receiver signing key never enters a Compose volume: the operator installs it
-# only at the receiver (C21). Verifiers receive the public key.
-SOURCE_SECRETS = INIT_SECRETS | {LAB_KEY, RECEIVER_PUBLIC, RECEIVER_PRIVATE}
+# The C21 receiver signing key is not a source secret: manage.py keeps it in the
+# separate ${NANFO_STATE_DIR}/receiver directory, which no container mounts, for
+# installation at the receiver only. Verifiers receive the public key.
+SOURCE_SECRETS = INIT_SECRETS | {LAB_KEY, RECEIVER_PUBLIC}
 OPTIONAL_SOURCES = frozenset({JWT_PREVIOUS_FILE})
 # logical volume -> (uid, gid, mode). The C23 lab is root without DAC_OVERRIDE: it
 # owns its output/result directories and reads commands through group 10001.

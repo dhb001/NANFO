@@ -4,6 +4,11 @@
 !deploy/
 !deploy/nginx.conf
 !deploy/nginx-upstream.conf
+!deploy/nginx-security-headers.conf
+!deploy/nginx-proxy.conf
+!deploy/nginx-upstream-single.conf
+!deploy/nginx-distributed-upstream.conf
+!deploy/gateway-entrypoint.sh
 frontend/node_modules/**
 frontend/dist/**
 frontend/playwright-report/**

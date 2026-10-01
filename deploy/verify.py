@@ -29,10 +29,16 @@ from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_ope
 
 try:
     from deploy.schema_contract import CURRENT_SCHEMA
-    from deploy.manage import allocate_proxy_networks
+    from deploy.manage import (
+        BACKEND_EXCLUDED_SCRIPTS, HOST_ONLY_DEPLOY, LAB_COMMAND_KEY, PASSWORD_SECRETS, RECEIVER_DIRECTORY,
+        RECEIVER_PRIVATE_KEY, RECEIVER_PUBLIC_KEY, allocate_deployment_networks, receiver_keypair,
+    )
 except ModuleNotFoundError:
     from schema_contract import CURRENT_SCHEMA
-    from manage import allocate_proxy_networks
+    from manage import (
+        BACKEND_EXCLUDED_SCRIPTS, HOST_ONLY_DEPLOY, LAB_COMMAND_KEY, PASSWORD_SECRETS, RECEIVER_DIRECTORY,
+        RECEIVER_PRIVATE_KEY, RECEIVER_PUBLIC_KEY, allocate_deployment_networks, receiver_keypair,
+    )
 
 ROOT = Path(__file__).resolve().parents[1]
 PROJECT_PATTERN = re.compile(r"nanfo-deploy-verify-[0-9a-f]{32}\Z")
@@ -46,6 +52,7 @@ CASES = (
     "bootstrap_login",
     "frontend_http",
     "full_stack_readiness",
+    "redis_acl",
     "distributed_failover",
     "simulation",
     "report_csv",
@@ -79,7 +86,77 @@ WORKERS = (
     "execution-worker",
     "autonomy-worker",
 )
+# ADR-028 supervised core services (C14 stream retention, telemetry retention, asset GC).
+SUPERVISED = ("stream-retention", "telemetry-retention", "asset-gc")
+APPLICATION = (*WORKERS, *SUPERVISED)
 STORES = ("postgres", "redis", "neo4j")
+# Backend-image services and their least-privilege role (C24): only these hold the
+# API role; every other one is a JWT-free worker on the worker secret volume.
+BACKEND_SERVICES = frozenset({
+    "api", "api2", *APPLICATION, "maintenance", "initialize", "secret-rotation",
+    "telemetry-retention-cli", "fleet-worker",
+})
+API_ROLE = frozenset({"api", "api2", "initialize", "secret-rotation"})
+SECRET_VOLUMES = {"api": "runtime_secrets_api", "api2": "runtime_secrets_api",
+                  "initialize": "init_secrets", "secret-rotation": "init_secrets"}
+# Reviewed capability grants; every other service runs with none (cap_drop ALL).
+CAPABILITIES = {
+    "volume-init": frozenset({"CHOWN", "FOWNER", "DAC_OVERRIDE"}),
+    "postgres": frozenset({"CHOWN", "FOWNER", "DAC_OVERRIDE", "SETUID", "SETGID"}),
+    "redis": frozenset({"CHOWN", "DAC_OVERRIDE", "SETUID", "SETGID"}),
+    "neo4j": frozenset({"CHOWN", "DAC_OVERRIDE", "SETUID", "SETGID"}),
+    "lab": frozenset({"NET_ADMIN", "NET_RAW", "SYS_ADMIN"}),  # C23 successor lab
+}
+# Secret-bearing volumes and the only services allowed to mount them.
+SECRET_HOLDERS = {
+    "runtime_secrets_api": frozenset({"api", "api2", "volume-init"}),
+    "init_secrets": frozenset({"initialize", "secret-rotation", "volume-init"}),
+    "execution_secrets": frozenset({"execution-worker", "volume-init"}),  # C15 key
+    "lab_secrets": frozenset({"lab", "volume-init"}),  # C15 key (root-owned copy)
+}
+# Exact gateway response headers (deploy/nginx-security-headers.conf).
+CONTENT_SECURITY_POLICY = (
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; "
+    "font-src 'self'; connect-src 'self' blob: data:; worker-src 'self' blob:; object-src 'none'; "
+    "base-uri 'self'; frame-ancestors 'none'; form-action 'self'"
+)
+GATEWAY_HEADERS = {
+    "Content-Security-Policy": CONTENT_SECURITY_POLICY,
+    "Referrer-Policy": "no-referrer",
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+}
+# /ready is private (the gateway answers 404): probe it inside the API container.
+READY_PROBE = (
+    "import json, urllib.error, urllib.request\n"
+    "try:\n"
+    "    response = urllib.request.urlopen('http://127.0.0.1:8000/ready', timeout=4)\n"
+    "    status, body = response.status, response.read(1048576)\n"
+    "except urllib.error.HTTPError as error:\n"
+    "    status, body = error.code, error.read(1048576)\n"
+    "print(json.dumps({'status': status, 'body': body.decode('utf-8', 'replace')}))\n"
+)
+# C24 live ACL proof, run through the credential-loading entrypoint in the API
+# container. CONFIG GET is harmless when allowed and must be denied (-@dangerous).
+REDIS_ACL_PROBE = (
+    "import json, os, redis\n"
+    "def attempt(**credentials):\n"
+    "    try:\n"
+    "        client = redis.Redis(host=os.environ['REDIS_HOST'], socket_timeout=5, **credentials)\n"
+    "        return 'ok' if client.ping() else 'refused'\n"
+    "    except redis.exceptions.RedisError as error:\n"
+    "        return type(error).__name__\n"
+    "application = redis.Redis(host=os.environ['REDIS_HOST'], socket_timeout=5,\n"
+    "    username=os.environ['REDIS_USERNAME'], password=os.environ['REDIS_PASSWORD'])\n"
+    "try:\n"
+    "    application.execute_command('CONFIG', 'GET', 'maxmemory')\n"
+    "    dangerous = 'allowed'\n"
+    "except redis.exceptions.RedisError as error:\n"
+    "    dangerous = type(error).__name__\n"
+    "print(json.dumps({'anonymous': attempt(),\n"
+    "    'default_user': attempt(username='default', password=os.environ['REDIS_PASSWORD']),\n"
+    "    'whoami': application.execute_command('ACL', 'WHOAMI').decode(), 'dangerous': dangerous}))\n"
+)
 
 
 class VerificationError(Exception):
@@ -255,31 +332,56 @@ class API:
         check(value.get("success") is (expected < 400), "Canonical envelope mismatch")
         return value["data"] if expected < 400 else value["errors"]
 
-    def ready(self):
-        status, _, raw = self.raw("GET", "/ready")
-        if status != 200:
-            return False
-        value = json.loads(raw)
-        data = value.get("data", {})
-        realtime = data.get("realtime", {})
-        delegated = (
-            realtime.get("mode") == "distributed"
-            and realtime.get("role") == "follower"
-            and realtime.get("local_consumer_count") == 0
-            and realtime.get("local_collector") is False
-            and data.get("checks", {}).get("realtime_subscription") == "ok"
-        )
-        check(
-            value.get("success") is True
-            and value.get("data", {}).get("ready") is True
-            and bool(value["data"].get("checks"))
-            and all(
-                status == "ok" or (key == "api_consumers" and status == "delegated" and delegated)
-                for key, status in value["data"]["checks"].items()
-            ),
-            "Readiness envelope invalid",
-        )
-        return True
+
+def ready_envelope(status, value):
+    """True only for a complete 200 readiness envelope (all checks ok or delegated)."""
+    if status != 200 or not isinstance(value, dict):
+        return False
+    data = value.get("data") or {}
+    realtime = data.get("realtime", {})
+    delegated = (
+        realtime.get("mode") == "distributed"
+        and realtime.get("role") == "follower"
+        and realtime.get("local_consumer_count") == 0
+        and realtime.get("local_collector") is False
+        and data.get("checks", {}).get("realtime_subscription") == "ok"
+    )
+    check(
+        value.get("success") is True
+        and data.get("ready") is True
+        and bool(data.get("checks"))
+        and all(
+            status == "ok" or (key == "api_consumers" and status == "delegated" and delegated)
+            for key, status in data["checks"].items()
+        ),
+        "Readiness envelope invalid",
+    )
+    return True
+
+
+def api_readiness(stack, service="api"):
+    """The API's private ``/ready`` as (status, envelope) via container exec.
+
+    The gateway answers ``/ready`` with 404 (deploy/nginx.conf), exactly like the
+    Compose healthcheck this mirrors; an unreachable API yields ``(0, None)``.
+    """
+    try:
+        value = json.loads(stack.compose("exec", "-T", service, "python", "-c", READY_PROBE, timeout=30))
+        return value["status"], (json.loads(value["body"]) if value["body"] else None)
+    except (VerificationError, ValueError, KeyError, TypeError):
+        return 0, None
+
+
+def stack_ready(stack, services=None):
+    return all(ready_envelope(*api_readiness(stack, name)) for name in (services or serving_apis(stack)))
+
+
+def application_ready(stack, api, services=None):
+    """Private readiness of the serving APIs plus the public gateway contract."""
+    if not stack_ready(stack, services) or api.raw("GET", "/health")[0] != 200:
+        return False
+    check(api.raw("GET", "/ready")[0] == 404, "Gateway exposes readiness publicly")
+    return True
 
 
 class Matrix:
@@ -360,7 +462,7 @@ def validate_compose(config, project, private_root):
     check(PROJECT_PATTERN.fullmatch(project), "Unowned project refused")
     services = config.get("services", {})
     check(
-        {*STORES, *WORKERS, "api", "gateway"}.issubset(services),
+        {*STORES, *APPLICATION, "api", "gateway"}.issubset(services),
         "Full package services missing",
     )
     volumes = config.get("volumes", {})
@@ -408,14 +510,10 @@ def validate_compose(config, project, private_root):
             )
         for mount in service.get("volumes", []):
             if mount["type"] == "bind":
+                # Runtime files are baked into images (ADR-028); no checkout path is mounted.
                 source = Path(mount["source"]).resolve()
-                packaged_script = (
-                    source == ROOT / "deploy" / "redis-entrypoint.sh"
-                    and mount.get("read_only")
-                    and mount.get("target") == "/deploy/redis-entrypoint.sh"
-                )
                 check(
-                    source.is_relative_to(private_root.resolve()) or packaged_script,
+                    source.is_relative_to(private_root.resolve()),
                     "Bind outside new private run directory refused",
                 )
             elif mount["type"] == "volume":
@@ -430,12 +528,7 @@ def validate_compose(config, project, private_root):
                 item = config.get(category, {}).get(mount["source"], {})
                 check(
                     "file" in item
-                    and (
-                        Path(item["file"]).resolve().is_relative_to(private_root.resolve())
-                        or category == "configs"
-                        and item["file"] == str(ROOT / "deploy/nginx-distributed-upstream.conf")
-                        and name == "gateway"
-                    ),
+                    and Path(item["file"]).resolve().is_relative_to(private_root.resolve()),
                     "External secret/config refused",
                 )
     if "api2" in services:
@@ -445,10 +538,92 @@ def validate_compose(config, project, private_root):
                 "Two serving APIs require explicit distributed mode on both",
             )
         check(services["api"].get("volumes") == services["api2"].get("volumes"), "Distributed API storage differs")
+    policy = validate_runtime_policy(config)
     return {
         "volumes": sorted(value["name"] for value in volumes.values()),
         "services": sorted(services),
+        "policy": policy,
     }
+
+
+def validate_runtime_policy(config):
+    """ADR-028 C15/C23/C24/R06 policy of the rendered configuration (no Docker access)."""
+    services = config["services"]
+    holders = {}
+    for name, service in services.items():
+        environment = service.get("environment") or {}
+        named = [mount for mount in service.get("volumes", []) if mount.get("type") == "volume"]
+        for mount in named:
+            holders.setdefault(mount.get("source"), set()).add(name)
+        check(
+            not {"JWT_SECRET_KEY", "JWT_PREVIOUS_SECRET_KEYS", "REDIS_PASSWORD", "POSTGRES_PASSWORD",
+                 "NEO4J_PASSWORD", "NEO4J_AUTH"} & set(environment),
+            "Credentials must come from staged secret files only",
+        )
+        check(
+            set(service.get("cap_add") or []) <= CAPABILITIES.get(name, frozenset()),
+            "Capability outside the reviewed allowlist refused",
+        )
+        if name not in BACKEND_SERVICES:
+            continue
+        role = "api" if name in API_ROLE else "worker"
+        check(
+            environment.get("APP_ENV") == "production" and environment.get("NANFO_SERVICE_ROLE") == role,
+            "Explicit APP_ENV/NANFO_SERVICE_ROLE policy violated",
+        )
+        check(environment.get("REDIS_USERNAME") == "nanfo", "Redis ACL user (C24) not configured")
+        check(
+            [mount.get("source") for mount in named if mount.get("target") == "/run/secrets"]
+            == [SECRET_VOLUMES.get(name, "runtime_secrets_worker")],
+            "Per-role secret volume (C24) violated",
+        )
+    for volume, allowed in SECRET_HOLDERS.items():
+        check(holders.get(volume, set()) <= allowed, "Secret volume reaches an unauthorized service")
+    gateway = services["gateway"]
+    hop = (gateway.get("environment") or {}).get("NANFO_GATEWAY_TRUSTED_HOP")
+    bridge = [
+        item.get("gateway")
+        for item in (config.get("networks", {}).get("gateway", {}).get("ipam", {}).get("config") or [])
+    ]
+    check(bool(hop) and bridge == [hop], "Gateway trusted hop (R06) must be the pinned bridge gateway")
+    check("private" not in (gateway.get("networks") or {}), "Gateway must not join the store network")
+    return {
+        "backend_services": sorted(BACKEND_SERVICES & set(services)),
+        "lab": validate_lab(services["lab"]) if "lab" in services else "absent",
+    }
+
+
+def validate_lab(service):
+    """C23: least-privilege successor; the privileged frozen image only when acknowledged."""
+    check(
+        service.get("network_mode") == "none" and "lab" in (service.get("profiles") or []),
+        "Lab must stay disconnected and opt-in",
+    )
+    check(
+        not any(
+            mount.get("type") == "bind" or mount.get("source") in {
+                "runtime_secrets_api", "runtime_secrets_worker", "init_secrets", "execution_secrets"}
+            for mount in service.get("volumes", [])
+        ),
+        "Lab must never receive credentials or host paths",
+    )
+    if service.get("privileged"):
+        check(
+            (service.get("labels") or {}).get("org.nanfo.lab.frozen-acknowledged") == "1",
+            "Privileged lab requires the explicit frozen overlay acknowledgement",
+        )
+        return "frozen"
+    check(
+        service.get("cap_drop") == ["ALL"]
+        and set(service.get("cap_add") or []) <= CAPABILITIES["lab"]
+        and "no-new-privileges:true" in (service.get("security_opt") or [])
+        and service.get("read_only") is True,
+        "Successor lab (C23) least-privilege profile violated",
+    )
+    for entry in service.get("tmpfs") or []:
+        options = entry.partition(":")[2].split(",")
+        check("nosuid" in options and "nodev" in options, "Lab scratch must be nosuid,nodev")
+    return "successor"
 
 
 class Stack:
@@ -842,6 +1017,17 @@ def download_report(api, workspace, job, fmt):
     }
 
 
+def gateway_headers(headers, where):
+    """Exact ADR-028 security headers on every gateway response class."""
+    for name, expected in GATEWAY_HEADERS.items():
+        check(headers.get(name) == expected, f"Gateway {name} header missing or changed on {where}")
+    policy = headers.get("Permissions-Policy") or ""
+    check(
+        all(item in policy for item in ("camera=()", "microphone=()", "geolocation=()", "payment=()")),
+        f"Gateway Permissions-Policy missing or weakened on {where}",
+    )
+
+
 def frontend_smoke(api):
     status, headers, data = api.raw("GET", "/", headers={"Accept": "text/html"})
     check(
@@ -849,6 +1035,8 @@ def frontend_smoke(api):
         "Frontend HTML unavailable",
     )
     check(b'id="root"' in data and b"<script" in data, "Frontend shell missing")
+    gateway_headers(headers, "the application shell")
+    check(headers.get("Cache-Control") == "no-cache", "Application shell must be revalidated (no-cache)")
     assets = re.findall(rb'(?:src|href)="(/assets/[^"?#]+\.(?:js|css))"', data)
     check(bool(assets), "Built frontend assets missing")
     for asset in assets:
@@ -859,13 +1047,26 @@ def frontend_smoke(api):
             and "text/html" not in asset_headers.get("Content-Type", ""),
             "Frontend asset served fallback HTML",
         )
-    check(
-        api.raw("GET", "/health")[0] == 200, "API liveness unavailable through gateway"
-    )
+        gateway_headers(asset_headers, "a built asset")
+        check("immutable" in (asset_headers.get("Cache-Control") or ""), "Hashed assets must be immutable")
+    check(api.raw("GET", "/assets/missing-" + uuid.uuid4().hex + ".js")[0] == 404,
+          "Missing asset served the SPA shell")
+    status, health_headers, _ = api.raw("GET", "/health")
+    check(status == 200, "API liveness unavailable through gateway")
+    gateway_headers(health_headers, "a proxied API response")
+    for path in ("/ready", "/api/docs", "/api/openapi.json"):
+        status, hidden_headers, _ = api.raw("GET", path)
+        check(status == 404, f"Gateway must not expose {path}")
+        gateway_headers(hidden_headers, path)
     return {
         "html_bytes": len(data),
         "built_assets_fetched": len(assets),
-        "browser_execution": "not tested; HTTP smoke only",
+        "security_headers": sorted([*GATEWAY_HEADERS, "Permissions-Policy"]),
+        "hidden_endpoints": ["/ready", "/api/docs", "/api/openapi.json"],
+        "browser_execution": (
+            "not tested here (HTTP smoke only); the C22 production gateway browser lane "
+            "(backend/scripts/review_fullstack.py) runs the Playwright suite through deploy/nginx.conf"
+        ),
     }
 
 
@@ -874,13 +1075,12 @@ def database_outage(stack, api):
         stack.compose("stop", "--timeout", "10", "postgres")
 
         def unavailable():
-            status, _, raw = api.raw("GET", "/ready")
-            if status != 503:
-                return False
-            value = json.loads(raw)
+            status, value = api_readiness(stack)
             return (
-                value.get("success") is False
-                and value["data"]["checks"].get("postgres") == "unavailable"
+                status == 503
+                and isinstance(value, dict)
+                and value.get("success") is False
+                and value.get("data", {}).get("checks", {}).get("postgres") == "unavailable"
             )
 
         until(unavailable, timeout=40)
@@ -890,9 +1090,10 @@ def database_outage(stack, api):
         )
     finally:
         stack.compose("start", "postgres")
-    until(api.ready)
-    until(lambda: stack.healthy(WORKERS))
-    return "Actual PostgreSQL stop: /ready 503, /health 200; readiness and workers recovered"
+    until(lambda: application_ready(stack, api))
+    until(lambda: stack.healthy(APPLICATION))
+    return ("Actual PostgreSQL stop: private /ready 503, gateway /health 200; readiness, "
+            "workers and supervised retention/asset services recovered")
 
 
 def heartbeat_outage(stack):
@@ -957,7 +1158,7 @@ def restart_with_pending_work(stack, api, workspace, network, simulation):
         for name in (*serving_apis(stack), *WORKERS)
     }
     stack.compose("restart", "--timeout", "15", *serving_apis(stack), *WORKERS, timeout=180)
-    until(api.ready)
+    until(lambda: application_ready(stack, api))
     until(lambda: stack.healthy(WORKERS))
     check(
         all(
@@ -1346,6 +1547,21 @@ def operator_tool(stack, action, archive, key_path):
         stack.registry.register(stack.project)
 
 
+def backup_mac_key(master, fmt):
+    """Independent re-derivation of the documented backup key schedule (deploy/OPERATIONS.md)."""
+    if fmt == 1:
+        return master
+    check(fmt == 2, "Unsupported backup manifest format")
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+
+    return HKDF(algorithm=hashes.SHA256(), length=32, salt=b"NANFO-backup-v2",
+                info=b"nanfo-backup/v2 manifest-mac").derive(master)
+
+
+BACKUP_MAGIC = {1: b"NANFO-GCM-1\0", 2: b"NANFO-GCM-2\0"}
+
+
 def encrypted_backup(stack, archive, key_path):
     result = operator_tool(stack, "backup", archive, key_path)
     check(
@@ -1364,16 +1580,22 @@ def encrypted_backup(stack, archive, key_path):
         ).strip(),
         "Source project still has running owners",
     )
-    for service in (*serving_apis(stack), *WORKERS, *STORES, "gateway"):
+    for service in (*serving_apis(stack), *APPLICATION, *STORES, "gateway"):
         check(
             not stack.inspect_service(service)["State"]["Running"],
             "Source owner still running after backup",
         )
     raw = (archive / "manifest.json").read_bytes()
     signature = (archive / "manifest.hmac").read_text()
+    try:
+        fmt = json.loads(raw).get("format", 1)
+    except (ValueError, AttributeError):
+        fmt = None
+    # Current tooling writes the segmented, HKDF-keyed format 2 (v1 stays restorable).
+    check(fmt == 2, "Current backup tool did not write segmented format 2")
     check(
         hmac.compare_digest(
-            signature, hmac.new(key_path.read_bytes(), raw, hashlib.sha256).hexdigest()
+            signature, hmac.new(backup_mac_key(key_path.read_bytes(), fmt), raw, hashlib.sha256).hexdigest()
         ),
         "Backup manifest authentication mismatch",
     )
@@ -1414,10 +1636,11 @@ def encrypted_backup(stack, archive, key_path):
             "Unsafe backup payload path",
         )
         path = archive / item["file"]
+        magic = BACKUP_MAGIC[fmt]
         with path.open("rb") as stream:
             check(
-                stream.read(len(b"NANFO-GCM-1\0")) == b"NANFO-GCM-1\0",
-                "Backup payload is not encrypted GCM format",
+                stream.read(len(magic)) == magic,
+                "Backup payload is not the encrypted segmented GCM format",
             )
             stream.seek(0)
             checksum = hashlib.file_digest(stream, "sha256").hexdigest()
@@ -1432,6 +1655,7 @@ def encrypted_backup(stack, archive, key_path):
     )
     return {
         "manifest_sha256": digest(raw),
+        "format": fmt,
         "encrypted_volumes": len(declared),
         "encrypted_bind_directories": len(manifest.get("binds", [])),
         "source_writers_stopped": True,
@@ -1669,6 +1893,7 @@ def parse_args(argv=None):
     parser.add_argument("--backend-image")
     parser.add_argument("--frontend-image")
     parser.add_argument("--neo4j-image")
+    parser.add_argument("--redis-image", help="Exact local ID of the ACL-entrypoint Redis image (Dockerfile.redis)")
     parser.add_argument(
         "--ai-image",
         help="Exact existing with-ai image ID; reuse never builds implicitly",
@@ -1684,13 +1909,13 @@ def parse_args(argv=None):
         parser.error(
             "Live execution requires --live and --agents-idle or --detect-source-drift; parent authorization required"
         )
-    images = (args.backend_image, args.frontend_image, args.neo4j_image)
+    images = (args.backend_image, args.frontend_image, args.neo4j_image, args.redis_image)
     if args.reuse_build_record:
         if not all(
             value and re.fullmatch(r"sha256:[0-9a-f]{64}", value) for value in images
         ):
             parser.error(
-                "Reuse requires exact --backend-image, --frontend-image and --neo4j-image IDs"
+                "Reuse requires exact --backend-image, --frontend-image, --neo4j-image and --redis-image IDs"
             )
         if args.model and not args.ai_image:
             parser.error("Reuse with --model requires --ai-image; no implicit AI build")
@@ -1781,6 +2006,7 @@ def referenced_build(args, registry):
         "backend": args.backend_image,
         "frontend": args.frontend_image,
         "neo4j": args.neo4j_image,
+        "redis": args.redis_image,
     }
     if args.lab:
         required["lab"] = args.lab_image
@@ -1813,6 +2039,11 @@ def referenced_build(args, registry):
         image = json.loads(run(["docker", "image", "inspect", args.lab_image]))[0]
         check(image["Id"] == args.lab_image, "Operator lab image unavailable")
         images["lab"] = {"id": image["Id"]}
+    # The small ACL-entrypoint Redis image postdates the historical build records:
+    # its exact local identity is pinned here, not claimed from that evidence.
+    image = json.loads(run(["docker", "image", "inspect", args.redis_image]))[0]
+    check(image["Id"] == args.redis_image, "Redis image identity mismatch")
+    images["redis"] = {"id": image["Id"], "os": image["Os"], "architecture": image["Architecture"]}
     if args.ai_image:
         check(
             args.ai_image in text and "uv sync --locked" in text,
@@ -1929,6 +2160,7 @@ def runtime_source(path):
             "compose.yaml",
             "compose.ai.yaml",
             "compose.lab.yaml",
+            "compose.lab.frozen.yaml",
             "compose.distributed.yaml",
             "compose.fleet.yaml",
             "compose.distributed-fleet.yaml",
@@ -1938,11 +2170,16 @@ def runtime_source(path):
             "compose.distributed-autonomous-client.yaml",
             "fleet.sources",
             "Dockerfile.backend",
+            "Dockerfile.backend.dockerignore",
             "Dockerfile.frontend",
+            "Dockerfile.frontend.dockerignore",
             "Dockerfile.neo4j",
+            "Dockerfile.redis",
             "entrypoint.py",
             "initialize.py",
             "volume_init.py",
+            "supervise.py",
+            "secret_rotation.py",
             "maintenance.py",
             "schema_contract.py",
             "asset_checkpoint.py",
@@ -1952,12 +2189,32 @@ def runtime_source(path):
             "telemetry_retention.py",
             "backup_restore.py",
             "nginx.conf",
+            "nginx-security-headers.conf",
+            "nginx-proxy.conf",
             "nginx-upstream.conf",
+            "nginx-upstream-single.conf",
             "nginx-distributed-upstream.conf",
+            "gateway-entrypoint.sh",
             "redis-entrypoint.sh",
             "neo4j-entrypoint.sh",
         }
     return not Path(path).name.startswith("test_")
+
+
+
+
+def image_runtime_sources():
+    """Python sources the backend image must contain (Dockerfile.backend + .dockerignore)."""
+    paths = [
+        path for prefix in ("backend/app", "backend/alembic")
+        for path in (ROOT / prefix).rglob("*.py") if "__pycache__" not in path.parts
+    ]
+    paths += [path for path in (ROOT / "backend/scripts").glob("*.py")
+              if not BACKEND_EXCLUDED_SCRIPTS.fullmatch(path.name)]
+    paths += (ROOT / "emulation").glob("*.py")
+    paths += [path for path in (ROOT / "deploy").glob("*.py")
+              if not path.name.startswith("test_") and path.name not in HOST_ONLY_DEPLOY]
+    return sorted(str(path.relative_to(ROOT)) for path in paths)
 
 
 def fresh_volumes(stack):
@@ -2130,15 +2387,15 @@ def activate_lab(source, target, api, binding, directory):
     source.compose("restart", "gateway")
     api.origin = source.gateway().origin
     try:
-        until(api.ready)
+        until(lambda: application_ready(source, api))
         until(lambda: source.healthy(WORKERS))
     except VerificationError:
-        status, _, content = api.raw("GET", "/ready")
+        status, content = api_readiness(source)
         private_write(
             directory / "evidence" / "lab-api-ready-failure.json",
             {
                 "status": status,
-                "body": json.loads(content) if content else None,
+                "body": content,
                 "services": {
                     name: source.inspect_service(name)["State"]
                     for name in ("api", *WORKERS)
@@ -2275,7 +2532,7 @@ def diagnose_model(source, target, api, network, directory, login):
     )
     source.compose("restart", "gateway")
     api.origin = source.gateway().origin
-    until(api.ready)
+    until(lambda: application_ready(source, api))
     paths = (
         "deploy/maintenance.py",
         "backend/app/core/config.py",
@@ -2372,8 +2629,12 @@ def package_contract():
             "compose.yaml",
             "Dockerfile.backend",
             "Dockerfile.frontend",
+            "Dockerfile.neo4j",
+            "Dockerfile.redis",
             "initialize.py",
             "volume_init.py",
+            "supervise.py",
+            "secret_rotation.py",
             "backup_restore.py",
         )
     ]
@@ -2387,10 +2648,10 @@ def package_contract():
     check(
         "poetry check --lock" in backend
         and "poetry install --only main" in backend
-        and "npm ci" in frontend,
+        and "npm ci --ignore-scripts" in frontend,
         "Locked dependency installation stages missing",
     )
-    for text in (backend, frontend):
+    for text in (backend, frontend, *((ROOT / "deploy" / name).read_text() for name in ("Dockerfile.neo4j", "Dockerfile.redis"))):
         bases = re.findall(r"^FROM\s+(\S+)", text, re.MULTILINE)
         aliases = set(
             re.findall(r"^FROM\s+\S+\s+AS\s+(\S+)", text, re.MULTILINE | re.IGNORECASE)
@@ -2402,21 +2663,29 @@ def package_contract():
             ),
             "Unpinned package base image",
         )
-    return {"locked_stages_present": True, "live_build": "pending"}
+    check(
+        re.search(r"^\s+image: postgres:17\.\d+-\w+@sha256:[0-9a-f]{64}$",
+                  (ROOT / "deploy/compose.yaml").read_text(), re.MULTILINE),
+        "Unpinned PostgreSQL image",
+    )
+    return {"locked_stages_present": True, "digest_pinned_bases": True, "live_build": "pending"}
 
 
 def initialize_secrets(directory):
+    """The exact manage.py source-secret set (volume-init refuses any other inventory).
+
+    C15 lab command key and the C21 public key are staged by volume-init; the C21
+    signing key goes to a sibling ``receiver`` directory that no container mounts.
+    """
     directory.mkdir(mode=0o700)
-    for name in (
-        "postgres_admin_password",
-        "postgres_owner_password",
-        "postgres_runtime_password",
-        "redis_password",
-        "neo4j_password",
-        "jwt_secret",
-        "bootstrap_password",
-    ):
+    for name in PASSWORD_SECRETS:
         private_write(directory / name, secrets.token_urlsafe(48).encode())
+    private_write(directory / LAB_COMMAND_KEY, secrets.token_hex(32).encode())
+    private_key, public_key = receiver_keypair()
+    private_write(directory / RECEIVER_PUBLIC_KEY, public_key)
+    receiver = directory.parent / RECEIVER_DIRECTORY
+    receiver.mkdir(mode=0o700)
+    private_write(receiver / RECEIVER_PRIVATE_KEY, private_key)
     return (directory / "bootstrap_password").read_text()
 
 
@@ -2429,10 +2698,9 @@ def distributed_failover(stack):
         raise Blocked("Optional distributed composition not requested")
 
     def readiness(name):
-        return json.loads(stack.compose(
-            "exec", "-T", name, "python", "-c",
-            "import urllib.request; print(urllib.request.urlopen('http://127.0.0.1:8000/ready',timeout=4).read().decode())",
-        ))["data"]
+        status, value = api_readiness(stack, name)
+        check(status == 200 and isinstance(value, dict), "Distributed API readiness unavailable")
+        return value["data"]
 
     def promoted(name):
         try:
@@ -2451,7 +2719,8 @@ def distributed_failover(stack):
     try:
         stack.compose("stop", "--timeout", "45", leader)
         until(lambda: promoted(follower), timeout=120)
-        until(stack.gateway().ready)
+        # The surviving API is ready privately and the gateway still routes to it.
+        until(lambda: application_ready(stack, stack.gateway(), services=(follower,)))
     finally:
         stack.compose("start", leader)
     until(lambda: stack.healthy(serving_apis(stack)))
@@ -2462,25 +2731,39 @@ def distributed_failover(stack):
 def start_application(stack):
     # Explicit services prevent accidental reruns of fresh-only initialization or lab.
     stack.compose(
-        "up", "-d", "--no-build", "--no-deps", *serving_apis(stack), *WORKERS, "gateway", timeout=180
+        "up", "-d", "--no-build", "--no-deps", *serving_apis(stack), *APPLICATION, "gateway", timeout=180
     )
     api = stack.gateway()
-    until(api.ready)
-    until(lambda: stack.healthy(WORKERS))
+    until(lambda: application_ready(stack, api))
+    until(lambda: stack.healthy(APPLICATION))
     return api
+
+
+def redis_acl(stack):
+    """C24 live proof: default user disabled, application user bounded (-@dangerous)."""
+    value = json.loads(stack.compose(
+        "exec", "-T", "api", "python", "/opt/nanfo/deploy/entrypoint.py", "python", "-c", REDIS_ACL_PROBE,
+        timeout=60,
+    ))
+    check(value.get("anonymous") in {"AuthenticationError", "ResponseError"}, "Unauthenticated Redis access allowed")
+    check(value.get("default_user") in {"AuthenticationError", "ResponseError"}, "Redis default user still enabled")
+    check(value.get("whoami") == "nanfo", "Application is not authenticated as the nanfo ACL user")
+    check(value.get("dangerous") in {"NoPermissionError", "ResponseError"}, "Dangerous Redis commands allowed")
+    return value
 
 
 def archive_fixture(stack, action, value):
     return json.loads(stack.compose(
         "run", "--rm", "--no-deps", "-T", "-e", "NANFO_DEPLOY_ACCEPTANCE=isolated-archive-v1",
-        "telemetry-retention", "python", "/opt/nanfo/deploy/archive_acceptance.py", action,
+        "telemetry-retention-cli", "python", "/opt/nanfo/deploy/archive_acceptance.py", action,
         stdin=json.dumps(value).encode(), timeout=120,
     ))
 
 
 def retention_cli(stack, operation, workspace, *args):
+    # The finite operator service; `telemetry-retention` is now the supervised loop.
     return json.loads(stack.compose(
-        "run", "--rm", "--no-deps", "-T", "telemetry-retention", "python",
+        "run", "--rm", "--no-deps", "-T", "telemetry-retention-cli", "python",
         "/opt/nanfo/deploy/telemetry_retention.py", operation, "--workspace-id", workspace,
         "--max-batches", "10", "--batch-size", "100", "--timeout-seconds", "30", *args,
         timeout=120,
@@ -2586,12 +2869,14 @@ def verify_live(args, directory, matrix, registry):
         "NANFO_BACKEND_IMAGE": projects[0] + ":backend",
         "NANFO_FRONTEND_IMAGE": projects[0] + ":frontend",
         "NANFO_NEO4J_IMAGE": projects[0] + ":neo4j",
+        "NANFO_REDIS_IMAGE": projects[0] + ":redis",
     }
     if args.reuse_build_record:
         env.update(
             NANFO_BACKEND_IMAGE=args.backend_image,
             NANFO_FRONTEND_IMAGE=args.frontend_image,
             NANFO_NEO4J_IMAGE=args.neo4j_image,
+            NANFO_REDIS_IMAGE=args.redis_image,
         )
     if args.lab_image:
         env["NANFO_LAB_IMAGE"] = args.lab_image
@@ -2601,10 +2886,12 @@ def verify_live(args, directory, matrix, registry):
     if args.distributed:
         files.append(ROOT / "deploy/compose.distributed.yaml")
     stacks = [Stack(project, files, env.copy(), registry) for project in projects]
-    for stack, proxy in zip(stacks, allocate_proxy_networks(2), strict=True):
-        stack.env.update(proxy)
+    # Proxy boundary plus the pinned published-port bridge (R06 trusted hop) per stack.
+    for stack, networks in zip(stacks, allocate_deployment_networks(2), strict=True):
+        stack.env.update(networks)
     private_write(directory / "proxy-networks.json", {stack.project: {
-        key: stack.env[key] for key in ("NANFO_PROXY_SUBNET", "NANFO_PROXY_GATEWAY_IP")
+        key: stack.env[key] for key in (
+            "NANFO_PROXY_SUBNET", "NANFO_PROXY_GATEWAY_IP", "NANFO_GATEWAY_SUBNET", "NANFO_GATEWAY_BRIDGE_IP")
     } for stack in stacks})
     source, target = stacks
     restore_dir = directory / "restore"
@@ -2622,14 +2909,16 @@ def verify_live(args, directory, matrix, registry):
     def build():
         # Explicit serial builds support installations without the buildx plugin.
         # Cache remains enabled; fixed digest bases and locked installs are retained.
-        for kind, service, target in (("backend", "api", "runtime"), ("frontend", "gateway", None), ("neo4j", "neo4j", None)):
+        for kind, service, target in (("backend", "api", "runtime"), ("frontend", "gateway", None),
+                                      ("neo4j", "neo4j", None), ("redis", "redis", None)):
             output = run([
                 "docker", "build", "-f", str(ROOT / f"deploy/Dockerfile.{kind}"),
                 "-t", source.config["services"][service]["image"],
                 *(["--target", target] if target else []), str(ROOT),
             ], timeout=1200, private_diagnostic=directory / ("build-" + kind + ".private.log"))
             private_write(directory / ("build-" + kind + ".log"), output)
-        source.compose("pull", "--policy", "missing", "postgres", "redis", timeout=300)
+        # Redis is built (baked ACL entrypoint); only PostgreSQL is a pulled digest.
+        source.compose("pull", "--policy", "missing", "postgres", timeout=300)
         check(
             source_fingerprint() == source_hash,
             "Source changed during build; wait for agents to finish and rerun",
@@ -2642,11 +2931,7 @@ def verify_live(args, directory, matrix, registry):
         }
 
     def installed_runtime_parity():
-        paths = [str(path.relative_to(ROOT)) for prefix in ("backend/app", "backend/scripts", "backend/alembic", "emulation", "deploy")
-                 for path in (ROOT / prefix).rglob("*.py")
-                 if not path.name.startswith("test_") and "tests" not in path.parts
-                 and path.name != "verify.py" and "__pycache__" not in path.parts]
-        expected = {"/opt/nanfo/" + name: digest((ROOT / name).read_bytes()) for name in paths}
+        expected = {"/opt/nanfo/" + name: digest((ROOT / name).read_bytes()) for name in image_runtime_sources()}
         # Runs as the shipped non-root user, detecting unreadable COPY directories
         # as well as stale cache/source bytes before any initialized volumes.
         proof = json.loads(run([
@@ -2691,8 +2976,10 @@ def verify_live(args, directory, matrix, registry):
     )
     # Never store the API object (which holds tokens) in evidence.
     matrix.rows["full_stack_readiness"]["detail"] = (
-        "Gateway /ready and all six work-coupled worker healthchecks passed"
+        "Private API /ready (container exec; the gateway answers 404), gateway /health and all "
+        "six work-coupled worker plus three supervised retention/asset healthchecks passed"
     )
+    matrix.case("redis_acl", lambda: redis_acl(source))
     matrix.case("distributed_failover", lambda: distributed_failover(source))
 
     def login():

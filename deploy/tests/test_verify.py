@@ -15,15 +15,94 @@ SPEC = importlib.util.spec_from_file_location(
 verify = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(verify)
 PROJECT = "nanfo-deploy-verify-" + "a" * 32
+PERMISSIONS = "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
+
+
+def backend_service(secret_volume="runtime_secrets_worker", role="worker"):
+    """Minimal rendered backend service satisfying the ADR-028 C24 role policy."""
+    return {
+        "environment": {"APP_ENV": "production", "NANFO_SERVICE_ROLE": role, "REDIS_USERNAME": "nanfo"},
+        "volumes": [{"type": "volume", "source": secret_volume, "target": "/run/secrets", "read_only": True}],
+    }
 
 
 def config():
+    services = {name: {} for name in verify.STORES}
+    services.update({name: backend_service() for name in verify.APPLICATION})
+    services["api"] = backend_service("runtime_secrets_api", "api")
+    services["gateway"] = {
+        "environment": {"NANFO_GATEWAY_TRUSTED_HOP": "172.31.87.1"},
+        "networks": {"proxy": {"ipv4_address": "172.30.27.254"}, "gateway": None},
+    }
     return {
-        "services": {
-            name: {} for name in (*verify.STORES, *verify.WORKERS, "api", "gateway")
+        "services": services,
+        "volumes": {
+            name: {"name": PROJECT + "_" + name}
+            for name in ("postgres", "runtime_secrets_api", "runtime_secrets_worker", "execution_secrets", "lab_secrets")
         },
-        "volumes": {"postgres": {"name": PROJECT + "_postgres"}},
-        "networks": {"default": {"name": PROJECT + "_default"}},
+        "networks": {
+            "default": {"name": PROJECT + "_default"},
+            "gateway": {"name": PROJECT + "_gateway",
+                        "ipam": {"config": [{"subnet": "172.31.87.0/24", "gateway": "172.31.87.1"}]}},
+        },
+    }
+
+
+def successor_lab():
+    return {
+        "profiles": ["lab"], "network_mode": "none", "cap_drop": ["ALL"],
+        "cap_add": ["NET_ADMIN", "NET_RAW", "SYS_ADMIN"], "security_opt": ["no-new-privileges:true"],
+        "read_only": True, "tmpfs": ["/run:rw,exec,nosuid,nodev,size=64m", "/tmp:rw,exec,nosuid,nodev,size=64m"],
+        "volumes": [{"type": "volume", "source": "lab_secrets", "target": "/run/nanfo-lab-key", "read_only": True}],
+    }
+
+
+def gateway_response(status=200, content_type="text/html", body=b"", **extra):
+    headers = {**verify.GATEWAY_HEADERS, "Permissions-Policy": PERMISSIONS, "Content-Type": content_type, **extra}
+    return status, headers, body
+
+
+def rendered(*names, environ=None):
+    """Approximate `docker compose config --format json` of shipped files (no Docker CLI)."""
+    import re
+    import yaml
+
+    environ = environ or {}
+
+    def interpolate(value):
+        if isinstance(value, str):
+            return re.sub(
+                r"\$\{([A-Z0-9_]+)(?:(:?[-?])([^}]*))?\}",
+                lambda match: environ.get(match.group(1))
+                or (match.group(3) if match.group(2) in (":-", "-") else "placeholder"),
+                value,
+            )
+        if isinstance(value, list):
+            return [interpolate(item) for item in value]
+        if isinstance(value, dict):
+            return {key: interpolate(item) for key, item in value.items()}
+        return value
+
+    services, volumes, networks = {}, {}, {}
+    for name in names:
+        document = interpolate(yaml.safe_load((verify.ROOT / "deploy" / name).read_text()))
+        services.update(document.get("services", {}))
+        volumes.update(document.get("volumes") or {})
+        networks.update(document.get("networks") or {})
+    for service in services.values():
+        mounts = []
+        for mount in service.get("volumes", []):
+            if isinstance(mount, str):
+                source, target, *mode = mount.split(":")
+                mount = {"type": "volume", "source": source, "target": target, "read_only": mode == ["ro"]}
+            mounts.append(mount)
+        service["volumes"] = mounts
+        if isinstance(service.get("networks"), list):
+            service["networks"] = {network: None for network in service["networks"]}
+    return {
+        "services": services,
+        "volumes": {name: {"name": PROJECT + "_" + name} for name in volumes},
+        "networks": {name: {**(value or {}), "name": PROJECT + "_" + name} for name, value in networks.items()},
     }
 
 
@@ -57,12 +136,13 @@ class SafetyTests(unittest.TestCase):
     def test_encrypted_backup_checks_exact_magic_length(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            payload = b"NANFO-GCM-1\0" + b"ciphertext"
+            payload = b"NANFO-GCM-2\0" + b"ciphertext"
             path = root / "volume-0000.tar.gcm"
             verify.private_write(path, payload)
             key = root / "key"
             verify.private_write(key, b"x" * 32)
             manifest = {
+                "format": 2,
                 "project": PROJECT,
                 "complete": True,
                 "volumes": [
@@ -76,38 +156,77 @@ class SafetyTests(unittest.TestCase):
             }
             raw = json.dumps(manifest).encode()
             verify.private_write(root / "manifest.json", raw)
+            # The verifier's independent HKDF derivation equals the delivered tool's.
+            from deploy import backup_restore
+
+            mac_key = verify.backup_mac_key(b"x" * 32, 2)
+            self.assertEqual(mac_key, backup_restore.backup_keys(b"x" * 32, 2).mac)
+            self.assertNotEqual(mac_key, b"x" * 32)
             verify.private_write(
                 root / "manifest.hmac",
-                verify.hmac.new(b"x" * 32, raw, verify.hashlib.sha256)
+                verify.hmac.new(mac_key, raw, verify.hashlib.sha256)
                 .hexdigest()
                 .encode(),
             )
             stack = Mock(project=PROJECT)
             stack.registry.volumes = {PROJECT + "_db": PROJECT}
             stack.inspect_service.return_value = {"State": {"Running": False}}
-            with (
-                patch.object(
-                    verify,
-                    "operator_tool",
-                    side_effect=[
-                        {"status": "backed_up", "writers": "stopped"},
-                        {"status": "authenticated"},
-                    ],
-                ),
-                patch.object(
-                    verify,
-                    "run",
-                    side_effect=[
-                        b"",
-                        json.dumps(
-                            [{"Labels": {"com.docker.compose.volume": "db"}}]
-                        ).encode(),
-                    ],
-                ),
-            ):
-                self.assertEqual(
-                    verify.encrypted_backup(stack, root, key)["encrypted_volumes"], 1
+
+            def backup(*, runs):
+                return (
+                    patch.object(
+                        verify,
+                        "operator_tool",
+                        side_effect=[
+                            {"status": "backed_up", "writers": "stopped"},
+                            {"status": "authenticated"},
+                        ],
+                    ),
+                    patch.object(
+                        verify,
+                        "run",
+                        side_effect=runs,
+                    ),
                 )
+
+            volumes = json.dumps([{"Labels": {"com.docker.compose.volume": "db"}}]).encode()
+            first, second = backup(runs=[b"", volumes])
+            with first, second:
+                result = verify.encrypted_backup(stack, root, key)
+            self.assertEqual((result["encrypted_volumes"], result["format"]), (1, 2))
+            checked = {call.args[0] for call in stack.inspect_service.call_args_list}
+            self.assertTrue(set(verify.SUPERVISED) <= checked)
+            # A v1 payload magic under a v2 manifest is refused.
+            path.unlink()
+            verify.private_write(path, b"NANFO-GCM-1\0ciphertext")
+            manifest["volumes"][0]["sha256"] = verify.digest(path.read_bytes())
+            raw = json.dumps(manifest).encode()
+            (root / "manifest.json").unlink()
+            (root / "manifest.hmac").unlink()
+            verify.private_write(root / "manifest.json", raw)
+            verify.private_write(root / "manifest.hmac", verify.hmac.new(mac_key, raw, verify.hashlib.sha256).hexdigest().encode())
+            first, second = backup(runs=[b"", volumes])
+            with first, second, self.assertRaises(verify.VerificationError) as caught:
+                verify.encrypted_backup(stack, root, key)
+            self.assertIn("segmented GCM", str(caught.exception))
+
+    def test_current_tool_backup_must_be_format_2(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            key = root / "key"
+            verify.private_write(key, b"x" * 32)
+            raw = json.dumps({"project": PROJECT, "complete": True, "volumes": []}).encode()
+            verify.private_write(root / "manifest.json", raw)
+            verify.private_write(root / "manifest.hmac", verify.hmac.new(b"x" * 32, raw, verify.hashlib.sha256).hexdigest().encode())
+            stack = Mock(project=PROJECT)
+            stack.inspect_service.return_value = {"State": {"Running": False}}
+            with (
+                patch.object(verify, "operator_tool", return_value={"status": "backed_up", "writers": "stopped"}),
+                patch.object(verify, "run", return_value=b""),
+                self.assertRaises(verify.VerificationError) as caught,
+            ):
+                verify.encrypted_backup(stack, root, key)
+            self.assertIn("format 2", str(caught.exception))
 
     def test_profile_inventory_is_complete_without_enabling_lifecycle_profiles(self):
         stack = verify.Stack(PROJECT, [Path("/tmp/compose.json")], {}, Mock(directory=Path("/tmp")))
@@ -135,18 +254,18 @@ class SafetyTests(unittest.TestCase):
             self.assertIn(expected, str(error.exception))
             self.assertNotIn("secret-canary", str(error.exception))
 
-    def test_current_schema_requires_single_0029(self):
+    def test_current_schema_requires_single_0030(self):
         stack = Mock()
-        for value in (b"0019\n", b"0024\n", b"0026\n", b"0027\n", b"0028\n", b"0029\n0028\n", b""):
+        for value in (b"0019\n", b"0024\n", b"0026\n", b"0027\n", b"0028\n", b"0029\n",
+                      b"0030\n0029\n", b""):
             stack.compose.return_value = value
             with self.subTest(value=value), self.assertRaises(verify.VerificationError):
                 verify.installed_schema(stack)
-        stack.compose.return_value = b"0029\n"
-        self.assertEqual(verify.installed_schema(stack), "0029")
-        self.assertIn("migration_0029", verify.CASES)
-        self.assertNotIn("migration_0028", verify.CASES)
-        self.assertNotIn("migration_0027", verify.CASES)
-        self.assertNotIn("migration_0019", verify.CASES)
+        stack.compose.return_value = b"0030\n"
+        self.assertEqual(verify.installed_schema(stack), "0030")
+        self.assertIn("migration_0030", verify.CASES)
+        for historical in ("migration_0029", "migration_0028", "migration_0027", "migration_0019"):
+            self.assertNotIn(historical, verify.CASES)
 
     def test_network_publisher_required_for_verifier_lifecycle(self):
         self.assertIn("network-outbox-worker", verify.WORKERS)
@@ -206,12 +325,17 @@ class SafetyTests(unittest.TestCase):
         return verify.validate_compose(self.config, PROJECT, Path("/tmp/private"))
 
     def test_full_internal_stack_random_loopback_is_accepted(self):
-        self.assertEqual(self.validate()["volumes"], [PROJECT + "_postgres"])
+        result = self.validate()
+        self.assertEqual(result["volumes"], sorted(value["name"] for value in self.config["volumes"].values()))
+        self.assertEqual(result["policy"]["lab"], "absent")
+        self.assertIn("stream-retention", result["policy"]["backend_services"])
 
     def test_every_store_and_worker_must_be_present(self):
-        del self.config["services"]["alert-worker"]
-        with self.assertRaises(verify.VerificationError):
-            self.validate()
+        for name in ("alert-worker", "stream-retention", "telemetry-retention", "asset-gc"):
+            self.setUp()
+            del self.config["services"][name]
+            with self.subTest(name=name), self.assertRaises(verify.VerificationError):
+                self.validate()
 
     def test_existing_project_names_refused(self):
         for project in (
@@ -271,16 +395,78 @@ class SafetyTests(unittest.TestCase):
             with self.assertRaises(verify.VerificationError):
                 self.validate()
 
-    def test_privilege_only_in_disconnected_opt_in_lab(self):
+    def test_privilege_only_in_acknowledged_frozen_disconnected_opt_in_lab(self):
         self.config["services"]["lab"] = {
             "privileged": True,
             "profiles": ["lab"],
             "network_mode": "none",
         }
-        self.validate()
+        with self.assertRaises(verify.VerificationError) as caught:
+            self.validate()
+        self.assertIn("frozen overlay acknowledgement", str(caught.exception))
+        self.config["services"]["lab"]["labels"] = {"org.nanfo.lab.frozen-acknowledged": "1"}
+        self.assertEqual(self.validate()["policy"]["lab"], "frozen")
         self.config["services"]["lab"]["network_mode"] = "host"
         with self.assertRaises(verify.VerificationError):
             self.validate()
+
+    def test_successor_lab_requires_the_c23_least_privilege_profile(self):
+        self.config["services"]["lab"] = successor_lab()
+        self.assertEqual(self.validate()["policy"]["lab"], "successor")
+        for field, value in (
+            ("cap_add", ["NET_ADMIN", "SYS_PTRACE"]),
+            ("cap_drop", []),
+            ("security_opt", []),
+            ("read_only", False),
+            ("tmpfs", ["/run:rw,exec,size=64m"]),
+            ("volumes", [{"type": "volume", "source": "runtime_secrets_worker", "target": "/run/secrets"}]),
+            ("volumes", [{"type": "bind", "source": "/tmp/private/x", "target": "/x"}]),
+            ("profiles", []),
+        ):
+            self.config["services"]["lab"] = {**successor_lab(), field: value}
+            with self.subTest(field=field, value=value), self.assertRaises(verify.VerificationError):
+                self.validate()
+
+    def test_shipped_compose_files_satisfy_the_verifier_policy(self):
+        base = rendered("compose.yaml")
+        policy = verify.validate_runtime_policy(base)
+        self.assertEqual(policy["lab"], "absent")
+        self.assertTrue(verify.BACKEND_SERVICES - {"api2", "fleet-worker"} <= set(policy["backend_services"]))
+        for name, service in base["services"].items():
+            self.assertLessEqual(set(service.get("cap_add") or []), verify.CAPABILITIES.get(name, frozenset()), name)
+        successor = rendered("compose.yaml", "compose.lab.yaml")
+        self.assertEqual(verify.validate_runtime_policy(successor)["lab"], "successor")
+        frozen = rendered("compose.yaml", "compose.lab.frozen.yaml")
+        with self.assertRaises(verify.VerificationError):
+            verify.validate_runtime_policy(frozen)  # unacknowledged
+        frozen = rendered("compose.yaml", "compose.lab.frozen.yaml", environ={"NANFO_LAB_FROZEN": "1"})
+        self.assertEqual(verify.validate_runtime_policy(frozen)["lab"], "frozen")
+
+    def test_role_secret_and_acl_policy_is_enforced_per_service(self):
+        cases = (
+            ("report-worker", lambda svc: svc["volumes"][0].update(source="runtime_secrets_api")),
+            ("report-worker", lambda svc: svc["environment"].update(NANFO_SERVICE_ROLE="api")),
+            ("stream-retention", lambda svc: svc["environment"].pop("APP_ENV")),
+            ("asset-gc", lambda svc: svc["environment"].pop("REDIS_USERNAME")),
+            ("api", lambda svc: svc["volumes"][0].update(source="runtime_secrets_worker")),
+            ("api", lambda svc: svc["environment"].update(JWT_SECRET_KEY="inline")),
+            ("alert-worker", lambda svc: svc["volumes"].append(
+                {"type": "volume", "source": "execution_secrets", "target": "/run/nanfo-lab-key"})),
+            ("simulation-worker", lambda svc: svc.update(cap_add=["NET_ADMIN"])),
+            ("redis", lambda svc: svc.update(cap_add=["SYS_ADMIN"])),
+            ("gateway", lambda svc: svc["environment"].update(NANFO_GATEWAY_TRUSTED_HOP="172.31.87.9")),
+            ("gateway", lambda svc: svc["networks"].update(private=None)),
+        )
+        for name, mutate in cases:
+            self.setUp()
+            mutate(self.config["services"][name])
+            with self.subTest(name=name), self.assertRaises(verify.VerificationError):
+                self.validate()
+        self.setUp()
+        self.config["services"]["execution-worker"]["volumes"].append(
+            {"type": "volume", "source": "execution_secrets", "target": "/run/nanfo-lab-key", "read_only": True})
+        self.config["services"]["redis"]["cap_add"] = ["CHOWN", "DAC_OVERRIDE", "SETUID", "SETGID"]
+        self.validate()
 
     def test_fixed_container_name_and_host_pid_refused(self):
         for field, value in (
@@ -288,8 +474,9 @@ class SafetyTests(unittest.TestCase):
             ("pid", "host"),
             ("privileged", True),
         ):
-            self.config["services"]["api"] = {field: value}
-            with self.assertRaises(verify.VerificationError):
+            self.setUp()
+            self.config["services"]["api"][field] = value
+            with self.subTest(field=field), self.assertRaises(verify.VerificationError):
                 self.validate()
 
     def test_private_write_exclusive_and_protected(self):
@@ -481,6 +668,7 @@ class APIAndWorkflowTests(unittest.TestCase):
             backend_image="sha256:" + "a" * 64,
             frontend_image="sha256:" + "b" * 64,
             neo4j_image="sha256:" + "c" * 64,
+            redis_image="sha256:" + "e" * 64,
             lab=True,
             lab_image="sha256:" + "d" * 64,
             ai_image=None,
@@ -505,6 +693,7 @@ class APIAndWorkflowTests(unittest.TestCase):
         ):
             verify.referenced_build(args, registry)
         self.assertIn(args.lab_image, str(caught.exception))
+        self.assertIn(args.redis_image, str(caught.exception))
         registry.fresh.assert_not_called()
         self.assertEqual(
             command.call_args.args[0], ["docker", "image", "ls", "-q", "--no-trunc"]
@@ -523,6 +712,10 @@ class APIAndWorkflowTests(unittest.TestCase):
             "--neo4j-image",
             "sha256:" + "c" * 64,
         ]
+        # The ACL-entrypoint Redis image (Dockerfile.redis) is pinned as well.
+        with patch("sys.stderr"), self.assertRaises(SystemExit):
+            verify.parse_args([*base, *images])
+        images += ["--redis-image", "sha256:" + "e" * 64]
         for flag in ("--model", "--lab"):
             with patch("sys.stderr"), self.assertRaises(SystemExit):
                 verify.parse_args([*base, *images, flag])
@@ -538,15 +731,59 @@ class APIAndWorkflowTests(unittest.TestCase):
             "deploy/README.md",
             "deploy/tests/test_verify.py",
             "deploy/verify.py",
+            "deploy/manage.py",
         ):
             self.assertFalse(verify.runtime_source(path))
         for path in (
             "deploy/maintenance.py",
             "deploy/backup_restore.py",
+            "deploy/supervise.py",
+            "deploy/secret_rotation.py",
+            "deploy/Dockerfile.redis",
+            "deploy/Dockerfile.backend.dockerignore",
+            "deploy/nginx-security-headers.conf",
+            "deploy/gateway-entrypoint.sh",
+            "deploy/compose.lab.frozen.yaml",
             "backend/app/core/config.py",
             "frontend/src/main.tsx",
         ):
             self.assertTrue(verify.runtime_source(path))
+
+    def test_installed_parity_expects_exactly_the_image_sources(self):
+        sources = verify.image_runtime_sources()
+        self.assertIn("deploy/entrypoint.py", sources)
+        self.assertIn("deploy/supervise.py", sources)
+        self.assertIn("backend/scripts/stream_retention.py", sources)
+        self.assertIn("emulation/runner.py", sources)
+        for name in sources:
+            parts = Path(name).parts
+            self.assertNotIn("tests", parts)
+            self.assertNotIn("__pycache__", parts)
+            if parts[:2] == ("backend", "scripts"):
+                self.assertEqual(len(parts), 3, name)  # top-level scripts only (.dockerignore)
+                self.assertIsNone(verify.BACKEND_EXCLUDED_SCRIPTS.fullmatch(parts[2]), name)
+            if parts[0] in {"deploy", "emulation"}:
+                self.assertEqual(len(parts), 2, name)
+        for host_only in ("deploy/verify.py", "deploy/manage.py", "deploy/gateway_config.py",
+                          "backend/scripts/review_fullstack.py", "backend/scripts/verify_execution.py"):
+            self.assertNotIn(host_only, sources)
+
+    def test_fresh_secrets_match_the_volume_init_allowlist(self):
+        from deploy import volume_init
+        from app.modules.autonomy.health_secret import load_signing_key, load_verify_key
+
+        with tempfile.TemporaryDirectory() as directory:
+            secrets_dir = Path(directory) / "secrets"
+            password = verify.initialize_secrets(secrets_dir)
+            self.assertEqual({path.name for path in secrets_dir.iterdir()}, set(volume_init.SOURCE_SECRETS))
+            self.assertEqual(password, (secrets_dir / "bootstrap_password").read_text())
+            self.assertNotEqual((secrets_dir / "redis_password").read_bytes(),
+                                (secrets_dir / "redis_admin_password").read_bytes())
+            receiver = Path(directory) / verify.RECEIVER_DIRECTORY
+            signer = load_signing_key(receiver / verify.RECEIVER_PRIVATE_KEY)
+            self.assertEqual(signer.key_id, load_verify_key(secrets_dir / verify.RECEIVER_PUBLIC_KEY).key_id)
+            for path in [*secrets_dir.iterdir(), *receiver.iterdir()]:
+                self.assertEqual(path.stat().st_mode & 0o777, 0o600)
 
     def test_missing_ai_image_blocks_without_building_or_changing_stack(self):
         source, target = Mock(), Mock()
@@ -669,9 +906,51 @@ class APIAndWorkflowTests(unittest.TestCase):
             api.request("GET", "/ready")
 
     def test_readiness_503_is_not_transient_success(self):
-        api = verify.API("http://127.0.0.1:12345")
-        with patch.object(api, "raw", return_value=(503, {}, b'{"success":false}')):
-            self.assertFalse(api.ready())
+        self.assertFalse(verify.ready_envelope(503, {"success": False}))
+        self.assertFalse(verify.ready_envelope(200, None))
+        with self.assertRaises(verify.VerificationError):
+            verify.ready_envelope(200, {"success": True, "data": {"ready": True, "checks": {"redis": "down"}}})
+        self.assertTrue(verify.ready_envelope(200, {"success": True, "data": {"ready": True, "checks": {"redis": "ok"}}}))
+
+    def test_private_readiness_is_probed_inside_the_api_container(self):
+        stack = Mock()
+        body = json.dumps({"success": False, "data": {"checks": {"postgres": "unavailable"}}})
+        stack.compose.return_value = json.dumps({"status": 503, "body": body}).encode()
+        status, value = verify.api_readiness(stack, "api2")
+        self.assertEqual((status, value["data"]["checks"]["postgres"]), (503, "unavailable"))
+        args = stack.compose.call_args.args
+        self.assertEqual(args[:5], ("exec", "-T", "api2", "python", "-c"))
+        self.assertIn("http://127.0.0.1:8000/ready", args[5])
+        stack.compose.side_effect = verify.VerificationError("Command failed")
+        self.assertEqual(verify.api_readiness(stack), (0, None))
+
+    def test_application_readiness_requires_the_gateway_to_hide_ready(self):
+        stack, api = Mock(), Mock()
+        envelope = {"success": True, "data": {"ready": True, "checks": {"postgres": "ok"}}}
+        stack.config = {"services": {"api": {}}}
+        stack.compose.return_value = json.dumps({"status": 200, "body": json.dumps(envelope)}).encode()
+        responses = {"/health": (200, {}, b""), "/ready": (404, {}, b"")}
+        api.raw.side_effect = lambda method, path, **kwargs: responses[path]
+        self.assertTrue(verify.application_ready(stack, api))
+        responses["/health"] = (0, {}, b"")
+        self.assertFalse(verify.application_ready(stack, api))
+        responses.update({"/health": (200, {}, b""), "/ready": (200, {}, b"{}")})
+        with self.assertRaises(verify.VerificationError) as caught:
+            verify.application_ready(stack, api)
+        self.assertIn("publicly", str(caught.exception))
+
+    def test_redis_acl_proof_runs_through_the_credential_entrypoint(self):
+        stack = Mock()
+        good = {"anonymous": "AuthenticationError", "default_user": "AuthenticationError",
+                "whoami": "nanfo", "dangerous": "NoPermissionError"}
+        stack.compose.return_value = json.dumps(good).encode()
+        self.assertEqual(verify.redis_acl(stack), good)
+        self.assertIn("/opt/nanfo/deploy/entrypoint.py", stack.compose.call_args.args)
+        for field, value in (("anonymous", "ok"), ("default_user", "ok"), ("whoami", "default"),
+                             ("dangerous", "allowed")):
+            stack.compose.return_value = json.dumps({**good, field: value}).encode()
+            with self.subTest(field=field), self.assertRaises(verify.VerificationError):
+                verify.redis_acl(stack)
 
     def test_report_download_rejects_tamper(self):
         api = Mock()
@@ -793,15 +1072,54 @@ class APIAndWorkflowTests(unittest.TestCase):
     def test_frontend_fallback_html_is_not_asset_success(self):
         api = Mock()
         api.raw.side_effect = [
-            (
-                200,
-                {"Content-Type": "text/html"},
-                b'<div id="root"></div><script src="/assets/main.js"></script>',
-            ),
-            (200, {"Content-Type": "text/html"}, b"fallback" * 100),
+            gateway_response(body=b'<div id="root"></div><script src="/assets/main.js"></script>',
+                             **{"Cache-Control": "no-cache"}),
+            gateway_response(body=b"fallback" * 100),
         ]
-        with self.assertRaises(verify.VerificationError):
+        with self.assertRaises(verify.VerificationError) as caught:
             verify.frontend_smoke(api)
+        self.assertIn("fallback HTML", str(caught.exception))
+
+    def smoke_responses(self, **overrides):
+        shell = b'<div id="root"></div><script src="/assets/main.js"></script>'
+        responses = {
+            "/": gateway_response(body=shell, **{"Cache-Control": "no-cache"}),
+            "/assets/main.js": gateway_response(content_type="text/javascript", body=b"x" * 200,
+                                                **{"Cache-Control": "public, max-age=31536000, immutable"}),
+            "/health": gateway_response(content_type="application/json", body=b"{}"),
+            "/ready": gateway_response(404),
+            "/api/docs": gateway_response(404),
+            "/api/openapi.json": gateway_response(404),
+        }
+        responses.update(overrides)
+
+        def raw(method, path, **kwargs):
+            if path.startswith("/assets/missing-"):
+                return gateway_response(404)
+            return responses[path]
+
+        api = Mock()
+        api.raw.side_effect = raw
+        return api
+
+    def test_gateway_security_headers_and_hidden_endpoints_are_verified(self):
+        result = verify.frontend_smoke(self.smoke_responses())
+        self.assertEqual(result["hidden_endpoints"], ["/ready", "/api/docs", "/api/openapi.json"])
+        self.assertIn("review_fullstack.py", result["browser_execution"])
+        self.assertIn("Content-Security-Policy", result["security_headers"])
+        weakened = {**verify.GATEWAY_HEADERS, "Content-Security-Policy": "default-src *"}
+        for overrides in (
+            {"/assets/main.js": (200, {**weakened, "Content-Type": "text/javascript",
+                                       "Permissions-Policy": PERMISSIONS, "Cache-Control": "immutable"}, b"x" * 200)},
+            {"/health": (200, {"Content-Type": "application/json"}, b"{}")},
+            {"/ready": gateway_response(200)},
+            {"/api/docs": gateway_response(200)},
+            {"/": gateway_response(body=b'<div id="root"></div><script src="/assets/main.js"></script>')},
+        ):
+            with self.subTest(overrides=list(overrides)), self.assertRaises(verify.VerificationError):
+                verify.frontend_smoke(self.smoke_responses(**overrides))
+        csp = (verify.ROOT / "deploy/nginx-security-headers.conf").read_text()
+        self.assertIn(f'Content-Security-Policy "{verify.CONTENT_SECURITY_POLICY}" always;', csp)
 
     def test_worker_always_continues_after_failed_stale_check(self):
         stack = Mock()

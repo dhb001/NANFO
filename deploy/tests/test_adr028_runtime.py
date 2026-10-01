@@ -392,11 +392,14 @@ def test_fresh_staging_splits_role_volumes_and_keeps_the_receiver_private_key_ou
 
 def test_fresh_staging_refuses_nonempty_volume_or_unexpected_sources(volume_tree):
     source, volumes, _, chown, fchown = volume_tree
-    (source / "extra").write_text("x")
-    (source / "extra").chmod(0o600)
-    with pytest.raises(ValueError, match="allowlist"):
-        volume_init.initialize(source=source, volumes=volumes, chown=chown, fchown=fchown)
-    (source / "extra").unlink()
+    # Includes the C21 signing key: it belongs in state/receiver, never in mounted sources.
+    for name in ("extra", "receiver_health_private_key.pem"):
+        (source / name).write_text("x" * 64)
+        (source / name).chmod(0o600)
+        with pytest.raises(ValueError, match="allowlist"):
+            volume_init.initialize(source=source, volumes=volumes, chown=chown, fchown=fchown)
+        (source / name).unlink()
+    assert not any(any(path.iterdir()) for path in volumes.iterdir())
     (volumes / "reports" / "evidence").write_text("keep")
     with pytest.raises(ValueError, match="nonempty"):
         volume_init.initialize(source=source, volumes=volumes, chown=chown, fchown=fchown)
@@ -511,6 +514,139 @@ def test_store_images_are_current_pinned_multi_arch_indexes():
     assert manage.NEO4J_TAG == "5.26.31" and manage.REDIS_TAG == "7.4.11"
 
 
+# --- Task 7: fleet collector SNMP runtime directory and egress pin ---
+
+def test_fleet_collector_has_a_private_snmp_runtime_tmpfs_and_pinned_egress_subnet(tmp_path, monkeypatch):
+    overlay = compose("compose.fleet.yaml")
+    fleet = overlay["services"]["fleet-worker"]
+    assert fleet["environment"]["NANFO_SNMP_RUNTIME_DIR"] == "/run/nanfo-snmp"
+    options = {entry.split(":", 1)[0]: set(entry.split(":", 1)[1].split(",")) for entry in fleet["tmpfs"]}
+    assert {"rw", "noexec", "nosuid", "nodev", "uid=10001", "gid=10001", "mode=0700"} <= options["/run/nanfo-snmp"]
+    # Inherited scratch mounts are restated byte-identically (merge-rule independent).
+    assert [entry for entry in fleet["tmpfs"] if not entry.startswith("/run/nanfo-snmp")] == (
+        compose()["x-application"]["tmpfs"])
+    assert overlay["networks"]["fleet_egress"]["ipam"]["config"][0]["subnet"].startswith(
+        "${NANFO_FLEET_EGRESS_SUBNET:?")
+    docs = (DEPLOY / "NETSNMP.md").read_text()
+    assert "DOCKER-USER" in docs and "--dport 161" in docs and "NANFO_FLEET_EGRESS_SUBNET" in docs
+    # The backend accepts exactly an owner-only base (mode 0700) and refuses a shared one.
+    from app.modules.telemetry.snmp_config import SNMPError
+    from app.modules.telemetry.snmp_transport import RUNTIME_DIR_ENV, private_runtime_base
+
+    assert RUNTIME_DIR_ENV == "NANFO_SNMP_RUNTIME_DIR"
+    base = tmp_path / "snmp"
+    base.mkdir(mode=0o700)
+    base.chmod(0o700)
+    monkeypatch.setenv(RUNTIME_DIR_ENV, str(base))
+    assert private_runtime_base() == base
+    base.chmod(0o750)
+    with pytest.raises(SNMPError):
+        private_runtime_base()
+
+
+# --- Task 13: backend image surface (.dockerignore allowlist, host-only tools) ---
+
+def docker_pattern(pattern):
+    """moby/patternmatcher regex: `**/` any dirs, `*`/`?` within one path component."""
+    expression, index = "", 0
+    while index < len(pattern):
+        char = pattern[index]
+        if pattern.startswith("**", index):
+            index += 2
+            if pattern.startswith("/", index):
+                index += 1
+            expression += ".*" if index >= len(pattern) else "(.*/)?"
+            continue
+        expression += "[^/]*" if char == "*" else "[^/]" if char == "?" else re.escape(char)
+        index += 1
+    return re.compile(expression + r"\Z")
+
+
+def dockerignore_excludes(ignore_file, path):
+    """PatternMatcher.MatchesOrParentMatches: the last applicable pattern decides."""
+    rules = []
+    for line in ignore_file.read_text().splitlines():
+        line = line.strip()
+        if line and not line.startswith("#"):
+            exception = line.startswith("!")
+            rules.append((exception, docker_pattern(os.path.normpath(line.lstrip("!")).lstrip("/"))))
+    parents = path.split("/")[:-1]
+    excluded = False
+    for exception, pattern in rules:
+        if exception != excluded:
+            continue
+        if pattern.match(path) or any(pattern.match("/".join(parents[: depth + 1])) for depth in range(len(parents))):
+            excluded = not exception
+    return excluded
+
+
+BACKEND_INCLUDED = (
+    "backend/pyproject.toml", "backend/poetry.lock", "backend/README.md", "backend/app/main.py",
+    "backend/app/modules/report/fonts/DejaVuSansMono.ttf", "backend/app/modules/report/fonts/LICENSE",
+    "backend/scripts/stream_retention.py", "backend/scripts/run_report_worker.py",
+    "backend/scripts/check_worker_health.py", "backend/scripts/telemetry_retention.py",
+    "backend/scripts/frozen_model_diagnostic.py", "backend/alembic/alembic.ini", "backend/alembic/env.py",
+    "emulation/runner.py", "emulation/topology.py", "deploy/entrypoint.py", "deploy/supervise.py",
+    "deploy/secret_rotation.py", "deploy/maintenance.py", "deploy/fleet.sources",
+)
+BACKEND_EXCLUDED = (
+    "backend/scripts/test_audit_http_smoke.py", "backend/scripts/verify_execution.py",
+    "backend/scripts/review_fullstack.py", "backend/scripts/test_review_fullstack.py",
+    "backend/scripts/acceptance/stage.py", "backend/tests/unit/test_proxy_boundary.py",
+    "backend/.env", "backend/app/modules/report/README.md", "deploy/manage.py", "deploy/verify.py",
+    "deploy/gateway_config.py", "deploy/test_lifecycle.py", "deploy/tests/test_verify.py",
+    "deploy/state/adr023-private-evidence/secret.json", "deploy/README.md", "emulation/tests/test_runner.py",
+    "emulation/results/run.json", "emulation/frozen/adr015-prechange-v4-source.tar.gz", "frontend/src/main.tsx",
+)
+
+
+def test_backend_image_context_is_a_precise_allowlist_in_both_build_paths():
+    ignore = DEPLOY / "Dockerfile.backend.dockerignore"
+    lines = ignore.read_text().splitlines()
+    # A "!dir/" line re-includes the whole tree (parent-path matching); only file globs.
+    assert not [line for line in lines if line.startswith("!") and line.endswith("/")]
+    for name in BACKEND_INCLUDED:
+        parts = tuple(name.split("/"))
+        assert not dockerignore_excludes(ignore, name), name
+        # manage.py builds from a staged tar: the same membership decision.
+        assert manage.context_allowed("backend", name, parts, Path(name).suffix), name
+    for name in BACKEND_EXCLUDED:
+        parts = tuple(name.split("/"))
+        assert dockerignore_excludes(ignore, name), name
+        excluded_from_tar = parts[0] == "deploy" and (
+            parts[-1].startswith("test_") or parts[-1] in {"verify.py", "manage.py", "gateway_config.py"}
+        ) or parts[:2] == ("deploy", "state") or any(part.startswith(".") for part in parts)
+        assert excluded_from_tar or not manage.context_allowed("backend", name, parts, Path(name).suffix), name
+    for name in ("test_x.py", "verify_x.py", "review_x.py"):
+        assert manage.BACKEND_EXCLUDED_SCRIPTS.fullmatch(name)
+
+
+def test_nothing_shipped_in_the_backend_image_imports_an_excluded_host_tool():
+    import ast
+
+    excluded = re.compile(r"(scripts\.)?(test_|verify_|review_)\w+|(deploy\.)?(manage|verify|gateway_config)")
+    # Host-run operator/acceptance tools that are shipped but documented to run from the
+    # checkout (poetry), never inside the image; their host-only imports are expected.
+    host_only = {"accept_continuous_feed.py", "audit_isolated_suite.py", "audit_experimental_lab.py",
+                 "prepare_strathmore_demo.py", "release_manifest.py"}
+    ignore = DEPLOY / "Dockerfile.backend.dockerignore"
+    shipped = [path for pattern in ("backend/app/**/*.py", "backend/scripts/*.py", "deploy/*.py", "emulation/*.py")
+               for path in ROOT.glob(pattern)
+               if "__pycache__" not in path.parts and not dockerignore_excludes(ignore, path.relative_to(ROOT).as_posix())]
+    assert len(shipped) > 100
+    offenders = []
+    for path in shipped:
+        if path.name in host_only:
+            continue
+        for node in ast.walk(ast.parse(path.read_text(), filename=str(path))):
+            modules = ([alias.name for alias in node.names] if isinstance(node, ast.Import)
+                       else [node.module or ""] if isinstance(node, ast.ImportFrom) else [])
+            names = [alias.name for alias in node.names] if isinstance(node, ast.ImportFrom) and node.module == "scripts" else []
+            if any(excluded.fullmatch(module) for module in (*modules, *names)):
+                offenders.append(f"{path.relative_to(ROOT)}:{node.lineno}")
+    assert offenders == []
+
+
 # --- Task 8: PostgreSQL connection budget ---
 
 def test_postgres_connection_budget_covers_every_pool():
@@ -529,3 +665,91 @@ def test_postgres_connection_budget_covers_every_pool():
     budget = (len(long_running) + 2) * (pool + overflow) + 15 + 6 + 10 + 3
     assert budget <= limit == 200
     assert postgres["pids_limit"] >= limit + 50
+
+
+# --- ADR-028 follow-up (a): periodic unreferenced asset collection ---
+
+def test_asset_gc_runs_supervised_on_the_api_asset_volume():
+    services = compose()["services"]
+    service = services["asset-gc"]
+    assert "asset-gc" in manage.SERVICES and "asset-gc" in manage.APPLICATION and "asset-gc" in manage.AUTOHEAL_SERVICES
+    assert service["command"] == ["python", "/opt/nanfo/deploy/supervise.py", "every", "--loop", "asset-gc", "--",
+                                  "python", "-m", "app.modules.network.asset_gc"]
+    assert service["healthcheck"]["test"] == ["CMD", "python", "/opt/nanfo/deploy/supervise.py", "check", "--loop", "asset-gc"]
+    assert mounts(service) == ["runtime_secrets_worker:/run/secrets:ro", "network_assets:/var/lib/nanfo/network-assets"]
+    # Same NETWORK_ASSET_ROOT as the API that owns uploads to that volume.
+    assert service["environment"]["NETWORK_ASSET_ROOT"] == services["api"]["environment"]["NETWORK_ASSET_ROOT"]
+    assert "network_assets:/var/lib/nanfo/network-assets" in mounts(services["api"])
+    assert service["restart"] == "unless-stopped" and service["read_only"] and service["cap_drop"] == ["ALL"]
+    assert service["environment"]["NANFO_SERVICE_ROLE"] == "worker"
+    gc = (ROOT / "backend/app/modules/network/asset_gc.py").read_text()
+    assert '"--dry-run"' in gc and "def main" in gc
+
+
+def gc_environment(tmp_path, **overrides):
+    return {"WORKER_HEARTBEAT_PATH": str(tmp_path / "hb.json"), "NANFO_ASSET_GC_INTERVAL_SECONDS": "60",
+            "NANFO_ASSET_GC_TIMEOUT_SECONDS": "10", "NANFO_ASSET_GC_RETRY_SECONDS": "1",
+            "NANFO_ASSET_GC_MAX_FAILURES": "2", **overrides}
+
+
+class StopAfter:
+    """threading.Event stand-in: stop after N waits (no real sleeping in tests)."""
+
+    def __init__(self, waits):
+        self.waits, self.stopped = waits, False
+
+    def is_set(self):
+        return self.stopped
+
+    def set(self):
+        self.stopped = True
+
+    def wait(self, timeout):
+        self.waits -= 1
+        self.stopped = self.waits <= 0
+        return self.stopped
+
+
+def test_periodic_job_success_refreshes_the_supervisor_heartbeat(tmp_path):
+    output = []
+    sink = type("Sink", (), {"write": lambda self, v: output.append(v), "flush": lambda self: None})()
+    code = supervise.every("asset-gc", child("print('{\"removed\": 0}')"), environ=gc_environment(tmp_path),
+                           stdout=sink, stop=StopAfter(2))
+    assert code == 0 and b"".join(output).count(b"removed") == 2
+    record = json.loads((tmp_path / "hb.json.asset-gc").read_text())
+    assert record["pid"] == os.getpid()
+    now = time.monotonic()
+    assert supervise.check("asset-gc", environ=gc_environment(tmp_path), clock=lambda: now)["ready"] is True
+
+
+def test_periodic_job_failures_retry_then_exit_for_the_restart_policy(tmp_path):
+    writes = []
+    original = supervise.write_heartbeat
+    supervise.write_heartbeat = lambda path, pid, **kwargs: (writes.append(pid), original(path, pid, **kwargs))
+    try:
+        code = supervise.every("asset-gc", child("raise SystemExit(1)"), environ=gc_environment(tmp_path),
+                               stdout=open(os.devnull, "wb"), stop=StopAfter(10))
+    finally:
+        supervise.write_heartbeat = original
+    assert code == supervise.EXIT_REPEATED_FAILURES
+    assert len(writes) == 1  # start record only; failed runs never refresh progress
+
+
+def test_periodic_job_timeout_kills_a_hung_run(tmp_path):
+    started = time.monotonic()
+    code = supervise.every("asset-gc", child("import time; time.sleep(60)"),
+                           environ=gc_environment(tmp_path, NANFO_ASSET_GC_TIMEOUT_SECONDS="10",
+                                                  NANFO_ASSET_GC_MAX_FAILURES="1"),
+                           stdout=open(os.devnull, "wb"), stop=StopAfter(5))
+    assert code == supervise.EXIT_REPEATED_FAILURES and time.monotonic() - started < 30
+
+
+@pytest.mark.parametrize("overrides", [{"NANFO_ASSET_GC_INTERVAL_SECONDS": "30"},
+                                       {"NANFO_ASSET_GC_TIMEOUT_SECONDS": "86400"},
+                                       {"NANFO_ASSET_GC_RETRY_SECONDS": "0"}])
+def test_periodic_schedule_bounds_fail_closed(tmp_path, overrides):
+    with pytest.raises(ValueError):
+        supervise.every("asset-gc", child("pass"), environ=gc_environment(tmp_path, **overrides))
+    with pytest.raises(ValueError):
+        supervise.run("asset-gc", child("pass"), environ=gc_environment(tmp_path))
+    assert supervise._asset_gc_max_age({}) == 86400 + 1800 + 600

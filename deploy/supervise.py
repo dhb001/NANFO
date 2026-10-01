@@ -1,6 +1,7 @@
-"""Supervise one long-running retention loop and publish work-coupled heartbeats.
+"""Supervise one long-running loop (or periodic job) and publish work-coupled heartbeats.
 
-    python /opt/nanfo/deploy/supervise.py run --loop NAME -- COMMAND...
+    python /opt/nanfo/deploy/supervise.py run --loop NAME -- COMMAND...     (long-running loop)
+    python /opt/nanfo/deploy/supervise.py every --loop NAME -- COMMAND...   (periodic one-shot job)
     python /opt/nanfo/deploy/supervise.py check --loop NAME
 
 The child is the documented owner CLI, unchanged (ADR-028 C14 stream retention,
@@ -12,6 +13,10 @@ the child is spawned: a first pass that never completes becomes stale after the
 loop's maximum age. SIGTERM/SIGINT are forwarded to the child and its exit status is
 returned; ``restart: unless-stopped`` restarts every non-zero exit (refusal exit 3,
 watchdog exit 70). Output never includes environment values.
+
+``every`` runs a finite owner CLI (network asset GC) once per interval under a hard
+timeout; only a zero exit refreshes the heartbeat. Failures retry after a shorter
+delay and repeated failures exit 3 so the restart policy and probes surface them.
 """
 
 import argparse
@@ -21,6 +26,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from pathlib import Path
 
@@ -70,10 +76,30 @@ def _telemetry_max_age(environ):
     return interval + 1200
 
 
+def _asset_gc_schedule(environ):
+    """(interval, timeout, retry, max failures) for the periodic network asset GC."""
+    interval = _positive_int(environ, "NANFO_ASSET_GC_INTERVAL_SECONDS", 86400)
+    timeout = _positive_int(environ, "NANFO_ASSET_GC_TIMEOUT_SECONDS", 1800)
+    retry = _positive_int(environ, "NANFO_ASSET_GC_RETRY_SECONDS", 300)
+    failures = _positive_int(environ, "NANFO_ASSET_GC_MAX_FAILURES", 3)
+    if not 60 <= interval <= 7 * 86400 or not 10 <= timeout < interval or retry > interval or failures > 100:
+        raise ValueError("NANFO_ASSET_GC_* schedule outside bounds")
+    return interval, timeout, retry, failures
+
+
+def _asset_gc_max_age(environ):
+    interval, timeout, _, _ = _asset_gc_schedule(environ)
+    return interval + timeout + 600
+
+
 LOOPS = {
     "stream-retention": (_stream_progress, _stream_max_age),
     "telemetry-retention": (_telemetry_progress, _telemetry_max_age),
+    "asset-gc": (None, _asset_gc_max_age),
 }
+LOOP_MODES = {"stream-retention": "run", "telemetry-retention": "run", "asset-gc": "every"}
+SCHEDULES = {"asset-gc": _asset_gc_schedule}
+EXIT_REPEATED_FAILURES = 3
 
 
 def heartbeat_path(loop, environ=os.environ):
@@ -101,6 +127,8 @@ def write_heartbeat(path, pid, *, clock=time.monotonic):
 
 
 def run(loop, command, *, environ=os.environ, stdout=None, popen=subprocess.Popen):
+    if LOOP_MODES[loop] != "run":
+        raise ValueError("Periodic jobs use the every mode")
     progress, max_age = LOOPS[loop]
     max_age(environ)  # Fail closed on invalid interval configuration before spawning.
     path = heartbeat_path(loop, environ)
@@ -135,6 +163,57 @@ def run(loop, command, *, environ=os.environ, stdout=None, popen=subprocess.Pope
     return 128 - code if code < 0 else code
 
 
+def every(loop, command, *, environ=os.environ, stdout=None, popen=subprocess.Popen, stop=None):
+    """Run a finite job per interval; the supervisor itself is the heartbeat process."""
+    interval, timeout, retry, max_failures = SCHEDULES[loop](environ)
+    path = heartbeat_path(loop, environ)
+    output = stdout or sys.stdout.buffer
+    stop = stop or threading.Event()
+    state = {"child": None}
+
+    def terminate(signum, _frame):
+        stop.set()
+        if state["child"] is not None and state["child"].poll() is None:
+            state["child"].send_signal(signum)
+
+    previous = {sig: signal.signal(sig, terminate) for sig in (signal.SIGTERM, signal.SIGINT)}
+    failures = 0
+    try:
+        write_heartbeat(path, os.getpid())
+        while not stop.is_set():
+            child = popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL)
+            state["child"] = child
+            timer = threading.Timer(timeout, child.kill)
+            timer.daemon = True
+            timer.start()
+            try:
+                while line := child.stdout.readline(LINE_LIMIT):
+                    output.write(line)
+                    output.flush()
+                child.stdout.close()
+                code = child.wait()
+            finally:
+                timer.cancel()
+                state["child"] = None
+            if stop.is_set():
+                break
+            if code == 0:
+                failures = 0
+                write_heartbeat(path, os.getpid())
+            else:
+                failures += 1
+                output.write((json.dumps({"supervisor": loop, "status": "job_failed", "exit": code,
+                                          "consecutive_failures": failures}) + "\n").encode())
+                output.flush()
+                if failures >= max_failures:
+                    return EXIT_REPEATED_FAILURES
+            stop.wait(interval if code == 0 else retry)
+    finally:
+        for sig, handler in previous.items():
+            signal.signal(sig, handler)
+    return 0
+
+
 def check(loop, *, environ=os.environ, clock=time.monotonic):
     """Backend-compatible freshness probe: live pid, same process start, bounded age."""
     status = "unavailable"
@@ -156,9 +235,11 @@ def check(loop, *, environ=os.environ, clock=time.monotonic):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     commands = parser.add_subparsers(dest="action", required=True)
-    runner = commands.add_parser("run")
-    runner.add_argument("--loop", choices=sorted(LOOPS), required=True)
-    runner.add_argument("command", nargs=argparse.REMAINDER)
+    for mode in ("run", "every"):
+        runner = commands.add_parser(mode)
+        runner.add_argument("--loop", choices=sorted(name for name, kind in LOOP_MODES.items() if kind == mode),
+                            required=True)
+        runner.add_argument("command", nargs=argparse.REMAINDER)
     probe = commands.add_parser("check")
     probe.add_argument("--loop", choices=sorted(LOOPS), required=True)
     args = parser.parse_args(argv)
@@ -170,7 +251,7 @@ def main(argv=None):
     if not command:
         parser.error("run requires -- COMMAND")
     try:
-        return run(args.loop, command)
+        return (run if args.action == "run" else every)(args.loop, command)
     except (OSError, ValueError, KeyError) as exc:
         print(json.dumps({"status": "refused", "reason": "supervisor_configuration", "error_type": type(exc).__name__}),
               file=sys.stderr)

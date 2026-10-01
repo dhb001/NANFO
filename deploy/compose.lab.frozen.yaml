@@ -1,0 +1,38 @@
+# HISTORICAL REPRODUCTION ONLY (ADR-028 C23). The frozen lab image is privileged and
+# runs an end-of-life base (Debian 11 / Python 3.9). Use it only to reproduce recorded
+# results; never for new qualification claims. Start it with
+#   NANFO_LAB_FROZEN=1 python3 deploy/manage.py lab start --frozen
+# (manage.py refuses without the acknowledgement; Compose requires it as well).
+# Used INSTEAD of compose.lab.yaml, never together with it. The frozen code predates
+# C15 command MACs, so it receives no key material and cannot accept commands from the
+# current execution worker: mailbox control stays disabled regardless of deployment.env.
+services:
+  lab:
+    image: ${NANFO_LAB_FROZEN_IMAGE:?Set the recorded frozen lab image digest or sha256 image ID}
+    profiles: [lab]
+    privileged: true
+    network_mode: none
+    labels:
+      org.nanfo.lab.frozen-acknowledged: ${NANFO_LAB_FROZEN:?Set NANFO_LAB_FROZEN=1 to run the frozen privileged EOL lab}
+    environment:
+      EMULATION_CONTROL_ENABLED: "false"
+      EMULATION_BINDING_DIGEST: ${EMULATION_BINDING_DIGEST:-}
+    volumes:
+      - lab_output:/output
+      - lab_commands:/commands:ro
+      - lab_results:/results
+    tmpfs: ["/run:exec,nosuid,nodev,size=64m", "/tmp:exec,nosuid,nodev,size=64m"]
+    pids_limit: 256
+    mem_limit: 768m
+    cpus: 2
+    stop_grace_period: 30s
+    restart: "no"
+    logging:
+      driver: json-file
+      options: {max-size: 2m, max-file: "2"}
+    healthcheck:
+      test: [CMD, python, -m, emulation.runner, --request, status]
+      interval: 10s
+      timeout: 5s
+      start_period: 60s
+      retries: 3

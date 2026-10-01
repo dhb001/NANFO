@@ -24,9 +24,9 @@ import time
 from pathlib import Path
 
 try:
-    from deploy.schema_contract import CURRENT_SCHEMA
+    from deploy.schema_contract import CURRENT_SCHEMA, require_consistent_schema
 except ModuleNotFoundError:
-    from schema_contract import CURRENT_SCHEMA
+    from schema_contract import CURRENT_SCHEMA, require_consistent_schema
 
 ROOT = Path(__file__).resolve().parents[1]
 LEGACY_STATE = ROOT / "deploy" / "state"
@@ -40,6 +40,7 @@ SERVICES = [
     "autonomy-worker",
     "stream-retention",
     "telemetry-retention",
+    "asset-gc",
     "gateway",
 ]
 # Services that load staged credentials at start (restarted after a rotation).
@@ -77,7 +78,10 @@ PASSWORD_SECRETS = [
 LAB_COMMAND_KEY = "lab_command_key"
 RECEIVER_PRIVATE_KEY = "receiver_health_private_key.pem"
 RECEIVER_PUBLIC_KEY = "receiver_health_public_key.pem"
-SECRET_NAMES = [*PASSWORD_SECRETS, LAB_COMMAND_KEY, RECEIVER_PRIVATE_KEY, RECEIVER_PUBLIC_KEY]
+# C21: the signing key lives outside secrets/ (which volume-init mounts); no service
+# mounts this directory. Install the file only at the receiver, then it may be removed.
+RECEIVER_DIRECTORY = "receiver"
+SECRET_NAMES = [*PASSWORD_SECRETS, LAB_COMMAND_KEY, RECEIVER_PUBLIC_KEY]
 # The operator may remove the bootstrap password after first login/initialization.
 POST_INIT_OPTIONAL = frozenset({"bootstrap_password"})
 JWT_PREVIOUS = "jwt_previous_secrets"
@@ -111,7 +115,52 @@ FROZEN_LAB_WARNING = (
     "(Debian 11 / Python 3.9). Use it only to reproduce historical results; the default "
     "lab is the least-privilege successor (compose.lab.yaml, ADR-028 C23)."
 )
+# Labs run only operator-verified immutable identities: a local sha256 image ID or a
+# registry digest reference, never a mutable tag (C23; see deploy/README.md).
+LAB_IMAGE_PIN = re.compile(r"sha256:[0-9a-f]{64}|[a-z0-9][a-z0-9._/:-]{0,254}@sha256:[0-9a-f]{64}")
+# Successor lab build context: exactly `emulation/` minus the entries emulation/.dockerignore
+# (and emulation/control.py's IGNORED) exclude, so this build and AI-Lab's
+# `python3 emulation/control.py build` use identical sources. Historical tags are never moved.
+LAB_IGNORED = frozenset({"output", "commands", "results", "frozen", ".ruff_cache", "__pycache__", ".git"})
+
+
+def lab_build_identity(root=None):
+    """(tag, source digest) of the successor lab, computed by emulation/control.py itself."""
+    import importlib.util
+
+    root = ROOT if root is None else root
+    spec = importlib.util.spec_from_file_location("nanfo_emulation_control", root / "emulation" / "control.py")
+    control = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(control)
+    source = control.sourceDigest(root / "emulation")
+    return f"{control.SUCCESSOR_REPOSITORY}:successor-{source[:12]}", source
 BACKEND_EXCLUDED_SCRIPTS = re.compile(r"(test_|verify_|review_).*\.py")
+# Host-only deployment tools: never staged into any image context.
+HOST_ONLY_DEPLOY = frozenset({"verify.py", "manage.py", "gateway_config.py"})
+BUILD_SKIPPED = frozenset({
+    "node_modules", "dist", "artifacts", "venv", "test-results", "playwright-report", "__pycache__",
+})
+
+
+def skipped_from_context(kind, parts):
+    """Never staged: host-only deploy tools and tests, private state, caches and dotfiles.
+
+    The lab keeps dotfiles inside ``emulation/`` (e.g. its .dockerignore) so its context is
+    exactly what ``docker build emulation`` would use; LAB_IGNORED still applies.
+    """
+    if parts[0] == "deploy" and (parts[-1].startswith("test_") or parts[-1] in HOST_ONLY_DEPLOY):
+        return True
+    if parts[:2] == ("deploy", "state"):
+        return True
+    if kind == "lab" and parts[0] == "emulation":
+        return any(part in BUILD_SKIPPED for part in parts)
+    return any(part.startswith(".") or part in BUILD_SKIPPED for part in parts)
+
+
+def lab_source_digest(source_hashes):
+    """emulation/control.py sourceDigest over the staged lab files (relative to emulation/)."""
+    files = {name.removeprefix("emulation/"): digest for name, digest in source_hashes.items()}
+    return hashlib.sha256(json.dumps(files, sort_keys=True, separators=(",", ":")).encode("ascii")).hexdigest()
 
 
 def run(command, *, capture=False, input=None):
@@ -119,7 +168,12 @@ def run(command, *, capture=False, input=None):
 
 
 def default_state(environ=os.environ, *, warn=print):
-    """Keep an existing in-repository deployment; otherwise use the XDG state home."""
+    """Keep an existing in-repository deployment; otherwise use the XDG state home.
+
+    ``deploy/state`` counts as a deployment only when it holds ``deployment.env``; an
+    evidence-only directory there is left untouched. Existing state is never moved.
+    A relative ``XDG_STATE_HOME`` is ignored, as the XDG specification requires.
+    """
     if (LEGACY_STATE / "deployment.env").exists():
         warn(
             f"WARNING: using existing deployment state inside the repository ({LEGACY_STATE}); "
@@ -127,8 +181,10 @@ def default_state(environ=os.environ, *, warn=print):
             file=sys.stderr,
         )
         return LEGACY_STATE
-    base = environ.get("XDG_STATE_HOME") or str(Path(environ.get("HOME") or Path.home()) / ".local" / "state")
-    return Path(base).absolute() / "nanfo"
+    base = environ.get("XDG_STATE_HOME", "")
+    if not os.path.isabs(base):
+        base = str(Path(environ.get("HOME") or Path.home()) / ".local" / "state")
+    return Path(base).resolve() / "nanfo"
 
 
 def _free_private_subnets(count):
@@ -207,6 +263,19 @@ def compose(state, *args, capture=False, files=(), input=None):
     return run([*command, *args], capture=capture, input=input)
 
 
+def require_private_file(path):
+    """Owner-only (no group/other bits), single-link regular file owned by this operator."""
+    info = path.lstat()
+    if (
+        not stat.S_ISREG(info.st_mode)
+        or info.st_uid != os.geteuid()
+        or info.st_mode & 0o077
+        or info.st_nlink != 1
+    ):
+        raise ValueError("Source credentials must remain private regular files")
+    return info
+
+
 def _private_network(config, subnet_key, address_key, *, offset):
     subnet = ipaddress.ip_network(config[subnet_key])
     address = ipaddress.ip_address(config[address_key])
@@ -237,14 +306,14 @@ def load_config(state):
         secret = state / "secrets" / name
         if name in optional and not os.path.lexists(secret):
             continue
-        info = secret.lstat()
-        if (
-            not stat.S_ISREG(info.st_mode)
-            or info.st_uid != os.geteuid()
-            or info.st_mode & 0o077
-            or info.st_nlink != 1
-        ):
-            raise ValueError("Source credentials must remain private regular files")
+        require_private_file(secret)
+    receiver = state / RECEIVER_DIRECTORY
+    if os.path.lexists(receiver):
+        info = receiver.lstat()
+        if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid() or info.st_mode & 0o077:
+            raise ValueError("Receiver key directory must remain private")
+        if os.path.lexists(receiver / RECEIVER_PRIVATE_KEY):
+            require_private_file(receiver / RECEIVER_PRIVATE_KEY)
     if not re.fullmatch(
         r"nanfo-deploy-[a-z0-9][a-z0-9-]{0,40}", config["NANFO_PROJECT"]
     ):
@@ -318,6 +387,7 @@ def generate(state, project, port, email):
         raise ValueError("Invalid port or state path")
     if state.resolve() != state or state.exists() or state.is_symlink():
         raise ValueError("Refusing to overwrite an existing state directory")
+    require_consistent_schema()
     for kind in ("container", "volume", "network"):
         command = [
             "docker",
@@ -344,7 +414,7 @@ def generate(state, project, port, email):
     networks = allocate_deployment_networks()[0]
     private_key, public_key = receiver_keypair()
     state.mkdir(mode=0o700)
-    for name in ("secrets", "binding", "models", "model-registry"):
+    for name in ("secrets", RECEIVER_DIRECTORY, "binding", "models", "model-registry"):
         (state / name).mkdir(mode=0o700)
     # Bind roots need traversal for the fixed application UID, never group writes.
     for name in ("binding", "models", "model-registry"):
@@ -353,7 +423,9 @@ def generate(state, project, port, email):
         write_private(state / "secrets" / name, secrets.token_hex(32) + "\n")
     # C15 mailbox HMAC key: 32 random bytes as 64 hex characters, no trailing newline.
     write_private(state / "secrets" / LAB_COMMAND_KEY, secrets.token_hex(32))
-    write_private(state / "secrets" / RECEIVER_PRIVATE_KEY, private_key)
+    # C21: verifiers get the public key (staged by volume-init); the signing key stays
+    # in receiver/, which no Compose service or volume-init mounts.
+    write_private(state / RECEIVER_DIRECTORY / RECEIVER_PRIVATE_KEY, private_key)
     write_private(state / "secrets" / RECEIVER_PUBLIC_KEY, public_key)
     config = {
         **networks,
@@ -379,15 +451,9 @@ def generate(state, project, port, email):
 def context_allowed(kind, name, parts, suffix):
     """Allowlisted build-context members per image (mirrors Dockerfile.*.dockerignore)."""
     if kind == "lab":
-        return parts[0] == "emulation" and (
-            suffix == ".py"
-            or name in {
-                "emulation/Dockerfile",
-                "emulation/apt-sources.list",
-                "emulation/requirements.txt",
-                "emulation/compose.yaml",
-            }
-        )
+        # The whole successor source tree except runtime mailboxes, results, frozen history
+        # and caches (mirrors emulation/.dockerignore; the image build runs emulation/tests).
+        return parts[0] == "emulation" and len(parts) > 1 and not LAB_IGNORED & set(parts[1:]) and suffix != ".pyc"
     if name == f"deploy/Dockerfile.{kind}":
         return True
     if kind == "backend":
@@ -400,6 +466,9 @@ def context_allowed(kind, name, parts, suffix):
             "ai-engine/uv.lock",
             "deploy/fleet.sources",
         }:
+            return True
+        # Runtime data packaged with the application (ADR-028 embedded PDF font + licence).
+        if name.startswith("backend/app/") and (suffix == ".ttf" or parts[-1] == "LICENSE"):
             return True
         if suffix != ".py":
             return False
@@ -419,6 +488,7 @@ def context_allowed(kind, name, parts, suffix):
             "deploy/nginx-security-headers.conf",
             "deploy/nginx-proxy.conf",
             "deploy/nginx-upstream.conf",
+            "deploy/nginx-upstream-single.conf",
             "deploy/nginx-distributed-upstream.conf",
             "deploy/gateway-entrypoint.sh",
         }
@@ -434,7 +504,10 @@ def build_images(state, *, service=None, with_ai=False, with_fleet=False, image_
     config = load_config(state)
     if with_fleet and (with_ai or service != "backend"):
         raise ValueError("Fleet build requires only --service backend --with-fleet")
-    config["NANFO_LAB_BUILD_IMAGE"] = "nanfo-emulation:operator-paths-adr020"
+    lab_source = None
+    if service == "lab":
+        # AI-Lab's convention (emulation/control.py build): nanfo-emulation:successor-<src12>.
+        config["NANFO_LAB_BUILD_IMAGE"], lab_source = lab_build_identity()
     if image_tag:
         repository = config["NANFO_BACKEND_IMAGE"].rsplit(":", 1)[0]
         if (
@@ -485,27 +558,7 @@ def build_images(state, *, service=None, with_ai=False, with_fleet=False, image_
                 for path in sorted(ROOT.rglob("*")):
                     relative = path.relative_to(ROOT)
                     parts = relative.parts
-                    if path.is_symlink() or not path.is_file():
-                        continue
-                    if parts[0] == "deploy" and (
-                        path.name.startswith("test_")
-                        or path.name in {"verify.py", "manage.py", "gateway_config.py"}
-                    ):
-                        continue
-                    if any(
-                        part.startswith(".")
-                        or part
-                        in {
-                            "node_modules",
-                            "dist",
-                            "artifacts",
-                            "venv",
-                            "test-results",
-                            "playwright-report",
-                            "__pycache__",
-                        }
-                        for part in parts
-                    ) or parts[:2] == ("deploy", "state"):
+                    if path.is_symlink() or not path.is_file() or skipped_from_context(kind, parts):
                         continue
                     name = relative.as_posix()
                     if context_allowed(kind, name, parts, path.suffix):
@@ -513,6 +566,8 @@ def build_images(state, *, service=None, with_ai=False, with_fleet=False, image_
                         source_hashes[name] = hashlib.sha256(
                             path.read_bytes()
                         ).hexdigest()
+            if kind == "lab" and lab_source_digest(source_hashes) != lab_source:
+                raise ValueError("Lab build context differs from the emulation/control.py source identity")
             tag = image_tag or config[image_key] + (
                 "-ai" if kind == "backend" and with_ai else "-fleet" if kind == "backend" and with_fleet else ""
             )
@@ -527,6 +582,8 @@ def build_images(state, *, service=None, with_ai=False, with_fleet=False, image_
             ]
             if target:
                 command += ["--target", target]
+            if kind == "lab":
+                command += ["--label", "org.nanfo.lab.source-sha256=" + lab_source]
             staged = Path(directory) / "context"
             staged.mkdir()
             with tarfile.open(archive) as context:
@@ -717,6 +774,8 @@ def start(state, *, restored=None, key_file=None):
     if restored:
         adopt_restored(state, restored, key_file)
     if not marker.exists():
+        # Never initialize below the migration head the shipped code requires.
+        require_consistent_schema()
         # A failed first initialization is intentionally not retried automatically.
         with (state / "initializing").open("x") as output:
             output.write(config["NANFO_PROJECT"])
@@ -824,9 +883,7 @@ def stop(state):
 
 
 def read_state_secret(path):
-    info = path.lstat()
-    if not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid() or info.st_mode & 0o077 or info.st_nlink != 1:
-        raise ValueError("Source credentials must remain private regular files")
+    require_private_file(path)
     value = path.read_text().strip()
     if not re.fullmatch(r"[A-Za-z0-9_:,-]{16,4096}", value):
         raise ValueError("Invalid source credential content")
@@ -858,7 +915,7 @@ def rotate(state, secret, *, resume=False, finalize=False, overlap_seconds=DEFAU
     if not (state / "initialized.json").exists():
         raise ValueError("Rotation requires an initialized deployment")
     if secret == "jwt_secret":
-        return rotate_jwt(state, finalize=finalize, overlap_seconds=overlap_seconds, now=now)
+        return rotate_jwt(state, finalize=finalize, resume=resume, overlap_seconds=overlap_seconds, now=now)
     if finalize:
         raise ValueError("--finalize applies to jwt_secret only")
     name, _store = ROTATIONS[secret]
@@ -890,12 +947,29 @@ def rotate(state, secret, *, resume=False, finalize=False, overlap_seconds=DEFAU
     return {"rotated": secret, "restarted": list(restarts)}
 
 
-def rotate_jwt(state, *, finalize, overlap_seconds, now):
-    """C19: sign with a new key; verify the previous one only for the overlap window."""
+def publish_jwt(state):
+    """Restage the verify-only previous keys and the signing key, then restart the API."""
+    compose(state, "run", "--rm", "--no-deps", "volume-init", "restage", JWT_PREVIOUS)
+    compose(state, "run", "--rm", "--no-deps", "volume-init", "restage", "jwt_secret")
+    compose(state, "restart", *ROTATION_RESTARTS["jwt_secret"])
+
+
+def rotate_jwt(state, *, finalize, overlap_seconds, now, resume=False):
+    """C19: sign with a new key; verify the previous one only for the overlap window.
+
+    ``resume`` republishes the recorded keys after an interrupted restage/restart;
+    ``finalize`` (after the window) drops the expired previous key from the API.
+    """
     directory = state / "secrets"
     previous = directory / JWT_PREVIOUS
     moment = int(now())
     entries = previous_entries(previous)
+    if resume and finalize:
+        raise ValueError("Use either --resume or --finalize")
+    if resume:
+        publish_jwt(state)
+        return {"rotated": "jwt_secret", "resumed": True,
+                "previous_valid_until": max((not_after for not_after, _ in entries), default=None)}
     if finalize:
         if not entries:
             return {"rotated": "jwt_secret", "finalized": True, "previous_keys": 0}
@@ -903,15 +977,15 @@ def rotate_jwt(state, *, finalize, overlap_seconds, now):
             raise ValueError("Previous signing key is still inside its overlap window")
         previous.unlink()
         sync_directory(directory)
-        compose(state, "run", "--rm", "--no-deps", "volume-init", "restage", JWT_PREVIOUS)
-        compose(state, "restart", "api")
+        publish_jwt(state)
         return {"rotated": "jwt_secret", "finalized": True, "previous_keys": 0}
     if not 0 <= overlap_seconds <= MAX_JWT_OVERLAP_SECONDS:
         raise ValueError("Overlap must be between 0 and 43200 seconds")
     current = read_state_secret(directory / "jwt_secret")
     # An entry equal to the current key is an interrupted run of this procedure.
     if any(not_after > moment and key != current for not_after, key in entries):
-        raise ValueError("A previous rotation is still inside its overlap window; finalize it first")
+        raise ValueError("A previous rotation is still inside its overlap window; "
+                         "--finalize it after expiry, or --resume an interrupted run")
     if overlap_seconds:
         # Verify-only: tokens are always signed with JWT_SECRET_KEY (C19).
         write_private(previous, f"{moment + overlap_seconds}:{current}\n", replace=True)
@@ -919,42 +993,50 @@ def rotate_jwt(state, *, finalize, overlap_seconds, now):
         previous.unlink()
         sync_directory(directory)
     write_private(directory / "jwt_secret", secrets.token_hex(32) + "\n", replace=True)
-    compose(state, "run", "--rm", "--no-deps", "volume-init", "restage", JWT_PREVIOUS)
-    compose(state, "run", "--rm", "--no-deps", "volume-init", "restage", "jwt_secret")
-    compose(state, "restart", "api")
+    publish_jwt(state)
     return {"rotated": "jwt_secret", "previous_valid_until": moment + overlap_seconds if overlap_seconds else None}
 
 
 def autoheal(state, *, once=False, interval=30, threshold=3, sleep=time.sleep, emit=print):
     """Restart project containers reported unhealthy on more than ``threshold`` checks.
 
-    Docker restart policies only react to exits; this closes the unhealthy gap for the
-    application services. Datastores and the lab are never restarted here. With
-    ``--once`` (systemd timer) consecutive counts persist in ``autoheal.json``.
+    Docker restart policies only react to exits (including the watchdog's exit 70);
+    this closes the unhealthy-but-running gap for the application services.
+    Datastores and the lab are never restarted here, and restarts are deferred while
+    any datastore is not healthy (dependent services cannot recover by restarting).
+    With ``--once`` (systemd timer) consecutive counts persist in ``autoheal.json``.
     """
     if not 1 <= threshold <= 100 or not 5 <= interval <= 3600:
         raise ValueError("Autoheal threshold 1..100 and interval 5..3600 seconds")
     config = load_config(state)
+    project = f"label=com.docker.compose.project={config['NANFO_PROJECT']}"
     ledger = state / "autoheal.json"
     counts = json.loads(ledger.read_text()) if once and ledger.exists() else {}
     if not isinstance(counts, dict):
         raise ValueError("Invalid autoheal ledger")
+
+    def listed(health, template):
+        return run(["docker", "ps", "--filter", project, "--filter", f"health={health}", "--format", template],
+                   capture=True).stdout.splitlines()
+
     while True:
-        output = run([
-            "docker", "ps", "--filter", f"label=com.docker.compose.project={config['NANFO_PROJECT']}",
-            "--filter", "health=unhealthy", "--format", '{{.ID}} {{.Label "com.docker.compose.service"}}',
-        ], capture=True).stdout
         unhealthy = {}
-        for line in output.splitlines():
+        for line in listed("unhealthy", '{{.ID}} {{.Label "com.docker.compose.service"}}'):
             identity, _, service = line.strip().partition(" ")
             if re.fullmatch(r"[0-9a-f]{12,64}", identity) and service in AUTOHEAL_SERVICES:
                 unhealthy[identity] = service
         counts = {identity: int(counts.get(identity, 0)) + 1 for identity in unhealthy}
-        for identity, count in sorted(counts.items()):
-            if count > threshold:
-                run(["docker", "restart", "--time", "45", identity])
-                emit(json.dumps({"autoheal": "restarted", "service": unhealthy[identity], "checks": count}))
-                counts[identity] = 0
+        due = {identity: count for identity, count in counts.items() if count > threshold}
+        if due:
+            stores = {line.strip() for line in listed("healthy", '{{.Label "com.docker.compose.service"}}')}
+            if not set(STORES) <= stores:
+                emit(json.dumps({"autoheal": "deferred", "reason": "datastore_not_healthy",
+                                 "services": sorted(unhealthy[identity] for identity in due)}))
+                due = {}
+        for identity, count in sorted(due.items()):
+            run(["docker", "restart", "-t", "45", identity])
+            emit(json.dumps({"autoheal": "restarted", "service": unhealthy[identity], "checks": count}))
+            counts[identity] = 0
         if once:
             write_private(ledger, json.dumps(counts, sort_keys=True), replace=True)
             return counts
@@ -962,16 +1044,27 @@ def autoheal(state, *, once=False, interval=30, threshold=3, sleep=time.sleep, e
 
 
 def lab(state, action, *, frozen=False, environ=os.environ, warn=print):
-    """Opt-in lab lifecycle; the frozen privileged EOL image needs NANFO_LAB_FROZEN=1."""
+    """Opt-in lab lifecycle; the frozen privileged EOL image needs NANFO_LAB_FROZEN=1.
+
+    Only an operator-pinned immutable image (``NANFO_LAB_IMAGE`` for the C23 successor,
+    ``NANFO_LAB_FROZEN_IMAGE`` for historical reproduction) is accepted, and ``start``
+    requires an initialized deployment so the lab volumes carry the volume-init layout
+    and the staged C15 command key instead of Docker-created empty volumes.
+    """
     if frozen:
         acknowledged = environ.get("NANFO_LAB_FROZEN") == "1"
         warn(FROZEN_LAB_WARNING + ("" if acknowledged else " Refused: set NANFO_LAB_FROZEN=1 to acknowledge."),
              file=sys.stderr)
         if not acknowledged:
             raise ValueError("Frozen lab refused without NANFO_LAB_FROZEN=1")
-    load_config(state)
+    config = load_config(state)
+    key = "NANFO_LAB_FROZEN_IMAGE" if frozen else "NANFO_LAB_IMAGE"
+    if not LAB_IMAGE_PIN.fullmatch(config.get(key) or environ.get(key, "")):
+        raise ValueError(f"{key} must be an operator-verified sha256 image ID or @sha256 digest reference")
     files = ["compose.lab.frozen.yaml" if frozen else "compose.lab.yaml"]
     if action == "start":
+        if not (state / "initialized.json").exists():
+            raise ValueError("Lab start requires an initialized deployment (lab volumes and C15 key staged)")
         return compose(state, "--profile", "lab", "up", "-d", "--no-build", "--no-deps", "lab", files=files)
     if action == "stop":
         return compose(state, "stop", "--timeout", "30", "lab", files=files)
@@ -1026,8 +1119,10 @@ def main(argv=None):
             build_images(state)
         print("Private configuration generated. Run start only after images are built.")
     elif args.command == "build":
+        # The opt-in lab image is pinned separately (NANFO_LAB_IMAGE), never in initialized.json.
         if (
             (state / "initialized.json").exists()
+            and args.service != "lab"
             and not ((args.with_ai or args.with_fleet) and args.service == "backend")
             and not args.image_tag
         ):

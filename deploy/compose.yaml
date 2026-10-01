@@ -219,6 +219,8 @@ services:
       <<: *environment
       NANFO_SERVICE_ROLE: api
       FORWARDED_ALLOW_IPS: ${NANFO_PROXY_GATEWAY_IP:-172.30.27.2}
+      # C21 verifier: Ed25519 public key only; the signing key never enters Compose.
+      NANFO_RECEIVER_HEALTH_PUBLIC_KEY_FILE: /run/secrets/receiver_health_public_key.pem
     networks: [private, proxy]
     volumes:
       - runtime_secrets_api:/run/secrets:ro
@@ -279,7 +281,7 @@ services:
     cpus: 0.5
     healthcheck:
       test: [CMD, python, /opt/nanfo/deploy/supervise.py, check, --loop, stream-retention]
-      interval: 30s
+      interval: 15s
       timeout: 5s
       retries: 3
       start_period: 30s
@@ -302,7 +304,33 @@ services:
     cpus: 0.5
     healthcheck:
       test: [CMD, python, /opt/nanfo/deploy/supervise.py, check, --loop, telemetry-retention]
-      interval: 30s
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+  # Periodic unreferenced campus-model object collector (Network owner CLI) on the
+  # API's asset volume. The collector re-checks references under the upload advisory
+  # lock, so it is safe while serving; one-off preview: `run --rm asset-gc python -m
+  # app.modules.network.asset_gc --dry-run`.
+  asset-gc:
+    <<: *application
+    command:
+      [python, /opt/nanfo/deploy/supervise.py, every, --loop, asset-gc, --,
+       python, -m, app.modules.network.asset_gc]
+    environment:
+      <<: *environment
+      NANFO_ASSET_GC_INTERVAL_SECONDS: ${NANFO_ASSET_GC_INTERVAL_SECONDS:-86400}
+      NANFO_ASSET_GC_TIMEOUT_SECONDS: ${NANFO_ASSET_GC_TIMEOUT_SECONDS:-1800}
+      NANFO_ASSET_GC_RETRY_SECONDS: ${NANFO_ASSET_GC_RETRY_SECONDS:-300}
+      NANFO_ASSET_GC_MAX_FAILURES: ${NANFO_ASSET_GC_MAX_FAILURES:-3}
+    volumes:
+      - runtime_secrets_worker:/run/secrets:ro
+      - network_assets:/var/lib/nanfo/network-assets
+    mem_limit: 384m
+    cpus: 0.5
+    healthcheck:
+      test: [CMD, python, /opt/nanfo/deploy/supervise.py, check, --loop, asset-gc]
+      interval: 15s
       timeout: 5s
       retries: 3
       start_period: 30s
@@ -363,6 +391,7 @@ services:
       NANFO_LAB_COMMAND_KEY_FILE: /run/nanfo-lab-key/lab_command_key
       # Command files 0640: a C23 lab without DAC_OVERRIDE reads them via group 10001.
       NANFO_UMASK: "027"
+      NANFO_RECEIVER_HEALTH_PUBLIC_KEY_FILE: /run/secrets/receiver_health_public_key.pem
     volumes:
       - runtime_secrets_worker:/run/secrets:ro
       - execution_secrets:/run/nanfo-lab-key:ro
@@ -383,6 +412,9 @@ services:
   autonomy-worker:
     <<: *application
     command: [python, scripts/run_autonomy_worker.py]
+    environment:
+      <<: *environment
+      NANFO_RECEIVER_HEALTH_PUBLIC_KEY_FILE: /run/secrets/receiver_health_public_key.pem
     volumes:
       - runtime_secrets_worker:/run/secrets:ro
       - lab_output:/var/lib/nanfo/lab/output:ro

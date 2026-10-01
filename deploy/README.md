@@ -1,6 +1,80 @@
 # ADR020 Deployment Package
 
-## Current-source schema contract — 2026-09-20
+## ADR-028 runtime contract — 2026-09-24 (current source)
+
+Fresh builds from this source target schema **0030** (`backend/app/core/schema_version.py`;
+`deploy/schema_contract.py` also reads the Alembic head, and `init`/fresh `start`/the
+initializer refuse a contract that lags it). Sections below that describe 0027–0029 images,
+builds or acceptance runs are historical records. This is a source/configuration change
+verified by unit tests (`VALIDATION.md`); no new image, live deployment, backup/restore or
+lab qualification is claimed.
+
+**Services.** One API, six workers and three supervised core loops, plus the gateway and three
+stores: `stream-retention` (C14 archive-before-delete of every domain stream and the DLQ into
+the 0700 `stream_archive` volume; `python -m scripts.stream_retention schedule`),
+`telemetry-retention` (archive-before-delete telemetry loop; its DSN is derived from the staged
+runtime secrets) and `asset-gc` (runs `python -m app.modules.network.asset_gc` every
+`NANFO_ASSET_GC_INTERVAL_SECONDS`, default 86400, on the API's asset volume; preview with
+`run --rm asset-gc python -m app.modules.network.asset_gc --dry-run`). `deploy/supervise.py`
+relays their output, writes a work-coupled heartbeat only after completed cycles, forwards
+SIGTERM and returns the child's exit status. Every lifecycle service uses
+`restart: unless-stopped`, so the backend watchdog's exit 70 and a retention refusal exit 3
+restart the container; `manage.py autoheal` covers running-but-unhealthy containers
+(`OPERATIONS.md`). `telemetry-retention-cli` (profile `retention`) keeps the finite operator
+invocations (dry-run/restore/reconcile).
+
+**Roles and secrets (C24).** Every backend service sets `APP_ENV=production` and an explicit
+`NANFO_SERVICE_ROLE`. Only the API mounts `runtime_secrets_api` (JWT signing key and the
+verify-only previous keys of a rotation); workers mount `runtime_secrets_worker`, and the
+entrypoint refuses to start a worker that can see a JWT key. Redis disables `default`;
+applications authenticate as `nanfo` (`+@all -@dangerous +info +client|setname +client|id`,
+all keys and channels; `REDIS_USERNAME=nanfo`), rotation and healthchecks as `nanfo-admin`.
+Only SHA-256 ACL hashes enter the generated Redis config. The Redis, Neo4j and gateway
+entrypoints/configurations are baked into their images (`Dockerfile.redis`,
+`Dockerfile.neo4j`, `Dockerfile.frontend`); no runtime file is bind-mounted from the checkout.
+
+**Keys.** `init` also creates the C15 lab command key (`secrets/lab_command_key`, 32 random
+bytes as 64 hex characters). volume-init stages it root-owned 0400 into `lab_secrets` for the
+lab and UID 10001 0400 into `execution_secrets` for the execution worker only
+(`NANFO_LAB_COMMAND_KEY_FILE=/run/nanfo-lab-key/lab_command_key`). The C21 Ed25519
+receiver-health keypair is generated as well: the public key
+(`secrets/receiver_health_public_key.pem`) is staged for the verifiers — the API, autonomy
+and execution workers read `NANFO_RECEIVER_HEALTH_PUBLIC_KEY_FILE=/run/secrets/receiver_health_public_key.pem`.
+The signing key goes to `receiver/receiver_health_private_key.pem`, a 0700 directory that no
+container (not even volume-init) mounts. Install it only on the separately packaged FRR
+receiver as `NANFO_RECEIVER_HEALTH_PRIVATE_KEY_FILE` (0400/0600); afterwards it may be removed
+from the deployment host. `NANFO_RECEIVER_HEALTH_LEGACY_HMAC=true` is for frozen runtimes only
+and is set nowhere in this package.
+
+**Images.** Multi-arch index digests, verified against Docker Hub on 2026-09-24 as the latest
+patch releases of their lines:
+
+| Store | Pinned reference |
+| --- | --- |
+| PostgreSQL | `postgres:17.11-bookworm@sha256:639ab7ceb90e13123085b741fb31ef493fba25463002f6da665352e7b534b652` |
+| Redis (base of `Dockerfile.redis`; ≥ 7.4.6 for CVE-2025-49844) | `redis:7.4.11-bookworm@sha256:c6eabf748fc7a61dbb5a705c78bcf3d6377b1127a97d0ce965c11c44ba46896f` |
+| Neo4j (base of `Dockerfile.neo4j`) | `neo4j:5.26.31-community-trixie@sha256:ab3aafb0020e6fed65bb2b59f7db1fabd7ee0568c4da46f3cc3b8fad77801d61` |
+
+PostgreSQL stays on bookworm (same glibc/collation as the previous 17.6-bookworm). Neo4j no
+longer publishes ubi9/bullseye 5.26 variants after 5.26.24; trixie keeps the su-exec, tini
+and UID 7474 layout the entrypoint relies on. `manage.py build` also builds the Redis image.
+The backend image context is a precise allowlist: host tools (`deploy/{manage,verify,
+gateway_config}.py`, `backend/scripts/{test_,verify_,review_}*.py`, `backend/scripts/acceptance/`)
+never enter it, and the embedded report PDF font ships in both build paths.
+
+**Fleet (optional overlay).** `compose.fleet.yaml` gives the SNMP collector a private
+`NANFO_SNMP_RUNTIME_DIR` tmpfs (0700, UID 10001) and requires `NANFO_FLEET_EGRESS_SUBNET`
+(a pinned unused private /24) so the host `DOCKER-USER` rules that restrict its egress to
+UDP/161 keep matching; see `NETSNMP.md`.
+
+**State location.** Without `--state`, `manage.py` keeps an existing in-repository deployment
+(`deploy/state/deployment.env`, with a warning that it lives inside the checkout) and
+otherwise uses `${XDG_STATE_HOME:-~/.local/state}/nanfo`. State is never moved, and an
+evidence-only `deploy/state` directory is not treated as a deployment. Existing ADR-020–
+ADR-027 deployments predate the new configuration keys and volumes: `manage.py` refuses them
+until an explicit, reviewed upgrade; nothing is regenerated implicitly.
+
+## Current-source schema contract — 2026-09-20 (historical: 0029)
 
 Fresh builds from this source explicitly target **0029**, centralized in
 `backend/app/core/schema_version.py`. Initialization, readiness/maintenance,
@@ -108,9 +182,12 @@ python3 deploy/manage.py --state /srv/nanfo/instance1 start
 python3 deploy/manage.py --state /srv/nanfo/instance1 status
 ```
 
-`init` generates seven independent random secrets without overwriting any file.
-State and secrets directories are 0700; source secret files are 0600. The nonsensitive
-`deployment.env` contains project, paths, image tags, email and loopback port only.
+`init` generates eight independent random passwords (PostgreSQL admin/owner/runtime,
+Redis application and admin, Neo4j, JWT signing key, bootstrap), the C15 lab command key
+and the C21 receiver-health keypair, without overwriting any file. The state, `secrets`
+and `receiver` directories are 0700; source secret files are 0600. The nonsensitive
+`deployment.env` contains project, paths, image tags, email, loopback port and the allocated
+proxy/gateway subnets only. `--state` is optional (see "State location" above).
 Read the bootstrap password locally from `secrets/bootstrap_password` using a
 trusted password manager; never put it in command arguments, logs or screenshots.
 The bootstrap actor has the existing Admin role; no example organization, network,
@@ -128,10 +205,13 @@ leaves evidence and resources intact, and requires operator reconciliation rathe
 than automatically rerunning or deleting volumes.
 
 Open `http://127.0.0.1:8787`. Only the gateway publishes a host port, bound explicitly
-to loopback, forwarding to non-root nginx port 8080. `/health` is liveness; `/ready`
-checks the exact current-source schema0029, PostgreSQL, Redis, Neo4j, API lease and event consumers. Worker
+to loopback, forwarding to non-root nginx port 8080. `/health` is liveness. `/ready` is
+private: the gateway answers it with 404, while the API container's healthcheck (and
+`verify.py`, through `docker compose exec`) call it on 127.0.0.1:8000. It checks the exact
+current-source schema 0030, PostgreSQL, Redis, Neo4j, API lease and event consumers. Worker
 health uses the existing `check_worker_health.py --worker NAME` and actual completed
-loop progress under each container's private `/run/nanfo` tmpfs, not process existence.
+loop progress under each container's private `/run/nanfo` tmpfs, not process existence;
+the supervised loops use `supervise.py check --loop NAME` the same way.
 The backend reads only `WORKER_HEARTBEAT_PATH` (`/run/nanfo/heartbeat.json`, one
 `.<loop>` file per loop); the unread legacy duplicate variable was removed (ADR-028).
 
@@ -172,20 +252,32 @@ global `container_name` or external volume aliases:
 | `redis_data` | Redis `/data`; AOF enabled, `appendfsync always`, noeviction |
 | `neo4j_data` | Neo4j `/data`, including system database and transaction logs |
 | `reports` | UID10001 mode0700; report worker RW, API RO |
-| `lab_output` | UID10001 directory0700; lab RW, API/execution/autonomy RO |
-| `lab_commands` | UID10001 directory0700; execution worker RW, lab/API/autonomy RO |
-| `lab_results` | UID10001 directory0700; lab RW, API/execution/autonomy RO |
-| `runtime_secrets` | UID10001 mode0700; four allowlisted files0400, applications RO |
-| `init_secrets` | UID10001 mode0700; all seven files0400, initializer only RO |
+| `network_assets` | UID10001 mode0700; API and `asset-gc` RW, maintenance RO |
+| `telemetry_archive` | UID10001 mode0700; `telemetry-retention` (+ `-cli`) RW, maintenance RO |
+| `stream_archive` | UID10001 mode0700; `stream-retention` RW only (C14 archives) |
+| `lab_output` | root:10001 directory0750; lab RW, API/execution/autonomy RO |
+| `lab_commands` | UID10001 directory0750; execution worker RW (files 0640), lab/API/autonomy RO |
+| `lab_results` | root:10001 directory0750; lab RW, API/execution/autonomy RO |
+| `runtime_secrets_api` | UID10001 mode0700; runtime passwords, JWT key (+ verify-only previous keys), C21 public key; API only |
+| `runtime_secrets_worker` | UID10001 mode0700; runtime passwords and C21 public key, **no JWT key**; workers |
+| `execution_secrets` | UID10001 mode0700; C15 `lab_command_key` 0400; execution worker only |
+| `lab_secrets` | root mode0700; C15 `lab_command_key` root 0400; lab only |
+| `init_secrets` | UID10001 mode0700; all eight passwords 0400; initializer and rotation helper only |
 
 Privileged `volume-init` runs with no network and only CHOWN/FOWNER/DAC_OVERRIDE.
 It refuses nonempty volumes, never recursively changes evidence, and stages secret
-copies because local Compose file secrets do not implement UID remapping. Application
-entrypoint rejects symlinks, multi-link/nonregular/oversized/unprotected secret files,
-loads only the allowlist, and execs the existing command as UID10001. Runtime never
-receives PostgreSQL owner/admin or bootstrap passwords. Store wrappers read explicit
-secret files; Redis receives a private config file rather than a password argument.
+copies per role because local Compose file secrets do not implement UID remapping;
+`volume_init.py restage NAME` atomically replaces one staged secret in every volume
+holding it (rotation). Application entrypoint requires `NANFO_SERVICE_ROLE` and
+`APP_ENV`, rejects symlinks, multi-link/nonregular/oversized/unprotected secret files,
+loads only the role's allowlist, validates the C15/C21 key files it is pointed at, and
+execs the existing command as UID10001. Runtime never receives PostgreSQL owner/admin or
+bootstrap passwords. Store wrappers read explicit secret files; Redis receives a
+generated private config holding ACL password hashes rather than a password argument.
 Neo4j wraps its shipped entrypoint and does not request or download APOC/plugins.
+The C23 lab runs as root without DAC_OVERRIDE, so the lab volumes are owned by root with
+group 10001 and the execution worker writes 0640 commands (`NANFO_UMASK=027`) that the lab
+reads through its supplementary group 10001.
 
 API/workers/gateway have read-only roots, dropped capabilities, no-new-privileges,
 bounded resources/logs and noexec tmpfs. Neo4j alone needs executable scratch for
@@ -202,30 +294,55 @@ Back up these directories with the declared volumes and original secret files.
 
 ## Optional Lab
 
-`compose.lab.yaml` has a `lab` profile with `network_mode: none` and `privileged: true`.
-It mounts only the three lab volumes. It must never receive credentials, binding,
-models, host devices, socket, host networking or host PID. Privilege is limited to
-this disposable Mininet/OVS namespace container, not the application image.
+The lab is opt-in and never started by `manage.py start` or a package build. Two
+mutually exclusive overlays exist (ADR-028 C23):
 
-Use the existing `emulation/Dockerfile` to build the lab separately, record its exact
-local sha256 image ID (or registry digest) in `NANFO_LAB_IMAGE`, and use the approved
-operator enrollment/binding workflow in `emulation/README.md`. Set
+- **Successor (default), `compose.lab.yaml`.** `network_mode: none`, `cap_drop: [ALL]`
+  plus only `NET_ADMIN`, `NET_RAW`, `SYS_ADMIN` (namespace/OVS/FRR management),
+  `no-new-privileges`, read-only root and `nosuid,nodev` tmpfs scratch for `/run`, `/tmp`,
+  the Open vSwitch state directories and `/var/log`. It mounts the three lab volumes and
+  the root-owned C15 command key (`lab_secrets`, `NANFO_LAB_COMMAND_KEY_FILE`) only, runs
+  as root without DAC_OVERRIDE and reads 0640 commands through group 10001. It is a new
+  runtime: its results need fresh qualification before any claim.
+- **Frozen (historical reproduction only), `compose.lab.frozen.yaml`.** The recorded
+  privileged end-of-life image (Debian 11 / Python 3.9), `NANFO_LAB_FROZEN_IMAGE`,
+  receives no key material and runs with mailbox control pinned off: it predates C15 and
+  cannot accept the MAC'd commands of the current execution worker. Compose refuses to
+  render it unless `NANFO_LAB_FROZEN` is set, and `manage.py` requires exactly
+  `NANFO_LAB_FROZEN=1` and prints a warning. Never use it for new qualification claims.
+
+Neither lab may receive credentials, binding, models, host devices, a Docker socket,
+host networking or host PID. `verify.py` refuses any other capability, a writable or
+credential mount, and a privileged lab without the frozen acknowledgement.
+
+Build the successor from `emulation/Dockerfile` with either `python3 emulation/control.py build`
+(AI-Lab) or `manage.py build --service lab` (allowed after initialization, because the lab
+image is pinned separately and never recorded in `initialized.json`): both use the same
+sources (`emulation/` minus its
+`.dockerignore` entries), tag `nanfo-emulation:successor-<first 12 hex of the source digest>`
+and label `org.nanfo.lab.source-sha256`; the historical `operator-paths-adr020` tag is never
+moved. Record the exact local sha256 image ID or
+`name@sha256:` registry digest in `NANFO_LAB_IMAGE` in `deployment.env`, and use the
+approved operator enrollment/binding workflow in `emulation/README.md`. `manage.py lab`
+accepts only such immutable references and starts only an initialized deployment (so the
+lab volumes carry the volume-init layout and the staged key). Set
 `EMULATION_BINDING_DIGEST` to the verified binding digest. Explicitly set emulation
 mode, snapshot adapter (`emulation`), and `EMULATION_CONTROL_ENABLED=true` only after
 binding authorization and recovery evidence are checked. Admission performs read-only
-mailbox validation; only the execution worker writes commands. The root lab publishes
-regular0644 observations/results/journal inside private UID10001 directories, which
-the unprivileged readers can read without allowing producer writes to binding.
+mailbox validation; only the execution worker writes (HMAC-signed, 0640) commands. The
+root lab publishes 0640 observations/results/journal with group 10001 inside root:10001
+0750 directories, which the unprivileged readers can read without allowing producer
+writes to binding. The SDN runtime needs only the capabilities above; the FRR experiment
+modes that `emulation/control.py` launches additionally need `NET_BIND_SERVICE` and are not
+part of this package's lab service.
 
 ```sh
-docker compose --project-name nanfo-deploy-instance1 \
-  --env-file /srv/nanfo/instance1/deployment.env \
-  -f deploy/compose.yaml -f deploy/compose.lab.yaml --profile lab up -d --no-build lab
+python3 deploy/manage.py --state /srv/nanfo/instance1 lab start      # status | stop
+NANFO_LAB_FROZEN=1 python3 deploy/manage.py --state /srv/nanfo/instance1 lab start --frozen
 ```
 
 Never delete `.journal.json` or replay an old physical command into a new lab run.
 Restore stays control-disabled until durable execution and override state reconcile.
-No lab is started by package build or normal `manage.py start`.
 
 ## Optional Frozen AI
 
@@ -300,12 +417,35 @@ all datastore/host disk exhaustion. PostgreSQL and Neo4j total durable data rema
 unbounded by this application guard. Redis has a192MiB noeviction admission limit;
 AOF and streams can still require more disk. Docker logs are independently capped.
 
-Raw telemetry retention remains **assessment-only**, with deletion blocked until
-all evidence owners provide complete reference/pin contracts. The report orphan
-cleanup is separately opt-in, bounded, backup-gated and requires stopped writers;
-it never deletes referenced artifacts. Audits, diagnostic/config/alert histories,
-pending streams and uncertain execution evidence are not age-deleted. Full Step15
-hard-quota/capacity acceptance is not claimed from this report guard.
+Retention (ADR-028): the supervised `telemetry-retention` and `stream-retention` loops
+archive before they delete, in bounded batches, into their private archive volumes, and
+refuse (exit 3 after repeated refusals) on unsafe conditions such as a non-`noeviction`
+Redis, low archive disk or pending/changed entries; domain-stream entries that are still
+pending in a consumer group are never eligible. Archive volumes are part of every backup.
+The report orphan cleanup is separately opt-in, bounded, backup-gated and requires stopped
+writers; it never deletes referenced artifacts. Audits, diagnostic/config/alert histories
+and uncertain execution evidence are not age-deleted. Full Step15 hard-quota/capacity
+acceptance is not claimed from these guards.
+
+**PostgreSQL connection budget.** `max_connections=200` (compose `command`), sized for
+every SQLAlchemy pool at the backend defaults `DB_POOL_SIZE=5` + `DB_MAX_OVERFLOW=5`:
+
+| Consumer | Worst-case connections |
+| --- | --- |
+| API, plus `api2` when distributed | 2 × 10 = 20 |
+| Six workers | 6 × 10 = 60 |
+| `telemetry-retention` (application pool + retention engine default 5 + 10) | 10 + 15 = 25 |
+| `asset-gc` | 10 |
+| `fleet-worker` (optional) | 10 |
+| Concurrent worker healthchecks | 6 |
+| One-shot maintenance/rotation/initializer | 10 |
+| `superuser_reserved_connections` | 3 |
+| **Total** | **144 of 200** |
+
+`stream-retention` uses Redis only. Raising pool settings, adding APIs or overlays requires
+raising `max_connections` together with the container `mem_limit` (1 GiB) and `pids_limit`
+(300; one backend process per connection); `test_postgres_connection_budget_covers_every_pool`
+keeps the budget honest.
 
 ## Network Exposure
 
@@ -316,6 +456,42 @@ stores. Configure the exact HTTPS origin in backend CORS rather than wildcards, 
 verify login, authorized downloads and WebSockets over HTTPS. Docker's private bridge
 uses plaintext internal protocols; hosts with untrusted local tenants need additional
 network/TLS isolation beyond this single-host package.
+
+**Client addresses behind the host TLS proxy (R06).** Every connection to the
+loopback-published port reaches nginx from the Docker bridge gateway of the pinned
+`gateway` network (`NANFO_GATEWAY_SUBNET`, `NANFO_GATEWAY_BRIDGE_IP`; `init` allocates an
+unused private /24 and its `.1` gateway). The gateway trusts `X-Forwarded-For` and
+`X-Forwarded-Proto` **only from that address** (`set_real_ip_from <bridge>/32`,
+`real_ip_recursive on`, rendered at start from `NANFO_GATEWAY_TRUSTED_HOP`); headers from
+any other peer are ignored and the scheme falls back to nginx's own. Consequently the host
+proxy must:
+
+- **overwrite** `X-Forwarded-For` with the connecting client's address — never append a
+  client-supplied chain (nginx: `proxy_set_header X-Forwarded-For $remote_addr;`, not
+  `$proxy_add_x_forwarded_for`; HAProxy: `http-request set-header X-Forwarded-For %[src]`;
+  Caddy strips untrusted client values by default) — because anything it forwards is
+  trusted;
+- set `X-Forwarded-Proto https`, forward `Upgrade`/`Connection` and `Sec-WebSocket-Protocol`
+  (C1 subprotocol bearer), keep `X-Request-ID` if you want end-to-end correlation (nginx keeps
+  a well-formed client value, otherwise issues its own), and connect to `127.0.0.1:<port>`
+  on the same host so the peer is the bridge gateway.
+
+Without a host proxy, every browser appears as the bridge gateway, which collapses the
+per-client login limits into one bucket; do not expose the loopback port through other
+forwarding (SSH tunnels, `socat`) without the same header discipline. The API trusts only
+nginx's fixed proxy-network address (`FORWARDED_ALLOW_IPS`) and receives exactly one hop.
+
+The gateway serves a strict same-origin policy on every response (CSP
+`default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self'
+data: blob:; font-src 'self'; connect-src 'self' blob: data:; worker-src 'self' blob:;
+object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'`,
+`Permissions-Policy`, `Referrer-Policy: no-referrer`, `X-Content-Type-Options: nosniff`,
+`X-Frame-Options: DENY`), immutable hashed `/assets/` (missing assets 404), a
+revalidated `index.html`, static-only gzip, and answers `/ready`, `/api/docs`,
+`/api/redoc` and `/api/openapi.json` with 404. `POST /api/v1/auth/login` is limited at the
+edge to 10/min per real client (burst 5) with a JSON 429 envelope, in addition to the API's
+own C11 limits. Access logs are JSON with `request_id`, `request_time` and
+`upstream_status` and never contain query strings or Referer; errors log at `warn`.
 
 ## Packaging Verification 2026-09-12
 
