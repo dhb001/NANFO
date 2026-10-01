@@ -1,0 +1,49 @@
+{
+  "name": "main: pull requests with required checks",
+  "target": "branch",
+  "enforcement": "active",
+  "bypass_actors": [],
+  "conditions": {
+    "ref_name": {
+      "include": ["~DEFAULT_BRANCH"],
+      "exclude": []
+    }
+  },
+  "rules": [
+    { "type": "deletion" },
+    { "type": "non_fast_forward" },
+    {
+      "type": "pull_request",
+      "parameters": {
+        "required_approving_review_count": 0,
+        "dismiss_stale_reviews_on_push": true,
+        "require_code_owner_review": false,
+        "require_last_push_approval": false,
+        "required_review_thread_resolution": true,
+        "allowed_merge_methods": ["merge", "squash", "rebase"]
+      }
+    },
+    {
+      "type": "required_status_checks",
+      "parameters": {
+        "strict_required_status_checks_policy": true,
+        "do_not_enforce_on_create": false,
+        "required_status_checks": [
+          { "context": "backend", "integration_id": 15368 },
+          { "context": "frontend", "integration_id": 15368 },
+          { "context": "ai", "integration_id": 15368 },
+          { "context": "python-inventories", "integration_id": 15368 },
+          { "context": "npm-lock", "integration_id": 15368 },
+          { "context": "evidence-hygiene", "integration_id": 15368 },
+          { "context": "database-contracts", "integration_id": 15368 },
+          { "context": "migrations", "integration_id": 15368 },
+          { "context": "stream-retention", "integration_id": 15368 },
+          { "context": "production-browser", "integration_id": 15368 },
+          { "context": "packaging", "integration_id": 15368 },
+          { "context": "gateway-proxy-boundary", "integration_id": 15368 },
+          { "context": "gateway-headers", "integration_id": 15368 }
+        ]
+      }
+    }
+  ]
+}

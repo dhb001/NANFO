@@ -1,0 +1,3 @@
+# Default reviewers (single maintainer). Review is requested automatically; merges are
+# gated by the required checks in .github/rulesets/main.json, not by code-owner approval.
+* @dhb001
