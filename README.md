@@ -69,8 +69,9 @@ decisions §7, owner actions §8, final verification) and the
 BREAKING ones (C3, C4, C5, C10), are listed in
 [ADR028-ContractChanges](docs/api/ADR028-ContractChanges.md).
 
-- Every finding of the 23 September full-stack review is remediated in the uncommitted
-  working tree over `e55a4f5`; schema head **0030**. The owner still has to commit it.
+- Every finding of the 23 September full-stack review is remediated; schema head **0030**.
+  The change is committed per ADR-028 workstream on top of `e55a4f5` and reaches `main`
+  through the ADR-028 pull request ([#47](https://github.com/dhb001/NANFO/issues/47)).
 - Final verification: backend **5,335 passed/0 failed** (coverage **85.64 %**, floor 84),
   private lane **94**, PostgreSQL 17/Redis lanes **323 + 29** with a clean migration round
   trip, portable lane **750** cases with zero skips, ai-engine **520**, frontend

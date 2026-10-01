@@ -7,10 +7,12 @@
   are in §7, owner actions in §8, and the integrator's final run in its
   "Final verification (integrator)" section.
 - Timeline: review and wave 1 on 2026-09-23; waves 2–3 on 2026-09-24. Base `75b514f`.
-  Part of the change is in the owner's commit `e55a4f5`; the rest, including new untracked
-  files, is uncommitted. The untracked files include `ai-engine/qualified/`,
-  `emulation/frozen/`, the generated `frontend/src/shared/types/generated/openapi.ts` and
-  the governance files.
+  Part of the change is in the owner's commit `e55a4f5`. On 2026-10-01 the rest, including
+  the previously untracked `ai-engine/qualified/`, `emulation/frozen/`, the generated
+  `frontend/src/shared/types/generated/openapi.ts` and the governance files, was committed
+  as one commit per workstream on `feat/adr-028-remediation`. It reaches `main` through the
+  ADR-028 pull request (tracking issue
+  [#47](https://github.com/dhb001/NANFO/issues/47)).
 - Current schema **0030** (single Alembic head, `CURRENT_SCHEMA = "0030"`). The C1–C26
   contract changes, with the BREAKING items C3, C4, C5 and C10, are listed in
   [ADR028-ContractChanges](../api/ADR028-ContractChanges.md).
@@ -35,9 +37,12 @@
 
 ### ADR-028 owner actions (ADR-028 §8)
 
-- [ ] Commit and push everything, including the untracked new files. Re-run the full
-  evidence-hygiene scan just before committing.
-- [ ] `git rm --cached` the two tracked `frontend/test-results/` Playwright outputs.
+- [x] Commit and push everything, including the untracked new files. Re-run the full
+  evidence-hygiene scan just before committing. Done 2026-10-01: scan 0 findings, one
+  commit per workstream, pushed for review
+  ([#47](https://github.com/dhb001/NANFO/issues/47)).
+- [x] `git rm --cached` the two tracked `frontend/test-results/` Playwright outputs
+  ([#49](https://github.com/dhb001/NANFO/issues/49)).
 - [ ] GitHub:
   - GitHub Pro/Team (or a public repository) for rulesets;
   - one pull request running the 13 required checks;
