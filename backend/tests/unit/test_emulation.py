@@ -495,15 +495,28 @@ async def test_runtime_composition_checks_trusted_manifest_and_fresh_session(tmp
     sessions = MagicMock()
     sessions.return_value.__aenter__ = AsyncMock(return_value=db)
     sessions.return_value.__aexit__ = AsyncMock()
+    services = []
+
+    async def apply(self, bound, snapshot):
+        services.append(self)
+        return data
+
     with (
         patch("app.main.AsyncSessionLocal", sessions),
         patch("app.main.get_neo4j_driver", return_value=MagicMock()),
-        patch("app.modules.network.emulation.EmulationDiscoveryService.apply_snapshot", new_callable=AsyncMock) as apply,
+        patch("app.modules.network.emulation.EmulationDiscoveryService.apply_snapshot", apply),
     ):
-        apply.return_value = data
         await collector.prepare_snapshot(parse(snapshot_data()))
         await collector.prepare_snapshot(parse(snapshot_data()))
-    assert sessions.call_count == 2 and apply.await_count == 2
+    assert sessions.call_count == 2 and len(services) == 2
+    # ADR-028: Network's public composition per poll — owner device reads (no repository),
+    # a graph writer, and the session released before any graph write.
+    from app.modules.network.service import NetworkService
+
+    first, second = services
+    assert first is not second and first.network is not second.network
+    assert all(service.devices is None and isinstance(service.network, NetworkService)
+               and service.topology is not None and service.release is db.rollback for service in services)
 
 
 def test_flow_entries_with_same_table_priority_cookie_keep_independent_raw_counters():

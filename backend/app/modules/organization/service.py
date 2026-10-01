@@ -149,12 +149,12 @@ class NetworkServiceInventory:
         self._redis = redis
 
     async def has_active_networks(self, *, workspace_id: uuid.UUID, actor_user_id: str) -> bool:
+        """One member-authorized existence probe (Network's public port), never a page/count."""
         from app.modules.network.service import NetworkService
 
-        page = await NetworkService(self._db, self._redis).list_networks(
-            workspace_id=workspace_id, actor_user_id=actor_user_id, page=1, page_size=1,
-        )
-        return bool(page.total)
+        return bool(await NetworkService(self._db, self._redis).has_active_networks(
+            workspace_id=workspace_id, actor_user_id=actor_user_id,
+        ))
 
 
 class OrgService:

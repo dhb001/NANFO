@@ -7,6 +7,7 @@ import json
 import os
 import stat
 import sys
+import uuid
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -262,39 +263,64 @@ async def test_real_ingestion_contract_with_fake_redis(binding):
 def owner_doubles(binding):
     identity = SimpleNamespace(get_profile=AsyncMock(return_value=SimpleNamespace(
         permissions=["read:telemetry", "read:topology", "write:config"])))
-    network = SimpleNamespace(assert_network_workspace_access=AsyncMock(), assert_device_workspace_access=AsyncMock(
-        return_value=(binding.network_id, binding.workspace_id)))
     device = SimpleNamespace(device_id=binding.device_id, network_id=binding.network_id, status="active", ip_address=str(binding.target))
-    devices = SimpleNamespace(list_devices=AsyncMock(return_value=SimpleNamespace(items=[device], total=1)))
-    return identity, network, devices, device
+    # ADR-028: one owner read of the bound device (no inventory paging, no DeviceService).
+    network = SimpleNamespace(assert_network_workspace_access=AsyncMock(), assert_device_workspace_access=AsyncMock(
+        return_value=(binding.network_id, binding.workspace_id)), get_device_for_owner=AsyncMock(return_value=device))
+    return identity, network, device
 
 
 async def test_owner_contract_enforces_org_membership_write_and_address(binding):
-    identity, network, devices, _ = owner_doubles(binding)
-    await validate_owner_scope(binding, publish=True, identity=identity, network=network, devices=devices)
+    identity, network, _ = owner_doubles(binding)
+    await validate_owner_scope(binding, publish=True, identity=identity, network=network)
     assert network.assert_network_workspace_access.call_args.kwargs == {
         "network_id": binding.network_id, "requested_workspace_id": binding.workspace_id,
         "actor_user_id": str(binding.actor_user_id), "claim_org_id": binding.org_id, "require_write": True,
     }
+    network.get_device_for_owner.assert_awaited_once_with(
+        device_id=binding.device_id, network_id=binding.network_id, actor_user_id=str(binding.actor_user_id),
+        requested_workspace_id=binding.workspace_id, claim_org_id=binding.org_id,
+    )
 
 
-@pytest.mark.parametrize("case", ["permissions", "cross_network", "wrong_address", "inactive", "membership", "missing"])
+@pytest.mark.parametrize("case", ["permissions", "cross_network", "wrong_address", "inactive", "membership", "missing",
+                                  "other_device", "other_network", "invalid_address"])
 async def test_owner_rejects_invalid_bindings(binding, case):
-    identity, network, devices, device = owner_doubles(binding)
+    from fastapi import HTTPException
+
+    identity, network, device = owner_doubles(binding)
     if case == "permissions":
         identity.get_profile.return_value.permissions = ["read:telemetry", "read:topology"]
     elif case == "cross_network":
         network.assert_device_workspace_access.return_value = (binding.org_id, binding.workspace_id)
     elif case == "wrong_address":
         device.ip_address = "192.0.2.11"
+    elif case == "invalid_address":
+        device.ip_address = "not-an-address"
     elif case == "inactive":
         device.status = "inactive"
     elif case == "membership":
         network.assert_network_workspace_access.side_effect = SNMPError("denied")
-    else:
-        devices.list_devices.return_value.items = []
-    with pytest.raises(SNMPError):
-        await validate_owner_scope(binding, publish=True, identity=identity, network=network, devices=devices)
+    elif case == "other_device":
+        device.device_id = uuid.uuid4()
+    elif case == "other_network":
+        device.network_id = uuid.uuid4()
+    else:  # absent, deleted or foreign device: the owner read answers 404
+        network.get_device_for_owner.side_effect = HTTPException(status_code=404, detail="Device not found.")
+    with pytest.raises(SNMPError) as raised:
+        await validate_owner_scope(binding, publish=True, identity=identity, network=network)
+    if case == "missing":
+        assert raised.value.args[0] == "device_missing_or_inventory_limit"
+
+
+async def test_owner_read_authorization_denial_is_not_reported_as_a_missing_device(binding):
+    from fastapi import HTTPException
+
+    identity, network, _ = owner_doubles(binding)
+    network.get_device_for_owner.side_effect = HTTPException(status_code=403, detail="Insufficient permissions.")
+    with pytest.raises(HTTPException) as raised:  # the boundary classifies it as owner_authorization_denied
+        await validate_owner_scope(binding, publish=False, identity=identity, network=network)
+    assert raised.value.status_code == 403
 
 
 @pytest.mark.parametrize("mode", [0o644, 0o640, 0o666, 0o400])

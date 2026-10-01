@@ -213,7 +213,8 @@ async def test_composition_rechecks_binding_owner_and_actual_network(path_eviden
     monkeypatch.setattr("app.modules.telemetry.probe_paths.EmulationDiscoveryService.validate_binding", validation)
     reader = AsyncMock(return_value=await e.reader.read(**e.args))
     monkeypatch.setattr("app.modules.telemetry.probe_paths.ProbePathsReader.read", reader)
-    args = dict(settings=settings, db=None, redis=None, claims=claims, network_id=e.binding.network_id)
+    # A session double: Network's discovery composition binds its release to the session.
+    args = dict(settings=settings, db=AsyncMock(), redis=None, claims=claims, network_id=e.binding.network_id)
     assert (await read_paths(**args)).status == "measured"
     assert validation.await_args.args[0].actor_user_id == e.binding.actor_user_id
     assert access.await_args.kwargs["actor_user_id"] == claims.user_id
@@ -249,8 +250,23 @@ def test_router_holds_no_cross_module_repository_or_identity_composition():
 
 
 def test_emulation_discovery_composition_is_built_per_session():
+    from unittest.mock import AsyncMock
+
+    from app.modules.network.service import NetworkService
     from app.modules.telemetry.probe_paths import build_emulation_discovery
 
-    first = build_emulation_discovery(object(), None, expected_topology={"topology_id": "t"})
-    second = build_emulation_discovery(object(), None, expected_topology={"topology_id": "t"})
-    assert first.devices is not second.devices and first.topology is None
+    first_db, second_db = AsyncMock(), AsyncMock()
+    first = build_emulation_discovery(first_db, None, expected_topology={"topology_id": "t"})
+    second = build_emulation_discovery(second_db, None, expected_topology={"topology_id": "t"})
+    # ADR-028: Network's public composition; bound devices come from the owner read
+    # (NetworkService.get_devices_for_owner), never an injected Network repository.
+    assert first.devices is None and second.devices is None and first.topology is None
+    assert isinstance(first.network, NetworkService) and first.network is not second.network
+    assert first.identity is not second.identity
+    assert first.release is first_db.rollback and second.release is second_db.rollback
+
+
+def test_telemetry_composition_builds_no_network_repository():
+    import app.modules.telemetry.probe_paths as probe_paths
+
+    assert not hasattr(probe_paths, "DeviceRepository") and not hasattr(probe_paths, "AuthService")

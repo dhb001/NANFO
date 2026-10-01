@@ -157,11 +157,12 @@ async def _ensure_graph_schema():
 
 
 async def _build_emulation_adapter(settings, redis):
-    """ADR-009 composition: Network validates discovery before Telemetry ingestion."""
-    from app.modules.identity.service import AuthService
-    from app.modules.network.emulation import EmulationDiscoveryService, load_binding
-    from app.modules.network.repository import DeviceRepository
-    from app.modules.network.service import NetworkService
+    """ADR-009 composition: Network validates discovery before Telemetry ingestion.
+
+    ADR-028: the per-poll discovery service is Network's public composition
+    (``build_emulation_discovery``) over owner services only, never a repository.
+    """
+    from app.modules.network.emulation import build_emulation_discovery, load_binding
     from app.modules.telemetry.emulation import (
         EmulationTelemetryAdapter,
         SnapshotReader,
@@ -182,10 +183,8 @@ async def _build_emulation_adapter(settings, redis):
     async def prepare(snapshot):
         # A fresh session prevents cached membership/capabilities surviving revocation.
         async with AsyncSessionLocal() as db:
-            service = EmulationDiscoveryService(
-                identity=AuthService(db, redis), network=NetworkService(db, redis),
-                devices=DeviceRepository(db), topology=TopologyQueryService(get_neo4j_driver()),
-                expected_topology=expected_topology,
+            service = build_emulation_discovery(
+                db, redis, expected_topology=expected_topology, topology=TopologyQueryService(get_neo4j_driver()),
             )
             return await service.apply_snapshot(binding, snapshot)
 
@@ -235,7 +234,8 @@ def create_app() -> FastAPI:
     # Added innermost-first: RequestContext -> CORS -> BodyLimit -> routing.
     application.add_middleware(
         BodyLimitMiddleware, default_limit=settings.API_MAX_BODY_BYTES,
-        asset_limit=settings.API_MAX_ASSET_UPLOAD_BYTES, error_handler=unhandled_exception_handler,
+        asset_limit=settings.API_MAX_ASSET_UPLOAD_BYTES, scene_limit=settings.API_MAX_SPATIAL_SCENE_BYTES,
+        error_handler=unhandled_exception_handler,
     )
     application.add_middleware(
         CORSMiddleware,

@@ -4,8 +4,10 @@ The router stays thin: this service performs the Network-owned access check, loa
 the operator binding and re-validates it through Network's public
 ``EmulationDiscoveryService`` contract (validation only, never the graph-mutating
 ``apply_snapshot``), then replays probe evidence with ``ProbePathsReader``.
-``build_emulation_discovery`` is the single composition of that contract for a
-session; the API collector composition can reuse it (see BE-Platform request).
+``build_emulation_discovery`` delegates to Network's single public composition
+(``app.modules.network.emulation.build_emulation_discovery``): public owner services
+only, bound devices read with ``NetworkService.get_devices_for_owner``, no Network
+repository constructed here (ADR-028).
 """
 
 from __future__ import annotations
@@ -17,9 +19,8 @@ import redis.asyncio as aioredis
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.identity.service import AuthService
 from app.modules.network.emulation import EmulationDiscoveryService, load_binding
-from app.modules.network.repository import DeviceRepository
+from app.modules.network.emulation import build_emulation_discovery as _network_emulation_discovery
 from app.modules.network.service import NetworkService
 from app.modules.telemetry.emulation import SnapshotReader
 from app.modules.telemetry.paths import ProbePathsReader, ProbePathsResponse
@@ -27,11 +28,11 @@ from app.modules.telemetry.paths import ProbePathsReader, ProbePathsResponse
 
 def build_emulation_discovery(db: AsyncSession, redis: aioredis.Redis | None, *, topology=None,
                               expected_topology: dict) -> EmulationDiscoveryService:
-    """Network's public binding-validation contract for one fresh session."""
-    return EmulationDiscoveryService(
-        identity=AuthService(db, redis), network=NetworkService(db, redis),
-        devices=DeviceRepository(db), topology=topology, expected_topology=expected_topology,
-    )
+    """Network's public binding-validation contract for one fresh session.
+
+    Kept as Telemetry's public entry point; the composition itself is Network-owned.
+    """
+    return _network_emulation_discovery(db, redis, expected_topology=expected_topology, topology=topology)
 
 
 class ProbePathsService:

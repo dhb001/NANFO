@@ -25,20 +25,22 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from app.core.logging import get_logger
 from app.modules.identity.service import AuthService, IdentityDirectoryService
-from app.modules.network.service import DeviceService, NetworkService
+from app.modules.network.service import NetworkService
 from app.modules.telemetry.diagnostics import OWNER_BOUNDARY_FAILURES, FailureCounter
 from app.modules.telemetry.snmp_config import ProtectedRevision, SNMPBinding, SNMPError, binding_sha256
 
 logger = get_logger(__name__)
 
 AUTHORITY_TTL_SECONDS = 10.0
-_INVENTORY_PAGE_SIZE = 200
-_INVENTORY_MAX_PAGES = 32
 
 
 async def validate_owner_scope(binding: SNMPBinding, *, publish: bool, identity: AuthService,
-                               network: NetworkService, devices: DeviceService) -> None:
-    """No cross-module repositories/SQL; require active inventory and exact IP."""
+                               network: NetworkService) -> None:
+    """No cross-module repositories/SQL; require active inventory and exact IP.
+
+    The bound device is read with Network's public owner read (``get_device_for_owner``,
+    ADR-028): one authorized lookup instead of paging the network's inventory.
+    """
     profile = await identity.get_profile(str(binding.actor_user_id))
     required = {"read:telemetry", "read:topology"}
     if publish:
@@ -55,27 +57,22 @@ async def validate_owner_scope(binding: SNMPBinding, *, publish: bool, identity:
     )
     if scope != (binding.network_id, binding.workspace_id):
         raise SNMPError("device_scope_mismatch")
-    # The Network owner exposes no get-device contract (requested from BE-Network).
-    # Bounded pagination, fail closed beyond the supported 6,400-device inventory;
-    # the TTL cache above keeps this off the per-sample path.
-    for page in range(1, _INVENTORY_MAX_PAGES + 1):
-        response = await devices.list_devices(
-            network_id=binding.network_id, actor_user_id=str(binding.actor_user_id), page=page,
-            page_size=_INVENTORY_PAGE_SIZE, requested_workspace_id=binding.workspace_id,
-            claim_org_id=binding.org_id,
+    try:
+        device = await network.get_device_for_owner(
+            device_id=binding.device_id, network_id=binding.network_id, actor_user_id=str(binding.actor_user_id),
+            requested_workspace_id=binding.workspace_id, claim_org_id=binding.org_id,
         )
-        for device in response.items:
-            if device.device_id == binding.device_id:
-                try:
-                    matches = device.ip_address is not None and ip_address(device.ip_address) == binding.target
-                except ValueError:
-                    matches = False
-                if device.status != "active" or device.network_id != binding.network_id or not matches:
-                    raise SNMPError("device_inventory_binding_mismatch")
-                return
-        if page * _INVENTORY_PAGE_SIZE >= response.total or not response.items:
-            break
-    raise SNMPError("device_missing_or_inventory_limit")
+    except HTTPException as exc:
+        if exc.status_code == 404:  # absent, deleted or foreign: fail closed (stable diagnostic code)
+            raise SNMPError("device_missing_or_inventory_limit") from None
+        raise  # authorization outcomes keep their own classification
+    try:
+        matches = device.ip_address is not None and ip_address(device.ip_address) == binding.target
+    except ValueError:
+        matches = False
+    if (device.device_id != binding.device_id or device.status != "active"
+            or device.network_id != binding.network_id or not matches):
+        raise SNMPError("device_inventory_binding_mismatch")
 
 
 def _unavailable_code(exc: BaseException) -> str:
@@ -125,7 +122,7 @@ class SNMPOwnerBoundary:
                 self.full_checks += 1
                 await validate_owner_scope(
                     binding, publish=publish, identity=AuthService(db, self.redis),
-                    network=NetworkService(db, self.redis), devices=DeviceService(db, self.redis),
+                    network=NetworkService(db, self.redis),
                 )
         except SNMPError:
             self.invalidate()

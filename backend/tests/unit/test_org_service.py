@@ -5,7 +5,6 @@ All external dependencies are mocked.
 
 import uuid
 from datetime import UTC, datetime
-from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -364,7 +363,9 @@ class TestWorkspaceService:
             patch.object(ws_svc._member_repo, "get_member", return_value=_make_member(ws.org_id, uuid.UUID(actor_id))),
             patch.object(ws_svc._repo, "get_by_org_and_id", return_value=ws),
             patch.object(ws_svc._repo, "soft_delete", new_callable=AsyncMock),
-            patch("app.modules.network.service.NetworkService.list_networks", return_value=SimpleNamespace(total=0)),
+            # ADR-028: the default inventory adapter asks Network's existence probe.
+            patch("app.modules.network.service.NetworkService.has_active_networks",
+                  new_callable=AsyncMock, return_value=False) as probe,
             patch("app.modules.organization.service.publish_event", new_callable=AsyncMock) as mock_publish,
         ):
             await ws_svc.delete_workspace(
@@ -375,6 +376,7 @@ class TestWorkspaceService:
                 correlation_id=str(uuid.uuid4()),
             )
 
+        probe.assert_awaited_once_with(workspace_id=ws.workspace_id, actor_user_id=actor_id)
         assert mock_publish.await_count == 1
         assert mock_publish.await_args.kwargs["event_type"] == "org.workspace.deleted"
 

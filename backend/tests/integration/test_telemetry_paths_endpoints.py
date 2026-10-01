@@ -32,11 +32,25 @@ def paths_http(request, session_auth, tenant_auth, monkeypatch):
     network_access = AsyncMock(return_value=SimpleNamespace(network_id=e.binding.network_id,
                                                            workspace_id=e.binding.workspace_id))
     monkeypatch.setattr("app.modules.telemetry.probe_paths.NetworkService.assert_network_workspace_access", network_access)
-    # Keep real binding validation and device lookup logic, replace only persistence.
+    # Keep real binding validation and Network's public owner read (get_devices_for_owner,
+    # ADR-028), replace only persistence and that read's (separately tested) authorization.
     devices = {device_id: SimpleNamespace(network_id=e.binding.network_id, status="active", deleted_at=None)
                for device_id in (*e.binding.switches.values(), *e.binding.hosts.values())}
-    monkeypatch.setattr("app.modules.network.repository.DeviceRepository.get_by_id",
-                        AsyncMock(side_effect=devices.get))
+
+    def active_rows(network_id, device_ids):
+        # DeviceRepository.list_active_by_ids contract: active rows of that network only.
+        return [SimpleNamespace(device_id=device_id, network_id=row.network_id, hostname=f"device-{index}",
+                                ip_address=None, device_type="switch", vendor=None, model=None,
+                                location_hint=None, spatial_ref_id=None, status=row.status, created_at=NOW)
+                for index, device_id in enumerate(sorted(set(device_ids)))
+                if (row := devices.get(device_id)) is not None and row.deleted_at is None
+                and row.network_id == network_id]
+
+    owner_devices = AsyncMock(side_effect=active_rows)
+    monkeypatch.setattr("app.modules.network.repository.DeviceRepository.list_active_by_ids", owner_devices)
+    owner_read_authority = AsyncMock(return_value=SimpleNamespace(
+        network=SimpleNamespace(network_id=e.binding.network_id, workspace_id=e.binding.workspace_id), org_id=None))
+    monkeypatch.setattr("app.modules.network.access.NetworkAccessGuard.check", owner_read_authority)
     owner_profile = AsyncMock(return_value=SimpleNamespace(permissions=["write:config", "read:topology"]))
     monkeypatch.setattr("app.modules.identity.service.AuthService.get_profile", owner_profile)
 
@@ -54,6 +68,7 @@ def paths_http(request, session_auth, tenant_auth, monkeypatch):
     e.url = f"/api/v1/telemetry/paths?network_id={e.binding.network_id}"
     e.client = TestClient(app, raise_server_exceptions=False)
     e.network_access, e.owner_profile, e.devices, e.clock = network_access, owner_profile, devices, clock
+    e.owner_devices, e.owner_read_authority = owner_devices, owner_read_authority
     yield e
     app.dependency_overrides.clear()
 
@@ -70,6 +85,11 @@ def test_paths_http_replays_pcaps_and_returns_canonical_ids(paths_http):
     assert data["paths"][0]["source_device_id"] == str(e.binding.hosts["h1"])
     assert e.owner_profile.await_args.args[0] == str(e.binding.actor_user_id)
     assert any(call.kwargs.get("require_write") for call in e.network_access.await_args_list)
+    # One authorized batch owner read for every bound device, as the binding actor.
+    assert e.owner_devices.await_count == 1
+    assert set(e.owner_devices.await_args.args[1]) == set(e.devices)
+    assert e.owner_read_authority.await_args.kwargs["actor_user_id"] == str(e.binding.actor_user_id)
+    assert e.owner_read_authority.await_args.kwargs["network_id"] == e.binding.network_id
 
 
 def test_paths_http_authentication_and_current_permission(paths_http, session_auth):

@@ -233,6 +233,35 @@ async def test_workspace_deletion_asks_the_injected_inventory_port(mock_db, fake
     svc._repo.soft_delete.assert_awaited_once()
 
 
+@pytest.mark.parametrize("present", [True, False])
+async def test_default_inventory_adapter_uses_the_network_existence_probe(mock_db, fake_redis, monkeypatch, present):
+    """ADR-028: the default adapter asks Network's member-authorized existence probe,
+    never pages or counts networks."""
+    from app.modules.network.service import NetworkService
+    from app.modules.organization.service import NetworkServiceInventory
+
+    probe, listing = AsyncMock(return_value=present), AsyncMock()
+    monkeypatch.setattr(NetworkService, "has_active_networks", probe)
+    monkeypatch.setattr(NetworkService, "list_networks", listing)
+    workspace_id = uuid.uuid4()
+    assert await NetworkServiceInventory(mock_db, fake_redis).has_active_networks(
+        workspace_id=workspace_id, actor_user_id=str(ACTOR)) is present
+    probe.assert_awaited_once_with(workspace_id=workspace_id, actor_user_id=str(ACTOR))
+    listing.assert_not_awaited()
+
+
+async def test_default_inventory_adapter_propagates_network_authorization(mock_db, fake_redis, monkeypatch):
+    from app.modules.network.service import NetworkService
+    from app.modules.organization.service import NetworkServiceInventory
+
+    monkeypatch.setattr(NetworkService, "has_active_networks",
+                        AsyncMock(side_effect=HTTPException(status_code=403, detail="Insufficient permissions.")))
+    with pytest.raises(HTTPException) as error:
+        await NetworkServiceInventory(mock_db, fake_redis).has_active_networks(
+            workspace_id=uuid.uuid4(), actor_user_id=str(ACTOR))
+    assert error.value.status_code == 403
+
+
 def test_organization_service_does_not_import_network_at_import_time():
     backend = Path(__file__).resolve().parents[2]
     probe = ("import sys, app.modules.organization.service as s; "

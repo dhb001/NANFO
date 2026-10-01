@@ -114,6 +114,7 @@ async def tenant_api(monkeypatch, mock_db, fake_redis):
     }
     repo(NetworkRepository, "get_by_id", side_effect=network_rows.get)
     repo(NetworkRepository, "list_for_workspace", return_value=([], 0))
+    network_probe = repo(NetworkRepository, "has_active_for_workspace", return_value=False)
     repo(DeviceRepository, "get_by_id", return_value=SimpleNamespace(device_id=DEVICE_B, network_id=NET_B))
     repo(SimulationRepository, "get_by_id", return_value=SimpleNamespace(network_id=NET_B, workspace_id=WS_B))
     audit_query = repo(AuditLogRepository, "list_entries", return_value=([], 0))
@@ -151,12 +152,12 @@ async def tenant_api(monkeypatch, mock_db, fake_redis):
         yield SimpleNamespace(
             client=client, headers=headers, orgs=orgs, members=members, roles=roles,
             audit_query=audit_query, plugin_query=plugin_query, alert_query=alert_query,
+            network_probe=network_probe,
         )
 
 
 @pytest.mark.parametrize("user", [ADMIN, READER])
 @pytest.mark.parametrize("path", [
-    f"/organizations/{ORG_B}",
     f"/organizations/{ORG_B}/workspaces",
     f"/organizations/{ORG_B}/workspaces/{WS_B}",
     f"/organizations/{ORG_B}/members",
@@ -180,6 +181,21 @@ async def tenant_api(monkeypatch, mock_db, fake_redis):
 async def test_claimless_users_cannot_read_other_tenant(tenant_api, user, path):
     response = await tenant_api.client.get(f"/api/v1{path}", headers=await tenant_api.headers(user))
     assert response.status_code == 403, response.text
+
+
+@pytest.mark.parametrize("user", [ADMIN, READER])
+async def test_claimless_users_cannot_read_other_tenant_organization(tenant_api, user):
+    # ADR-028 C6: an organization GET answers the same 404 for "not a member" and
+    # "absent", so the response is no existence oracle and carries no tenant data.
+    headers = await tenant_api.headers(user)
+    foreign = await tenant_api.client.get(f"/api/v1/organizations/{ORG_B}", headers=headers)
+    absent = await tenant_api.client.get(f"/api/v1/organizations/{UUID(int=99)}", headers=headers)
+    assert foreign.status_code == absent.status_code == 404, foreign.text
+    assert foreign.json() == absent.json()
+    assert "org-b" not in foreign.text and str(ORG_B) not in foreign.text
+    # The caller's own organization stays readable with its role (sanity for the double).
+    own = await tenant_api.client.get(f"/api/v1/organizations/{ORG_A}", headers=headers)
+    assert own.status_code == 200 and own.json()["data"]["org_id"] == str(ORG_A)
 
 
 @pytest.mark.parametrize("path,body", [
@@ -243,6 +259,8 @@ async def test_org_deletion_denies_descendants_with_same_token(tenant_api):
     assert response.status_code == 409
     response = await tenant_api.client.delete(f"/api/v1/organizations/{ORG_A}/workspaces/{WS_A}", headers=headers)
     assert response.status_code == 204
+    # Deletion consulted Network's member-authorized existence probe for this workspace only.
+    tenant_api.network_probe.assert_awaited_once_with(WS_A)
     response = await tenant_api.client.delete(f"/api/v1/organizations/{ORG_A}", headers=headers)
     assert response.status_code == 204
     for path in [f"/organizations/{ORG_A}/workspaces", f"/organizations/{ORG_A}/members",
