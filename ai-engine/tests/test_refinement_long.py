@@ -7,6 +7,10 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from private_store import requirePrivateStore
+
+requirePrivateStore(__file__)
+pytestmark = pytest.mark.private_artifacts
 
 DIRECTORY = Path(__file__).resolve().parents[1] / "scripts/refinement_long"
 

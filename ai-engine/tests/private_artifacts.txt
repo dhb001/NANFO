@@ -1,0 +1,18 @@
+# ai-engine test modules that replay ignored private evidence under ai-engine/artifacts/
+# (ADR-028). Every other ai-engine test runs from tracked files only.
+#
+# These modules import the completed, hash-pinned ADR015/ADR016 refinement code
+# (scripts/refinement, scripts/refinement_long). That code binds the frozen ADR014
+# client copy (artifacts/adr014-001/source), artifacts/adr014-001/plan.json,
+# artifacts/adr014-holdout-001/plan.json (which stores an absolute checkpoint path),
+# artifacts/adr015-release.json and artifacts/adr015-002/. Those bytes are pinned by
+# historical plans, so the tests cannot be redirected to tracked copies without changing
+# historical evidence identities.
+#
+# Each module calls private_store.requirePrivateStore(__file__) before importing that
+# code and sets pytestmark = pytest.mark.private_artifacts. Absent store: explicit module
+# skip. Present store: tests run unchanged. Lanes may also use -m "not private_artifacts".
+#
+# Format: one module file name per line, relative to ai-engine/tests/.
+test_refinement.py
+test_refinement_long.py

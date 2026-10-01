@@ -15,7 +15,16 @@ from .cli import report
 from .contracts import jsonBytes, parseJson
 from .expanded import frozenPlan, qualify, selectPolicy
 from .qualification import actionEffectChecks
-from .supervisor import GLOBAL_LOCK, IMAGE_PATTERN, ROOT, Supervisor, lock, outputPath, readJson
+from .supervisor import (
+    GLOBAL_LOCK,
+    IMAGE_PATTERN,
+    ROOT,
+    Supervisor,
+    labProfile,
+    lock,
+    outputPath,
+    readJson,
+)
 
 
 def releaseEvidence(path, image):
@@ -342,6 +351,7 @@ def main(argv=None):
                 "version": 4,
                 "plan": frozenPlan(),
                 "image_id": args.image_id,
+                "lab_profile": labProfile(),
                 "release": release,
                 "client_source_sha256": clientSources(),
                 "runtime_versions": runtimeVersions(),

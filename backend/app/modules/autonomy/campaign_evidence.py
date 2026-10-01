@@ -181,6 +181,30 @@ def relative_evidence_path(store, value):
     return value
 
 
+def service_metrics(sent, received, ping):
+    """Foreground service semantics of the frozen client (ADR-028 task 13).
+
+    The formulas are the single experimental implementation (``flow_service_metrics`` /
+    ``probe_service_metrics``, re-exported by ``experimental.metrics`` and used by
+    ``measured_metrics``). ``measured_metrics`` itself is not called: it admits only matched
+    ADR025 frames with verified drain and wall-clock attachment, while these dossiers also
+    hold OSPF and pre-drain frames; fabricating those fields would weaken it.
+    """
+    # Lazy on purpose: formal stages and `import app.main` never load the experimental package;
+    # calling this loads only its dependency-free formulas module.
+    from app.modules.autonomy.experimental.formulas import flow_service_metrics, probe_service_metrics
+
+    flow = flow_service_metrics(sent[0].packets, received[0].packets, received[0].bytes,
+                                sent[0].duration_seconds)
+    # `sent` is validated by the caller after this call; `.get` keeps its error order unchanged.
+    icmp = probe_service_metrics(ping.get("sent"), ping["received"], ping["rtt_avg_ms"])
+    return {
+        "goodput_mbps": flow["goodput_mbps"],
+        "loss_fraction": flow["loss_fraction"],
+        "icmp_rtt_ms": icmp["rtt_ms"],
+    }
+
+
 def reconstruct_measurement(data: RawData, request: RawRequest, manifest: dict):
     e, o = data.evidence, data.observation
     require(
@@ -247,11 +271,11 @@ def reconstruct_measurement(data: RawData, request: RawRequest, manifest: dict):
         same(e["actual_offered_mbps"][index], rate)
         if index == 0:
             same(o.actual_offered_mbps, rate)
-    goodput = received[0].bytes * 8 / sent[0].duration_seconds / 1e6
-    loss = 1 - received[0].packets / sent[0].packets
+    ping = e["ping"]
+    service = service_metrics(sent, received, ping)
+    goodput, loss = service["goodput_mbps"], service["loss_fraction"]
     same(o.goodput_mbps, goodput)
     same(o.loss_fraction, loss)
-    ping = e["ping"]
     require(
         type(ping["sent"]) is int
         and type(ping["received"]) is int

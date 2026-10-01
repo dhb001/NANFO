@@ -89,7 +89,7 @@ def verify(output):
         path = output / name
         return dict(path=name, sha256=campaign.digest(path), size_bytes=path.stat().st_size)
     now = datetime.now(timezone.utc)
-    private = Path(tempfile.mkdtemp(prefix="nanfo-adr024-installation-check-", dir="/tmp/opencode"))
+    private = Path(tempfile.mkdtemp(prefix="nanfo-adr024-installation-check-", dir=recovery.scratch_root()))
     (private / "observations").mkdir(mode=0o700)
     manifest = plan["checkpoint"]["manifest"]
     registry = dict(version=1, model_id="adr024-rebuilt-v4", checkpoint=ref("checkpoint.ptz"),

@@ -174,15 +174,18 @@ def test_inference_validates_history_spec_and_order(tmp_path, monkeypatch, trans
         distribution=trainingDistribution(5.0, 4),
     )
     # Explicit unit-only loader injection; no mock is saved or reported as measured-trained.
-    monkeypatch.setattr(cli, "loadCheckpoint", lambda path: (agent, manifest))
+    identity = {"checkpoint_sha256": "9" * 64, "manifest": manifest.model_dump()}
+    monkeypatch.setattr(
+        cli, "loadCheckpointIdentity", lambda path, **k: (agent, manifest, identity)
+    )
     path = tmp_path / "history.json"
     path.write_text(json.dumps({"version": 3, "frames": frames}))
     args = ["infer", "--checkpoint", str(tmp_path / "fixture.ptz"), "--history", str(path)]
     assert cli.main(args) == 0
-    assert (
-        json.loads(capsys.readouterr().out)["checkpoint_provenance"]
-        == "offline-fixture-not-trained-model"
-    )
+    result = json.loads(capsys.readouterr().out)
+    assert result["checkpoint_provenance"] == "offline-fixture-not-trained-model"
+    # The reported policy is the identity that was loaded, never a second file read.
+    assert result["policy_sha256"] == "9" * 64
     path.write_text(json.dumps({"version": 3, "frames": [frames[0], frames[0]]}))
     assert cli.main(args) == 1
     assert "invalid measured history" in capsys.readouterr().err

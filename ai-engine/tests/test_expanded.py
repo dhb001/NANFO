@@ -211,15 +211,17 @@ def test_v4_validation_checkpoint_identity_allows_multiple_not_retries(tmp_path,
             str(tmp_path / "model"),
         ]
     )
+    identity = {"checkpoint_sha256": "a" * 64}
     monkeypatch.setattr(
         qualification,
-        "loadCheckpoint",
-        lambda *a: (None, SimpleNamespace(config=PPOConfig(seed=44))),
+        "loadCheckpointIdentity",
+        lambda *a, **k: (None, SimpleNamespace(config=PPOConfig(seed=44)), deepcopy(identity)),
     )
-    identity = {"checkpoint_sha256": "a" * 64}
-    monkeypatch.setattr(qualification, "inspectCheckpoint", lambda *a: deepcopy(identity))
     with qualification.collectionAdmission(args):
         pass
+    # The admitted identity pins the evaluation session's own checkpoint load.
+    assert args.checkpoint_sha256 == "a" * 64
+    args.checkpoint_sha256 = None
     with pytest.raises(ValueError, match="already consumed"):
         with qualification.collectionAdmission(args):
             pass

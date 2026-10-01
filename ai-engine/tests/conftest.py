@@ -3,6 +3,8 @@
 import hashlib
 import json
 import runpy
+import sys
+import tarfile
 from copy import deepcopy
 from pathlib import Path
 
@@ -11,16 +13,48 @@ import pytest
 from nanfo_routing.contracts import ACTION_MAP, CONTRACT, jsonBytes
 from nanfo_routing.evidence import PATH_PORTS
 
-producerSchedule = runpy.run_path(
-    str(Path(__file__).resolve().parents[2] / "emulation" / "workloads.py")
-)["schedule"]
+REPO = Path(__file__).resolve().parents[2]
+FROZEN_LAB = REPO / "emulation/frozen/adr015-prechange-v4-source.tar.gz"
+SPEC_FIXTURE = Path(__file__).resolve().parent / "fixtures/adr014-environment-spec.json"
+# spec_hash recorded in the ADR014 release and in the qualified checkpoint manifest.
+SPEC_FIXTURE_SHA256 = "bb15142a19ed3ee87a6aec2c6f9109d789d9736a5e6afda826ad898ef5fe7200"
+
+
+def loadSpecFixture(path=SPEC_FIXTURE):
+    spec = json.loads(Path(path).read_bytes())
+    if hashlib.sha256(jsonBytes(spec)).hexdigest() != SPEC_FIXTURE_SHA256:
+        raise ValueError("ADR014 environment spec fixture differs from its pinned spec_hash")
+    return spec
+
+
+def frozenLabModule(name):
+    """A V4 producer module from the tracked frozen archive, pinned by the fixture spec."""
+    with tarfile.open(FROZEN_LAB) as archive:
+        source = archive.extractfile("emulation/" + name).read()
+    if hashlib.sha256(source).hexdigest() != loadSpecFixture()["source_files"][name]:
+        raise ValueError(f"frozen V4 {name} differs from the pinned lab source")
+    namespace = {"__name__": "_frozen_v4_" + name.removesuffix(".py")}
+    exec(compile(source, f"frozen-v4/emulation/{name}", "exec"), namespace)
+    return namespace
+
+
+def successorLabModule(name):
+    """The evolving lab module (V5 refinement tests); it imports the emulation package."""
+    saved = list(sys.path)
+    sys.path.insert(0, str(REPO))
+    try:
+        return runpy.run_path(str(REPO / "emulation" / name))
+    finally:
+        sys.path[:] = saved
+
+
+# Historical V4 client tests must not silently consume the evolving successor lab.
+producerSchedule = frozenLabModule("workloads.py")["schedule"]
 
 
 def producerSpec():
-    # Historical V4 client tests must not silently consume the evolving V5 lab.
     # Refinement tests independently validate V5; production artifacts stay read-only.
-    path = Path(__file__).resolve().parents[1] / "artifacts/adr014-001/release.json"
-    return json.loads(path.read_bytes())["environment_spec"]
+    return loadSpecFixture()
 
 
 def evidenceFixture(observation, request):

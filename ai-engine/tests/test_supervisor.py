@@ -3,6 +3,7 @@
 import json
 import os
 import signal
+import stat
 import subprocess
 from types import SimpleNamespace
 
@@ -749,35 +750,144 @@ def test_signal_in_session_attempts_protocol_close(tmp_path, monkeypatch, transp
     assert not (output / "checkpoint.ptz").exists()
 
 
-def test_docker_run_is_pinned_private_and_bounded(supervisor, monkeypatch):
+SUCCESSOR_LABELS = '{"org.nanfo.lab.frozen":"false","org.nanfo.lab.profile":"successor"}'
+
+
+def launch(supervisor, monkeypatch, labels=SUCCESSOR_LABELS, mode="sdn"):
     commands = []
     monkeypatch.setattr(supervisor, "exclusiveLab", lambda: None)
+    (supervisor.output / "lab-output").mkdir(mode=0o700, exist_ok=True)
 
     def command(argv, *a, **k):
         commands.append(argv)
+        if argv[1:3] == ["image", "inspect"]:
+            return labels + "\n"
         if argv[1] == "run":
             (supervisor.output / "train-01.cid").write_text(CID)
             return CID
         return ""
 
     monkeypatch.setattr(supervisor, "command", command)
-    assert supervisor.startLab("train-01") == "nanfo-training-" + CAMPAIGN
-    argv = commands[0]
+    assert supervisor.startLab("train-01", mode) == "nanfo-training-" + CAMPAIGN
+    assert commands[0][:5] == ["docker", "image", "inspect", "--format", "{{json .Config.Labels}}"]
+    assert commands[0][5] == IMAGE
+    return commands[1], commands
+
+
+def test_docker_run_is_pinned_private_and_bounded(supervisor, monkeypatch):
+    monkeypatch.delenv("NANFO_LAB_FROZEN", raising=False)
+    argv, commands = launch(supervisor, monkeypatch)
     for key, value in [
         ("--network", "none"),
         ("--cpus", "2"),
         ("--memory", "768m"),
         ("--pids-limit", "256"),
         ("--label", s.LABEL + "=" + CAMPAIGN),
+        ("--cap-drop", "ALL"),
+        ("--security-opt", "no-new-privileges:true"),
     ]:
         assert argv[argv.index(key) + 1] == value
-    assert "--pull=never" in argv and "--rm" in argv and IMAGE in argv
-    assert argv.count("--mount") == 1 and argv.count("--tmpfs") == 2
+    assert "--pull=never" in argv and "--rm" in argv and IMAGE in argv and "--read-only" in argv
+    added = [argv[i + 1] for i, value in enumerate(argv) if value == "--cap-add"]
+    assert added == ["NET_ADMIN", "NET_RAW", "SYS_ADMIN"] and "--privileged" not in argv
+    tmpfs = [argv[i + 1] for i, value in enumerate(argv) if value == "--tmpfs"]
+    assert len(tmpfs) == 6 and all("nosuid,nodev" in value for value in tmpfs)
+    assert argv.count("--mount") == 1
+    labOutput = supervisor.output / "lab-output"
     mount = argv[argv.index("--mount") + 1]
-    assert mount == f"type=bind,src={supervisor.output / 'lab-output'},dst=/output"
+    assert mount == f"type=bind,src={labOutput},dst=/output"
+    assert argv[argv.index("--group-add") + 1] == str(labOutput.stat().st_gid)
+    assert stat.S_IMODE(labOutput.stat().st_mode) == 0o2770
     assert all(value not in argv for value in ["host", "--pid", "--volume", "nanfo-experiment"])
-    assert commands[1][2] == CID
-    compile(commands[1][-1], "readiness", "exec")
+    assert commands[2][2] == CID
+    compile(commands[2][-1], "readiness", "exec")
+
+
+def test_successor_frr_modes_add_only_bind_service_and_crashlog(supervisor, monkeypatch):
+    monkeypatch.delenv("NANFO_LAB_FROZEN", raising=False)
+    argv, _ = launch(supervisor, monkeypatch, mode="matched")
+    added = [argv[i + 1] for i, value in enumerate(argv) if value == "--cap-add"]
+    assert added == ["NET_ADMIN", "NET_RAW", "SYS_ADMIN", "NET_BIND_SERVICE"]
+    assert "/var/tmp:rw,noexec,nosuid,nodev,size=16m" in argv
+
+
+def test_frozen_privileged_lab_only_with_explicit_opt_in(tmp_path, monkeypatch):
+    historical = {**s.plan(IMAGE, "frozen"), "campaign_id": CAMPAIGN, "output": str(tmp_path)}
+    assert "lab_profile" not in historical and "Privileged" in historical["limitations"][-1]
+    supervisor = s.Supervisor(tmp_path, historical)
+    monkeypatch.setattr(supervisor, "exclusiveLab", lambda: None)
+    monkeypatch.setattr(supervisor, "command", lambda *a, **k: pytest.fail("Docker contacted"))
+    monkeypatch.delenv("NANFO_LAB_FROZEN", raising=False)
+    with pytest.raises(ValueError, match="NANFO_LAB_FROZEN=1"):
+        supervisor.startLab("train-01")
+    monkeypatch.setenv("NANFO_LAB_FROZEN", "1")
+    argv, _ = launch(supervisor, monkeypatch, labels="null")
+    assert "--privileged" in argv and "--cap-drop" not in argv and "--group-add" not in argv
+    assert [argv[i + 1] for i, v in enumerate(argv) if v == "--tmpfs"] == [
+        "/run:exec,size=64m",
+        "/tmp:exec,size=64m",
+    ]
+    assert stat.S_IMODE((tmp_path / "lab-output").stat().st_mode) == 0o700
+
+
+@pytest.mark.parametrize(
+    "profile,frozenEnv,labels,match",
+    [
+        ("successor", "1", SUCCESSOR_LABELS, "forbid"),
+        ("successor", None, "null", "labelled org.nanfo.lab.profile=successor"),
+        ("successor", None, '{"org.nanfo.lab.profile":"successor"}', "labelled"),
+        ("frozen", "1", SUCCESSOR_LABELS, "never runs a labelled successor image privileged"),
+        ("successor", "yes", SUCCESSOR_LABELS, "must be 1"),
+    ],
+)
+def test_lab_profile_mismatches_fail_before_launch(
+    tmp_path, monkeypatch, profile, frozenEnv, labels, match
+):
+    frozen = {**s.plan(IMAGE, profile), "campaign_id": CAMPAIGN, "output": str(tmp_path)}
+    supervisor = s.Supervisor(tmp_path, frozen)
+    (tmp_path / "lab-output").mkdir(mode=0o700)
+    monkeypatch.setattr(supervisor, "exclusiveLab", lambda: None)
+    commands = []
+
+    def command(argv, *a, **k):
+        commands.append(argv)
+        if argv[1] == "run":
+            pytest.fail("mismatched profile launched")
+        return labels
+
+    monkeypatch.setattr(supervisor, "command", command)
+    if frozenEnv is None:
+        monkeypatch.delenv("NANFO_LAB_FROZEN", raising=False)
+    else:
+        monkeypatch.setenv("NANFO_LAB_FROZEN", frozenEnv)
+    with pytest.raises(ValueError, match=match):
+        supervisor.startLab("train-01")
+    assert all(argv[1] != "run" for argv in commands)
+
+
+def test_plan_records_successor_profile_and_old_plans_stay_frozen(tmp_path, monkeypatch):
+    successor = s.plan(IMAGE)
+    assert successor["lab_profile"] == "successor"
+    assert successor["limitations"][-1] == s.SUCCESSOR_LIMITATION
+    assert {k: v for k, v in successor.items() if k not in ("lab_profile", "limitations")} == {
+        k: v for k, v in s.plan(IMAGE, "frozen").items() if k != "limitations"
+    }
+    with pytest.raises(ValueError, match="unknown lab profile"):
+        s.plan(IMAGE, "privileged")
+    for value in (s.plan(IMAGE, "frozen"), successor):
+        (tmp_path / "plan.json").write_bytes(
+            jsonBytes({**value, "campaign_id": CAMPAIGN, "output": str(tmp_path)})
+        )
+        assert s.loadPlan(tmp_path)["image_id"] == IMAGE
+    tampered = {**successor, "limitations": s.plan(IMAGE, "frozen")["limitations"]}
+    (tmp_path / "plan.json").write_bytes(
+        jsonBytes({**tampered, "campaign_id": CAMPAIGN, "output": str(tmp_path)})
+    )
+    with pytest.raises(ValueError, match="differs"):
+        s.loadPlan(tmp_path)
+    monkeypatch.setenv("NANFO_LAB_FROZEN", "1")
+    assert s.labProfile() == "frozen" and s.labProfile({}) == "successor"
+    assert s.labProfile({"NANFO_LAB_FROZEN": "0"}) == "successor"
 
 
 def test_malformed_summary_aborts_without_reward_or_retry(supervisor, monkeypatch):

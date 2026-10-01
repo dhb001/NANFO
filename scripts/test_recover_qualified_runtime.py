@@ -2,11 +2,13 @@
 
 import io
 import json
+import os
 from pathlib import Path
 import subprocess
 import tarfile
 import tempfile
 import unittest
+from unittest import mock
 
 import recover_qualified_runtime as recovery
 
@@ -53,6 +55,25 @@ class RecoveryTests(unittest.TestCase):
                 recovery.write(path, b"replacement")
             self.assertEqual(path.read_bytes(), b"original")
             self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+
+    def test_scratch_root_is_parameterized_not_a_fixed_tmp_path(self):
+        with tempfile.TemporaryDirectory(dir="/tmp/opencode") as directory, \
+                mock.patch.dict(os.environ, {"NANFO_RESEARCH_SCRATCH": directory}):
+            self.assertEqual(recovery.scratch_root(), Path(directory))
+        with mock.patch.dict(os.environ, {"NANFO_RESEARCH_SCRATCH": ""}):
+            self.assertEqual(recovery.scratch_root(), Path(tempfile.gettempdir()))
+        for value in ("relative/dir", "/nonexistent-nanfo-scratch"):
+            with self.subTest(value=value), mock.patch.dict(os.environ, {"NANFO_RESEARCH_SCRATCH": value}), \
+                    self.assertRaisesRegex(ValueError, "NANFO_RESEARCH_SCRATCH"):
+                recovery.scratch_root()
+
+    def test_tracked_archive_is_the_pinned_historical_archive(self):
+        content = recovery.ARCHIVE.read_bytes()
+        self.assertEqual(recovery.ARCHIVE.relative_to(recovery.ROOT), Path("emulation/frozen/adr015-prechange-v4-source.tar.gz"))
+        self.assertEqual(recovery.sha(content), recovery.ARCHIVE_HASH)
+        files = recovery.archive_files(content)
+        self.assertEqual(len(files), 36)
+        self.assertIn("emulation/tests/test_experiment.py", files)
 
     def test_original_archive_and_checkpoint_are_exact(self):
         manifest, files, report = recovery.audit()

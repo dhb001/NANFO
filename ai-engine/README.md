@@ -1,6 +1,45 @@
 # Measured Routing PPO
 
-## Current status — 21 September 2026
+## Current status — ADR-028 (24 September 2026)
+
+Everything below this section is **historical** and keeps its original commands and
+results; none of it is an instruction to rerun an old campaign or a current admission.
+
+- `src/nanfo_routing` is now a **successor client**. ADR-028 changed checkpoint loading
+  (one bounded read, optional `--checkpoint-sha256` pin checked before parsing,
+  `torch.load(weights_only=True)` from the same bytes), the C23 lab launch profile, and added
+  the successor protocol and calibration tooling. Historical checkpoints bind their exact
+  client sources, so they load only through the frozen client copy (below), never through
+  this package. No successor model exists or is qualified.
+- Tracked, byte-identical copies of the qualified ADR024 runtime (checkpoint, parent, lineage,
+  histories, frozen client) are in [qualified/](qualified/README.md); the frozen v4 lab source
+  archive is in [../emulation/frozen/](../emulation/frozen/README.md). They are copies, not a
+  new qualification.
+- [SUCCESSOR-PROTOCOL.md](SUCCESSOR-PROTOCOL.md): the ADR024 gates admit argmax(capacity), so
+  successor models must beat capacity-oracle and capacity-aware-OSPF baselines, on whole
+  held-out profiles, for at least five model seeds, with a capacity-feature ablation.
+- Confidence calibration (C17): `python -m nanfo_routing.calibration calibrate|validate`
+  (temperature scaling, ECE/reliability, `calibration_id`). No calibration exists for any real
+  model, so autonomous dispatch stays gated by C17 (`confidence_uncalibrated`) until a genuine
+  artifact is produced from fresh measured held-out evidence and installed by the backend.
+- Lab launches (`supervisor.py`, `../scripts/adr024_campaign.py`) use the unprivileged C23
+  successor profile; the privileged frozen image runs only with `NANFO_LAB_FROZEN=1`.
+
+### Version legend
+
+| Name | What it identifies | Status |
+|---|---|---|
+| Wire envelope v1 | lab request/response framing | unchanged |
+| Checkpoint manifest v3 | `checkpoint.ptz` = `manifest.json` + tensor-only `weights.pt` | current loader |
+| Client contract v1/v2 | 47-input smoke checkpoint, then the ADR-011 v2 contract | historical, cannot load |
+| Client contract v3 | 16-input matched Linux/FRR policy (ADR013 onward) | frozen per campaign |
+| Environment spec v4 | frozen v4 lab, `SOURCE 08c312c6…` (ADR014 training, ADR024 qualification) | frozen |
+| Environment spec v5 | V5 profiles `seeded-stationary-profiles-v5` (ADR015/016 refinement) | historical |
+| Frozen ADR014 client | 14 modules in `qualified/adr024-qualified-001/client-source/` | frozen |
+| `adr024-rebuilt-v4` | `MODEL 77dae44a…` = ADR014 `train-06` tensors rebound to image `954462c0…` | qualified only for its recorded scope |
+| Successor (ADR-028) | current `src/nanfo_routing`, C23 lab, `nanfo.successor-qualification/v1` | not qualified |
+
+## Historical status at ADR024 — 21 September 2026
 
 The current repository review register is
 [ReviewClosure-Completion](../docs/project/ReviewClosure-Completion.md).
@@ -267,23 +306,30 @@ uv run nanfo-routing infer \
 
 ## Install And Verify
 
-Install [uv](https://docs.astral.sh/uv/getting-started/installation/) first. From
-`ai-engine/`:
+Install [uv](https://docs.astral.sh/uv/getting-started/installation/) (the lock was written
+by uv 0.12.10). Python is pinned exactly: `.python-version` and `requires-python` are
+`3.12.14`; uv downloads that interpreter when it is missing. From `ai-engine/`:
 
 ```bash
-uv sync --locked --dev
-uv run pytest
-uv run ruff check .
-uv run ruff format --check .
-uv run nanfo-routing --help
-uv run nanfo-routing train --help
-uv run nanfo-routing evaluate --help
-uv run nanfo-routing infer --help
-uv run python scripts/campaign.py --help
+uv sync --locked --dev          # first sync needs network for the CPU-only PyTorch index
+uv run --locked pytest -q       # add -m "not private_artifacts" to skip private replays
+uv run --locked ruff check .
+uv run --locked ruff format --check .
+uv run --locked nanfo-routing --help
+uv run --locked nanfo-routing train --help
+uv run --locked nanfo-routing evaluate --help
+uv run --locked nanfo-routing infer --help
+uv run --locked python -m nanfo_routing.calibration --help
+uv run --locked python scripts/campaign.py --help
 ```
 
-`uv` uses the repository's Python 3.12 selection and locked CPU-only PyTorch
-index. Do not install torch into the lab container. Tests use explicitly labeled
+With a populated `.venv`/uv cache, `uv sync --locked --dev --offline` works without network.
+The suite runs from a clean checkout: the V4 fixtures use the tracked, hash-pinned spec
+(`tests/fixtures/`) and the frozen V4 lab archive. Only the modules listed in
+`tests/private_artifacts.txt` replay the ignored private store (`artifacts/`); without it
+they are skipped with that explicit reason, with it they run unchanged.
+
+Do not install torch into the lab container. Tests use explicitly labeled
 offline fixtures, including weight updates and fresh-process checkpoint inference;
 they are not evidence of measured training or policy quality. Live CLI inference,
 resume and PPO evaluation refuse fixture checkpoints.

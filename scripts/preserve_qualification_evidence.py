@@ -24,6 +24,8 @@ import release_manifest as safe
 
 ARTIFACTS = ROOT / "ai-engine/artifacts/adr024-qualified-001"
 DOCUMENTS = ROOT / "docs/project/CompletionProgram/QualificationEvidence-ADR024"
+# Historical acquisition roots (defaults; wiped scratch on most hosts). Override each with
+# --source-root GROUP=PATH; the roots actually used are recorded as historical_roots.
 SOURCES = {
     "evaluation": Path("/tmp/opencode/nanfo-adr024-evaluation-002"),
     "live": Path("/tmp/opencode/nanfo-live-acceptance-7ngrbdgv"),
@@ -520,15 +522,29 @@ def finalize(artifacts, documents):
     return result
 
 
+def source_roots(values):
+    """GROUP=PATH overrides for acquisition roots; the repository root is never replaced."""
+    roots = dict(SOURCES)
+    for value in values or ():
+        group, separator, path = value.partition("=")
+        require(separator == "=" and group in SOURCES and group != "repository", "Unknown source root group.")
+        require(Path(path).is_absolute() and ".." not in Path(path).parts, "Source root must be absolute.")
+        roots[group] = Path(path)
+    return roots
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("operation", choices=("inspect", "preserve", "verify", "replay", "finalize"))
     parser.add_argument("--artifacts", type=Path, default=ARTIFACTS)
     parser.add_argument("--documents", type=Path, default=DOCUMENTS)
+    parser.add_argument("--source-root", action="append", metavar="GROUP=PATH",
+                        help="acquisition root for evaluation|live|native|recovery|review")
     args = parser.parse_args()
     os.umask(0o077)
     sys.dont_write_bytecode = True
     try:
+        SOURCES.update(source_roots(args.source_root))
         result = (finalize(args.artifacts, args.documents) if args.operation == "finalize" else
                   replay(args.artifacts, args.documents) if args.operation == "replay" else
                   verify(args.artifacts, args.documents) if args.operation == "verify" else

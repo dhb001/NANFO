@@ -12,8 +12,53 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import re
+import stat
 import sys
+import tempfile
 import time
+
+PIN = re.compile(r"[a-f0-9]{64}")
+SOURCE_NAME = re.compile(r"[a-z_]+\.py")
+MAX_SOURCE_BYTES = 1024 * 1024
+MAX_CHECKPOINT_BYTES = 16 * 1024 * 1024
+
+
+def read_once(path, limit):
+    """One bounded read of a regular file; a final symlink or FIFO is refused."""
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
+    with os.fdopen(fd, "rb") as stream:
+        if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+            raise ValueError("frozen_input_not_regular")
+        data = stream.read(limit + 1)
+    if len(data) > limit:
+        raise ValueError("frozen_input_too_large")
+    return data
+
+
+def verified_snapshot(plan, destination):
+    """Copy only pin-verified bytes; nothing named by the plan is executed or loaded in place."""
+    source, pins = Path(plan["source_directory"]), plan["client_source_sha256"]
+    if type(pins) is not dict or not pins or any(
+            not SOURCE_NAME.fullmatch(name) or type(pin) is not str or not PIN.fullmatch(pin)
+            for name, pin in pins.items()):
+        raise ValueError("frozen_source_pins_invalid")
+    if {path.name for path in source.glob("*.py")} != set(pins):
+        raise ValueError("frozen_source_inventory_changed")
+    package = destination / "source"
+    package.mkdir(mode=0o700)
+    for name, pin in sorted(pins.items()):
+        data = read_once(source / name, MAX_SOURCE_BYTES)
+        if hashlib.sha256(data).hexdigest() != pin:
+            raise ValueError("frozen_source_changed")
+        (package / name).write_bytes(data)
+    data = read_once(Path(plan["checkpoint"]), MAX_CHECKPOINT_BYTES)
+    pin = plan.get("checkpoint_sha256")
+    if type(pin) is not str or not PIN.fullmatch(pin) or hashlib.sha256(data).hexdigest() != pin:
+        raise ValueError("checkpoint_pin_mismatch")
+    checkpoint = destination / "checkpoint.ptz"
+    checkpoint.write_bytes(data)
+    return package, checkpoint
 
 
 def modules(source):
@@ -43,13 +88,22 @@ def wait(path, deadline):
 
 def run(args):
     os.umask(0o077)
-    plan = json.loads(args.plan.read_bytes())
+    plan_bytes = args.plan.read_bytes()
+    plan = json.loads(plan_bytes)
     item = next(row for row in plan["episodes"] if row["scenario"] == args.scenario)
-    m = modules(Path(plan["source_directory"]))
+    with tempfile.TemporaryDirectory(prefix="nanfo-live-feed-frozen-") as private:
+        source, checkpoint = verified_snapshot(plan, Path(private))
+        m = modules(source)
+        a = m["artifacts"]
+        # The frozen loader's own torch.load(weights_only=True) reads the pin-verified copy.
+        _, manifest = a.loadCheckpoint(checkpoint)
+        if a.clientSources() != plan["client_source_sha256"]:
+            raise ValueError("frozen_source_changed")
+        evaluate(args, plan_bytes, item, m, manifest)
+
+
+def evaluate(args, plan_bytes, item, m, manifest):
     a = m["artifacts"]
-    _, manifest = a.loadCheckpoint(Path(plan["checkpoint"]))
-    if a.clientSources() != plan["client_source_sha256"]:
-        raise ValueError("frozen_source_changed")
     args.output.mkdir(mode=0o700)
     log = a.EvidenceLog(args.output / "evidence.jsonl")
     env = m["env"].RoutingEnv(m["cli"].LoggedTransport(m["transport"].DockerTransport(args.container, 90), log),
@@ -58,7 +112,7 @@ def run(args):
     log.append(dict(kind="session", summary=dict(kind="evaluation", mode="matched", generalization=False,
         window_seconds=2., episode_steps=4, split="train", evaluation_role="operational-not-held-out",
         seeds=[item["seed"]], scenarios=[args.scenario], policy="constant0",
-        plan_sha256=hashlib.sha256(args.plan.read_bytes()).hexdigest())))
+        plan_sha256=hashlib.sha256(plan_bytes).hexdigest())))
     write(args.output / "header-ready.json", {"session_sha256": hashlib.sha256(
         (args.output / "evidence.jsonl").read_bytes().rstrip(b"\n")).hexdigest()})
     deadline = time.monotonic() + 240

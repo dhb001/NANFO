@@ -3,7 +3,12 @@
 import statistics
 from pathlib import Path
 
-from .artifacts import inspectCheckpoint, loadCheckpoint, trainingDistribution
+from .artifacts import (
+    inspectCheckpoint,
+    loadCheckpoint,
+    loadCheckpointIdentity,
+    trainingDistribution,
+)
 from .contracts import CONTRACT_HASH, Observation, parseJson
 from .env import encode
 from .ppo import PPOConfig
@@ -122,8 +127,7 @@ def qualify(checkpoint, training, validation, planPath, calibration):
     validation, calibration = [list(map(Path, paths)) for paths in (validation, calibration)]
     plan, planHash = readPlan(planPath)
     controls, effects = actionEffectChecks(calibration, plan)
-    agent, manifest = loadCheckpoint(checkpoint)
-    identity = inspectCheckpoint(checkpoint)
+    agent, manifest, identity = loadCheckpointIdentity(checkpoint)
     if (
         manifest.config.model_dump() != plan["ppo_config"]
         or manifest.environment_spec.get("version") != 4
