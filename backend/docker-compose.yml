@@ -1,62 +1,98 @@
+# Local development stores only (API and workers run as separate processes).
+# Images and digests mirror production exactly: postgres from deploy/compose.yaml,
+# redis and neo4j from the bases of deploy/Dockerfile.redis / deploy/Dockerfile.neo4j
+# (enforced by backend/tests/unit/test_dev_setup.py). All ports bind to loopback.
+#
 # The sample intentionally cannot start. Use ../scripts/dev-start.sh to generate
-# private local credentials, or provision backend/.env before starting manually.
+# private local credentials, or provision backend/.env (mode 0600) before starting.
 x-required-credentials:
   JWT_SECRET_KEY: ${JWT_SECRET_KEY:?Generate local credentials with scripts/dev-start.sh}
 
 services:
   postgres:
-    image: postgres:16-alpine
+    image: postgres:17.11-bookworm@sha256:639ab7ceb90e13123085b741fb31ef493fba25463002f6da665352e7b534b652
     container_name: nanfo_postgres
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-nanfo}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Generate local credentials with scripts/dev-start.sh}
       POSTGRES_DB: ${POSTGRES_DB:-nanfo}
+      POSTGRES_INITDB_ARGS: --auth-host=scram-sha-256
     ports:
       - "127.0.0.1:5432:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      # PostgreSQL 17 cannot open the former PostgreSQL 16 dev volume (postgres_data);
+      # a new volume keeps that data untouched for a manual dump/restore.
+      - postgres17_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-nanfo}"]
+      # TCP path as the application user/database; ready only after init finished.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
       interval: 5s
       timeout: 5s
-      retries: 10
+      retries: 20
 
   neo4j:
-    image: neo4j:5.25-community
+    image: neo4j:5.26.31-community-trixie@sha256:ab3aafb0020e6fed65bb2b59f7db1fabd7ee0568c4da46f3cc3b8fad77801d61
     container_name: nanfo_neo4j
     restart: unless-stopped
     environment:
+      # No NEO4J_PLUGINS / APOC and no unrestricted procedures (production parity).
       NEO4J_AUTH: ${NEO4J_USER:-neo4j}/${NEO4J_PASSWORD:?Generate local credentials with scripts/dev-start.sh}
-      NEO4J_PLUGINS: '["apoc"]'
-      NEO4J_dbms_security_procedures_unrestricted: "apoc.*"
     ports:
       - "127.0.0.1:7474:7474"
       - "127.0.0.1:7687:7687"
     volumes:
       - neo4j_data:/data
     healthcheck:
-      test: ["CMD", "wget", "--quiet", "--spider", "http://127.0.0.1:7474/"]
+      # Authenticated Bolt query. cypher-shell reads credentials from its own environment,
+      # derived from NEO4J_AUTH inside the check: nothing secret is placed in argv, and no
+      # extra NEO4J_* variable is exported (the image turns those into config settings).
+      test: ["CMD-SHELL", "NEO4J_USERNAME=\"$${NEO4J_AUTH%%/*}\" NEO4J_PASSWORD=\"$${NEO4J_AUTH#*/}\" cypher-shell -a bolt://127.0.0.1:7687 --non-interactive 'RETURN 1;' > /dev/null"]
       interval: 10s
-      timeout: 10s
-      retries: 10
+      timeout: 15s
+      retries: 20
+      start_period: 20s
 
   redis:
-    image: redis:7-alpine
+    image: redis:7.4.11-bookworm@sha256:c6eabf748fc7a61dbb5a705c78bcf3d6377b1127a97d0ce965c11c44ba46896f
     container_name: nanfo_redis
     restart: unless-stopped
-    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:?Generate local credentials with scripts/dev-start.sh}"]
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?Generate local credentials with scripts/dev-start.sh}
+      REDIS_USERNAME: ${REDIS_USERNAME:-nanfo}
+    # Production-like ACL (C24): user REDIS_USERNAME with +@all -@dangerous +info
+    # +client|setname +client|id. `default` gets the same restricted command set so env
+    # files without REDIS_USERNAME keep working. The config file is rendered at start from
+    # the environment (never argv) and served with noeviction like production.
+    entrypoint: ["sh", "-euc"]
+    command:
+      - |
+        case "$$REDIS_PASSWORD" in
+          ''|*[[:space:]]*|*\"*|*\'*|*\\*) echo 'REDIS_PASSWORD must be non-empty without whitespace, quotes or backslashes' >&2; exit 64 ;;
+        esac
+        case "$$REDIS_USERNAME" in
+          ''|default|*[!A-Za-z0-9_.-]*) echo 'REDIS_USERNAME must be a plain ACL user name other than default' >&2; exit 64 ;;
+        esac
+        umask 077
+        rules='~* &* +@all -@dangerous +info +client|setname +client|id'
+        printf '%s\n' 'port 6379' 'protected-mode yes' 'dir /data' 'appendonly yes' 'save ""' \
+          'maxmemory 256mb' 'maxmemory-policy noeviction' \
+          "user default on >$$REDIS_PASSWORD $$rules" \
+          "user $$REDIS_USERNAME on >$$REDIS_PASSWORD $$rules" > /tmp/redis.conf
+        chown redis:redis /tmp/redis.conf
+        exec docker-entrypoint.sh redis-server /tmp/redis.conf
     ports:
       - "127.0.0.1:6379:6379"
     volumes:
       - redis_data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "--no-auth-warning", "-a", "${REDIS_PASSWORD:?Generate local credentials with scripts/dev-start.sh}", "ping"]
+      # REDISCLI_AUTH keeps the password out of argv; authenticates as the ACL user.
+      test: ["CMD-SHELL", "REDISCLI_AUTH=\"$$REDIS_PASSWORD\" redis-cli --user \"$$REDIS_USERNAME\" ping | grep -qx PONG"]
       interval: 5s
       timeout: 5s
-      retries: 10
+      retries: 20
 
 volumes:
-  postgres_data:
+  postgres17_data:
   neo4j_data:
   redis_data:

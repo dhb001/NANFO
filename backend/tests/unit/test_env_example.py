@@ -50,6 +50,21 @@ def test_exclusions_are_real_fields_and_not_documented():
     assert all(len(reason) >= 16 for reason in EXCLUDED.values())
 
 
+def test_asset_store_process_variables_listed_in_prose_match_asset_settings():
+    # AssetSettings reads NETWORK_ASSET_* from the process environment only; an active
+    # line in .env would be an unknown Settings input, so the example lists them as prose.
+    from app.modules.network.asset_settings import AssetSettings
+
+    prefix = AssetSettings.model_config["env_prefix"]
+    expected = {prefix + name.upper() for name in AssetSettings.model_fields}
+    text = EXAMPLE.read_text(encoding="utf-8")
+    listed = set(re.findall(rf"\b{prefix}[A-Z0-9_]+\b", text))
+    assert listed == expected
+    _, documented = parse_example()
+    assert not expected & set(documented), "asset store variables must not be assignments in .env.example"
+    assert not expected & set(Settings.model_fields)
+
+
 def test_example_is_a_development_template_with_blank_secrets():
     active, _ = parse_example()
     assert active["APP_ENV"] == "development"

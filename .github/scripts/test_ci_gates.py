@@ -100,6 +100,33 @@ class GateTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("skip reason not allowlisted", stderr)
 
+    def test_module_level_skips_are_budgeted_by_their_real_reason_not_as_collection_skips(self):
+        # Exact layout pytest writes for pytest.skip(..., allow_module_level=True).
+        reason = "private evidence store absent: ai-engine/artifacts/ (ADR-028, tests/private_artifacts.txt)"
+        module = ('<testcase classname="" name="tests.test_refinement" time="0.0"><skipped message="collection skipped">'
+                  f"('/w/ai-engine/tests/test_refinement.py', 21, 'Skipped: {reason}')</skipped></testcase>")
+        other = ('<testcase classname="" name="tests.test_other" time="0.0"><skipped message="collection skipped">'
+                 "('/w/ai-engine/tests/test_other.py', 3, 'Skipped: could not import torch')</skipped></testcase>")
+        opaque = ('<testcase classname="" name="tests.test_odd" time="0.0">'
+                  '<skipped message="collection skipped">__import__("os")</skipped></testcase>')
+
+        def xml(*cases):
+            passing = '<testcase classname="tests.test_x" name="test_ok" time="0.1"></testcase>'
+            return f'<?xml version="1.0"?><testsuites><testsuite name="pytest">{passing}{"".join(cases)}</testsuite></testsuites>'
+
+        budget = self.budget([{"pattern": r"^private evidence store absent: ai-engine/artifacts/ ", "max": 1,
+                               "why": "Private evidence lane (test fixture)"}], lane="ai")
+        allowed = self.write("allowed.xml", xml(module))
+        self.assertEqual(self.run_gate(allowed, "--budget", budget, "--lane", "ai")[0], 0)
+        self.assertEqual([case.reason for case in gates.load_cases(allowed) if case.outcome == "skipped"], [reason])
+        for name, case in (("other", other), ("opaque", opaque)):
+            with self.subTest(case=name):
+                code, _, stderr = self.run_gate(self.write(f"{name}.xml", xml(module, case)), "--budget", budget,
+                                                "--lane", "ai")
+                self.assertEqual(code, 1)
+                self.assertIn("skip reason not allowlisted", stderr)
+        self.assertEqual(self.run_gate(allowed, "--zero-skips")[0], 1)
+
     def test_budget_schema_is_strict(self):
         clean = self.write("clean.xml", report([("test_a", None, "")]))
         for reasons in ([{"pattern": "x", "max": 1}], [{"pattern": "x", "max": "1", "why": "a" * 20}],

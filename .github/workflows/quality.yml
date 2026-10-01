@@ -26,10 +26,10 @@ jobs:
     env:
       POETRY_VIRTUALENVS_IN_PROJECT: 'true'
       PIP_DISABLE_PIP_VERSION_CHECK: '1'
-      # Coverage floor = measured baseline - 1 point. No trustworthy local baseline
-      # existed when this gate was introduced (ADR-028), so it starts at 80: raise it
-      # to (reported total - 1) after the first green run on main.
-      COVERAGE_FLOOR: '80'
+      # Coverage floor = measured baseline - 1 point (ADR-028): CI's exact command
+      # (tests/unit tests/integration, -m "not private_artifacts") measured 85.60% total
+      # on 2026-09-25, so the floor is 84. Raise it with the baseline, never lower it.
+      COVERAGE_FLOOR: '84'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -151,7 +151,7 @@ jobs:
         run: poetry run pytest tests/integration/test_gateway_headers.py --no-cov -q --junitxml=gateway-results.xml
       - name: Require executed gateway header cases with zero skips
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
-        run: python ../.github/scripts/ci_gates.py junit gateway-results.xml --zero-skips --min-cases 6
+        run: python ../.github/scripts/ci_gates.py junit gateway-results.xml --zero-skips --min-cases 13
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
@@ -172,22 +172,13 @@ jobs:
       PYTHONNOUSERSITE: '1'
       OMP_NUM_THREADS: '1'
       MKL_NUM_THREADS: '1'
-      # ADR-028 gate (explicit marker): the full AI suite needs the environment spec that
-      # tests/conftest.py still reads from the ignored artifacts store
-      # (artifacts/adr014-001/release.json). Set to 'true' once the small hashed spec
-      # fixture from the AI-Emulation workstream is committed; until then the
-      # artifact-independent suites below run and must pass with zero skips.
-      AI_FULL_SUITE: 'false'
-      AI_PORTABLE_SUITES: >-
-        tests/test_transport.py tests/test_ppo.py tests/test_holdout.py tests/test_shadow.py
-        tests/test_agent_runtime.py
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version-file: backend/.python-version
+          python-version-file: ai-engine/.python-version
       - name: Install separate locked CPU AI environment
         id: install
         run: |
@@ -215,25 +206,67 @@ jobs:
       - name: AI lint
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: uv run --no-sync ruff check src tests scripts/shadow scripts/shadow_evaluate.py scripts/agent_runtime
-      - name: AI unit tests (no live training or lab launcher)
+      - name: AI unit tests (every suite; no live training or lab launcher)
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
-        run: |
-          if [ "$AI_FULL_SUITE" = true ]; then
-            uv run --no-sync pytest -q --junitxml=quality-results.xml
-          else
-            echo "::notice title=AI suite gated (ADR-028)::Artifact-independent suites only until the hashed environment-spec fixture is committed."
-            # shellcheck disable=SC2086 # word splitting of the explicit suite list is intended
-            uv run --no-sync pytest -q --junitxml=quality-results.xml $AI_PORTABLE_SUITES
-          fi
-      - name: Require executed AI cases with zero skips
+        # The environment spec is the hashed tracked fixture (tests/fixtures). Only the
+        # modules in tests/private_artifacts.txt need ai-engine/artifacts; without it they
+        # skip with one explicit reason, allowlisted per module in the skip budget.
+        run: uv run --no-sync pytest -q --junitxml=quality-results.xml
+      - name: Explicit skip budget (only the registered private-evidence modules may skip)
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
-        run: python ../.github/scripts/ci_gates.py junit quality-results.xml --zero-skips --min-cases 150
+        run: >-
+          python ../.github/scripts/ci_gates.py junit quality-results.xml
+          --budget ../.github/ci-skip-budget.json --lane ai --min-cases 440
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
           name: ai-quality-results
           path: ai-engine/quality-results.xml
           retention-days: 7
+
+  # Not a required check: committed frontend contract types
+  # (frontend/src/shared/types/generated/openapi.ts) must equal the backend's OpenAPI.
+  api-contract:
+    name: api-contract
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      POETRY_VIRTUALENVS_IN_PROJECT: 'true'
+      PIP_DISABLE_PIP_VERSION_CHECK: '1'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version-file: backend/.python-version
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22.22.0'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Locked backend and frontend tooling
+        run: |
+          python -m pip install poetry==2.4.1
+          poetry -C backend check --lock
+          poetry -C backend sync --with dev --no-root --no-interaction
+          npm ci --prefix frontend --no-audit --no-fund
+      - name: Generated OpenAPI types match the backend schema (npm run api:check)
+        working-directory: frontend
+        env:
+          # Inert placeholders so app.main imports under APP_ENV=test; nothing is contacted.
+          POSTGRES_HOST: 127.0.0.1
+          POSTGRES_USER: nanfo_ci
+          POSTGRES_PASSWORD: unused
+          POSTGRES_DB: nanfo_ci
+          NEO4J_URI: bolt://127.0.0.1:7687
+          NEO4J_USER: neo4j
+          NEO4J_PASSWORD: unused
+          REDIS_HOST: 127.0.0.1
+          REDIS_PASSWORD: unused
+        run: |
+          # The API role needs a signing key to import; this one is random and discarded.
+          JWT_SECRET_KEY="$(python -c 'import secrets; print(secrets.token_hex(32))')" npm run api:check
 
   frontend:
     name: frontend

@@ -1,12 +1,12 @@
 {
   "schema": "nanfo-ci-skip-budget-v1",
-  "about": "Explicit skip allowlist for CI JUnit gates (.github/scripts/ci_gates.py). Every reason names where the skipped tests really execute. Counts were measured on a CI-equivalent checkout (tracked files only, no ai-engine/artifacts, no DSNs) on 2026-09-24. Adding a skip needs a reviewed bump here; an unlisted reason always fails.",
+  "about": "Explicit skip allowlist for CI JUnit gates (.github/scripts/ci_gates.py). Every reason names where the skipped tests really execute. Counts were measured on a CI-equivalent checkout (tracked files only, no ai-engine/artifacts, no DSNs) on 2026-09-24, re-measured on 2026-09-24 22:40 for the gateway-header reason (13) and on 2026-09-25 for the DSN reason (314 across 23 suites, matching the integrators' real-store runs) after other owners added tests (ai lane: full suite on a tracked-files-only snapshot, 445 cases). Adding a skip needs a reviewed bump here; an unlisted reason always fails.",
   "lanes": {
     "backend": {
       "reasons": [
         {
           "pattern": "\\b[A-Z][A-Z0-9_]*_TEST_(?:DSN|REDIS_URL)\\b",
-          "max": 294,
+          "max": 314,
           "why": "Real PostgreSQL/Redis contracts; executed with zero skips by disposable-integration.yml database-contracts (drift-checked file list)."
         },
         {
@@ -16,7 +16,7 @@
         },
         {
           "pattern": "^NANFO_TEST_NGINX=1 required$",
-          "max": 6,
+          "max": 13,
           "why": "Real nginx gateway headers; executed with zero skips by quality.yml gateway-headers."
         },
         {
@@ -63,6 +63,15 @@
           "pattern": "^actual derived artifact not supplied$",
           "max": 1,
           "why": "Private evidence lane NANFO_REBUILT_CHECKPOINT_TEST=<derived checkpoint> (read-only lineage check)."
+        }
+      ]
+    },
+    "ai": {
+      "reasons": [
+        {
+          "pattern": "^private evidence store absent: ai-engine/artifacts/ \\(ADR-028, tests/private_artifacts\\.txt\\)$",
+          "max": 2,
+          "why": "Private evidence lane with ai-engine/artifacts present (cd ai-engine && uv run --no-sync pytest -m private_artifacts): one module-level skip per module listed in ai-engine/tests/private_artifacts.txt (test_refinement.py, test_refinement_long.py); their historical plans pin those ignored bytes."
         }
       ]
     }

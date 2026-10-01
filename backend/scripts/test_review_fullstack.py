@@ -1,6 +1,7 @@
 """No-store regressions for R09/C22 admission, gateway rendering, resource fencing and cleanup."""
 
 import argparse
+import base64
 import json
 import os
 import re
@@ -184,14 +185,24 @@ def test_gateway_rendering_fails_closed_on_unexpected_production_shape(tmp_path)
 
 
 def test_gateway_includes_shipped_from_deploy_are_mapped_to_the_repository_copy(tmp_path):
-    template, _, prefix = render_real(tmp_path)
+    template, real, prefix = render_real(tmp_path)
+    # Every /etc/nginx include the production template ships (headers, proxy rules, ...)
+    # renders to the repository copy; the upstream include is the test upstream.
+    shipped = sorted(set(re.findall(r"include\s+/etc/nginx/([\w.-]+);", template)) - {"mime.types", "nginx-upstream.conf"})
+    assert shipped, "production gateway template ships no includes"
+    for name in shipped:
+        assert f'include "{GATEWAY_TEMPLATE.parent / name}";' in real
     deploy = tmp_path / "deploy"
     deploy.mkdir()
+    for name in shipped:
+        shutil.copyfile(GATEWAY_TEMPLATE.parent / name, deploy / name)
     (deploy / "nanfo-extra.conf").write_text("# extra\n")
     rendered = render_gateway_config(template.replace("http {", "http {\n    include /etc/nginx/nanfo-extra.conf;"),
                                      prefix=prefix, dist=tmp_path / "dist", upstream=prefix / "nginx-upstream.conf",
                                      port=1, deploy=deploy)
     assert f'include "{deploy / "nanfo-extra.conf"}";' in rendered
+    assert all(f'include "{deploy / name}";' in rendered for name in shipped)
+    assert "include /etc/nginx/" not in rendered.replace("include /etc/nginx/mime.types;", "")
     assert "include /etc/nginx/mime.types;" in rendered
 
 
@@ -242,7 +253,9 @@ def playwright_junit(path, failures):
 
 
 def test_failed_cases_report_name_error_class_and_redacted_first_error_line(tmp_path):
-    jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.c2lnbmF0dXJlLXZhbHVlLXNpZw"
+    # Token-shaped values are generated at runtime: no credential-like literal lives in source.
+    jwt = ".".join(base64.urlsafe_b64encode(part).rstrip(b"=").decode()
+                   for part in (b'{"alg":"HS256","typ":"JWT"}', b'{"sub":"r09-owner"}', secrets.token_bytes(32)))
     token = secrets.token_urlsafe(32)
     uid = "3f1c2b4a-9d8e-4f7a-b6c5-d4e3f2a1b0c9"
     body = (f"  [production-chromium] › regression.spec.ts:10:5 › login\n\n"

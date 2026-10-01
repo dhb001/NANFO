@@ -19,6 +19,7 @@ Output contains counts, test ids and skip reasons only (never failure bodies).
 from __future__ import annotations
 
 import argparse
+import ast
 from dataclasses import dataclass
 import json
 from pathlib import Path
@@ -41,6 +42,26 @@ class Case:
     reason: str
 
 
+def skip_reason(child: ET.Element) -> str:
+    """The skip reason; module-level (collection) skips keep theirs in the element text.
+
+    pytest writes <skipped message="collection skipped">('path', line, 'Skipped: reason')
+    for pytest.skip(..., allow_module_level=True); the tuple is parsed as a literal,
+    never evaluated, and an unparsable text keeps the opaque message.
+    """
+    message = (child.get("message") or "").strip()
+    text = (child.text or "").strip()
+    if message == "collection skipped" and text:
+        try:
+            _, _, detail = ast.literal_eval(text)
+        except (ValueError, SyntaxError, TypeError, MemoryError, RecursionError):
+            return message
+        if isinstance(detail, str):
+            return detail.removeprefix("Skipped: ").strip() or message
+        return message
+    return message or text
+
+
 def load_cases(path: Path) -> list[Case]:
     try:
         root = ET.parse(path).getroot()
@@ -53,7 +74,7 @@ def load_cases(path: Path) -> list[Case]:
             child = element.find(tag)
             if child is not None:
                 outcome = tag
-                reason = (child.get("message") or child.text or "").strip()
+                reason = skip_reason(child) if tag == "skipped" else (child.get("message") or child.text or "").strip()
                 break
         name = element.get("name", "")
         cases.append(Case(f"{element.get('classname', '')}::{name}", name, outcome, reason))

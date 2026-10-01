@@ -23,7 +23,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        lane: [backend, ai, ai-upstream, emulation]
+        # emulation = C23 successor lab lock; emulation-frozen = frozen historical lab pins.
+        lane: [backend, ai, ai-upstream, emulation, emulation-frozen]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

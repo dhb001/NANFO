@@ -1,0 +1,163 @@
+name: Packaging
+
+on:
+  pull_request:
+  push:
+    branches: [main, master]
+  schedule:
+    # Weekly rescan so newly fixed CVEs in pinned images surface without a code change.
+    - cron: '41 4 * * 2'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  packaging:
+    name: packaging
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      # Pinned release binaries, verified by SHA-256 before use.
+      HADOLINT_VERSION: v2.15.1
+      HADOLINT_SHA256: c7187db94eeeeca956519a6af171adc31453941a1e777961f6e680f697c8c507
+      TRIVY_VERSION: 0.74.0
+      TRIVY_SHA256: 2ae6fe3ee734b7fdf11335663e18c75ea12dccc76062f09f164a3b0f8be4371a
+      # Upstream store image used unmodified by deploy/compose.yaml (others are built below).
+      POSTGRES_IMAGE: postgres:17.11-bookworm@sha256:639ab7ceb90e13123085b741fb31ef493fba25463002f6da665352e7b534b652
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install pinned hadolint and trivy
+        id: tools
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/bin"
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/hadolint" \
+            "https://github.com/hadolint/hadolint/releases/download/${HADOLINT_VERSION}/hadolint-linux-x86_64"
+          echo "${HADOLINT_SHA256}  $RUNNER_TEMP/hadolint" | sha256sum -c -
+          install -m 0755 "$RUNNER_TEMP/hadolint" "$RUNNER_TEMP/bin/hadolint"
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/trivy.tar.gz" \
+            "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
+          echo "${TRIVY_SHA256}  $RUNNER_TEMP/trivy.tar.gz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/trivy.tar.gz" -C "$RUNNER_TEMP/bin" trivy
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+      - name: hadolint (deploy Dockerfiles and the C23 successor lab image)
+        if: ${{ !cancelled() && steps.tools.outcome == 'success' }}
+        run: |
+          set -euo pipefail
+          mapfile -t dockerfiles < <(find deploy -maxdepth 1 -type f -name 'Dockerfile.*' ! -name '*.dockerignore' | sort)
+          test "${#dockerfiles[@]}" -ge 4
+          # emulation/Dockerfile.frozen is the byte-identical historical recipe (ADR-028
+          # section 1): never rebuilt or changed, so it is not linted. The successor is.
+          dockerfiles+=(emulation/Dockerfile)
+          hadolint "${dockerfiles[@]}"
+      - name: Production Compose configuration resolves (dummy environment)
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          env_file="$RUNNER_TEMP/compose.env"
+          # Every required ${VAR:?} of the validated files gets a harmless dummy; no secret
+          # or state is created.
+          cat deploy/compose.yaml deploy/compose.lab.yaml deploy/compose.lab.frozen.yaml |
+            grep -oE '\$\{[A-Z_][A-Z0-9_]*:\?' | sed -E 's/^\$\{([A-Z0-9_]+):\?$/\1/' | sort -u |
+            while read -r name; do
+              value="ci-dummy-$(printf '%s' "$name" | tr 'A-Z_' 'a-z-')"
+              case "$name" in
+                NANFO_STATE_DIR) value="$RUNNER_TEMP/nanfo-state" ;;
+                NANFO_BOOTSTRAP_EMAIL) value="ci@example.invalid" ;;
+              esac
+              printf '%s=%s\n' "$name" "$value"
+            done > "$env_file"
+          cat "$env_file"
+          docker compose --env-file "$env_file" -f deploy/compose.yaml config -q
+          docker compose --env-file "$env_file" -f deploy/compose.yaml --profile '*' config -q
+          # manage.py lab layers exactly one lab overlay on the base file (C23 successor,
+          # or the frozen opt-in reproduction overlay).
+          for overlay in compose.lab.yaml compose.lab.frozen.yaml; do
+            docker compose --env-file "$env_file" -f deploy/compose.yaml -f "deploy/$overlay" --profile '*' config -q
+          done
+      - name: Build backend runtime image
+        id: build-backend
+        if: ${{ !cancelled() }}
+        run: docker buildx build --load --file deploy/Dockerfile.backend --target runtime --tag nanfo-backend:ci .
+      - name: Build backend fleet collector image
+        id: build-fleet
+        if: ${{ !cancelled() }}
+        run: docker buildx build --load --file deploy/Dockerfile.backend --target with-fleet --tag nanfo-backend-fleet:ci .
+      - name: Build backend frozen-AI image (build only; frozen torch is a reviewed exception)
+        if: ${{ !cancelled() }}
+        run: docker buildx build --load --file deploy/Dockerfile.backend --target with-ai --tag nanfo-backend-ai:ci .
+      - name: Build gateway image (frontend + nginx)
+        id: build-gateway
+        if: ${{ !cancelled() }}
+        run: docker buildx build --load --file deploy/Dockerfile.frontend --tag nanfo-gateway:ci .
+      - name: Build Neo4j image
+        id: build-neo4j
+        if: ${{ !cancelled() }}
+        run: docker buildx build --load --file deploy/Dockerfile.neo4j --tag nanfo-neo4j:ci .
+      - name: Build Redis image
+        id: build-redis
+        if: ${{ !cancelled() }}
+        run: docker buildx build --load --file deploy/Dockerfile.redis --tag nanfo-redis:ci .
+      - name: Build the C23 successor lab image (official builder; frozen image is never rebuilt)
+        id: build-lab
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          # emulation/control.py requires the lab's private runtime directories (ignored).
+          mkdir -p emulation/output emulation/commands emulation/results
+          python3 emulation/control.py build > "$RUNNER_TEMP/lab-build.out"
+          image="$(tail -n 1 "$RUNNER_TEMP/lab-build.out" | python3 -c 'import json, sys; print(json.load(sys.stdin)["image_id"])')"
+          label() { docker image inspect --format "{{ index .Config.Labels \"$1\" }}" "$image"; }
+          test "$(label org.nanfo.lab.profile)" = successor
+          test "$(label org.nanfo.lab.frozen)" = false
+          [[ "$(label org.nanfo.lab.source-sha256)" =~ ^[0-9a-f]{64}$ ]]
+          docker tag "$image" nanfo-lab:ci
+      - name: nginx -t inside the built gateway image (baked entrypoint render, both upstreams)
+        if: ${{ !cancelled() && steps.build-gateway.outcome == 'success' }}
+        run: |
+          set -euo pipefail
+          # Same user, read-only root, tmpfs and privileges as deploy/compose.yaml; no
+          # network or DNS (`resolve` upstreams are resolved at run time, not by -t).
+          # The image's own entrypoint renders /tmp/nginx exactly as at start-up.
+          for upstream in single distributed; do
+            for hop in '' 172.31.87.1; do
+              echo "::group::NANFO_GATEWAY_UPSTREAM=$upstream NANFO_GATEWAY_TRUSTED_HOP=${hop:-<none>}"
+              docker run --rm --network none --read-only --cap-drop ALL \
+                --security-opt no-new-privileges:true \
+                --tmpfs /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777 \
+                --env NANFO_GATEWAY_UPSTREAM="$upstream" --env NANFO_GATEWAY_TRUSTED_HOP="$hop" \
+                --entrypoint sh nanfo-gateway:ci -euc \
+                'sh /usr/local/bin/nanfo-gateway-entrypoint.sh --render /tmp/nginx && nginx -t'
+              echo "::endgroup::"
+            done
+          done
+      - name: trivy backend runtime image
+        if: ${{ !cancelled() && steps.tools.outcome == 'success' && steps.build-backend.outcome == 'success' }}
+        run: trivy image --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed --scanners vuln --ignorefile security/trivyignore.yaml --no-progress --timeout 15m nanfo-backend:ci
+      - name: trivy backend fleet image
+        if: ${{ !cancelled() && steps.tools.outcome == 'success' && steps.build-fleet.outcome == 'success' }}
+        run: trivy image --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed --scanners vuln --ignorefile security/trivyignore.yaml --no-progress --timeout 15m nanfo-backend-fleet:ci
+      - name: trivy gateway image
+        if: ${{ !cancelled() && steps.tools.outcome == 'success' && steps.build-gateway.outcome == 'success' }}
+        run: trivy image --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed --scanners vuln --ignorefile security/trivyignore.yaml --no-progress --timeout 15m nanfo-gateway:ci
+      - name: trivy Neo4j image
+        if: ${{ !cancelled() && steps.tools.outcome == 'success' && steps.build-neo4j.outcome == 'success' }}
+        run: trivy image --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed --scanners vuln --ignorefile security/trivyignore.yaml --no-progress --timeout 15m nanfo-neo4j:ci
+      - name: trivy Redis image
+        if: ${{ !cancelled() && steps.tools.outcome == 'success' && steps.build-redis.outcome == 'success' }}
+        run: trivy image --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed --scanners vuln --ignorefile security/trivyignore.yaml --no-progress --timeout 15m nanfo-redis:ci
+      - name: trivy successor lab image
+        if: ${{ !cancelled() && steps.tools.outcome == 'success' && steps.build-lab.outcome == 'success' }}
+        run: trivy image --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed --scanners vuln --ignorefile security/trivyignore.yaml --no-progress --timeout 15m nanfo-lab:ci
+      - name: trivy upstream PostgreSQL store image
+        if: ${{ !cancelled() && steps.tools.outcome == 'success' }}
+        run: |
+          docker pull "$POSTGRES_IMAGE"
+          trivy image --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed --scanners vuln --ignorefile security/trivyignore.yaml --no-progress --timeout 15m "$POSTGRES_IMAGE"
