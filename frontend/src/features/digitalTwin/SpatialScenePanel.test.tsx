@@ -110,7 +110,7 @@ describe("scene editing", () => {
     Object.defineProperty(file, "text", { value: async () => JSON.stringify(EMPTY_SPATIAL_SCENE) });
     fireEvent.change(screen.getByLabelText("Import spatial scene JSON"), { target: { files: [file] } });
     await screen.findByText(/Imported and validated locally/);
-    const draft = (screen.getByLabelText("Spatial scene JSON") as HTMLTextAreaElement).value;
+    const draft = screen.getByLabelText<HTMLTextAreaElement>("Spatial scene JSON").value;
     const invalid = new File([""], "invalid.json");
     Object.defineProperty(invalid, "text", { value: async () => "{}" });
     fireEvent.change(screen.getByLabelText("Import spatial scene JSON"), { target: { files: [invalid] } });

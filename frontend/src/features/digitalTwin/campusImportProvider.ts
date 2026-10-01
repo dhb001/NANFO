@@ -182,7 +182,8 @@ function readRing(value: unknown): [number, number][] | null {
     if (!Number.isFinite(lon) || !Number.isFinite(lat) || Math.abs(lon) > 180 || Math.abs(lat) > 90) return null;
     ring.push([lon, lat]);
   }
-  if (ring.length > 1 && ring[0][0] === ring[ring.length - 1][0] && ring[0][1] === ring[ring.length - 1][1]) ring.pop();
+  const first = ring[0], last = ring[ring.length - 1];
+  if (ring.length > 1 && first && last && first[0] === last[0] && first[1] === last[1]) ring.pop();
   return ring.length >= 3 ? ring : null;
 }
 
@@ -221,7 +222,7 @@ function isAxisAlignedRectangle(points: readonly [number, number][]): boolean {
   if (points.length !== 4) return false;
   const tolerance = 0.05;
   return points.every(([x, z], index) => {
-    const [nextX, nextZ] = points[(index + 1) % points.length];
+    const [nextX, nextZ] = points[(index + 1) % points.length] ?? [x, z];
     return Math.abs(nextX - x) <= tolerance || Math.abs(nextZ - z) <= tolerance;
   });
 }
@@ -266,7 +267,7 @@ function parseGeoJsonTextDeterministic(value: string): CampusImportParseResult {
       ignoredCount += 1;
       continue;
     }
-    const properties = (feature.properties && typeof feature.properties === "object" ? feature.properties : {}) as Record<string, unknown>;
+    const properties = (feature.properties && typeof feature.properties === "object" ? feature.properties : {});
     const allowed = readString(properties, ["building", "amenity", "use"]);
     if (!allowed || allowed === "no") {
       ignoredCount += 1;
@@ -409,7 +410,7 @@ async function readText(file: Blob): Promise<string> {
   if (typeof file.text === "function") return file.text();
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result ?? ""));
+    reader.onload = () => resolve(typeof reader.result === "string" ? reader.result : "");
     reader.onerror = () => reject(new Error("Campus file cannot be read."));
     reader.readAsText(file);
   });

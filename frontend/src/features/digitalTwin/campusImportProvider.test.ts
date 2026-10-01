@@ -140,7 +140,7 @@ describe("campusImportProvider", () => {
     const text = vi.fn(async () => collection());
     const big = { name: "campus.geojson", type: "application/geo+json", size: MAX_CAMPUS_GEOJSON_BYTES + 1, text } as unknown as File;
     await expect(parseCampusGeoJsonFile(big)).rejects.toThrow("exceeds 8 MiB");
-    await expect(parseCampusGeoJsonFile({ ...big, name: "campus.kml", type: "application/vnd.google-earth.kml+xml", size: 10 } as unknown as File)).rejects.toThrow(".geojson or .json");
+    await expect(parseCampusGeoJsonFile({ ...big, name: "campus.kml", type: "application/vnd.google-earth.kml+xml", size: 10 })).rejects.toThrow(".geojson or .json");
     expect(text).not.toHaveBeenCalled();
     const ok = { name: "campus.geojson", type: "", size: 100, text: async () => collection(feature("Hall", rect(36.8, -1.3, 0.0005, 0.0005))) } as unknown as File;
     expect((await parseCampusGeoJsonFile(ok)).buildings).toHaveLength(1);

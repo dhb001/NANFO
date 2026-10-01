@@ -9,7 +9,7 @@ import { getSpatialHistory, getSpatialRevision } from "./spatialApi";
 import { diffSpatialScenes } from "./spatialHistory";
 
 export function SpatialHistoryPanel({ token, networkId, current, disabled, onStage }: {
-  token: string; networkId: string; current?: SpatialSceneSnapshot; disabled: boolean;
+  token: string; networkId: string; current?: SpatialSceneSnapshot | undefined; disabled: boolean;
   onStage: (scene: SpatialSceneSnapshot) => void;
 }) {
   const [page, setPage] = useState(1);
@@ -35,7 +35,7 @@ export function SpatialHistoryPanel({ token, networkId, current, disabled, onSta
     {detail.data && diff ? <>
       <p>Restore revision {detail.data.revision} over current {current!.revision}: +{diff.added.length} / −{diff.removed.length} / changed {diff.changed.length}</p>
       <details><summary>Restore diff and historical JSON</summary><pre className="twin-scroll-pre">{JSON.stringify({ diff, scene: detail.data }, null, 2)}</pre></details>
-      <Button permission="write:config" disabled={disabled || detail.isFetching || detail.isError} onClick={() => onStage(detail.data!)}>Stage revision {detail.data.revision} for restore</Button>
+      <Button permission="write:config" disabled={disabled || detail.isFetching || detail.isError} onClick={() => onStage(detail.data)}>Stage revision {detail.data.revision} for restore</Button>
     </> : null}
   </section>;
 }

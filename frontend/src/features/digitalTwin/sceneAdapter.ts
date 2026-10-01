@@ -100,7 +100,7 @@ export interface TwinTopologyInput {
   baseNodes: TopologyNode[];
   baseEdges: TopologyEdge[];
   liveNodesByDeviceId: Record<string, TopologyDeltaData["node"]>;
-  importedSpatialRefByDeviceId?: Record<string, string>;
+  importedSpatialRefByDeviceId?: Record<string, string> | undefined;
 }
 
 export interface TwinTopology<N extends TwinNode = TwinNode> {
@@ -126,7 +126,7 @@ export const NEUTRAL_CONGESTION: TwinCongestion = Object.freeze({
   metrics: Object.freeze([]) as unknown as TwinMetricSnapshot[],
   heuristic: VISUAL_HEURISTIC_ID,
   primaryMetric: null,
-}) as TwinCongestion;
+});
 
 export function parseSpatialRefPath(spatialRefId: string | null | undefined): SpatialRefPath | null {
   return parseSpatialRefPathWithProvider(spatialRefId);
@@ -180,8 +180,8 @@ export function deriveDeviceCongestion(metrics: readonly TelemetryDeltaData["met
       if (Number.isFinite(leftTs) !== Number.isFinite(rightTs)) return Number.isFinite(leftTs) ? -1 : 1;
       return left.metric.localeCompare(right.metric) || left.source.localeCompare(right.source);
     });
-  if (candidates.length === 0) return NEUTRAL_CONGESTION;
   const primary = candidates[0];
+  if (!primary) return NEUTRAL_CONGESTION;
   return {
     severity: primary.stale ? "neutral" : primary.severity,
     metrics: candidates.slice(0, 6),
@@ -286,7 +286,7 @@ export function buildTwinTopology(input: TwinTopologyInput): TwinTopology {
 function getSceneObjectSpatialRef(sceneObject: DigitalTwinDeltaData["scene_object"]): string | null {
   if (sceneObject.spatial_ref_id) return sceneObject.spatial_ref_id;
   if (!sceneObject.changed_fields || typeof sceneObject.changed_fields !== "object") return null;
-  const candidate = (sceneObject.changed_fields as Record<string, unknown>).spatial_ref_id;
+  const candidate = (sceneObject.changed_fields).spatial_ref_id;
   return typeof candidate === "string" && candidate.trim() ? candidate : null;
 }
 

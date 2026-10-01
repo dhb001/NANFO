@@ -14,16 +14,6 @@ export interface MetricSnapshotListItem {
   level?: HeuristicLevel;
   rule?: DetectorRuleMirror;
   severity?: string;
-  /** @deprecated Pre-ADR-028 congestion-policy fields; accepted for compatibility, never rendered. */
-  normalizedScore?: number;
-  /** @deprecated see normalizedScore. */
-  policyId?: string;
-  /** @deprecated see normalizedScore. */
-  policyPriority?: number;
-  /** @deprecated see normalizedScore. */
-  lowUpperExclusive?: number;
-  /** @deprecated see normalizedScore. */
-  mediumUpperExclusive?: number;
 }
 
 function heuristicText(metric: MetricSnapshotListItem): string {

@@ -60,12 +60,12 @@ export function pythonCanonical(value: Json, key = ""): string {
     return raw.includes("e") ? raw.replace(/e([+-]?)(\d+)$/, (_, sign: string, digits: string) => `e${sign || "+"}${digits.padStart(2, "0")}`) : raw.includes(".") ? raw : `${raw}.0`;
   }
   if (Array.isArray(value)) return `[${value.map((entry) => pythonCanonical(entry)).join(",")}]`;
-  if (value && typeof value === "object") return `{${Object.keys(value).sort(codepointOrder).map((name) => `${pythonCanonical(name)}:${pythonCanonical(value[name], name)}`).join(",")}}`;
+  if (value && typeof value === "object") return `{${Object.keys(value).sort(codepointOrder).map((name) => `${pythonCanonical(name)}:${pythonCanonical(value[name] ?? null, name)}`).join(",")}}`;
   return JSON.stringify(value).replace(/[\u007f-\uffff]/g, (char) => `\\u${char.charCodeAt(0).toString(16).padStart(4, "0")}`);
 }
 function codepointOrder(a: string, b: string) {
   const left = Array.from(a, (char) => char.codePointAt(0)!); const right = Array.from(b, (char) => char.codePointAt(0)!);
-  for (let i = 0; i < Math.min(left.length, right.length); i++) if (left[i] !== right[i]) return left[i] - right[i];
+  for (let i = 0; i < Math.min(left.length, right.length); i++) if (left[i] !== right[i]) return (left[i] ?? 0) - (right[i] ?? 0);
   return left.length - right.length;
 }
 async function digest(value: Json) {

@@ -113,7 +113,8 @@ export function deriveGroupProposal({ nodes, focus, existingGroups }: {
     : pickMostCommon(persisted.filter((item) => buildingId && item.scope.buildingId === buildingId).map((item) => item.scope.floorKey));
   const inScope = persisted.filter((item) => item.ref && buildingId && item.scope.buildingId === buildingId && (!floorKey || item.scope.floorKey === floorKey));
   // The prefix comes from a real persisted reference so it matches the server's comparison.
-  const sitePrefix = inScope.length ? rawPrefix(inScope[0].ref!, floorKey ? 3 : 2) : null;
+  const firstRef = inScope[0]?.ref;
+  const sitePrefix = firstRef ? rawPrefix(firstRef, floorKey ? 3 : 2) : null;
   const scopeSource = sitePrefix ? source : "network";
   const [, buildingKey] = sitePrefix ? (buildingId ?? "").split(":") : [];
   const label = sitePrefix ? [buildingKey?.toUpperCase() ?? null, floorKey?.toUpperCase() ?? null].filter(Boolean).join(" ") : "";

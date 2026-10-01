@@ -5,7 +5,7 @@ import { MAX_RF_BYTES, MAX_RF_SAMPLES, parseRFArtifact, type RFSample } from "./
 
 export interface RFImportState { scene: SpatialSceneSnapshot; samples: RFSample[] }
 export function RFImportPanel({ scene, workspaceId, networkId, value, onChange }: {
-  scene?: SpatialSceneSnapshot; workspaceId: string | null; networkId: string | null;
+  scene?: SpatialSceneSnapshot | undefined; workspaceId: string | null; networkId: string | null;
   value: RFImportState | null; onChange: (value: RFImportState | null) => void;
 }) {
   const [frame, setFrame] = useState("");
@@ -40,11 +40,11 @@ export function RFImportPanel({ scene, workspaceId, networkId, value, onChange }
     {value && value.scene !== scene ? <p role="alert">Scene changed/unavailable: RF hidden. Reimport required.</p> : null}
     {busy ? <p role="status">Validating RF artifacts…</p> : null}
     {message ? <p role="status">{message}</p> : null}
-    <div style={{ maxHeight: 260, overflow: "auto" }}>{samples.map((sample) => <details key={sample.receiverId}>
+    <div className="twin-scroll-pre">{samples.map((sample) => <details key={sample.receiverId}>
       <summary>{sample.receiverId}: {sample.signalDbm.toFixed(1)} dBm · {sample.uncertaintyDb === null ? "uncertainty unknown" : `assumed ±${sample.uncertaintyDb} dB`}</summary>
       <p>Network XYZ meters: {sample.position.join(", ")} · frame {sample.frameId} · revision {scene?.revision}</p>
       <p>Scene SHA256: {sample.sceneHash}<br />RF config SHA256: {sample.configHash}<br />RF request SHA256: {sample.inputHash}</p>
-      <pre style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{sample.provenance}</pre>
+      <pre className="twin-pre-wrap">{sample.provenance}</pre>
     </details>)}</div>
   </section>;
 }

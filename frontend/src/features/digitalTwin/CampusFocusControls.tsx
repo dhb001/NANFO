@@ -75,26 +75,18 @@ export function CampusFocusControls({
   );
 
   return (
-    <div
-      style={{
-        border: "1px solid var(--line-soft)",
-        borderRadius: "10px",
-        padding: "0.48rem 0.56rem",
-        display: "grid",
-        gap: "0.45rem",
-      }}
-    >
-      <strong style={{ fontSize: "0.9rem" }}>Campus focus</strong>
+    <section className="twin-card" aria-label="Campus focus">
+      <h4 className="twin-card-title">Campus focus</h4>
 
-      <label style={{ display: "grid", gap: "0.3rem" }}>
-        <span className="mono" style={{ fontSize: "0.78rem", color: "var(--ink-3)" }}>
+      <label className="twin-field">
+        <span className="mono twin-field-label">
           Building
         </span>
         <select
           aria-label="Twin building focus"
+          className="twin-select"
           value={selectedBuildingId ?? ""}
           onChange={(event) => onSelectedBuildingChange(event.target.value || null)}
-          style={{ border: "1px solid var(--line-soft)", borderRadius: "10px", padding: "0.45rem 0.5rem" }}
         >
           <option value="">Auto (selected device building)</option>
           {buildingOptions.map((building) => (
@@ -105,16 +97,16 @@ export function CampusFocusControls({
         </select>
       </label>
 
-      <label style={{ display: "grid", gap: "0.3rem" }}>
-        <span className="mono" style={{ fontSize: "0.78rem", color: "var(--ink-3)" }}>
+      <label className="twin-field">
+        <span className="mono twin-field-label">
           Floor
         </span>
         <select
           aria-label="Twin floor focus"
+          className="twin-select"
           value={normalizedSelectedFloorKey ?? ""}
           disabled={!selectedBuilding}
           onChange={(event) => onSelectedFloorKeyChange(event.target.value || null)}
-          style={{ border: "1px solid var(--line-soft)", borderRadius: "10px", padding: "0.45rem 0.5rem" }}
         >
           <option value="">All floors</option>
           {floorOptions.map((floor) => (
@@ -125,7 +117,7 @@ export function CampusFocusControls({
         </select>
       </label>
 
-      <div style={{ display: "flex", gap: "0.35rem", flexWrap: "wrap" }}>
+      <div className="twin-actions">
         <Button
           type="button"
           tone={focusSelectedBuildingOnly ? "primary" : "ghost"}
@@ -151,9 +143,9 @@ export function CampusFocusControls({
         ) : null}
       </div>
 
-      <div style={{ color: "var(--ink-3)", fontSize: "0.78rem" }}>
+      <p className="twin-muted">
         Building and floor focus derive from `spatial_ref_id` path segments and preserve existing topology contracts.
-      </div>
-    </div>
+      </p>
+    </section>
   );
 }

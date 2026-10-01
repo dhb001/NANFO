@@ -1,31 +1,22 @@
-import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
-import { createRoot, type Root } from "react-dom/client";
+import { useLayoutEffect, useState, type PropsWithChildren } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
-import { Group, Vector3 } from "three";
+import { SceneLabelEngine } from "./sceneLabels";
+import { SceneLabelContext } from "./sceneLabelContext";
 
-/** Noninteractive projected labels: one bounded DOM element, no occlusion/transform mode. */
-export function SceneLabel({ children, position, distanceFactor = 18, style }: {
-  children: ReactNode; position?: [number, number, number]; distanceFactor?: number; style?: CSSProperties;
-}) {
-  const { gl, camera, size } = useThree();
-  const group = useRef<Group>(null);
-  const root = useRef<Root>();
-  const [element] = useState(() => document.createElement("div"));
-  const [world] = useState(() => new Vector3());
-  useEffect(() => {
-    Object.assign(element.style, { position: "absolute", top: "0", left: "0", pointerEvents: "none", ...style });
-    gl.domElement.parentElement?.appendChild(element);
-    const mounted = createRoot(element); root.current = mounted;
-    return () => { element.remove(); queueMicrotask(() => mounted.unmount()); };
-  }, [element, gl, style]);
-  useEffect(() => { root.current?.render(children); }, [children]);
-  useFrame(() => {
-    if (!group.current) return;
-    group.current.getWorldPosition(world);
-    const distance = world.distanceTo(camera.position);
-    world.project(camera);
-    element.style.display = world.z < -1 || world.z > 1 || Math.abs(world.x) > 1 || Math.abs(world.y) > 1 ? "none" : "block";
-    element.style.transform = `translate(${(world.x + 1) * size.width / 2}px,${(1 - world.y) * size.height / 2}px) translate(-50%,-50%) scale(${Math.min(1.5, distanceFactor / Math.max(1, distance))})`;
-  });
-  return <group ref={group} position={position} />;
+/**
+ * Hosts every in-scene label in ONE DOM container next to the canvas. Layers publish
+ * text labels with `useSceneLabels`; a single frame callback positions them and skips
+ * all DOM writes when the camera, viewport and labels are unchanged. Mount it as the
+ * outermost scene element so its frame callback runs after camera controllers.
+ */
+export function SceneLabelHost({ children }: PropsWithChildren) {
+  const gl = useThree((state) => state.gl);
+  const [engine] = useState(() => new SceneLabelEngine(document.createElement("div")));
+  useLayoutEffect(() => {
+    gl.domElement.parentElement?.appendChild(engine.container);
+    return () => engine.container.remove();
+  }, [engine, gl]);
+  useLayoutEffect(() => () => engine.dispose(), [engine]);
+  useFrame((state) => { engine.frame(state.camera, state.size.width, state.size.height); });
+  return <SceneLabelContext.Provider value={engine}>{children}</SceneLabelContext.Provider>;
 }

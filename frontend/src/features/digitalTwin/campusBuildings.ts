@@ -1,4 +1,5 @@
 import type { TwinNode } from "@/features/digitalTwin/sceneAdapter";
+import type { SceneLabelSpec } from "@/features/digitalTwin/sceneLabels";
 import { parseSpatialRefPath } from "@/features/digitalTwin/spatialProjection";
 
 export type CampusBuildingGeometryKind = "box" | "extrude";
@@ -126,7 +127,7 @@ function toBuildingLabel(value: string): string {
   return cleaned
     .split(/[-_]+/g)
     .filter(Boolean)
-    .map((segment) => segment[0].toUpperCase() + segment.slice(1))
+    .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
     .join(" ");
 }
 
@@ -278,7 +279,7 @@ export function isNodeVisibleInBuildingView(
 export function resolveCampusBuildingCameraFocus(
   building: CampusBuilding,
   options: {
-    floorKey?: string | null;
+    floorKey?: string | null | undefined;
   } = {},
 ): CampusBuildingCameraFocus {
   const floorIndex = parseFloorIndex(options.floorKey);
@@ -417,4 +418,21 @@ export function deriveCampusBuildings(
         footprint,
       } satisfies CampusBuilding;
     });
+}
+
+export const MAX_BUILDING_LABELS = 24;
+
+/** Selected building first, then by id: labels stay bounded for large campus imports. */
+export function buildingLabelSpecs(buildings: readonly CampusBuilding[], viewState: CampusBuildingViewState | undefined, limit = MAX_BUILDING_LABELS): SceneLabelSpec[] {
+  const selected = viewState?.selectedBuildingId ?? null;
+  return [...buildings]
+    .sort((left, right) => (left.id === selected ? -1 : right.id === selected ? 1 : left.id.localeCompare(right.id)))
+    .slice(0, Math.max(0, limit))
+    .map((building) => ({
+      id: building.id,
+      position: [building.x, building.baseY + building.height + 0.5, building.z] as const,
+      text: `${building.label} f${building.floors} n${building.nodeCount}${building.id === selected ? " · selected" : ""}`,
+      variant: "building" as const,
+      distanceFactor: 28,
+    }));
 }

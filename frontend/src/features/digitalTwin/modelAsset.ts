@@ -25,7 +25,7 @@ function exactBuffer(input: ArrayBuffer | Uint8Array): ArrayBuffer {
   if (!ArrayBuffer.isView(input)) return input;
   return input.byteOffset === 0 && input.byteLength === input.buffer.byteLength
     ? input.buffer as ArrayBuffer
-    : input.slice().buffer as ArrayBuffer;
+    : input.slice().buffer;
 }
 
 /**
@@ -34,7 +34,12 @@ function exactBuffer(input: ArrayBuffer | Uint8Array): ArrayBuffer {
  * The full three.js parse happens once, in the renderer; a model is persisted only after
  * that render succeeded, so the same bytes are never parsed twice for validation.
  */
-export async function validateModelBytes(input: ArrayBuffer | Uint8Array, name: string, mime: string): Promise<void> {
+export function validateModelBytes(input: ArrayBuffer | Uint8Array, name: string, mime: string): Promise<void> {
+  // Validation is synchronous CPU work; failures surface as a rejected promise, never a throw.
+  return new Promise<void>((resolve) => { validateModelBytesSync(input, name, mime); resolve(); });
+}
+
+function validateModelBytesSync(input: ArrayBuffer | Uint8Array, name: string, mime: string): void {
   const buffer = exactBuffer(input);
   if (buffer.byteLength < 1 || buffer.byteLength > MAX_MODEL_BYTES) throw new Error(`Model must be between 1 byte and ${MAX_MODEL_SIZE_TEXT}.`);
   const lower = name.toLowerCase();
@@ -61,18 +66,21 @@ export async function validateModelBytes(input: ArrayBuffer | Uint8Array, name: 
     }
     if (chunks === 0) throw new Error("Invalid GLB chunk.");
   }
-  let document: Record<string, unknown>;
-  try { document = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(jsonBytes)); }
+  let parsed: unknown;
+  try { parsed = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(jsonBytes)); }
   catch { throw new Error("Model contains invalid glTF JSON."); }
-  if (!document || typeof document !== "object" || Array.isArray(document) || (document.asset as { version?: unknown } | undefined)?.version !== "2.0") {
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed) || ((parsed as { asset?: { version?: unknown } }).asset)?.version !== "2.0") {
     throw new Error("Only glTF 2.0 models are supported.");
   }
+  const document = parsed as Record<string, unknown>;
   for (const key of ["nodes", "meshes", "accessors", "bufferViews", "buffers", "materials", "textures", "images", "animations", "skins"]) {
     const entries = document[key];
     if (entries !== undefined && (!Array.isArray(entries) || entries.length > 10_000)) throw new Error("Model exceeds supported object bounds.");
-    if (Array.isArray(entries)) for (const entry of entries) {
-      if (!entry || typeof entry !== "object" || (entry.byteLength !== undefined && (!Number.isSafeInteger(entry.byteLength) || entry.byteLength < 0 || entry.byteLength > MAX_MODEL_BYTES)) ||
-          (key === "accessors" && (!Number.isSafeInteger(entry.count) || entry.count < 0 || entry.count > 1_000_000))) throw new Error("Model exceeds supported buffer or accessor bounds.");
+    if (Array.isArray(entries)) for (const raw of entries as unknown[]) {
+      const entry = raw && typeof raw === "object" ? raw as { byteLength?: unknown; count?: unknown } : null;
+      const byteLength = entry?.byteLength, count = entry?.count;
+      if (!entry || (byteLength !== undefined && (typeof byteLength !== "number" || !Number.isSafeInteger(byteLength) || byteLength < 0 || byteLength > MAX_MODEL_BYTES)) ||
+          (key === "accessors" && (typeof count !== "number" || !Number.isSafeInteger(count) || count < 0 || count > 1_000_000))) throw new Error("Model exceeds supported buffer or accessor bounds.");
     }
   }
   // One file only: never let the loader fetch external resources (absolute or relative URIs).

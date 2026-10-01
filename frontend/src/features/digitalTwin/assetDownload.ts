@@ -1,21 +1,10 @@
 import { apiUrl } from "@/shared/lib/env";
 import { ApiClientError } from "@/shared/lib/errors";
+import { etagSha256 } from "@/shared/lib/etag";
 import { useAuthStore } from "@/shared/state/auth-store";
 import { useWorkspaceStore } from "@/shared/state/workspace-store";
 import type { CampusModelAssetRecord } from "@/shared/types/network";
 import { MAX_MODEL_BYTES } from "./modelAsset";
-
-const DIGEST_ETAG = /^(?:W\/)?"(?:sha256:)?([0-9a-f]{64})"$/i;
-
-/**
- * Digest named by an ETag (C4 `"sha256:<hex>"`), tolerating the weak form (`W/`) that
- * compressing proxies produce and the legacy bare-hex form. Opaque validators return
- * null: the SHA-256 of the body (verified by `decodePersistedModel`) is authoritative.
- */
-export function etagDigest(etag: string | null): string | null {
-  const match = etag?.trim().match(DIGEST_ETAG);
-  return match ? match[1].toLowerCase() : null;
-}
 
 export async function downloadModelBytes(asset: CampusModelAssetRecord, signal?: AbortSignal) {
   const session = useAuthStore.getState(), context = useWorkspaceStore.getState();
@@ -30,7 +19,7 @@ export async function downloadModelBytes(asset: CampusModelAssetRecord, signal?:
   let response: Response | undefined;
   for (let attempt = 0; attempt < 2; attempt++) {
     check(); const token = useAuthStore.getState().accessToken;
-    response = await fetch(apiUrl(path), { headers: { Authorization: `Bearer ${token}` }, signal, cache: "no-store", redirect: "error" });
+    response = await fetch(apiUrl(path), { headers: { Authorization: `Bearer ${token}` }, ...(signal ? { signal } : {}), cache: "no-store", redirect: "error" });
     check();
     if (response.status !== 401 || attempt) break;
     await response.body?.cancel();
@@ -43,12 +32,15 @@ export async function downloadModelBytes(asset: CampusModelAssetRecord, signal?:
     throw new ApiClientError("Asset download returned 304 without a local copy. Retry the restore.", "ASSET_NOT_MODIFIED", 304);
   }
   if (!response!.ok) {
-    const payload = await response!.json().catch(() => null); check();
-    throw new ApiClientError(payload?.errors?.message ?? "Asset download failed.", payload?.errors?.code ?? "ASSET_DOWNLOAD_FAILED", response!.status);
+    const payload: unknown = await response!.json().catch(() => null); check();
+    const errors = payload && typeof payload === "object" ? (payload as { errors?: { message?: unknown; code?: unknown } | null }).errors : null;
+    throw new ApiClientError(typeof errors?.message === "string" ? errors.message : "Asset download failed.",
+      typeof errors?.code === "string" ? errors.code : "ASSET_DOWNLOAD_FAILED", response!.status);
   }
   const length = response!.headers.get("Content-Length");
-  const digest = etagDigest(response!.headers.get("ETag"));
-  const type = response!.headers.get("Content-Type")?.split(";")[0].trim().toLowerCase();
+  // Digest ETags ("sha256:<hex>", W/ weak, legacy bare hex) are a pre-check; opaque ones are ignored and the body SHA-256 stays authoritative.
+  const digest = etagSha256(response!.headers.get("ETag"));
+  const type = response!.headers.get("Content-Type")?.split(";")[0]?.trim().toLowerCase();
   if (type !== "application/octet-stream" || (length !== null && Number(length) !== asset.model_size_bytes) || (digest !== null && digest !== asset.model_sha256)) {
     await response!.body?.cancel(); throw new Error("Asset headers changed. Reload metadata.");
   }

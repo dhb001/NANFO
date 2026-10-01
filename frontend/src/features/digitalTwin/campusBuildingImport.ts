@@ -64,7 +64,7 @@ export function diffCampusBuildings(existing: readonly CampusBuildingRecord[], i
   for (const record of existing) {
     if (!incomingIds.has(record.building_id)) diff.removed.push({ id: record.building_id, label: record.label, fields: [] });
   }
-  for (const list of Object.values(diff)) list.sort((left: CampusBuildingChange, right: CampusBuildingChange) => left.id.localeCompare(right.id));
+  for (const list of [diff.added, diff.changed, diff.unchanged, diff.removed]) list.sort((left, right) => left.id.localeCompare(right.id));
   return diff;
 }
 

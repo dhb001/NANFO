@@ -54,7 +54,7 @@ describe("guided spatial replacement", () => {
     change("width", "12"); change("depth", "8"); change("thickness", "-1");
     expect(screen.getByText("Save scene replacement")).toBeDisabled();
     fireEvent.click(screen.getByText("Stage object in draft"));
-    expect((screen.getByLabelText("Spatial scene JSON") as HTMLTextAreaElement).value).not.toContain('"slab"');
+    expect(screen.getByLabelText<HTMLTextAreaElement>("Spatial scene JSON").value).not.toContain('"slab"');
     change("thickness", "0.2"); change("Parent object", "wall");
     fireEvent.click(screen.getByText("Stage object in draft"));
     expect(screen.getByText("Invalid parent hierarchy or cycle.")).toBeInTheDocument();
@@ -63,7 +63,7 @@ describe("guided spatial replacement", () => {
     await waitFor(() => expect(screen.getByText("Stage object in draft")).toBeEnabled());
     expect(screen.getByLabelText("thickness")).toHaveValue(0.2);
     fireEvent.click(screen.getByText("Stage object in draft"));
-    const draft = (screen.getByLabelText("Spatial scene JSON") as HTMLTextAreaElement).value;
+    const draft = screen.getByLabelText<HTMLTextAreaElement>("Spatial scene JSON").value;
     const scene = JSON.parse(draft);
     expect(scene.objects[0]).not.toHaveProperty("geometry");
     expect(scene.objects[1].geometry).toEqual({ kind: "slab", width: 12, depth: 8, thickness: 0.2 });
@@ -91,7 +91,7 @@ describe("guided spatial replacement", () => {
     change("length", "8"); change("height", "3"); change("thickness", "0.1");
     change("Material name", "survey material"); change("Material source", "site record");
     fireEvent.click(screen.getByText("Stage object in draft"));
-    const scene = JSON.parse((screen.getByLabelText("Spatial scene JSON") as HTMLTextAreaElement).value);
+    const scene = JSON.parse(screen.getByLabelText<HTMLTextAreaElement>("Spatial scene JSON").value);
     expect(scene.objects[0].geometry).toEqual({ kind: "box", width: 20, depth: 10, height: 5 });
     expect(scene.objects[2].geometry.material).toEqual({ name: "survey material", source: "site record", attenuation_db: null });
     fireEvent.click(screen.getByText("Validate JSON"));
@@ -108,7 +108,7 @@ describe("guided spatial replacement", () => {
     fireEvent.click(screen.getByText("Next inventory page"));
     fireEvent.click(await screen.findByLabelText(/device-21 ·/));
     fireEvent.click(screen.getByText("Stage object in draft"));
-    expect(JSON.parse((screen.getByLabelText("Spatial scene JSON") as HTMLTextAreaElement).value).objects.at(-1)).toMatchObject({ object_id: "device-object", device_id: deviceId(21), provenance: { accuracy_m: null } });
+    expect(JSON.parse(screen.getByLabelText<HTMLTextAreaElement>("Spatial scene JSON").value).objects.at(-1)).toMatchObject({ object_id: "device-object", device_id: deviceId(21), provenance: { accuracy_m: null } });
     expect(putSpatialScene).not.toHaveBeenCalled();
   });
 });

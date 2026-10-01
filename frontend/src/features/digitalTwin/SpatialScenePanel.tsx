@@ -87,7 +87,7 @@ export function SpatialScenePanel({ query, token, networkId, canWrite, onSelectD
     <details>
       <summary>Spatial hierarchy and server JSON</summary>
       <p>Only explicit geometry is drawn. Device markers are symbols. Dimensions are local meters; omitted geometry stays omitted on restore.</p>
-      <div style={{ maxHeight: 240, overflow: "auto" }}>
+      <div className="twin-scroll-box">
         {query.data?.objects.map((object) => <div key={object.object_id}>
           {object.object_type}: {object.name} ({object.object_id}) ← {object.parent_id ?? "scene"}
           {object.device_id ? <Button tone="ghost" onClick={() => onSelectDevice(object.device_id!)}>Inspect {object.name}</Button> : null}
@@ -95,7 +95,7 @@ export function SpatialScenePanel({ query, token, networkId, canWrite, onSelectD
           {object.geometry?.kind === "wall" ? <small> · {object.geometry.material.name} · {object.geometry.material.attenuation_db ?? "unknown"} dB · {object.geometry.material.source}</small> : null}
         </div>)}
       </div>
-      <pre style={{ maxHeight: 240, overflow: "auto" }}>{sceneText}</pre>
+      <pre className="twin-scroll-box">{sceneText}</pre>
     </details>
     <label>Import spatial scene JSON <input type="file" accept=".json,application/json" disabled={!editable} onChange={(event) => {
       void importFile(event.target.files?.[0]); event.target.value = "";
@@ -104,17 +104,17 @@ export function SpatialScenePanel({ query, token, networkId, canWrite, onSelectD
       onDirty={setGuidedDirty}
       onBegin={() => { if (!draft && query.data) setDraft({ text: sceneText, revision: query.data.revision }); }}
       onStage={(scene) => { setDraft({ text: JSON.stringify(scene, null, 2), revision: draft?.revision ?? query.data!.revision }); setMessage("Guided edits staged locally."); }} />
-    <label style={{ display: "grid" }}>Spatial scene JSON (advanced)
+    <label className="twin-block-grid">Spatial scene JSON (advanced)
       <textarea aria-label="Spatial scene JSON" rows={12} spellCheck={false} value={draft?.text ?? sceneText} disabled={!editable} onChange={(event) => {
         setDraft({ text: event.target.value, revision: draft?.revision ?? query.data!.revision }); setGuidedDirty(false); setEditorVersion((value) => value + 1); setMessage("");
       }} />
     </label>
     <details><summary>Dimension editing guide</summary>
       <p>Add geometry to an object in the JSON, validate, then save the replacement. Box: building/room/rack; slab: floor; wall: direct floor/room child with null device_id. Dimensions: 0.000001–1000000 m.</p>
-      <pre style={{ overflow: "auto" }}>{'{"kind":"box","width":12,"depth":8,"height":3}\n{"kind":"slab","width":12,"depth":8,"thickness":0.2}\n{"kind":"wall","length":8,"height":3,"thickness":0.15,"material":{"name":"drywall","attenuation_db":null,"source":"operator-survey"}}'}</pre>
+      <pre className="twin-scroll-x">{'{"kind":"box","width":12,"depth":8,"height":3}\n{"kind":"slab","width":12,"depth":8,"thickness":0.2}\n{"kind":"wall","length":8,"height":3,"thickness":0.15,"material":{"name":"drywall","attenuation_db":null,"source":"operator-survey"}}'}</pre>
       <p>Box/slab X and Z are centered; Y starts at zero. Wall X starts at zero, Y starts at zero, and thickness is centered on Z. Null attenuation means unknown. Material source records supplied provenance.</p>
     </details>
-    <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem" }}>
+    <div className="twin-actions">
       <Button tone="ghost" disabled={!editable} onClick={() => {
         try { const scene = parseSpatialScene(draft?.text ?? sceneText); setMessage(`Valid scene: ${scene.objects.length} objects. Server checks network membership on save.`); }
         catch (error) { setMessage(toErrorMessage(error)); }
@@ -125,7 +125,7 @@ export function SpatialScenePanel({ query, token, networkId, canWrite, onSelectD
       }}>Discard draft</Button>
       {draft && query.data && draft.revision !== query.data.revision ? <Button tone="ghost" disabled={!editable} onClick={() => {
         if (window.confirm("Use the latest server revision for this full replacement? Review the server JSON first; this does not merge concurrent edits.")) {
-          setDraft({ ...draft, revision: query.data!.revision }); setConflict(false); setMessage("Draft rebased locally. Review and save explicitly.");
+          setDraft({ ...draft, revision: query.data.revision }); setConflict(false); setMessage("Draft rebased locally. Review and save explicitly.");
         }
       }}>Rebase draft to revision {query.data.revision}</Button> : null}
     </div>

@@ -2,7 +2,7 @@ import { useEffect, useId, useRef, type KeyboardEvent, type ReactNode } from "re
 import { createPortal } from "react-dom";
 import { Button } from "@/shared/ui/Button";
 
-const FOCUSABLE = 'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+const FOCUSABLE = 'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), summary, [tabindex]:not([tabindex="-1"])';
 
 /**
  * Modal confirmation with explicit focus management: focus moves into the dialog
@@ -41,9 +41,9 @@ export function ConfirmDialog({ title, children, confirmLabel, cancelLabel = "Ca
     }
     if (event.key !== "Tab" || !dialog.current) return;
     const items = [...dialog.current.querySelectorAll<HTMLElement>(FOCUSABLE)];
-    if (items.length === 0) return;
     const first = items[0];
     const last = items[items.length - 1];
+    if (!first || !last) return;
     if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
     else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
   }

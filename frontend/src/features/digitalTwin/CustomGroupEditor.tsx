@@ -81,11 +81,11 @@ export function CustomGroupEditor({ token, networkId, canWrite }: { token: strin
       if (disabled || !editing) return;
       setRemoving(true); setMessage("");
       try {
-        const groups = await scope.request((credential) => retainedGroups(credential, networkId!, draft.group_key, baseUpdatedAt));
+        const groups = await scope.request((credential) => retainedGroups(credential, networkId, draft.group_key, baseUpdatedAt));
         if (!window.confirm(`Remove persisted group ${draft.group_key}? Unsaved edits to it will be discarded. Full replacement retains ${groups.length} groups: ${groups.map((group) => group.group_key).join(", ") || "none"}. Each retained group is revision-checked; if any changed meanwhile nothing is removed. Proceed with this reviewed list?`)) return;
         scope.assertCurrent();
         if (scope.authority !== authorityKey() || !hasPermission(useAuthStore.getState().profile, "write:config") || useWorkspaceStore.getState().networkId !== networkId) throw new Error("Authority or network changed. Review the action again.");
-        await scope.request((credential) => replaceReviewedGroups(credential, networkId!, groups));
+        await scope.request((credential) => replaceReviewedGroups(credential, networkId, groups));
         setDraft(emptyGroup()); setEditing(false); setBaseUpdatedAt(null);
         const refreshed = await query.refetch();
         setMessage(refreshed.isError ? "Group removed; reload failed. Reload groups before further editing." : "Selected group removed; other groups retained.");

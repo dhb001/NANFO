@@ -45,9 +45,8 @@ export const HEURISTIC_LEVEL_TEXT: Readonly<Record<HeuristicLevel, string>> = Ob
 });
 
 export function detectorRuleFor(metric: string, unit: string | null): DetectorRuleMirror | null {
-  if (!Object.hasOwn(BACKEND_DETECTOR_RULES, metric)) return null;
-  const rule = BACKEND_DETECTOR_RULES[metric];
-  return unit === rule.unit ? rule : null;
+  const rule = Object.hasOwn(BACKEND_DETECTOR_RULES, metric) ? BACKEND_DETECTOR_RULES[metric] : undefined;
+  return rule && unit === rule.unit ? rule : null;
 }
 
 export function visualHeuristicLevel(metric: string, unit: string | null, value: number): { rule: DetectorRuleMirror; level: HeuristicLevel } | null {
@@ -68,7 +67,7 @@ export function describeDetectorRule(metric: string, rule: DetectorRuleMirror): 
 export interface AlertEventLike {
   event_type: string;
   payload: Record<string, unknown>;
-  timestamp?: string;
+  timestamp?: string | undefined;
 }
 
 export interface AlertRecordLike {

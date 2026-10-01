@@ -37,8 +37,8 @@ export function validateSpatialScene(value: unknown): SpatialScene {
     if (provenance.accuracy_m !== null && (typeof provenance.accuracy_m !== "number" || !Number.isFinite(provenance.accuracy_m) || provenance.accuracy_m < 0 || provenance.accuracy_m > 1_000_000 || provenance.source === "schematic-fallback")) throw new Error("accuracy_m must be 0–1000000 or null; schematic-fallback accuracy must be null.");
     return { object_id: text(item.object_id), parent_id: item.parent_id === null ? null : text(item.parent_id),
       object_type: objectType, name: text(item.name, 256), position: vector(item.position, 1_000_000), rotation: vector(item.rotation, 2 * Math.PI),
-      device_id: item.device_id as string | null,
-       provenance: { source: text(provenance.source), accuracy_m: provenance.accuracy_m as number | null },
+      device_id: item.device_id,
+       provenance: { source: text(provenance.source), accuracy_m: provenance.accuracy_m },
        ...(Object.hasOwn(item, "geometry") ? { geometry: validateSpatialGeometry(item.geometry, objectType) } : {}) };
   });
   const byId = new Map(objects.map((item) => [item.object_id, item]));
@@ -109,6 +109,8 @@ export function applySpatialScene<M extends TwinTopology>(model: M, scene?: Spat
   const links = model.links.map((link) => {
     const source = nodeById[link.sourceId];
     const target = nodeById[link.targetId];
+    // Links are built from existing nodes only; keep the original endpoints if one vanished.
+    if (!source || !target) return link;
     return { ...link, source: [source.x, source.y, source.z] as [number, number, number], target: [target.x, target.y, target.z] as [number, number, number] };
   });
   return { ...model, nodes, nodeById, links };

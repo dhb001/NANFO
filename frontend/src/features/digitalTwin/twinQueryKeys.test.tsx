@@ -38,23 +38,28 @@ describe("Twin query keys carry session identity, never the credential", () => {
     await waitFor(() => expect(result.current.data).toEqual(scene));
     await screen.findByText(/Inventory page 1/);
     await waitFor(() => expect(getSpatialHistory).toHaveBeenCalledTimes(1));
+    // spatial-scene, spatial-history, spatial-revision (disabled until a revision is chosen), twin-inventory.
     const keys = client.getQueryCache().getAll().map((query) => JSON.stringify(query.queryKey));
-    expect(keys).toHaveLength(3);
+    expect(keys.map((key) => JSON.parse(key)[0]).sort()).toEqual(["spatial-history", "spatial-revision", "spatial-scene", "twin-inventory"]);
     for (const key of keys) expect(key).not.toContain("secret-token");
     act(() => useAuthStore.setState({ accessToken: "secret-token-2" }));
     expect(getSpatialScene).toHaveBeenCalledTimes(1);
     expect(listDevices).toHaveBeenCalledTimes(1);
     await act(async () => { await result.current.refetch(); });
     expect(vi.mocked(getSpatialScene).mock.calls.at(-1)?.[0]).toBe("secret-token-2");
-    expect(client.getQueryCache().getAll()).toHaveLength(3);
+    expect(client.getQueryCache().getAll()).toHaveLength(4);
   });
 
   it("separates caches by tenant scope", async () => {
-    const { result, rerender } = renderHook(({ network }) => useSpatialScene("t", network, true), { wrapper, initialProps: { network: "network" } });
+    // The page reads the network from the same store as the session scope (one render per change).
+    const { result } = renderHook(() => useSpatialScene("t", useWorkspaceStore((state) => state.networkId), true), { wrapper });
     await waitFor(() => expect(result.current.data).toEqual(scene));
+    const firstKey = JSON.stringify(client.getQueryCache().getAll()[0].queryKey);
     act(() => useWorkspaceStore.setState({ networkId: "other" }));
-    rerender({ network: "other" });
     await waitFor(() => expect(getSpatialScene).toHaveBeenCalledTimes(2));
     expect(vi.mocked(getSpatialScene).mock.calls[1][1]).toBe("other");
+    const keys = client.getQueryCache().getAll().map((query) => JSON.stringify(query.queryKey));
+    expect(keys).toHaveLength(2);
+    expect(keys).toContain(firstKey);
   });
 });

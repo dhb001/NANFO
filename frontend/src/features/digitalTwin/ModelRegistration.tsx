@@ -22,8 +22,8 @@ export function ModelRegistrationControls({ initial, saved = false, disabled = f
   return <fieldset disabled={disabled}>
     <legend>Model registration — {saved && !dirty ? "saved" : "local, unsaved"}</legend>
     <p>Translation meters; rotation radians (Rz × Ry × Rx); positive XYZ scale into meter/Y-up. Apply locally, then Persist Model Asset to save. Legacy assets remain unregistered.</p>
-    <div style={{ display: "flex", flexWrap: "wrap", gap: "0.4rem" }}>
-      {["Position X", "Position Y", "Position Z", "Rotation X", "Rotation Y", "Rotation Z", "Scale X", "Scale Y", "Scale Z"].map((label, index) => <label key={label} style={{ display: "grid", width: 110 }}>{label}
+    <div className="twin-registration-grid">
+      {["Position X", "Position Y", "Position Z", "Rotation X", "Rotation Y", "Rotation Z", "Scale X", "Scale Y", "Scale Z"].map((label, index) => <label key={label} className="twin-registration-field">{label}
         <input type="number" step="any" value={values[index]} onChange={(event) => { setValues(values.map((value, i) => i === index ? event.target.value : value)); setApplied(false); setDirty(true); }} />
       </label>)}
     </div>

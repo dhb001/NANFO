@@ -11,7 +11,9 @@ export function disposeModelResources(roots: readonly Object3D[]): void {
     if (!value || typeof value !== "object" || !(value as Texture).isTexture) return;
     const item = value as Texture;
     textures.add(item);
-    for (const image of Array.isArray(item.image) ? item.image : [item.image]) if (image) images.add(image);
+    const image: unknown = item.image;
+    const sources: readonly unknown[] = Array.isArray(image) ? image : [image];
+    for (const source of sources) if (source && typeof source === "object") images.add(source);
   }
   for (const root of roots) root.traverse((object) => {
     const mesh = object as Object3D & { geometry?: BufferGeometry; material?: Material | Material[]; skeleton?: Skeleton };

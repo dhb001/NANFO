@@ -54,6 +54,6 @@ export function geometryCameraFocus(shapes: GeometryShape[]) {
   const radius = bounds.getSize(new Vector3()).length() / 2;
   // Conservative fit for 46° FOV, including narrow laptop viewports.
   const distance = Math.max(1, radius * 4);
-  return { target: target.toArray() as Triple, position: target.clone().add(new Vector3(1, 0.8, 1).normalize().multiplyScalar(distance)).toArray() as Triple,
+  return { target: target.toArray(), position: target.clone().add(new Vector3(1, 0.8, 1).normalize().multiplyScalar(distance)).toArray(),
     near: Math.max(0.001, distance / 10000), far: Math.max(2000, distance * 10) };
 }

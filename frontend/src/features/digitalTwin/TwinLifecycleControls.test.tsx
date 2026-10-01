@@ -33,7 +33,9 @@ it("retires exactly the confirmed asset with an empty DELETE, clears selection o
   expect(fetchMock).not.toHaveBeenCalled();
   fireEvent.click(screen.getByText("Retire selected asset"));
   await screen.findByText("Selected asset retired.");
-  expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("/api/v1/networks/network/campus/model-assets/asset-old"), expect.objectContaining({ method: "DELETE", body: undefined, headers: { Authorization: "Bearer token" } }));
+  expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("/api/v1/networks/network/campus/model-assets/asset-old"), expect.objectContaining({ method: "DELETE", headers: { Authorization: "Bearer token" } }));
+  // Empty DELETE: no body at all (the shared client now omits the key instead of sending `body: undefined`).
+  expect(fetchMock.mock.calls[0]?.[1]?.body).toBeUndefined();
   expect(retired).toHaveBeenCalledWith("asset-old");
   expect(screen.getByLabelText("Persisted model asset")).toHaveValue("");
   expect(reload).toHaveBeenCalledOnce();

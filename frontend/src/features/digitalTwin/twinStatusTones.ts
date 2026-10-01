@@ -65,7 +65,7 @@ export const OVERLAY_BASE_COLORS: Readonly<Record<"intent_state" | "simulation_s
 
 function lookup(map: Readonly<Record<string, TwinTone>>, value: string | null | undefined): TwinTone {
   if (typeof value !== "string") return "neutral";
-  return Object.hasOwn(map, value) ? map[value] : "neutral";
+  return (Object.hasOwn(map, value) ? map[value] : undefined) ?? "neutral";
 }
 
 export interface OverlayStateLike {

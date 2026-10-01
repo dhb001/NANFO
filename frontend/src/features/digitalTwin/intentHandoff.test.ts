@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { MAX_HANDOFF_ALERT_REFS, buildIntentHandoffFromNode, intentHandoffQuery } from "./intentHandoff";
+import { intentHandoffState, readIntentHandoffState } from "@/features/intent/handoff";
+import { MAX_HANDOFF_ALERT_REFS, buildIntentHandoffFromNode } from "./intentHandoff";
 import { deriveDeviceAlertStates } from "./twinSeverity";
 
 describe("Digital Twin -> Intent handoff", () => {
@@ -26,9 +27,11 @@ describe("Digital Twin -> Intent handoff", () => {
     expect(scope.backend_alerts).toHaveLength(MAX_HANDOFF_ALERT_REFS);
   });
 
-  it("omits the action parameter from the Intent query", () => {
-    const params = new URLSearchParams(intentHandoffQuery(buildIntentHandoffFromNode(node)));
-    expect([...params.keys()]).toEqual(["source", "scope", "constraints", "context_summary"]);
-    expect(JSON.parse(params.get("constraints")!)).toEqual({ max_downtime: 0, preserve_connectivity: true, simulation_required: true, context_source: "digital_twin" });
+  it("travels as trusted router state (never in the URL) and carries no action", () => {
+    const state = intentHandoffState(buildIntentHandoffFromNode(node));
+    const reading = readIntentHandoffState(state);
+    expect(reading).toMatchObject({ source: "digital-twin", action: null, untrusted: false, contextSummary: "device=edge-1 | backend_alerts=0 active, 0 acknowledged | action=operator choice" });
+    expect(JSON.parse(reading!.constraintsJson)).toEqual({ max_downtime: 0, preserve_connectivity: true, simulation_required: true, context_source: "digital_twin" });
+    expect(JSON.parse(reading!.scopeJson)).toEqual({ source: "digital_twin", device_id: "d1", spatial_ref_id: "campus/b1/f1/r1/d1", backend_alerts: [] });
   });
 });

@@ -1,4 +1,5 @@
 import { Suspense, lazy } from "react";
+import "./twin.css";
 import { useAuthStore } from "@/shared/state/auth-store";
 import { useWorkspaceStore } from "@/shared/state/workspace-store";
 
@@ -14,7 +15,7 @@ export function TwinPage() {
   const workspaceId = useWorkspaceStore((state) => state.workspaceId);
   const networkId = useWorkspaceStore((state) => state.networkId);
   return (
-    <Suspense fallback={<div style={{ color: "var(--ink-3)" }}>Loading...</div>}>
+    <Suspense fallback={<p role="status" className="twin-muted">Loading...</p>}>
       <TwinPageContent key={JSON.stringify([generation, userId, organizationId, workspaceId, networkId])} />
     </Suspense>
   );

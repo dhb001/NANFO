@@ -61,13 +61,3 @@ export function buildIntentHandoffFromNode(node: IntentHandoffNode, alerts: read
     contextSummary: summary,
   };
 }
-
-/** Query string for `/ops/intent`; the action parameter is omitted deliberately. */
-export function intentHandoffQuery(handoff: IntentHandoffPrefill): string {
-  const query = new URLSearchParams();
-  query.set("source", handoff.source);
-  query.set("scope", handoff.scopeJson);
-  query.set("constraints", handoff.constraintsJson);
-  query.set("context_summary", handoff.contextSummary);
-  return query.toString();
-}
