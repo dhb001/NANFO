@@ -1,0 +1,106 @@
+{
+  "schema": "nanfo-evidence-location-exceptions-v1",
+  "decision": "Owner decision 2026-09-24 (ADR-028 section 5): these 10 ADR-023 deployment-verification evidence copies inside the campaign-014 source snapshot stay tracked, because the campaign's plan.json, offline-gates.json and seed-audit.json pin each file by path and SHA-256 and their content scan is clean. Only these exact paths with these exact digests are excepted from the tracked deploy/state rule; any changed byte, rename or additional file fails. Purging them with a history rewrite remains an owner option.",
+  "files": {
+    "nanfo-experimental-campaign-014/source/deploy/state/adr023-private-evidence/nanfo-deploy-verify-b_fzalg0/backup/manifest.json": {
+      "sha256": "0ad15462fb7aefd9f715b09ebc4ceb2e3a7cb2a24e8014124d882c68ba39d57a",
+      "rule": "tracked_deploy_state",
+      "pinned_by": [
+        "nanfo-experimental-campaign-014/plan.json",
+        "nanfo-experimental-campaign-014/offline-gates.json",
+        "nanfo-experimental-campaign-014/seed-audit.json"
+      ],
+      "reason": "ADR-023 deployment-verification backup manifest copied into the frozen campaign-014 source snapshot; pinned by path and SHA-256 in the campaign plan, offline gates and seed audit (owner decision 2026-09-24)."
+    },
+    "nanfo-experimental-campaign-014/source/deploy/state/adr023-private-evidence/nanfo-deploy-verify-d_iukq6u/backup/manifest.json": {
+      "sha256": "6ba5c09b6636547dee2f07e6f5ea951078ecce66502dbe5668f1aaad84550fe2",
+      "rule": "tracked_deploy_state",
+      "pinned_by": [
+        "nanfo-experimental-campaign-014/plan.json",
+        "nanfo-experimental-campaign-014/offline-gates.json",
+        "nanfo-experimental-campaign-014/seed-audit.json"
+      ],
+      "reason": "ADR-023 deployment-verification backup manifest copied into the frozen campaign-014 source snapshot; pinned by path and SHA-256 in the campaign plan, offline gates and seed audit (owner decision 2026-09-24)."
+    },
+    "nanfo-experimental-campaign-014/source/deploy/state/adr023-private-evidence/nanfo-deploy-verify-e5vhtnkm/backup/manifest.json": {
+      "sha256": "21065946b4c7a8b23a76c249ef63430175a60fb2aa7ce049e55c3eba72613f73",
+      "rule": "tracked_deploy_state",
+      "pinned_by": [
+        "nanfo-experimental-campaign-014/plan.json",
+        "nanfo-experimental-campaign-014/offline-gates.json",
+        "nanfo-experimental-campaign-014/seed-audit.json"
+      ],
+      "reason": "ADR-023 deployment-verification backup manifest copied into the frozen campaign-014 source snapshot; pinned by path and SHA-256 in the campaign plan, offline gates and seed audit (owner decision 2026-09-24)."
+    },
+    "nanfo-experimental-campaign-014/source/deploy/state/adr023-private-evidence/nanfo-deploy-verify-fnh8dvek/backup/manifest.json": {
+      "sha256": "706b342be6ba0cb2ad998e18d6fa9cbdbb0ef9fa5debadae60caa01dbba42a2a",
+      "rule": "tracked_deploy_state",
+      "pinned_by": [
+        "nanfo-experimental-campaign-014/plan.json",
+        "nanfo-experimental-campaign-014/offline-gates.json",
+        "nanfo-experimental-campaign-014/seed-audit.json"
+      ],
+      "reason": "ADR-023 deployment-verification backup manifest copied into the frozen campaign-014 source snapshot; pinned by path and SHA-256 in the campaign plan, offline gates and seed audit (owner decision 2026-09-24)."
+    },
+    "nanfo-experimental-campaign-014/source/deploy/state/adr023-private-evidence/nanfo-deploy-verify-tmi4p8hn/backup/manifest.json": {
+      "sha256": "1b8bf5db591bc91b148642fa939ec06f5e9263cc200f26c97855d17ea878dadd",
+      "rule": "tracked_deploy_state",
+      "pinned_by": [
+        "nanfo-experimental-campaign-014/plan.json",
+        "nanfo-experimental-campaign-014/offline-gates.json",
+        "nanfo-experimental-campaign-014/seed-audit.json"
+      ],
+      "reason": "ADR-023 deployment-verification backup manifest copied into the frozen campaign-014 source snapshot; pinned by path and SHA-256 in the campaign plan, offline gates and seed audit (owner decision 2026-09-24)."
+    },
+    "nanfo-experimental-campaign-014/source/deploy/state/adr023-private-evidence/nanfo-deploy-verify-ui7t5pi2/backup/manifest.json": {
+      "sha256": "0b203d722888a143d6d5f391d22f463eba6654e80f61433a70b6cd9c01da5428",
+      "rule": "tracked_deploy_state",
+      "pinned_by": [
+        "nanfo-experimental-campaign-014/plan.json",
+        "nanfo-experimental-campaign-014/offline-gates.json",
+        "nanfo-experimental-campaign-014/seed-audit.json"
+      ],
+      "reason": "ADR-023 deployment-verification backup manifest copied into the frozen campaign-014 source snapshot; pinned by path and SHA-256 in the campaign plan, offline gates and seed audit (owner decision 2026-09-24)."
+    },
+    "nanfo-experimental-campaign-014/source/deploy/state/adr023-private-evidence/relocation-nanfo-deploy-verify-b_fzalg0.json": {
+      "sha256": "5f777df098c8244c6f002e47c2444052ef0a2796e830ab64f3ebb5fdba0683e1",
+      "rule": "tracked_deploy_state",
+      "pinned_by": [
+        "nanfo-experimental-campaign-014/plan.json",
+        "nanfo-experimental-campaign-014/offline-gates.json",
+        "nanfo-experimental-campaign-014/seed-audit.json"
+      ],
+      "reason": "ADR-023 deployment-verification relocation receipt copied into the frozen campaign-014 source snapshot; pinned by path and SHA-256 in the campaign plan, offline gates and seed audit (owner decision 2026-09-24)."
+    },
+    "nanfo-experimental-campaign-014/source/deploy/state/adr023-private-evidence/relocation-nanfo-deploy-verify-e5vhtnkm.json": {
+      "sha256": "ace3c3af0406f2057b4cad1db2a86c0b4e0f9eb2f87922fb892b7d0d2bafaeae",
+      "rule": "tracked_deploy_state",
+      "pinned_by": [
+        "nanfo-experimental-campaign-014/plan.json",
+        "nanfo-experimental-campaign-014/offline-gates.json",
+        "nanfo-experimental-campaign-014/seed-audit.json"
+      ],
+      "reason": "ADR-023 deployment-verification relocation receipt copied into the frozen campaign-014 source snapshot; pinned by path and SHA-256 in the campaign plan, offline gates and seed audit (owner decision 2026-09-24)."
+    },
+    "nanfo-experimental-campaign-014/source/deploy/state/adr023-private-evidence/relocation-nanfo-deploy-verify-fnh8dvek.json": {
+      "sha256": "3444ef74a47c26c4ddaed82bbc3fc5a834684c83b66088ab1e55888b453e2801",
+      "rule": "tracked_deploy_state",
+      "pinned_by": [
+        "nanfo-experimental-campaign-014/plan.json",
+        "nanfo-experimental-campaign-014/offline-gates.json",
+        "nanfo-experimental-campaign-014/seed-audit.json"
+      ],
+      "reason": "ADR-023 deployment-verification relocation receipt copied into the frozen campaign-014 source snapshot; pinned by path and SHA-256 in the campaign plan, offline gates and seed audit (owner decision 2026-09-24)."
+    },
+    "nanfo-experimental-campaign-014/source/deploy/state/adr023-private-evidence/relocation.json": {
+      "sha256": "426010cfd2bcdccfdb34dfadcb35a791bd6bdc3f31bb16f0848ab883387850cb",
+      "rule": "tracked_deploy_state",
+      "pinned_by": [
+        "nanfo-experimental-campaign-014/plan.json",
+        "nanfo-experimental-campaign-014/offline-gates.json",
+        "nanfo-experimental-campaign-014/seed-audit.json"
+      ],
+      "reason": "ADR-023 deployment-verification relocation receipt copied into the frozen campaign-014 source snapshot; pinned by path and SHA-256 in the campaign plan, offline gates and seed audit (owner decision 2026-09-24)."
+    }
+  }
+}

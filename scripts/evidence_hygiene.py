@@ -49,6 +49,28 @@ BEARER = re.compile(rb"(?i)\bBearer\s+([a-z0-9_.~+/-]{16,})")
 JWT = re.compile(rb"\beyJ[a-zA-Z0-9_-]{8,}\.[a-zA-Z0-9_-]{8,}\.[a-zA-Z0-9_-]{8,}")
 PRIVATE_KEY = re.compile(rb"-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY-----")
 DSN = re.compile(rb"(?<![a-z0-9])[a-z][a-z0-9+.-]{0,31}://[^\s/:{}]+:([^\s/@{}]+)@", re.I)
+# Paths that must never be committed, wherever they appear, including inside campaign
+# source snapshots (e.g. nanfo-experimental-campaign-014/source/deploy/state/...).
+# Content scanning cannot vouch for these: they are private by location (ADR-028 §5).
+FORBIDDEN_TRACKED = (
+    (re.compile(r"(?:^|/)deploy/state(?:/|$)"), "tracked_deploy_state"),
+    (re.compile(r"(?:^|/)ai-engine/artifacts(?:/|$)"), "tracked_private_artifact_store"),
+    (re.compile(r"(?:^|/)\.?secrets/"), "tracked_secret_directory"),
+    (re.compile(r"(?:^|/)(?:[^/]+\.env|\.env(?:\.[^/]+)?)$"), "tracked_env_file"),
+)
+ENV_TEMPLATE = re.compile(r"(?:^|/)\.env\.example$")
+# Owner-approved exceptions to the location rules: exact tracked path + exact SHA-256,
+# never a pattern. Only the deploy-state rule is exceptable; secret directories, .env
+# files and the private artifact store never are.
+LOCATION_EXCEPTION_SCHEMA = "nanfo-evidence-location-exceptions-v1"
+EXCEPTABLE_LOCATION_RULES = frozenset({"tracked_deploy_state"})
+
+
+def forbidden_tracked(name):
+    """Rule codes for a committed path that must never be tracked (path_name-validated)."""
+    path_name(name)
+    return [rule for pattern, rule in FORBIDDEN_TRACKED
+            if pattern.search(name) and not (rule == "tracked_env_file" and ENV_TEMPLATE.search(name))]
 
 
 def require(ok, code):
@@ -155,11 +177,39 @@ class Scanner:
         self.total = 0
         self.entries = 0
         self.fixture_matches = 0
+        self.location_exception_matches = 0
 
     def finding(self, name, rule):
         row = {"path_sha256": safe.sha256(name.encode()), "rule": rule}
         if row not in self.findings:
             self.findings.append(row)
+
+    def tracked_paths(self, selected, root=None, exceptions=None):
+        """Location rules for the committed inventory, campaign source snapshots included.
+
+        An exception applies only to its exact path, rule and content digest; any other
+        file in a forbidden location, a changed byte or a rename still fails, and an
+        exception whose path is no longer tracked fails as stale.
+        """
+        exceptions = exceptions or {}
+        for name in selected:
+            for rule in forbidden_tracked(name):
+                exception = exceptions.get(name)
+                if exception and exception["rule"] == rule and root is not None \
+                        and self.content_digest(root, name) == exception["sha256"]:
+                    self.location_exception_matches += 1
+                    continue
+                self.finding(name, rule)
+        present = set(selected)
+        for name in exceptions:
+            if name not in present:
+                self.finding(name, "stale_location_exception")
+
+    def content_digest(self, root, name):
+        try:
+            return safe.sha256(read_file(root, name, self.limits.file_bytes))
+        except (Error, OSError):
+            return None
 
     def charge(self, size):
         self.entries += 1
@@ -181,8 +231,11 @@ class Scanner:
             if python_source and pattern is ASSIGNMENT and matches:
                 # A Python variable/attribute assignment is not a credential literal.
                 # Constant strings (including embedded config/JSON) remain screened.
+                # surrogatepass: a lone-surrogate escape ("\ud800") is valid Python and
+                # must not turn an ordinary source file into uninspectable content.
                 tree = ast.parse(data)
-                literal_data = b"\n".join(node.value.encode() if isinstance(node.value, str) else node.value
+                literal_data = b"\n".join(node.value.encode("utf-8", "surrogatepass")
+                                          if isinstance(node.value, str) else node.value
                                           for node in ast.walk(tree) if isinstance(node, ast.Constant)
                                           and isinstance(node.value, (str, bytes)))
                 matches = [m for m in matches if m.group(1) in literal_data]
@@ -331,6 +384,7 @@ class Scanner:
     def report(self):
         return {"status": "failed" if self.findings else "passed", "entries": self.entries,
                 "inspected_bytes": self.total, "synthetic_fixture_matches": self.fixture_matches,
+                "location_exception_matches": self.location_exception_matches,
                 "findings": self.findings}
 
 
@@ -349,6 +403,28 @@ def load_fixtures(path):
                 and all(isinstance(rule, str) for rule in item["rules"])
                 and set(item["rules"]) <= {"secret_assignment", "secret_field", "credential_url", "bearer", "jwt", "private_key"},
                 "invalid_fixture_exception")
+    return value["files"]
+
+
+def load_location_exceptions(path):
+    """Owner-approved exact-path exceptions to the location rules (see security/)."""
+    value = safe.parse_json(read_file(path.parent, path.name, 1024**2))
+    require(isinstance(value, dict) and set(value) == {"schema", "decision", "files"}
+            and value["schema"] == LOCATION_EXCEPTION_SCHEMA
+            and isinstance(value["decision"], str) and len(value["decision"].strip()) >= 16
+            and isinstance(value["files"], dict) and value["files"], "invalid_location_exceptions")
+    for name, item in value["files"].items():
+        path_name(name)
+        require(isinstance(item, dict) and set(item) == {"sha256", "rule", "pinned_by", "reason"}
+                and isinstance(item["sha256"], str) and safe.HEX.fullmatch(item["sha256"])
+                and item["rule"] in EXCEPTABLE_LOCATION_RULES
+                # The path must really be in the excepted location, and nothing else.
+                and forbidden_tracked(name) == [item["rule"]]
+                and isinstance(item["pinned_by"], list) and item["pinned_by"]
+                and all(isinstance(pin, str) and path_name(pin) and not forbidden_tracked(pin)
+                        for pin in item["pinned_by"])
+                and isinstance(item["reason"], str) and len(item["reason"].strip()) >= 16,
+                "invalid_location_exception")
     return value["files"]
 
 
@@ -489,6 +565,8 @@ def main(argv=None):
     parser.add_argument("--destination", type=Path)
     parser.add_argument("--allowlist", type=Path)
     parser.add_argument("--fixtures", type=Path)
+    parser.add_argument("--location-exceptions", type=Path,
+                        help="With --tracked, exact-path/SHA-256 owner exceptions to the location rules")
     parser.add_argument("--known-private", type=Path)
     parser.add_argument("--tracked", action="store_true", help="Scan tracked working-tree files; pending deletions excluded")
     parser.add_argument("--include-untracked", action="store_true", help="With --tracked, include nonignored new files for precommit validation")
@@ -503,6 +581,8 @@ def main(argv=None):
         tokens = known_private_tokens(args.known_private) if args.known_private else ()
         if args.operation == "scan":
             require(not args.include_untracked or args.tracked, "tracked_required")
+            require(args.location_exceptions is None or args.tracked, "tracked_required")
+            exceptions = load_location_exceptions(args.location_exceptions) if args.location_exceptions else None
             selected = tracked_names(args.root, include_untracked=args.include_untracked) if args.tracked else names(args.root, limits.entries)
             if args.tracked:
                 # git diff --diff-filter=D distinguishes intentional worktree deletions.
@@ -512,6 +592,8 @@ def main(argv=None):
                 deleted = set(result.stdout.decode().split("\0"))
                 selected = [n for n in selected if n not in deleted]
             scanner = Scanner(limits, tokens, load_fixtures(args.fixtures) if args.fixtures else None)
+            if args.tracked:
+                scanner.tracked_paths(selected, args.root, exceptions)
             result = scanner.scan(args.root, selected)
         elif args.operation == "preserve-credentials":
             require(args.destination is not None, "destination_required")

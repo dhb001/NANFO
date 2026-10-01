@@ -27,6 +27,18 @@
 3f9f1f1fd247cd1af6d66cf38d94155ee32a91e1:nanfo-experimental-campaign-014/source/scripts/test_preserve_qualification_evidence.py:generic-api-key:45
 3f9f1f1fd247cd1af6d66cf38d94155ee32a91e1:scripts/test_preserve_qualification_evidence.py:generic-api-key:45
 
-# Source code false positive: `key, max_bytes=args.max_volume_bytes` argument list.
+# Source code false positive: a keyword-argument list in deploy/backup_restore.py, no literal value.
 3f9f1f1fd247cd1af6d66cf38d94155ee32a91e1:nanfo-experimental-campaign-014/source/deploy/backup_restore.py:generic-api-key:1232
 ef069559b6163b2add007d05c6326941fc7791c9:deploy/backup_restore.py:generic-api-key:1101
+
+# Commit e55a4f5 (wave-2 snapshot), reviewed 2026-09-24. The earlier wording of the comment
+# above matched the generic rule; synthetic JWT literals in log/report redaction tests
+# (payloads sub=secret and sub=1234567890, signatures are plain words); synthetic
+# production-shaped store passwords and a previous-signing-key literal passed only to
+# in-process Settings/PyJWT objects in unit tests.
+e55a4f5dc73f0dfb22c4a167ff21f16802e8cff7:.gitleaksignore:generic-api-key:30
+e55a4f5dc73f0dfb22c4a167ff21f16802e8cff7:backend/scripts/test_review_fullstack.py:jwt:245
+e55a4f5dc73f0dfb22c4a167ff21f16802e8cff7:backend/tests/unit/test_logging_redaction.py:jwt:19
+e55a4f5dc73f0dfb22c4a167ff21f16802e8cff7:backend/tests/unit/test_settings_followups.py:generic-api-key:217
+e55a4f5dc73f0dfb22c4a167ff21f16802e8cff7:backend/tests/unit/test_settings_followups.py:generic-api-key:218
+e55a4f5dc73f0dfb22c4a167ff21f16802e8cff7:backend/tests/unit/test_security_pyjwt.py:generic-api-key:33

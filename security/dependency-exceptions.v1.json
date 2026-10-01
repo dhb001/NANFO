@@ -10,60 +10,60 @@
       "remediation": "Successor plan (ADR-028 section 1): a versioned successor CPU runtime with torch >=2.13.0 (current highest advertised fix) delivered as a new runtime identity, never a relabel. Reevaluate unpatched PYSEC-2026-139 applicability, audit the exact wheel/SBOM, run deterministic tensor/load/tamper and isolated inference regressions, then source/image/model-bound requalification. Repeated training and qualification evidence are owner actions (ADR-028 section 5) and are not invented. Do not alter the historical environment or weights."
     },
     {
-      "lane": "emulation", "package": "ryu", "version": "4.34",
+      "lane": "emulation-frozen", "package": "ryu", "version": "4.34",
       "advisories": ["PYSEC-2026-1876", "PYSEC-2026-1877", "PYSEC-2026-1878", "PYSEC-2026-1879", "PYSEC-2026-1880", "PYSEC-2026-1881", "PYSEC-2026-1882", "PYSEC-2026-1883", "PYSEC-2026-1884"],
       "owner": "Emulation qualification maintainer", "expires": "2026-10-29",
-      "rationale": "emulation/requirements.txt pins the frozen historical lab runtime that recorded campaign results depend on (ADR-028 section 1: not rewritten). Upstream has no fixed release for these OpenFlow parser infinite loops. OpenFlow from lab OVS reaches the parser: malicious/compromised switches remain a real DoS risk. ADR-028 C23 makes the successor lab the default and restricts the frozen privileged image to the explicit opt-in historical-reproduction overlay (deploy/compose.lab.frozen.yaml / NANFO_LAB_FROZEN=1). Exception applies only to isolated operator-owned emulation, never an untrusted switch or public controller service.",
-      "remediation": "Successor plan (ADR-028 section 1, C23): versioned successor controller/runtime on a supported base image with a hash-pinned successor lock (AI-Emulation workstream), malformed-frame tests, then source/image-bound requalification. Preserve historical bytes. Shortest expiry: the controller parser is the most exposed component."
+      "rationale": "emulation/requirements.frozen.txt (with emulation/Dockerfile.frozen) pins the frozen historical lab runtime that recorded campaign results depend on (ADR-028 section 1: not rewritten). Upstream has no fixed release for these OpenFlow parser infinite loops. OpenFlow from lab OVS reaches the parser: malicious/compromised switches remain a real DoS risk. ADR-028 C23 makes the successor lab the default and restricts the frozen privileged image to the explicit opt-in historical-reproduction overlay (deploy/compose.lab.frozen.yaml / NANFO_LAB_FROZEN=1). Exception applies only to isolated operator-owned emulation, never an untrusted switch or public controller service.",
+      "remediation": "Successor (ADR-028 section 1, C23): emulation/Dockerfile on a supported base with the hash-pinned lock emulation/requirements.txt replaces Ryu with the maintained os-ken 4.2.2 controller (audited in the emulation lane); remaining: malformed-frame tests, then source/image-bound requalification before any result claim. Preserve historical bytes. Shortest expiry: the controller parser is the most exposed component."
     },
     {
-      "lane": "emulation", "package": "eventlet", "version": "0.30.2",
+      "lane": "emulation-frozen", "package": "eventlet", "version": "0.30.2",
       "advisories": ["PYSEC-2021-12", "PYSEC-2026-1307", "PYSEC-2026-1350", "PYSEC-2026-2472"],
       "owner": "Emulation qualification maintainer", "expires": "2026-10-29",
       "rationale": "Frozen Ryu requires ALREADY_HANDLED removed in later eventlet. WebSocket exhaustion, DNS interference and WSGI request smuggling remain unpatched here. No public WSGI/WebSocket listener is authorized; lab DNS and controller peers must remain isolated. PYSEC-2026-1307 and 2472 alias the same CVE but both exact feed IDs are reviewed. Reachable only through the frozen opt-in overlay (ADR-028 C23).",
-      "remediation": "Successor plan (ADR-028 C23): the successor lock (AI-Emulation) removes the legacy eventlet/Ryu coupling; exercise HTTP/WebSocket/DNS boundaries and requalify before promotion."
+      "remediation": "Successor lock emulation/requirements.txt (ADR-028 C23) pins eventlet 0.41.2 with os-ken instead of Ryu; remaining: exercise HTTP/WebSocket/DNS boundaries and requalify before promotion."
     },
     {
-      "lane": "emulation", "package": "dnspython", "version": "1.16.0",
+      "lane": "emulation-frozen", "package": "dnspython", "version": "1.16.0",
       "advisories": ["PYSEC-2026-1307"],
       "owner": "Emulation qualification maintainer", "expires": "2026-11-05",
       "rationale": "Frozen eventlet DNS dependency is susceptible to TuDoor. Numeric lab addresses reduce routine DNS exposure; hostile network DNS remains a risk, not a proven unreachable path. Reachable only through the frozen opt-in overlay (ADR-028 C23).",
-      "remediation": "Successor plan (ADR-028 C23): dnspython >=2.6.1 in the successor lock (AI-Emulation) with DNS regression and qualification."
+      "remediation": "Successor lock emulation/requirements.txt (ADR-028 C23) pins dnspython 2.8.0; remaining: DNS regression and qualification."
     },
     {
-      "lane": "emulation", "package": "webob", "version": "1.8.9",
+      "lane": "emulation-frozen", "package": "webob", "version": "1.8.9",
       "advisories": ["PYSEC-2026-251", "PYSEC-2026-3943"],
       "owner": "Emulation qualification maintainer", "expires": "2026-11-05",
       "rationale": "Frozen controller HTTP dependency; hostile Location targets can redirect off-host. No public redirect/SSO use is authorized in this operator-only lab. Do not expose Ryu web services to untrusted callers. Reachable only through the frozen opt-in overlay (ADR-028 C23).",
-      "remediation": "Successor plan (ADR-028 C23): WebOb >=1.8.11 (or no WebOb) in the successor lock (AI-Emulation); redirect/control-character tests and image requalification."
+      "remediation": "Successor lock emulation/requirements.txt (ADR-028 C23) pins WebOb 1.8.11; remaining: redirect/control-character tests and image requalification."
     },
     {
-      "lane": "emulation", "package": "msgpack", "version": "1.0.8",
+      "lane": "emulation-frozen", "package": "msgpack", "version": "1.0.8",
       "advisories": ["PYSEC-2026-3625"],
       "owner": "Emulation qualification maintainer", "expires": "2026-11-12",
       "rationale": "Streaming Unpacker reuse after errors can crash. NANFO emulation exchanges JSON, not an exposed MessagePack input endpoint; transitively installed Ryu code still requires review before new RPC use. Reachable only through the frozen opt-in overlay (ADR-028 C23).",
-      "remediation": "Successor plan (ADR-028 C23): msgpack >=1.2.1 (or no msgpack) in the successor lock (AI-Emulation) and a malformed-stream regression."
+      "remediation": "Successor lock emulation/requirements.txt (ADR-028 C23) pins msgpack 1.2.2; remaining: a malformed-stream regression."
     },
     {
-      "lane": "emulation", "package": "requests", "version": "2.31.0",
+      "lane": "emulation-frozen", "package": "requests", "version": "2.31.0",
       "advisories": ["PYSEC-2026-1872", "PYSEC-2026-1873", "PYSEC-2026-2275"],
       "owner": "Emulation qualification maintainer", "expires": "2026-11-12",
       "rationale": "Frozen client dependency retains TLS-session verification persistence, netrc disclosure and zipped-path temporary-file flaws. Lab destinations must be operator-controlled; no host netrc credentials or shared writable temp mounts. These constraints limit exposure and do not patch the library.",
-      "remediation": "Successor plan (ADR-028 C23): requests >=2.33.0 in the successor lock (AI-Emulation); TLS, redirect, credential and temporary-file regressions."
+      "remediation": "Successor lock emulation/requirements.txt (ADR-028 C23) pins requests 2.34.2; remaining: TLS, redirect, credential and temporary-file regressions."
     },
     {
-      "lane": "emulation", "package": "idna", "version": "3.7",
+      "lane": "emulation-frozen", "package": "idna", "version": "3.7",
       "advisories": ["PYSEC-2026-215"],
       "owner": "Emulation qualification maintainer", "expires": "2026-11-26",
       "rationale": "Oversized attacker-controlled Unicode hostnames can consume CPU. Operator-defined numeric lab endpoints reduce exposure; arbitrary remote URL inputs are outside the exception scope.",
-      "remediation": "Successor plan (ADR-028 C23): idna >=3.15 in the successor lock (AI-Emulation) with hostname-boundary tests."
+      "remediation": "Successor lock emulation/requirements.txt (ADR-028 C23) pins idna 3.20; remaining: hostname-boundary tests."
     },
     {
-      "lane": "emulation", "package": "urllib3", "version": "1.26.19",
+      "lane": "emulation-frozen", "package": "urllib3", "version": "1.26.19",
       "advisories": ["PYSEC-2026-141", "PYSEC-2026-1994", "PYSEC-2026-1996", "PYSEC-2026-1998", "PYSEC-2026-1999"],
       "owner": "Emulation qualification maintainer", "expires": "2026-11-26",
       "rationale": "Frozen HTTP dependency retains redirect/header leakage and response decompression DoS. Only controlled lab endpoints are authorized; malicious responses remain exploitable if that boundary fails. Do not use this runtime for arbitrary web fetching.",
-      "remediation": "Successor plan (ADR-028 C23): urllib3 >=2.7.0 in the successor lock (AI-Emulation); bounded decompression and cross-origin redirect credential tests plus requalification."
+      "remediation": "Successor lock emulation/requirements.txt (ADR-028 C23) pins urllib3 2.8.0; remaining: bounded decompression and cross-origin redirect credential tests plus requalification."
     }
   ],
   "coverage_gaps": [
