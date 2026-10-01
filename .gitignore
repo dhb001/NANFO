@@ -23,6 +23,8 @@ ENV/
 
 # --- Build / packaging artifacts ---
 build/
+# Source code, not build output: the frontend build guards imported by vite.config.ts.
+!frontend/src/scripts/build/
 dist/
 *.egg-info/
 .eggs/
