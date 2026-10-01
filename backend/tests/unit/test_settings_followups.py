@@ -35,39 +35,63 @@ def _settings_like(node: ast.AST) -> bool:
     return "settings" in source or "config" in source
 
 
-def _literal(node: ast.AST | None):
+def _literal(node: ast.AST | None, constants: dict[str, object] | None = None):
     if node is None:
         return _MISSING
+    if isinstance(node, ast.Name):
+        return (constants or {}).get(node.id, _MISSING)
     try:
         return ast.literal_eval(node)
-    except ValueError:
+    except (TypeError, ValueError, SyntaxError):
         return _MISSING
+
+
+def _module_constants(tree: ast.Module) -> dict[str, object]:
+    """Top-level ``NAME = <literal>`` bindings, so named fallbacks (``DEFAULT_X``) are compared too."""
+    constants: dict[str, object] = {}
+    for statement in tree.body:
+        if isinstance(statement, ast.Assign):
+            targets, value = statement.targets, statement.value
+        elif isinstance(statement, ast.AnnAssign) and statement.value is not None:
+            targets, value = [statement.target], statement.value
+        else:
+            continue
+        literal = _literal(value)
+        for target in targets:
+            if isinstance(target, ast.Name) and literal is not _MISSING:
+                constants[target.id] = literal
+    return constants
+
+
+def _source_reads(source: str, location: str, reads: dict[str, list[tuple[str, object]]]) -> None:
+    tree = ast.parse(source, filename=location)
+    constants = _module_constants(tree)
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        function = ast.unparse(node.func)
+        names = [
+            (index, arg.value) for index, arg in enumerate(node.args)
+            if isinstance(arg, ast.Constant) and isinstance(arg.value, str) and _NAME.match(arg.value)
+        ]
+        site = f"{location}:{node.lineno}"
+        if function == "getattr":
+            if len(node.args) >= 2 and names and names[0][0] == 1 and _settings_like(node.args[0]):
+                default = _literal(node.args[2], constants) if len(node.args) > 2 else _MISSING
+                reads.setdefault(names[0][1], []).append((site, default))
+        elif ("setting" in function.lower() or "configured" in function.lower()) and not function.startswith(
+            ("os.", "environ"),
+        ):
+            for index, name in names:
+                default = _literal(node.args[index + 1], constants) if len(node.args) > index + 1 else _MISSING
+                reads.setdefault(name, []).append((site, default))
 
 
 def optional_setting_reads() -> dict[str, list[tuple[str, object]]]:
     """``{NAME: [(location, literal default | _MISSING), ...]}`` for app/ and scripts/."""
     reads: dict[str, list[tuple[str, object]]] = {}
     for path in sorted([*(BACKEND / "app").rglob("*.py"), *(BACKEND / "scripts").rglob("*.py")]):
-        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-        for node in ast.walk(tree):
-            if not isinstance(node, ast.Call):
-                continue
-            function = ast.unparse(node.func)
-            names = [
-                (index, arg.value) for index, arg in enumerate(node.args)
-                if isinstance(arg, ast.Constant) and isinstance(arg.value, str) and _NAME.match(arg.value)
-            ]
-            location = f"{path.relative_to(BACKEND)}:{node.lineno}"
-            if function == "getattr":
-                if len(node.args) >= 2 and names and names[0][0] == 1 and _settings_like(node.args[0]):
-                    default = _literal(node.args[2]) if len(node.args) > 2 else _MISSING
-                    reads.setdefault(names[0][1], []).append((location, default))
-            elif ("setting" in function.lower() or "configured" in function.lower()) and not function.startswith(
-                ("os.", "environ"),
-            ):
-                for index, name in names:
-                    default = _literal(node.args[index + 1]) if len(node.args) > index + 1 else _MISSING
-                    reads.setdefault(name, []).append((location, default))
+        _source_reads(path.read_text(encoding="utf-8"), str(path.relative_to(BACKEND)), reads)
     return reads
 
 
@@ -79,6 +103,21 @@ def test_scanner_discovers_known_optional_readers():
                  "AUTH_REFRESH_GRACE_SECONDS",  # _configured_seconds(...)
                  "REPORTS_MAX_CLAIM_ATTEMPTS"):  # bounded_setting(self.settings, ...)
         assert name in reads, name
+
+
+def test_scanner_resolves_module_level_named_fallbacks():
+    reads: dict[str, list[tuple[str, object]]] = {}
+    _source_reads(
+        "LIMIT = 2\n"
+        "WINDOW: float = 1.5\n"
+        "COMPUTED = compute()\n"
+        "def read(service, settings):\n"
+        '    return (getattr(service.settings, "X_LIMIT", LIMIT), getattr(settings, "X_WINDOW", WINDOW),\n'
+        '            getattr(settings, "X_COMPUTED", COMPUTED), getattr(settings, "X_LOCAL", local))\n',
+        "sample.py", reads,
+    )
+    assert reads == {"X_LIMIT": [("sample.py:5", 2)], "X_WINDOW": [("sample.py:5", 1.5)],
+                     "X_COMPUTED": [("sample.py:6", _MISSING)], "X_LOCAL": [("sample.py:6", _MISSING)]}
 
 
 def test_every_optionally_read_setting_name_is_declared():
@@ -127,6 +166,7 @@ FOLLOWUP_DEFAULTS = {
     "AUTONOMY_REQUIRE_DISTINCT_APPROVER": True,
     "AUTONOMY_STOP_ALLOW_READ_ONLY": True,
     "AUTONOMY_DECISION_RETENTION_DAYS": 30,
+    "AUTONOMY_MODEL_DIAGNOSTICS_MAX_PER_ORG": 2,
     "NANFO_EXPERIMENTAL_LAB_ENABLED": False,
     "REDIS_USERNAME": None,
     "WATCHDOG_ENABLED": None,
@@ -157,6 +197,7 @@ def test_followup_contract_names_and_defaults(name, expected, monkeypatch):
     ("INTENT_OUTBOX_RETENTION_DAYS", 36501), ("ALERT_OBSERVATION_RETENTION_DAYS", -1),
     ("AUTONOMY_DECISION_RETENTION_DAYS", -1), ("ALERT_OBSERVATION_PURGE_BATCH_SIZE", 0),
     ("ALERT_OBSERVATION_PURGE_MAX_BATCHES", 1001), ("ALERT_OBSERVATION_PURGE_INTERVAL_SECONDS", 29),
+    ("AUTONOMY_MODEL_DIAGNOSTICS_MAX_PER_ORG", 0), ("AUTONOMY_MODEL_DIAGNOSTICS_MAX_PER_ORG", 17),
     ("WATCHDOG_TIMEOUT_SECONDS", 9),
     ("WATCHDOG_TIMEOUT_SECONDS", math.inf), ("WATCHDOG_HEARTBEAT_INTERVAL_SECONDS", 0),
 ])

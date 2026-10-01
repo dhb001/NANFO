@@ -247,9 +247,11 @@ class SimulationRepository:
 
         Unpublished rows are never touched (at-least-once delivery is preserved), and
         publication order only ever consults unpublished rows, so removing old
-        published ones cannot reorder or re-enable anything. Oldest rows go first
-        (``created_at`` once migration 0030 adds it). ``SKIP LOCKED`` lets replicas
-        share the work. The caller commits.
+        published ones cannot reorder or re-enable anything. When the model has
+        ``created_at`` (migration 0030) a row must also be that old and oldest rows go
+        first; 0030 backfills existing rows with the migration time, so they age from
+        then (the conservative direction). ``SKIP LOCKED`` lets replicas share the work.
+        The caller commits.
         """
         if type(limit) is not int or not 1 <= limit <= MAX_RETENTION_BATCH_ROWS:
             raise ValueError("Retention batch must be between 1 and 10000 rows")

@@ -46,11 +46,16 @@ def test_current_schema_uses_complete_repository_chain():
     config.set_main_option("script_location", str(BACKEND / "alembic"))
     scripts = ScriptDirectory.from_config(config)
     assert ACCEPTANCE_SCHEMA == "0027"
-    assert scripts.get_heads() == [CURRENT_SCHEMA]
-    # The private experimental migration extends, rather than retargets, release0027.
-    assert [rev.revision for rev in scripts.walk_revisions("base", CURRENT_SCHEMA)] == [
-        f"{revision:04d}" for revision in range(int(CURRENT_SCHEMA), 0, -1)
-    ]
+    # ADR-028 migration 0030 is the single repository head (CURRENT_SCHEMA must follow it;
+    # that equality is enforced by deploy/tests/test_schema_contract.py and readiness).
+    assert scripts.get_heads() == ["0030"]
+    assert scripts.get_revision("0030").down_revision == "0029"
+    # The private experimental migration extends, rather than retargets, release0027, and
+    # every current revision sits on the same contiguous chain.
+    for top, target in ((30, "heads"), (int(CURRENT_SCHEMA), CURRENT_SCHEMA)):
+        assert [rev.revision for rev in scripts.walk_revisions("base", target)] == [
+            f"{revision:04d}" for revision in range(top, 0, -1)
+        ]
     assert scripts.get_revision("0029").down_revision == "0028"
     assert [rev.revision for rev in scripts.walk_revisions("base", ACCEPTANCE_SCHEMA)] == [
         f"{revision:04d}" for revision in range(27, 0, -1)

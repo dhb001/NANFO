@@ -66,6 +66,8 @@ class Settings(BaseSettings):
     # Request body bounds (C2). Asset uploads are the only larger route.
     API_MAX_BODY_BYTES: int = Field(default=1024 * 1024, ge=1024, le=64 * 1024 * 1024)
     API_MAX_ASSET_UPLOAD_BYTES: int = Field(default=12 * 1024 * 1024, ge=1024, le=64 * 1024 * 1024)
+    # PUT .../spatial-scene replaces a whole scene (<= 10,000 objects): 8 MiB by default.
+    API_MAX_SPATIAL_SCENE_BYTES: int = Field(default=8 * 1024 * 1024, ge=1024, le=64 * 1024 * 1024)
     # Readiness probe result reuse; bounded so /ready never serves stale health for long.
     API_READINESS_CACHE_SECONDS: float = Field(default=1.5, ge=0, le=2, allow_inf_nan=False)
     # Leader startup: bounded background topology backfill (never blocks readiness).
@@ -279,6 +281,8 @@ class Settings(BaseSettings):
     AUTONOMY_STOP_ALLOW_READ_ONLY: bool = True
     # Decision rows older than this are pruned by the autonomy worker; 0 keeps them forever.
     AUTONOMY_DECISION_RETENTION_DAYS: int = Field(default=30, ge=0, le=36500)
+    # C26 tenant fairness: concurrent frozen-model diagnostics per organisation (one slot lock each).
+    AUTONOMY_MODEL_DIAGNOSTICS_MAX_PER_ORG: int = Field(default=2, ge=1, le=16)
     # Experimental lab surfaces (C17 allow_uncalibrated_confidence) are opt-in only.
     NANFO_EXPERIMENTAL_LAB_ENABLED: bool = False
 

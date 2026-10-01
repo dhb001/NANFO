@@ -17,6 +17,11 @@ from starlette.requests import Request
 from app.core.errors import RequestTooLargeError
 
 ASSET_UPLOAD_PATH = re.compile(r"^/api/v1/networks/[^/]+/campus/model-assets/?$")
+# Whole-scene replacement allows up to 10,000 objects (spatial_schemas.MAX_OBJECTS);
+# the 1 MiB default capped real scenes near 3,000 objects, so the scene PUT is bounded
+# separately (API_MAX_SPATIAL_SCENE_BYTES).
+SPATIAL_SCENE_PATH = re.compile(r"^/api/v1/networks/[^/]+/spatial-scene/?$")
+DEFAULT_SPATIAL_SCENE_BYTES = 8 * 1024 * 1024
 ErrorHandler = Callable[[Request, Exception], Awaitable]
 
 
@@ -25,17 +30,21 @@ class _BodyLimitExceeded(RequestTooLargeError):
 
 
 class BodyLimitMiddleware:
-    def __init__(self, app, *, default_limit: int, asset_limit: int, error_handler: ErrorHandler):
-        if default_limit <= 0 or asset_limit <= 0:
+    def __init__(self, app, *, default_limit: int, asset_limit: int, error_handler: ErrorHandler,
+                 scene_limit: int = DEFAULT_SPATIAL_SCENE_BYTES):
+        if default_limit <= 0 or asset_limit <= 0 or scene_limit <= 0:
             raise ValueError("Body limits must be positive")
         self.app = app
         self.default_limit = default_limit
         self.asset_limit = asset_limit
+        self.scene_limit = scene_limit
         self.error_handler = error_handler
 
     def limit_for(self, method: str, path: str) -> int:
         if method == "POST" and ASSET_UPLOAD_PATH.match(path):
             return self.asset_limit
+        if method == "PUT" and SPATIAL_SCENE_PATH.match(path):
+            return self.scene_limit
         return self.default_limit
 
     async def _reject(self, scope, receive, send, limit: int) -> None:
