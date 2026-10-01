@@ -172,6 +172,7 @@ async def test_authority_rechecked_after_inference(registered, monkeypatch, chan
     db = SimpleNamespace(commit=AsyncMock(), rollback=AsyncMock(), expire_all=MagicMock())
     service = ModelDiagnosticsService(db, redis)
     workspace = uuid.uuid4()
+    service.org_scope = AsyncMock(return_value=uuid.uuid4())
     service.scope = AsyncMock(side_effect=[workspace,
         HTTPException(403) if change == "revoked" else uuid.uuid4() if change == "workspace" else workspace])
     service.repo.insert = AsyncMock()
@@ -185,7 +186,7 @@ async def test_authority_rechecked_after_inference(registered, monkeypatch, chan
         await service.diagnose(SimpleNamespace(user_id="actor"), DiagnoseModelRequest(network_id=network, history_reference="validation-06"))
     assert error.value.status_code == (403 if change == "revoked" else 409)
     service.repo.insert.assert_not_awaited()
-    lock.release.assert_awaited_once()
+    assert lock.release.await_count == 2  # per-network lock and the organization slot
 
 
 async def test_current_network_scope_blocks_unregistered_history(registered):
@@ -193,8 +194,210 @@ async def test_current_network_scope_blocks_unregistered_history(registered):
     db = SimpleNamespace(commit=AsyncMock())
     service = ModelDiagnosticsService(db, SimpleNamespace(lock=MagicMock()))
     service.scope = AsyncMock(return_value=uuid.uuid4())
+    service.org_scope = AsyncMock(return_value=uuid.uuid4())
     for target, reference in ((uuid.uuid4(), "validation-06"), (network, "unknown")):
         with pytest.raises(HTTPException) as error:
             await service.diagnose(SimpleNamespace(user_id="admin"), DiagnoseModelRequest(network_id=target, history_reference=reference))
         assert error.value.status_code == 404
     service.redis.lock.assert_not_called()
+
+
+# ── ADR-028 C26: per-network admission and per-organisation fairness ──────────
+
+
+@pytest.fixture
+def fair(monkeypatch, fake_redis):
+    """Synthetic registry seam (no private artifacts): real Redis locks, fake frozen runner."""
+    networks = [uuid.uuid4(), uuid.uuid4(), uuid.uuid4()]
+    history = SimpleNamespace(network_ids=networks)
+    model = SimpleNamespace(histories={"validation-06": history})
+    monkeypatch.setattr("app.modules.autonomy.model_diagnostics.load_registry", lambda: (object(), "f" * 64, None))
+    monkeypatch.setattr("app.modules.autonomy.model_diagnostics.select_model", lambda registry, network: model)
+    release = {}
+    started = {}
+    async def infer(network, *args):
+        started[network] = True
+        release.setdefault(network, __import__("asyncio").Event())
+        await release[network].wait()
+        return SimpleNamespace(network=network)
+    monkeypatch.setattr("app.modules.autonomy.model_diagnostics.frozen_inference", infer)
+    orgs = {networks[0]: "org-a", networks[1]: "org-a", networks[2]: "org-b"}
+    def service():
+        db = SimpleNamespace(commit=AsyncMock(), rollback=AsyncMock(), expire_all=MagicMock())
+        instance = ModelDiagnosticsService(db, fake_redis)
+        instance.repo.insert = AsyncMock(side_effect=lambda **kwargs: kwargs["result"])
+        current = {}
+        async def scope(claims, network_id, write=False):
+            current["network"] = network_id
+            return uuid.UUID(int=1)
+        instance.scope = scope
+        instance.org_scope = AsyncMock(side_effect=lambda workspace: orgs[current["network"]])
+        return instance
+    return SimpleNamespace(networks=networks, service=service, release=release, started=started, redis=fake_redis)
+
+
+def request(network):
+    return DiagnoseModelRequest(network_id=network, history_reference="validation-06")
+
+
+async def test_busy_network_is_refused_but_other_networks_proceed(fair, monkeypatch):
+    import asyncio
+
+    monkeypatch.setattr("app.modules.autonomy.model_diagnostics.max_per_org", lambda: 2)
+    claims = SimpleNamespace(user_id="u")
+    first = asyncio.create_task(fair.service().diagnose(claims, request(fair.networks[0])))
+    while fair.networks[0] not in fair.started:
+        await asyncio.sleep(0)
+    with pytest.raises(HTTPException) as error:
+        await fair.service().diagnose(claims, request(fair.networks[0]))
+    assert error.value.status_code == 429 and error.value.detail["code"] == "MODEL_DIAGNOSTIC_BUSY"
+    assert error.value.headers["Retry-After"]
+    second = asyncio.create_task(fair.service().diagnose(claims, request(fair.networks[2])))
+    while fair.networks[2] not in fair.started:
+        await asyncio.sleep(0)
+    for event in fair.release.values():
+        event.set()
+    assert (await first).network == fair.networks[0] and (await second).network == fair.networks[2]
+    assert await fair.redis.keys("nanfo:autonomy:model-diagnostics:inference") == []
+
+
+async def test_org_limit_is_per_organization(fair, monkeypatch):
+    import asyncio
+
+    monkeypatch.setattr("app.modules.autonomy.model_diagnostics.max_per_org", lambda: 1)
+    claims = SimpleNamespace(user_id="u")
+    first = asyncio.create_task(fair.service().diagnose(claims, request(fair.networks[0])))
+    while fair.networks[0] not in fair.started:
+        await asyncio.sleep(0)
+    with pytest.raises(HTTPException) as error:  # same organisation, different network
+        await fair.service().diagnose(claims, request(fair.networks[1]))
+    assert error.value.status_code == 429 and error.value.detail["code"] == "MODEL_DIAGNOSTIC_ORG_LIMIT"
+    assert not await fair.redis.exists(f"nanfo:autonomy:model-diagnostics:inference:{fair.networks[1]}")
+    other = asyncio.create_task(fair.service().diagnose(claims, request(fair.networks[2])))  # other organisation
+    while fair.networks[2] not in fair.started:
+        await asyncio.sleep(0)
+    for event in fair.release.values():
+        event.set()
+    await asyncio.gather(first, other)
+    # Slots are released: the first organisation can run again.
+    fair.release.clear()
+    fair.started.clear()
+    again = asyncio.create_task(fair.service().diagnose(claims, request(fair.networks[1])))
+    while fair.networks[1] not in fair.started:
+        await asyncio.sleep(0)
+    fair.release[fair.networks[1]].set()
+    assert (await again).network == fair.networks[1]
+
+
+def test_live_inference_shares_per_network_admission_key():
+    from app.modules.autonomy.model_diagnostic_registry import diagnostic_lock_key
+    from app.modules.autonomy.model_provider import QUALIFY_LOCK
+
+    network = uuid.uuid4()
+    assert diagnostic_lock_key(network).endswith(str(network)) and str(network) not in QUALIFY_LOCK
+
+
+@pytest.mark.parametrize(("configured", "expected"), [(None, 2), (1, 1), (16, 16), (0, 2), (17, 2), (True, 2), ("4", 2)])
+def test_org_limit_setting_is_bounded_with_default(monkeypatch, configured, expected):
+    from app.modules.autonomy.model_diagnostics import max_per_org
+
+    settings = SimpleNamespace() if configured is None else SimpleNamespace(AUTONOMY_MODEL_DIAGNOSTICS_MAX_PER_ORG=configured)
+    monkeypatch.setattr("app.core.config.get_settings", lambda: settings)
+    assert max_per_org() == expected
+
+
+async def test_qualification_replay_overlaps_network_inference_but_not_itself(fair, monkeypatch):
+    """The installation-level replay never queues per-network work; a second replay is refused
+    and the same network's diagnostic still shares the live-inference admission key."""
+    import asyncio
+
+    from app.modules.autonomy import model_provider
+
+    gates, entered = {}, []
+
+    async def runtime(registry, operation, **kwargs):
+        key = operation if operation == "qualify" else kwargs["observation"].network_id
+        entered.append(key)
+        await gates.setdefault(key, asyncio.Event()).wait()
+        return operation
+
+    monkeypatch.setattr(model_provider, "confined_runtime", runtime)
+    provider = model_provider.FrozenModelProvider(None, fair.redis)
+    replay = asyncio.create_task(provider._runtime("qualify"))
+    while "qualify" not in entered:
+        await asyncio.sleep(0)
+    with pytest.raises(ValueError, match="live_inference_busy"):
+        await model_provider.FrozenModelProvider(None, fair.redis)._runtime("qualify")
+    observation = SimpleNamespace(network_id=fair.networks[0])
+    inference = asyncio.create_task(provider._runtime("infer", observation=observation, snapshot_hash="a" * 64))
+    while fair.networks[0] not in entered:
+        await asyncio.sleep(0)
+    assert not replay.done()  # both confined runs are in flight together
+    with pytest.raises(ValueError, match="live_inference_busy"):  # same network: one inference at a time
+        await provider._runtime("infer", observation=observation, snapshot_hash="a" * 64)
+    claims = SimpleNamespace(user_id="u")
+    with pytest.raises(HTTPException) as error:
+        await fair.service().diagnose(claims, request(fair.networks[0]))
+    assert error.value.status_code == 429 and error.value.detail["code"] == "MODEL_DIAGNOSTIC_BUSY"
+    other = asyncio.create_task(fair.service().diagnose(claims, request(fair.networks[2])))
+    while fair.networks[2] not in fair.started:
+        await asyncio.sleep(0)
+    for event in (*gates.values(), *fair.release.values()):
+        event.set()
+    assert await replay == "qualify" and await inference == "infer"
+    assert (await other).network == fair.networks[2]
+    assert await fair.redis.keys("nanfo:autonomy:*") == []
+
+
+async def test_overlapping_confined_runs_get_private_stages(monkeypatch):
+    """Why the overlap is safe at the parent: each run has its own HOME/TMPDIR/cwd and stdout."""
+    import asyncio
+    from pathlib import Path
+
+    from app.modules.autonomy import model_provider
+    from app.modules.autonomy.live_schemas import RuntimeResult
+
+    identity = dict(registry_sha256="1" * 64, checkpoint_sha256="2" * 64, weights_sha256="3" * 64,
+                    source_sha256="4" * 64, contract_sha256="5" * 64, spec_sha256="6" * 64, report_sha256="7" * 64,
+                    scope="stationary-campus-small-v4-scoped-benchmark")
+    results = {"qualify": RuntimeResult(operation="qualify", **identity),
+               "infer": RuntimeResult(operation="infer", **identity, snapshot_sha256="8" * 64,
+                                      history_sha256="9" * 64, input_sha256="a" * 64, action=0,
+                                      action_path=["access1", "dist1", "access2"], probabilities=[.9, .1],
+                                      value=1., inference_seconds=.01)}
+    spawned, both = [], asyncio.Event()
+
+    class Process:
+        def __init__(self, operation):
+            self.returncode = None
+            self.stdout, self.stderr = asyncio.StreamReader(), asyncio.StreamReader()
+            self.stdout.feed_data(results[operation].model_dump_json().encode())
+            self.stdout.feed_eof()
+            self.stderr.feed_eof()
+
+        async def wait(self):
+            await both.wait()
+            self.returncode = 0
+            return 0
+
+        def kill(self):
+            self.returncode = -9
+
+    async def spawn(*args, cwd, env, **kwargs):
+        assert Path(cwd).is_dir() and env["HOME"] == env["TMPDIR"] == cwd
+        spawned.append(cwd)
+        if len(spawned) == 2:
+            both.set()
+        return Process(args[4])
+
+    monkeypatch.setattr(model_provider.asyncio, "create_subprocess_exec", spawn)
+    settings = SimpleNamespace(interpreter="/usr/bin/python3", environment=lambda: {})
+    registry = SimpleNamespace(configuration=lambda: settings)
+    observation = SimpleNamespace(network_id=uuid.uuid4(), workspace_id=uuid.uuid4())
+    qualified, inferred = await asyncio.gather(
+        model_provider.confined_runtime(registry, "qualify"),
+        model_provider.confined_runtime(registry, "infer", observation=observation, snapshot_hash="8" * 64))
+    assert (qualified, inferred) == (results["qualify"], results["infer"])
+    first, second = map(Path, spawned)
+    assert first != second and not first.is_relative_to(second) and not second.is_relative_to(first)
+    assert not first.exists() and not second.exists()  # private stages are removed after each run

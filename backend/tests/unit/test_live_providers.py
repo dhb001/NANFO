@@ -4,6 +4,7 @@ import asyncio
 from builtins import ExceptionGroup
 import json
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -110,10 +111,20 @@ async def test_cannot_infer_with_self_asserted_qualification(registered):
 
 
 async def test_real_readonly_benchmark_qualification(registered):
-    registry, _, _, _ = registered
+    registry, network, workspace, _ = registered
     installation = registry.load()
-    result = await confined_runtime(registry, "qualify")
+    _, digest = registry.snapshot(installation, network, workspace)
+    scope = SimpleNamespace(network_id=network, workspace_id=workspace)
+    sequential = await confined_runtime(registry, "infer", observation=scope, snapshot_hash=digest)
+    # C26: the installation-level replay and per-network inference use separate admission
+    # keys, so they may overlap on the same frozen runtime. Proof on the real runtime: the
+    # overlapped inference is identical to the sequential one and both results validate.
+    result, overlapped = await asyncio.gather(
+        confined_runtime(registry, "qualify"),
+        confined_runtime(registry, "infer", observation=scope, snapshot_hash=digest))
     FrozenModelProvider._validate_result(result, installation, "qualify")
+    FrozenModelProvider._validate_result(overlapped, installation, "infer")
+    assert overlapped.model_dump(exclude={"inference_seconds"}) == sequential.model_dump(exclude={"inference_seconds"})
     assert result.scope == "stationary-campus-small-v4-scoped-benchmark"
     assert result.safety_authorized is False
 
@@ -183,6 +194,9 @@ async def test_qualification_pending_then_receipt_and_frozen_inference(registere
     assert proposal.action_id == "route0"
     assert "execution:not_applied" in proposal.evidence
     assert "probabilities_are_safety_confidence:false" in proposal.evidence
+    # C17: the real frozen policy probability is typed and never labelled calibrated.
+    assert proposal.confidence.method == "policy_action_probability" and proposal.confidence.calibrated is False
+    assert proposal.confidence.calibration_id is None and 0.5 <= proposal.confidence.value <= 1
     path.write_bytes(path.read_bytes() + b" ")
     with pytest.raises(ValueError, match="hash_mismatch"):
         await provider.infer(observation, qualification)

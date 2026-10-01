@@ -46,16 +46,16 @@ class ReceiverHealth:
         return self.identity_of(self.verifier or self.signer, self.key)
 
     async def completed(self):
+        if self.signer is None and not (self.key is not None and legacy_hmac_enabled()):
+            raise ValueError("receiver_health_signing_key_unconfigured")
         self.iteration += 1
         common = dict(**self.scope, process_id=self.process_id, iteration=self.iteration, completed_at=time.time())
         if self.signer is not None:
             body = dict(version=RECEIPT_V2, key_id=self.signer.key_id, **common)
             receipt = dict(body=body, signature=self.signer.sign(self.canonical(body)))
-        elif self.key is not None and legacy_hmac_enabled():
+        else:
             body = dict(version=RECEIPT_V1, **common)
             receipt = dict(body=body, mac=hmac.new(self.key, self.canonical(body), hashlib.sha256).hexdigest())
-        else:
-            raise ValueError("receiver_health_signing_key_unconfigured")
         await self.redis.set(self.redis_key, self.canonical(receipt), ex=self.max_age)
 
     def _authenticate(self, receipt):

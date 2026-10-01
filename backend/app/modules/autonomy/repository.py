@@ -81,10 +81,14 @@ class AutonomyRepository:
     def __init__(self, db: AsyncSession):
         self.db = db
 
-    async def get(self, network_id, *, lock=False):
+    async def get(self, network_id, *, lock=False, fresh=False):
         query = select(AutonomyControl).where(AutonomyControl.network_id == network_id)
         if lock:
-            query = query.with_for_update().execution_options(populate_existing=True)
+            query = query.with_for_update()
+        if lock or fresh:
+            # Committed state even when this session already holds the object: STOP writes
+            # with Core statements, which bypass the identity map (expire_on_commit=False).
+            query = query.execution_options(populate_existing=True)
         return (await self.db.execute(query)).scalar_one_or_none()
 
     async def ensure(self, network_id, workspace_id):

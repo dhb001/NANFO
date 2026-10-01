@@ -14,9 +14,15 @@ from app.modules.autonomy.artifact_io import EvidenceError
 from app.modules.autonomy.live_schemas import OBSERVATION_CONTRACT, MeasuredFeatures, RuntimeResult
 from app.modules.autonomy.schemas import POLICY_PROBABILITY_METHOD, Confidence, Proposal, ProviderStatus, Qualification
 from app.core.canonical import canonical_sha256 as canonical_hash
+from app.modules.autonomy.model_diagnostic_registry import diagnostic_lock_key
 
 RUNNER = Path(__file__).resolve().parents[3] / "scripts" / "frozen_live_inference.py"
-LOCK = "nanfo:autonomy:model-diagnostics:inference"  # share actual CPU admission with ADR018
+#: Installation-level qualification replay (not network scoped). Inference shares the
+#: per-network admission key with ADR018 diagnostics (C26: never a global lock). A replay may
+#: overlap inference by design: every confined run stages a private HOME/TMPDIR/cwd, the
+#: Landlock/seccomp-confined runner writes only there, and each result is re-bound to the
+#: installation identities; serialising would only queue every network behind a 120 s replay.
+QUALIFY_LOCK = "nanfo:autonomy:live-inference:qualify"
 _QUALIFICATION_TASKS = set()
 
 
@@ -93,7 +99,9 @@ class FrozenModelProvider:
             return
 
     async def _runtime(self, operation, **kwargs):
-        lock = self.redis.lock(LOCK, timeout=130 if operation == "qualify" else 40,
+        observation = kwargs.get("observation")
+        key = QUALIFY_LOCK if observation is None else diagnostic_lock_key(observation.network_id)
+        lock = self.redis.lock(key, timeout=130 if operation == "qualify" else 40,
                                blocking=False, thread_local=False)
         acquired = False
         try:

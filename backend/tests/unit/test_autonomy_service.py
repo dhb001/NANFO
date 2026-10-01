@@ -14,7 +14,6 @@ from pydantic import ValidationError
 from sqlalchemy.dialects import postgresql
 
 from app.modules.autonomy.providers import (
-    IntentCancellation,
     TelemetryObserver,
     UnavailableRecovery,
     installed_providers,
@@ -48,11 +47,16 @@ def setup(monkeypatch, mock_db, fake_redis):
     auth = AsyncMock(return_value=(control, ["read:telemetry", "write:config", "execute:rollback"]))
     monkeypatch.setattr("app.modules.autonomy.worker.authorize", auth)
     monkeypatch.setattr("app.modules.autonomy.service.authorize", auth)
+    # Organization-service lookups are covered by governance/endpoint tests; here the actor is Admin.
+    audit = AsyncMock()
+    monkeypatch.setattr("app.modules.autonomy.governance.audit", audit)
+    monkeypatch.setattr("app.modules.autonomy.governance.caller_org_role", AsyncMock(return_value="Admin"))
+    monkeypatch.setattr("app.modules.autonomy.governance.require_distinct_approver", lambda: False)
     worker = AutonomyWorker(sessions=sessions_for(mock_db), redis=fake_redis, providers=providers)
     service = AutonomyService(mock_db, fake_redis, providers=providers)
     claims = SimpleNamespace(user_id=control.approved_by_user_id, workspace_id=None, org_id=None)
     return SimpleNamespace(control=control, repo=repo, providers=providers, worker=worker,
-                           service=service, claims=claims, auth=auth, db=mock_db)
+                           service=service, claims=claims, auth=auth, db=mock_db, audit=audit)
 
 
 async def test_installed_readiness_never_qualifies_or_infers(mock_db, fake_redis):
@@ -276,7 +280,8 @@ async def test_expiry_during_verification_cannot_release_execution(setup):
 
 async def test_stop_during_verification_fences_completion(setup):
     async def verify(identity):
-        setup.providers.cancellation.cancel.return_value = Verification(execution_id=identity.execution_id, status="pending")
+        setup.providers.recovery.cancel.side_effect = None
+        setup.providers.recovery.cancel.return_value = Verification(execution_id=identity.execution_id, status="pending")
         await setup.service.stop(claims=setup.claims, network_id=setup.control.network_id)
         return Verification(execution_id=identity.execution_id, status="verified", safe_to_release=True, evidence=["test:readback"])
     setup.providers.executor.verify.side_effect = verify
@@ -296,12 +301,13 @@ async def test_repeated_safety_rejection_does_not_dispatch(setup):
 
 async def test_stop_commits_before_failed_cancellation_and_blocks_mode_change(setup):
     setup.control.active_execution_id, setup.control.active_intent_id = uuid.uuid4(), uuid.uuid4()
-    async def cancel(**kwargs):
+    setup.control.active_decision_id = uuid.uuid4()
+    async def cancel(reference):
         assert setup.control.emergency_stopped
         setup.db.commit.assert_awaited()
-        assert kwargs["execution_id"] == setup.control.active_execution_id
+        assert reference.execution_id == setup.control.active_execution_id
         raise RuntimeError("sensitive internal error")
-    setup.providers.cancellation.cancel.side_effect = cancel
+    setup.providers.recovery.cancel.side_effect = cancel
     result = await setup.service.stop(claims=setup.claims, network_id=setup.control.network_id)
     assert result.emergency_stopped and result.cancellation_status == "uncertain"
     assert result.active_execution_id
@@ -315,7 +321,7 @@ async def test_stop_commits_before_failed_cancellation_and_blocks_mode_change(se
 async def test_stop_without_owned_execution_does_not_cancel_manual_jobs(setup):
     result = await setup.service.stop(claims=setup.claims, network_id=setup.control.network_id)
     assert result.emergency_stopped
-    setup.providers.cancellation.cancel.assert_not_awaited()
+    setup.providers.recovery.cancel.assert_not_awaited()
     result = await setup.service.set_mode(claims=setup.claims, request=SetAutonomyRequest(
         network_id=setup.control.network_id, expected_revision=setup.control.revision, mode="monitor"))
     assert not result.emergency_stopped
@@ -325,12 +331,13 @@ async def test_stop_without_owned_execution_does_not_cancel_manual_jobs(setup):
 async def test_late_cancellation_response_cannot_override_newer_stop(setup):
     identity = uuid.uuid4()
     setup.control.active_execution_id, setup.control.active_intent_id = identity, uuid.uuid4()
-    async def cancel(**kwargs):
+    setup.control.active_decision_id = uuid.uuid4()
+    async def cancel(reference):
         # A newer stop owns the unresolved cancellation state.
         setup.control.revision += 1
         setup.control.cancellation_status = "uncertain"
         return Verification(execution_id=identity, status="cancelled", safe_to_release=True, evidence=["test:old_result"])
-    setup.providers.cancellation.cancel.side_effect = cancel
+    setup.providers.recovery.cancel.side_effect = cancel
     result = await setup.service.stop(claims=setup.claims, network_id=setup.control.network_id)
     assert result.active_execution_id == identity
     assert result.cancellation_status == "uncertain"
@@ -346,7 +353,7 @@ async def test_stopping_actor_can_reconcile_after_approver_revocation(setup):
         execution_id=identity, status="cancelled", safe_to_release=True, evidence=["test:compensation"])
     await setup.worker.run_one()
     setup.providers.executor.verify.assert_awaited_once()
-    setup.providers.cancellation.cancel.assert_not_awaited()
+    setup.providers.recovery.cancel.assert_awaited_once()
     assert setup.control.active_execution_id is None
 
 
@@ -398,40 +405,51 @@ async def test_observer_uses_scoped_real_telemetry_only(monkeypatch, mock_db):
     assert "vector" not in result.model_dump()
 
 
-async def test_intent_cancellation_checks_owned_identity(monkeypatch, mock_db, fake_redis):
-    control = control_record()
-    detail = AsyncMock(return_value={"network_id": str(control.network_id),
-                                   "execution_provenance": {"execution_id": str(uuid.uuid4())}})
-    execute = AsyncMock()
-    monkeypatch.setattr("app.modules.autonomy.providers.IntentExecutionService.get_intent_detail", detail)
-    monkeypatch.setattr("app.modules.autonomy.providers.IntentExecutionService.execute_intent", execute)
-    result = await IntentCancellation(sessions_for(mock_db), fake_redis).cancel(
-        network_id=control.network_id, workspace_id=control.workspace_id, intent_id=uuid.uuid4(),
-        execution_id=uuid.uuid4(), actor_id=control.approved_by_user_id, permissions=[])
-    assert result.status == "uncertain"
-    execute.assert_not_awaited()
-
-
 @pytest.mark.parametrize("released", [True, False])
-async def test_intent_cancellation_uses_real_signature_and_verified_release(monkeypatch, mock_db, fake_redis, released):
-    from app.modules.intent.service import IntentExecutionService
+async def test_stop_cancels_through_real_journal_recovery_not_intent(setup, monkeypatch, released):
+    """ADR-028 fix 2: STOP requests exact journal cancellation; the Intent module is never consulted."""
+    from app.modules.autonomy.execution_client import JournalRecovery
 
-    control = control_record()
-    execution_id = uuid.uuid4()
-    detail = {"network_id": str(control.network_id), "execution_provenance": {
-        "execution_id": str(execution_id), "phase": "cancelled" if released else "accepted",
-        "cancel_requested": True, "blocks_lab": not released}}
-    monkeypatch.setattr(IntentExecutionService, "get_intent_detail", AsyncMock(return_value=detail))
-    from unittest.mock import create_autospec
-    execute = create_autospec(IntentExecutionService.execute_intent, return_value=detail)
-    monkeypatch.setattr(IntentExecutionService, "execute_intent", execute)
-    result = await IntentCancellation(sessions_for(mock_db), fake_redis).cancel(
-        network_id=control.network_id, workspace_id=control.workspace_id, intent_id=uuid.uuid4(),
-        execution_id=execution_id, actor_id=control.approved_by_user_id, permissions=["execute:rollback"])
-    assert result.safe_to_release == released
-    assert result.status == ("cancelled" if released else "pending")
-    assert execute.call_args.kwargs["cancel"] is True
-    assert "manual_approval" not in execute.call_args.kwargs
+    identity, intent, decision = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    setup.control.active_execution_id, setup.control.active_intent_id, setup.control.active_decision_id = identity, intent, decision
+    command = {key: str(value) for key, value in dict(network_id=setup.control.network_id,
+        workspace_id=setup.control.workspace_id, intent_id=intent, decision_id=decision, execution_id=identity).items()}
+    result = ({"execution_id": str(identity), "status": "cancelled", "safe_to_release": True,
+               "evidence": ["persisted_no_dispatch:" + str(identity)], "reasons": []} if released else None)
+    journal = SimpleNamespace(command=command, cancel_requested=False, result=result)
+    looked_up = []
+    async def reference(self, reference, *, lock=False):
+        looked_up.append((reference, lock))
+        if any(str(getattr(reference, key)) != value for key, value in command.items()):
+            raise ValueError("owned_execution_identity_mismatch")
+        return journal
+    monkeypatch.setattr("app.modules.autonomy.execution_repository.ExecutionRepository.reference", reference)
+    intent_detail = AsyncMock(side_effect=AssertionError("Intent must not be used for autonomous STOP"))
+    monkeypatch.setattr("app.modules.intent.service.IntentExecutionService.get_intent_detail", intent_detail)
+    object.__setattr__(setup.providers, "recovery", JournalRecovery(sessions_for(setup.db)))
+    response = await setup.service.stop(claims=setup.claims, network_id=setup.control.network_id)
+    assert journal.cancel_requested is True
+    assert looked_up[0][1] is True and looked_up[0][0].execution_id == identity
+    intent_detail.assert_not_awaited()
+    assert response.emergency_stopped
+    assert response.cancellation_status == ("verified" if released else "requested")
+    assert (response.active_execution_id is None) == released
+    assert setup.control.next_cycle_at <= datetime.now(UTC)
+    stopped = next(row for row in setup.repo.rows if row.status == "stopped")
+    assert stopped.execution_id == identity and stopped.verification["status"] == ("cancelled" if released else "pending")
+
+
+async def test_stop_identity_mismatch_is_uncertain_and_keeps_exclusion(setup, monkeypatch):
+    from app.modules.autonomy.execution_client import JournalRecovery
+
+    setup.control.active_execution_id, setup.control.active_intent_id = uuid.uuid4(), uuid.uuid4()
+    setup.control.active_decision_id = uuid.uuid4()
+    async def reference(self, reference, *, lock=False):
+        raise ValueError("owned_execution_identity_mismatch")
+    monkeypatch.setattr("app.modules.autonomy.execution_repository.ExecutionRepository.reference", reference)
+    object.__setattr__(setup.providers, "recovery", JournalRecovery(sessions_for(setup.db)))
+    response = await setup.service.stop(claims=setup.claims, network_id=setup.control.network_id)
+    assert response.cancellation_status == "uncertain" and response.active_execution_id is not None
 
 
 async def test_claim_uses_skip_locked_and_db_time(mock_db):
@@ -599,7 +617,6 @@ async def test_revoked_approver_still_verified_then_governed_recovery(setup, gov
     reference = setup.providers.executor.verify.call_args.args[0]
     assert reference.execution_id == identity and reference.network_id == setup.control.network_id
     assert "actor_id" not in type(reference).model_fields and "permissions" not in type(reference).model_fields
-    setup.providers.cancellation.cancel.assert_not_awaited()
     if governed:
         assert setup.control.active_execution_id is None
         assert setup.repo.rows[-1].status == "cancelled"

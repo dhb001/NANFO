@@ -5,6 +5,8 @@ from datetime import UTC, datetime
 from fastapi import HTTPException
 
 from app.core.canonical import canonical_sha256
+from app.modules.autonomy import governance
+from app.modules.autonomy.confidence import uncalibrated_confidence_honoured
 from app.modules.autonomy.models import ConfigurationRevision
 from app.modules.autonomy.schemas import (
     ConfigurationResponse,
@@ -29,9 +31,10 @@ class ConfigurationService(AutonomyService):
             revision=rows[0].revision if rows else 0, control_revision=control.revision if control else 0,
             operational=OperationalSettings.model_validate(rows[0].operational) if rows else OperationalSettings(),
             requested_training=training, training_status="retraining_required" if training.reward_weights else "not_requested",
+            allow_uncalibrated_confidence_honoured=uncalibrated_confidence_honoured(),
             history=[ConfigurationRevisionResponse.model_validate(row) for row in rows])
 
-    async def put(self, *, claims, request):
+    async def put(self, *, claims, request, correlation_id=None):
         network, _ = await self.scope(claims, request.network_id, write=True)
         control = await self.repo.ensure(request.network_id, network.workspace_id)
         rows = await self.repo.configurations(request.network_id, 1)
@@ -49,5 +52,12 @@ class ConfigurationService(AutonomyService):
         control.next_cycle_at, control.updated_at = datetime.now(UTC), datetime.now(UTC)
         await self.repo.invalidate_observing(control.network_id, "configuration_changed_before_acceptance")
         self.repo.record(control, status="control_changed", reasons=["configuration_revision_changed"], actor_id=claims.user_id)
+        # C25: configuration changes are audited in the same transaction.
+        await governance.audit(self.db, self.redis, event_type="autonomy.configuration.changed",
+            actor_id=claims.user_id, network_id=request.network_id, workspace_id=network.workspace_id,
+            correlation_id=correlation_id, resource_type="autonomy_configuration", metadata={
+                "revision": revision + 1, "control_revision": control.revision, "content_sha256": content_hash,
+                "reason": request.reason[:256], "min_confidence": request.operational.min_confidence,
+                "allow_uncalibrated_confidence": request.operational.allow_uncalibrated_confidence})
         await self.db.commit()
         return await self.get(claims=claims, network_id=request.network_id)

@@ -127,9 +127,10 @@ async def test_core_insert_extracts_both_observation_and_safety_frame_references
 
 async def test_final_checkpoint_rechecks_revocation_after_contended_lock(monkeypatch):
     case = fixture()
-    allowed, validations = True, []
-    async def validate(db, auth, accepted):
+    allowed, validations, guards = True, [], []
+    async def validate(db, auth, accepted, runtime_guard=True):
         validations.append(allowed)
+        guards.append(runtime_guard)
         if not allowed:
             raise ValueError("actor_revoked")
     async def lock(*_):
@@ -145,4 +146,6 @@ async def test_final_checkpoint_rechecks_revocation_after_contended_lock(monkeyp
     with pytest.raises(ValueError, match="actor_revoked"):
         await journal.checkpoint(case.command, mutation=True)
     assert validations == [True, False]
+    # ADR-028 fix 1: runtime-guard I/O runs only in the first check, before any row lock.
+    assert guards == [True, False]
     db.commit.assert_not_awaited()

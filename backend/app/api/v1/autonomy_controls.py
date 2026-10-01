@@ -31,7 +31,7 @@ async def get_configuration(network_id: uuid.UUID, claims: Claims, meta: Meta, d
 @router.put("/configuration", response_model=APIResponse[ConfigurationResponse])
 async def put_configuration(request: SetConfigurationRequest, claims: Claims, meta: Meta, db: Database, redis: Redis):
     started = time.monotonic()
-    result = await ConfigurationService(db, redis).put(claims=claims, request=request)
+    result = await ConfigurationService(db, redis).put(claims=claims, request=request, correlation_id=meta.request_id)
     return success_response(result, meta.request_id, started, meta.timestamp)
 
 
@@ -45,19 +45,21 @@ async def get_overrides(network_id: uuid.UUID, claims: Claims, meta: Meta, db: D
 @router.post("/overrides", response_model=APIResponse[OverrideResponse], status_code=201)
 async def create_override(request: CreateOverrideRequest, claims: Claims, meta: Meta, db: Database, redis: Redis):
     started = time.monotonic()
-    result = await OverrideService(db, redis).create(claims=claims, request=request)
+    result = await OverrideService(db, redis).create(claims=claims, request=request, correlation_id=meta.request_id)
     return success_response(result, meta.request_id, started, meta.timestamp)
 
 
 @router.post("/overrides/{override_id}/cancel", response_model=APIResponse[OverrideResponse])
 async def cancel_override(override_id: uuid.UUID, claims: Claims, meta: Meta, db: Database, redis: Redis):
     started = time.monotonic()
-    result = await OverrideService(db, redis).cancel(claims=claims, override_id=override_id)
+    result = await OverrideService(db, redis).cancel(claims=claims, override_id=override_id,
+                                                      correlation_id=meta.request_id)
     return success_response(result, meta.request_id, started, meta.timestamp)
 
 
 @router.post("/overrides/{override_id}/return", response_model=APIResponse[OverrideResponse])
 async def return_override(override_id: uuid.UUID, request: ReturnOverrideRequest, claims: Claims, meta: Meta, db: Database, redis: Redis):
     started = time.monotonic()
-    result = await OverrideService(db, redis).return_mode(claims=claims, override_id=override_id, request=request)
+    result = await OverrideService(db, redis).return_mode(claims=claims, override_id=override_id, request=request,
+                                                           correlation_id=meta.request_id)
     return success_response(result, meta.request_id, started, meta.timestamp)

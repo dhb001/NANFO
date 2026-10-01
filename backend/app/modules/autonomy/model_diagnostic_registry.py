@@ -16,6 +16,14 @@ from app.modules.autonomy.model_diagnostic_schemas import ModelDiagnosticRegistr
 
 CONFIG_KEYS = ("NANFO_MODEL_REGISTRY", "NANFO_MODEL_REGISTRY_SHA256", "NANFO_MODEL_ROOT", "NANFO_MODEL_PYTHON")
 
+#: Per-network frozen-runtime admission (ADR-028 C26): diagnostics and live inference of the
+#: same network never overlap; other networks and tenants are never refused because of it.
+_NETWORK_LOCK_PREFIX = "nanfo:autonomy:model-diagnostics:inference:"
+
+
+def diagnostic_lock_key(network_id) -> str:
+    return f"{_NETWORK_LOCK_PREFIX}{network_id}"
+
 
 def load_registry():
     if not all(os.environ.get(key) for key in CONFIG_KEYS):

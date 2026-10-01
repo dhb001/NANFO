@@ -1,13 +1,15 @@
-"""Explicit deployment composition. No default installation and no lab launch."""
+"""Explicit deployment composition. No default installation and no lab launch.
+
+The lab driver comes from the installed runtime's profile (fix 7); emulation modules
+are imported only when a lab is actually composed (fix 11), never at import time.
+"""
 
 from dataclasses import dataclass
 
+from app.modules.autonomy.drivers import runtime_profile
 from app.modules.autonomy.execution import build_execution_providers
 from app.modules.autonomy.safety_installation import load_independently_validated_safety
 from app.modules.autonomy.safety_provider import CalibratedSafetyProvider
-from emulation.actions import Actions
-from emulation.autonomous_driver import IsolatedOVSDriver
-from emulation.autonomous_ownership import IsolatedLabOwnership
 
 
 @dataclass
@@ -15,7 +17,7 @@ class AutonomousLabProviders:
     safety: CalibratedSafetyProvider
     executor: object
     recovery: object
-    ownership: IsolatedLabOwnership
+    ownership: object
 
     def close(self):
         """Call only after the receiver task and all device calls have finished."""
@@ -29,11 +31,16 @@ def compose_autonomous_lab(*, sessions, redis, lab, resource_id, results_directo
     installation = load_independently_validated_safety(**calibration_config)
     if str(lab.runId) != installation.data.calibration.run_id:
         raise ValueError("calibration_lab_run_mismatch")
+    profile = runtime_profile(installation.data.runtime_action)
+    if profile.lab_driver_factory is None:
+        raise ValueError("autonomous_runtime_lab_driver_unavailable")
+    from emulation.autonomous_ownership import IsolatedLabOwnership
+
     ownership = IsolatedLabOwnership(lab, resource_id, results_directory=results_directory,
         manual_enabled=manual_enabled, experiment_enabled=experiment_enabled)
     try:
-        driver = IsolatedOVSDriver(Actions(lab), resource_id=resource_id, run_id=lab.runId,
-                                   ownership_check=ownership.check)
+        driver = profile.lab_driver_factory(lab, resource_id=resource_id, run_id=lab.runId,
+                                            ownership_check=ownership.check)
         executor, recovery = build_execution_providers(sessions, redis, installation, driver, resource_id,
                                                        execution_mode=execution_mode)
         return AutonomousLabProviders(CalibratedSafetyProvider(sessions, installation), executor, recovery, ownership)

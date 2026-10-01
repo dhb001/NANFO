@@ -6,6 +6,7 @@ import math
 import os
 import subprocess
 import sys
+import textwrap
 import uuid
 from pathlib import Path
 from types import SimpleNamespace
@@ -112,3 +113,79 @@ def test_application_import_loads_no_scripts_or_emulation_modules():
                             env={**os.environ, "PYTHONPATH": str(BACKEND) + os.pathsep + str(root),
                                  "PYTHONDONTWRITEBYTECODE": "1"})
     assert result.stdout.strip() == ""
+
+
+# ── Fix 11b: experimental/lab wiring is lazy; the lab flag never unpins historical evidence ──
+
+#: The only emulation modules owned code may load at import time: stdlib-only shared contract
+#: modules that never import a driver, the lab runtime or application code (FRR wire constants;
+#: C15 lab contracts reached through Intent's lab mailbox).
+PURE_EMULATION_CONTRACTS = {"emulation", "emulation.autonomous_contract", "emulation.lab_contracts"}
+
+
+def run_clean(code):
+    """Run in a fresh interpreter (the pytest process may already hold lab modules)."""
+    root = BACKEND.parent
+    env = {key: value for key, value in os.environ.items() if key != "NANFO_EXPERIMENTAL_LAB_ENABLED"}
+    result = subprocess.run([sys.executable, "-B", "-c", textwrap.dedent(code)], capture_output=True, text=True,
+                            check=True, cwd=BACKEND, env={**env, "PYTHONPATH": str(BACKEND) + os.pathsep + str(root),
+                                                          "PYTHONDONTWRITEBYTECODE": "1"})
+    return json.loads(result.stdout)
+
+
+def test_owned_modules_import_no_experimental_lab_or_driver_code():
+    modules = [f"app.modules.autonomy.{path.stem}" for path in OWNED
+               if path.parent.name == "autonomy" and path.stem != "__init__"]
+    modules += ["app.api.v1.autonomy", "app.api.v1.autonomy_controls", "app.api.v1.model_diagnostics"]
+    assert "app.modules.autonomy.service" in modules and "app.modules.autonomy.execution_composition" in modules
+    loaded = run_clean(f"""
+        import importlib, json, sys
+        for name in {modules!r}:
+            importlib.import_module(name)
+        print(json.dumps(sorted(k for k in sys.modules if k == "scripts"
+                                or k.startswith(("scripts.", "emulation", "app.modules.autonomy.experimental")))))
+    """)
+    assert set(loaded) <= PURE_EMULATION_CONTRACTS, loaded
+
+
+def test_experimental_references_are_lazy_and_not_gated_off_by_the_lab_flag():
+    """Formal stages never import experimental code. With NANFO_EXPERIMENTAL_LAB_ENABLED off, rows
+    written while the lab was enabled are still enumerated, so their telemetry pins survive."""
+    loaded = run_clean("""
+        import asyncio, json, sys, uuid
+
+        from app.core.config import get_settings
+        from app.modules.autonomy.service import telemetry_reference_page
+
+        class Rows:
+            def all(self):
+                return []
+
+        class Database:
+            def __init__(self):
+                self.experimental_queries = 0
+
+            async def scalar(self, query):
+                return "present"
+
+            async def scalars(self, query):
+                return Rows()
+
+            async def execute(self, query):
+                self.experimental_queries += 1
+                return Rows()
+
+        async def main():
+            assert get_settings().NANFO_EXPERIMENTAL_LAB_ENABLED is False
+            db, cursor, loaded = Database(), None, []
+            for _ in range(9):
+                page = await telemetry_reference_page(db, workspace_id=uuid.uuid4(), after=cursor, limit=10)
+                loaded.append(sorted(k for k in sys.modules if k.startswith("app.modules.autonomy.experimental")))
+                cursor = page.next_cursor
+            assert cursor is None and db.experimental_queries == 3
+            print(json.dumps(loaded))
+
+        asyncio.run(main())
+    """)
+    assert loaded[:6] == [[]] * 6
+    assert {"app.modules.autonomy.experimental.models", "app.modules.autonomy.experimental.references"} <= set(loaded[6])

@@ -1,11 +1,19 @@
-"""Protected runtime equivalence admission and actual source fingerprint checks."""
+"""Protected runtime equivalence admission and actual source fingerprint checks.
+
+This is the FRR driver module (ADR-028 fix 7): the FRR runtime profile, its required
+capabilities and its runtime-binding validation are declared here, never in core code.
+"""
 
 import hashlib
 from pathlib import Path
 import time
 
 from app.modules.autonomy.artifact_io import ArtifactStore, parse_json
-from app.modules.autonomy.frr_contract import FRRRuntimeBinding
+from app.modules.autonomy.drivers import Capability, RuntimeProfile, register_runtime
+from app.modules.autonomy.frr_contract import RUNTIME, FRRPlan, FRRRuntimeBinding
+
+#: Frozen-model runtime action of FRR host-route checkpoints (LiveInstallation.runtime_action).
+FRR_MODEL_RUNTIME_ACTION = "linux-frr-host-route"
 
 RECEIVER_SOURCES = frozenset({
     "emulation/autonomous_contract.py", "backend/app/modules/autonomy/health_secret.py",
@@ -23,6 +31,9 @@ RECEIVER_SOURCES = frozenset({
     "backend/app/modules/autonomy/model_provider.py", "backend/scripts/frozen_live_inference.py",
     "backend/app/modules/autonomy/execution_client.py", "backend/app/modules/autonomy/execution_settings.py",
     "backend/app/modules/autonomy/receiver_health.py", "backend/app/modules/autonomy/providers.py",
+    # ADR-028: receiver-path decisions now also depend on these modules.
+    "backend/app/modules/autonomy/drivers.py", "backend/app/modules/autonomy/ovs_runtime.py",
+    "backend/app/modules/autonomy/confidence.py", "backend/app/core/canonical.py",
 })
 FROZEN_SOURCES = frozenset({"emulation/matched.py", "emulation/ospf.py", "emulation/topology.py",
     "emulation/workloads.py", "emulation/measurements.py", "emulation/actions.py", "emulation/runner.py"})
@@ -69,7 +80,7 @@ def validate_model_binding(binding, model_installation):
     model, manifest = model_installation.model, model_installation.manifest
     spec = manifest.get("environment_spec", {})
     historical_sources = spec.get("source_files", {})
-    if (model.runtime_action != "linux-frr-host-route" or model.checkpoint.sha256 != binding.checkpoint_sha256
+    if (model.runtime_action != FRR_MODEL_RUNTIME_ACTION or model.checkpoint.sha256 != binding.checkpoint_sha256
             or model.contract_sha256 != binding.model_contract_sha256 or model.spec_sha256 != binding.model_spec_sha256
             or model.action_ids != binding.action_ids
             or manifest["contract"]["action_map"] != [binding.actions["0"], binding.actions["1"]]
@@ -77,3 +88,11 @@ def validate_model_binding(binding, model_installation):
             or any(historical_sources.get(path.removeprefix("emulation/")) != digest
                    for path, digest in binding.frozen_sources.items())):
         raise ValueError("frr_model_runtime_identity_mismatch")
+
+
+PROFILE = register_runtime(RuntimeProfile(
+    runtime_id=RUNTIME, plan_type=FRRPlan,
+    requires=frozenset({Capability.INDEPENDENT_DISPATCH_GUARD, Capability.RUNTIME_BINDING}),
+    plan_binding_fields=frozenset({"runtime_binding_sha256"}),
+    validate_runtime_binding=validate_runtime_binding,
+))

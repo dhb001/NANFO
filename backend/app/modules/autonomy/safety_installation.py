@@ -5,6 +5,7 @@ from fractions import Fraction
 
 from app.modules.autonomy.artifact_io import ArtifactStore
 from app.modules.autonomy.calibration_verification import load_trusted_calibration, runtime_service_bounds, runtime_uncertainty_floor
+from app.modules.autonomy.drivers import Capability, runtime_profile
 from app.modules.autonomy.safety_provider import load_safety_installation
 
 
@@ -15,10 +16,11 @@ def validate_execution_binding(data, config):
         raise ValueError("independent_execution_binding_missing_or_mismatched")
     if not 0 <= data.actuation_delay_upper_seconds <= data.policy.max_delay_seconds <= config.max_delay_seconds:
         raise ValueError("runtime_total_delay_exceeds_reviewed_envelope")
+    profile = runtime_profile(data.runtime_action)
     for action in data.actions:
         plan = action.plan.model_dump(mode="json")
-        if data.runtime_action == "isolated-linux-frr-host-route/v1":
-            plan.pop("runtime_binding_sha256")
+        for field in profile.plan_binding_fields:
+            plan.pop(field)  # evidence-bound fields are validated with the runtime binding instead
         if plan != reviewed.plans.get(action.action_id):
             raise ValueError("executable_plan_differs_from_reviewed_calibration")
     paths = {p.route_id: p for p in data.policy.allowed_paths}
@@ -113,11 +115,11 @@ class IndependentInstallationValidator:
                     "arrival_upper_bytes_per_second", "service_lower_bytes_per_second",
                     "service_upper_bytes_per_second", "error_upper_bytes", "capacity_bytes_per_second")):
                     raise ValueError("independent_action_bounds_mismatch")
-        if data.runtime_action == "isolated-linux-frr-host-route/v1":
-            from app.modules.autonomy.frr_installation import validate_runtime_binding
-            if self.runtime_trust is None:
-                raise ValueError("frr_independent_runtime_trust_missing")
-            validate_runtime_binding(data, evidence, **self.runtime_trust)
+        profile = runtime_profile(data.runtime_action)
+        if profile.needs(Capability.RUNTIME_BINDING):
+            if self.runtime_trust is None or profile.validate_runtime_binding is None:
+                raise ValueError("independent_runtime_trust_missing")
+            profile.validate_runtime_binding(data, evidence, **self.runtime_trust)
         return sha256
 
 

@@ -158,8 +158,9 @@ class ReceiptVerifier:
 def load_signing_key(path) -> ReceiptSigner:
     from cryptography.hazmat.primitives.serialization import load_pem_private_key
 
+    content = read_key_file(path)  # protection failures keep their specific reason
     try:
-        key = load_pem_private_key(read_key_file(path), password=None)
+        key = load_pem_private_key(content, password=None)
     except (TypeError, ValueError) as exc:
         raise ValueError("receiver_health_private_key_invalid") from exc
     return ReceiptSigner(key)
@@ -168,8 +169,9 @@ def load_signing_key(path) -> ReceiptSigner:
 def load_verify_key(path) -> ReceiptVerifier:
     from cryptography.hazmat.primitives.serialization import load_pem_public_key
 
+    content = read_key_file(path)
     try:
-        key = load_pem_public_key(read_key_file(path))
+        key = load_pem_public_key(content)
     except (TypeError, ValueError) as exc:
         raise ValueError("receiver_health_public_key_invalid") from exc
     return ReceiptVerifier(key)

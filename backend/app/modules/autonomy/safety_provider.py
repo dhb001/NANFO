@@ -96,19 +96,23 @@ class SafetyInstallation(Contract):
         ids = {a.action_id for a in self.actions}
         if any(old not in ids or new not in ids for old, new in self.transitions):
             raise ValueError("transition_action_not_installed")
+        from app.modules.autonomy.drivers import Capability, runtime_profile
+
+        profile = runtime_profile(self.runtime_action)
+        bound = profile.needs(Capability.RUNTIME_BINDING)
         for action in self.actions:
-            frr = self.runtime_action == "isolated-linux-frr-host-route/v1"
-            if frr != isinstance(action.plan, FRRPlan):
+            if not isinstance(action.plan, profile.plan_type):
                 raise ValueError("runtime_plan_discriminator_mismatch")
-            if frr and (self.runtime_binding is None or action.plan.runtime_binding_sha256 != self.runtime_binding.sha256):
-                raise ValueError("frr_runtime_evidence_required")
+            if bound and (self.runtime_binding is None or any(
+                    getattr(action.plan, field) != self.runtime_binding.sha256 for field in profile.plan_binding_fields)):
+                raise ValueError("runtime_evidence_required")
             if (len({q.egress_id for q in action.queues}) != len(action.queues)
                     or {q.egress_id for q in action.queues} != set(self.calibration.egress_ids)
                     or {r.demand_id for r in action.routes} != set(self.calibration.demand_ids)
                     or len(action.routes) != len(self.calibration.demand_ids)):
                 raise ValueError("incomplete_calibrated_action")
-        if self.runtime_action == "isolated-ovs-autonomous/v1" and self.runtime_binding is not None:
-            raise ValueError("ovs_runtime_binding_not_supported")
+        if not bound and self.runtime_binding is not None:
+            raise ValueError("runtime_binding_not_supported")
         return self
 
 

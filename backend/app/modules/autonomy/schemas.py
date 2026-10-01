@@ -360,13 +360,15 @@ class Verification(Contract):
     reasons: list[str] = Field(default_factory=list, max_length=32)
 
 
-#: Evidence token recording how many identical coalescible cycles one decision row stands for
-#: (ADR-028 fix 6; the row's updated_at is the last time such a cycle was seen).
+#: Internal reasons token recording how many identical coalescible cycles one decision row
+#: stands for (ADR-028 fix 6; the row's updated_at is the last time such a cycle was seen).
+#: It lives in `reasons` (not a telemetry-evidence field, so folding never re-pins evidence)
+#: and is stripped from every API projection in favour of `repeat_count`.
 COALESCED_CYCLES_PREFIX = "coalesced_cycles:"
 
 
-def coalesced_cycles(evidence) -> int:
-    for item in evidence or ():
+def coalesced_cycles(reasons) -> int:
+    for item in reasons or ():
         if isinstance(item, str) and item.startswith(COALESCED_CYCLES_PREFIX):
             try:
                 return max(1, int(item.removeprefix(COALESCED_CYCLES_PREFIX)))
@@ -380,6 +382,7 @@ class _DecisionDerived(Contract):
 
     #: C17 confidence of the persisted proposal (None for decisions without a proposal).
     confidence: Confidence | None = None
+    #: Identical no-change cycles this row stands for (>= 1); see last_seen_at.
     repeat_count: int = Field(default=1, ge=1)
     last_seen_at: AwareDatetime | None = None
 
@@ -388,7 +391,10 @@ class _DecisionDerived(Contract):
         proposal = getattr(self, "proposal", None)
         if self.confidence is None and proposal is not None:
             self.confidence = proposal.confidence
-        self.repeat_count = coalesced_cycles(getattr(self, "evidence", ()))
+        reasons = getattr(self, "reasons", None) or []
+        if any(isinstance(item, str) and item.startswith(COALESCED_CYCLES_PREFIX) for item in reasons):
+            self.repeat_count = coalesced_cycles(reasons)
+            self.reasons = [item for item in reasons if not str(item).startswith(COALESCED_CYCLES_PREFIX)]
         self.last_seen_at = getattr(self, "updated_at", None)
         return self
 

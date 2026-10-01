@@ -6,6 +6,7 @@ import uuid
 
 from sqlalchemy import text
 
+from app.modules.autonomy.drivers import Capability, bind_driver
 from app.modules.autonomy.execution_authority import ExecutionAuthority
 from app.modules.autonomy.execution_client import JournalReferences
 from app.modules.autonomy.execution_contract import AutonomousCommand
@@ -13,7 +14,6 @@ from app.modules.autonomy.execution_repository import ExecutionRepository
 from app.modules.autonomy.provider_state import ProviderStateRepository
 from app.modules.autonomy.safety_provider import CalibratedSafetyProvider
 from app.modules.autonomy.schemas import ProviderStatus, SafetyAssessment, Verification
-from emulation.autonomous_receiver import AutonomousReceiver
 
 
 def valid_readback(evidence, *, recovery=False):
@@ -60,8 +60,9 @@ class ReceiverJournal:
             await db.flush()
             await self.exclusion()
             # Control was locked first. Re-read current membership and clocks only
-            # after the execution/resource lock waits and flush are complete.
-            await self.authority.check(db, command.authorization, accepted=True)
+            # after the execution/resource lock waits and flush are complete. The
+            # runtime guard's evidence I/O already ran before the lock (fix 1).
+            await self.authority.check(db, command.authorization, accepted=True, runtime_guard=False)
             await db.commit()
 
     async def recovery_checkpoint(self, command):
@@ -96,7 +97,7 @@ class ReceiverJournal:
                                        if key not in {"snapshot_id", "observed_at_unix_seconds"})):
                 raise ValueError("dispatch_history_changed")
             await self.exclusion()
-            await self.authority.check(db, command.authorization, accepted=True)
+            await self.authority.check(db, command.authorization, accepted=True, runtime_guard=False)
             now = await repo.now()
             state = dict(history.state)
             state["last_evaluated_sequence"] = safety.binding.observation.sequence
@@ -106,7 +107,7 @@ class ReceiverJournal:
             history.state = state
             row.phase, row.dispatched_at = "applying", now
             await db.flush()
-            await self.authority.check(db, command.authorization, accepted=True)
+            await self.authority.check(db, command.authorization, accepted=True, runtime_guard=False)
             await db.commit()
 
     async def begin_recovery(self, command):
@@ -162,24 +163,25 @@ class ReceiverJournal:
             await db.flush()
             if phase == "verified":
                 await self.exclusion()
-                await self.authority.check(db, command.authorization, accepted=True)
+                await self.authority.check(db, command.authorization, accepted=True, runtime_guard=False)
             await db.commit()
             return result
 
 
 class AutonomousExecutor(JournalReferences):
     def __init__(self, sessions, redis, installation, driver, resource_id, *, execution_mode="emulation"):
-        if (not driver or driver.resource_id != resource_id or str(driver.run_id) != installation.data.calibration.run_id
-                or driver.driver_id != installation.data.runtime_action):
+        if (not driver or driver.resource_id != resource_id
+                or str(driver.run_id) != installation.data.calibration.run_id):
             raise ValueError("installed_lab_driver_scope_mismatch")
+        # Capability-driven binding (fix 7): the installed runtime's profile says what the
+        # driver must provide; core never branches on runtime or driver identifiers.
+        profile = bind_driver(driver, installation.data)
         if execution_mode != "emulation":
             raise ValueError("production_autonomous_driver_unavailable")
         self.sessions, self.redis, self.installation = sessions, redis, installation
         self.driver, self.resource_id = driver, resource_id
         self.authority = ExecutionAuthority(redis, CalibratedSafetyProvider(sessions, installation), execution_mode=execution_mode)
-        if driver.driver_id == "isolated-linux-frr-host-route/v1":
-            if not callable(getattr(driver, "dispatch_guard", None)):
-                raise ValueError("frr_independent_dispatch_guard_required")
+        if profile.needs(Capability.INDEPENDENT_DISPATCH_GUARD):
             self.authority.runtime_guard = driver.dispatch_guard
         self.status = ProviderStatus(provider_id="durable-autonomous-lab/v1", status="ready")
         self.health_publisher = None
@@ -190,9 +192,11 @@ class AutonomousExecutor(JournalReferences):
             await self.health_publisher.completed()
 
     async def accept(self, db, authorization):
-        await self.authority.check(db, authorization)
+        # The caller holds the control row lock: no runtime-guard I/O here. The guard runs
+        # before every dispatch step in the receiver journal, ahead of its own locks.
+        await self.authority.check(db, authorization, runtime_guard=False)
         await ExecutionRepository(db).stage(authorization, self.installation, self.resource_id)
-        await self.authority.check(db, authorization)
+        await self.authority.check(db, authorization, runtime_guard=False)
 
     async def run_one(self, *, execution_id=None, recovery_only=False):
         if recovery_only and execution_id is None:
@@ -243,6 +247,8 @@ class AutonomousExecutor(JournalReferences):
                         1, redis_key, redis_token)
                     if not renewed:
                         raise ValueError("receiver_distributed_lock_lost")
+
+                from emulation.autonomous_receiver import AutonomousReceiver  # lab code only in receivers
 
                 journal = ReceiverJournal(self.sessions, self.authority, command, token, exclusion_check=exclusion_check)
                 result = await AutonomousReceiver(self.driver).receive(command, journal)
