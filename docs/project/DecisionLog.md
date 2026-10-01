@@ -2,6 +2,26 @@
 
 Lightweight chronological notes for decisions that do not require a full ADR.
 
+## 2026-10-01: GitHub Project Tracking and ADR-028 Delivery
+
+The owner adopted the Git/GitHub workflow for all further work: every change starts from
+an issue, is developed on a branch and reaches `main` through a reviewed pull request
+(CONTRIBUTING.md, "Issues, milestones and branches").
+
+- Work completed before this workflow is recorded retrospectively instead of being left
+  untracked: milestones M1–M14 are closed with their completion dates, and 46 issues
+  labelled `retrospective` cite their exact commits, including what the vaguely named
+  commits contain. Pushed history is not rewritten to improve commit messages.
+- `e55a4f5` keeps its placeholder message, because `.gitleaksignore` pins its full hash
+  and the docs cite it. For the same reason the ADR-028 pull request
+  ([#98](https://github.com/dhb001/NANFO/pull/98)) is merged with a merge commit, never
+  squash or rebase.
+- The uncommitted ADR-028 work is committed as one commit per workstream, following the
+  ADR-028 §2 ownership map. Intermediate commits are not guaranteed to build alone; the
+  final tree is the verified one.
+- The repository stays private for now. Making it public waits for the history rewrite
+  ([#67](https://github.com/dhb001/NANFO/issues/67)).
+
 ## 2026-09-24: ADR-028 Integration Decisions
 
 ADR-028 is the current authority, above the ADR027 matrix, for the remediation it covers.

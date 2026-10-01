@@ -1,5 +1,28 @@
 # Development Journal
 
+## [2026-10-01] - GitHub Workflow Adoption and the ADR-028 Pull Request
+
+- **Tracking:** labels (type, `area:`, `priority:`), milestones M1–M19 and 97 issues on
+  GitHub. M1–M14 (closed, with completion dates) and the 46 `retrospective` issues record
+  VS1–VS21, the completion program and ADR-009–ADR-027 with their exact commits; M15–M19
+  hold ADR-028 delivery and every open item from CurrentSprint, KnownIssues and
+  TechnicalDebt. Issue forms, the CONTRIBUTING workflow section and the README layout and
+  tracking sections document the workflow
+  ([#71](https://github.com/dhb001/NANFO/issues/71)).
+- **ADR-028 committed:** one commit per workstream on `feat/adr-028-remediation` after a
+  clean evidence scan and gitleaks run (0 findings), reviewed in
+  [#98](https://github.com/dhb001/NANFO/pull/98).
+- **First remote CI run** (triage in [#64](https://github.com/dhb001/NANFO/issues/64)):
+  `database-contracts`, `migrations`, `stream-retention`, both gateway lanes,
+  `api-contract` and `evidence-hygiene` passed for the first time; backend 5,335 passed,
+  0 failed. The `build/` ignore rule had hidden `frontend/src/scripts/build/` from the
+  commit, failing `frontend`, the gateway image and `production-browser`. It is fixed,
+  verified on a clean `git archive` export and its test fixture pinned
+  ([#99](https://github.com/dhb001/NANFO/issues/99)). New upstream advisories (PyJWT,
+  brace-expansion, frozen urllib3, image OS packages), the portable lane's private-copy
+  skips, a pre-existing float flake and four GitGuardian false positives are tracked in
+  #100–#106.
+
 ## [2026-09-25] - ADR-028 Final Verification
 
 - **Database lanes** (owner-approved throwaway PostgreSQL 17.11 / Redis 7.4.11 containers,
