@@ -69,6 +69,9 @@ async def context(migrated_sessions, monkeypatch):
     auth = AsyncMock(return_value=(control, ["read:telemetry", "write:config", "execute:rollback"]))
     monkeypatch.setattr("app.modules.autonomy.worker.authorize", auth)
     monkeypatch.setattr("app.modules.autonomy.service.authorize", auth)
+    # C25 four-eyes approval (Redis-backed) is covered by test_autonomy_endpoints; these races
+    # concern the single confirmed PUT that re-validates the control after its provider wait.
+    monkeypatch.setattr("app.modules.autonomy.governance.require_distinct_approver", lambda: False)
     return SimpleNamespace(sessions=sessions, control=control, providers=providers,
         claims=SimpleNamespace(user_id=control.approved_by_user_id, workspace_id=None, org_id=None),
         worker=AutonomyWorker(sessions=sessions, redis=None, providers=providers))
@@ -120,14 +123,15 @@ async def test_stop_serializes_with_acceptance_and_persists_before_cancel(contex
         entered.set()
         await release.wait()
     context.providers.executor.accept.side_effect = accept
-    async def cancel(**kwargs):
+    async def cancel(reference):
         async with context.sessions() as db:
             current = await db.get(AutonomyControl, context.control.network_id)
             assert current.emergency_stopped
-            assert current.active_execution_id == kwargs["execution_id"]
-        return Verification(execution_id=kwargs["execution_id"], status="cancelled", safe_to_release=True,
+            assert current.active_execution_id == reference.execution_id
+        return Verification(execution_id=reference.execution_id, status="cancelled", safe_to_release=True,
                             evidence=["test:verified_no_mutation"])
-    context.providers.cancellation.cancel.side_effect = cancel
+    # STOP cancels the exact persisted execution through the recovery provider (never Intent).
+    context.providers.recovery.cancel.side_effect = cancel
     async def stop():
         async with context.sessions() as db:
             return await AutonomyService(db, None, providers=context.providers).stop(
@@ -143,9 +147,20 @@ async def test_stop_serializes_with_acceptance_and_persists_before_cancel(contex
     _, result = await asyncio.wait_for(asyncio.gather(cycle, stopping), 5)
     assert result.emergency_stopped and result.active_execution_id is None
     context.providers.executor.accept.assert_awaited_once()
-    context.providers.cancellation.cancel.assert_awaited_once()
+    context.providers.recovery.cancel.assert_awaited_once()
     async with context.sessions() as db:
         assert (await db.get(AutonomyControl, context.control.network_id)).cancellation_status == "verified"
+
+
+async def test_stop_response_reports_the_committed_latch(context):
+    """The latch is a Core upsert; the response must not serve the session's pre-STOP control."""
+    async with context.sessions() as db:
+        result = await AutonomyService(db, None, providers=context.providers).stop(
+            claims=context.claims, network_id=context.control.network_id)
+    assert result.emergency_stopped and result.status == "stopped" and result.stopped_at is not None
+    assert result.revision == context.control.revision + 1
+    async with context.sessions() as db:
+        assert (await db.get(AutonomyControl, context.control.network_id)).revision == result.revision
 
 
 async def test_stop_before_acceptance_invalidates_durable_cycle(context):

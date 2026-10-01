@@ -612,9 +612,10 @@ def test_0030_offline_upgrade_sql_orders_dedupe_concurrency_and_validation():
     # Large-table work only after the transaction committed, with lock_timeout restored.
     commit = _position(sql, "COMMIT;")
     assert commit < _position(sql, "SET lock_timeout = 0") < sql.index("CONCURRENTLY")
-    assert sql.count("CREATE INDEX CONCURRENTLY IF NOT EXISTS") == 7
+    assert sql.count("CREATE INDEX CONCURRENTLY IF NOT EXISTS") == 8
     assert "ON telemetry_records (device_id, observed_at DESC, record_id DESC)" in sql
     assert "ON telemetry_records USING brin (observed_at)" in sql
+    assert "ix_alert_observations_observed_at_brin ON alert_observations USING brin (observed_at)" in sql
     assert 'ON audit_logs (org_id, "timestamp" DESC, log_id DESC)' in sql
     assert "ON alerts (workspace_id, updated_at DESC, alert_id DESC)" in sql
     assert (_position(sql, "CREATE INDEX CONCURRENTLY IF NOT EXISTS ix_telemetry_records_device_observed")

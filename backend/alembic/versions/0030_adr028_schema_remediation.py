@@ -24,7 +24,8 @@ Migration notes (data changes; nothing is deleted):
   stricter, which only leaves such rows on the NULL/legacy path).
 
 Schema changes: indexes for the telemetry/audit/alert hot paths (created CONCURRENTLY),
-a BRIN index on telemetry time, indexes for every foreign key, same-module foreign keys
+BRIN indexes on telemetry and alert-observation time (retention range scans), indexes
+for every foreign key, same-module foreign keys
 (NOT VALID, validated only when no orphan exists), fixed server defaults (devices.status
 stored the quoted literal ``'active'``; plugin outcome defaults now match the model;
 autonomy_overrides timestamps default to now()), ``claim_attempts`` (reports,
@@ -166,6 +167,8 @@ CONCURRENT_INDEXES = (
     ("ix_alerts_network_id", "alerts", ("network_id",), None),
     ("ix_alert_consumed_events_alert_id", "alert_consumed_events", ("alert_id",), None),
     ("ix_alert_observations_detector_key", "alert_observations", ("detector_key",), None),
+    # Observation retention prunes by time (AlertRepository.purge_observations).
+    ("ix_alert_observations_observed_at_brin", "alert_observations", ("observed_at",), "brin"),
 )
 # Truly redundant indexes (see module notes): (name, table, column, on a large table)
 REDUNDANT_INDEXES = (

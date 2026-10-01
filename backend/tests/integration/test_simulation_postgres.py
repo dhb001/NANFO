@@ -135,10 +135,13 @@ async def test_pause_during_worker_batch_atomic_and_resume_equivalent(
     started, release = asyncio.Event(), asyncio.Event()
     actual_thread = asyncio.to_thread
 
-    async def delayed(*args, **kwargs):
-        started.set()
-        await release.wait()
-        return await actual_thread(*args, **kwargs)
+    async def delayed(func, *args, **kwargs):
+        # asyncio.to_thread is patched globally: hold only the worker's batch computation,
+        # never the pause transition's own off-loop validation (it would self-deadlock).
+        if func is advance:
+            started.set()
+            await release.wait()
+        return await actual_thread(func, *args, **kwargs)
 
     monkeypatch.setattr("app.modules.simulation.worker.asyncio.to_thread", delayed)
     worker = SimulationWorker(sessions=sessions, redis=None, batch_ticks=3)
@@ -435,8 +438,14 @@ async def test_delayed_mailbox_callback_cannot_outlive_evidence(accepted_executi
         claimed = await ExecutionRepository(db).claim(ctx.worker.owner, 15)
         await db.commit()
     observed = []
+    actual_thread = asyncio.to_thread
 
-    async def delayed_thread(function, command, *, can_publish):
+    async def delayed_thread(function, *args, **kwargs):
+        if function is not ctx.worker.mailbox.write:
+            # asyncio.to_thread is patched globally: the simulation-evidence re-verification
+            # before dispatch must still run for real (off-loop).
+            return await actual_thread(function, *args, **kwargs)
+        can_publish = kwargs["can_publish"]
         observed.append(can_publish())
         # Model a scheduling pause after dispatch authority is committed but before
         # the filesystem thread can publish. No real sleeping/lab mutation needed.
@@ -483,3 +492,35 @@ async def test_claim_attempts_cap_marks_poison_job_failed(sessions):
         assert (current.state, current.warning) == ("failed", "attempts_exhausted")
         event = await db.scalar(select(SimulationOutbox))
         assert event.envelope["event_type"] == "simulation.cancelled"
+
+
+async def test_outbox_retention_deletes_only_old_published_rows(sessions):
+    """ADR-028: bounded deletion of published simulation_outbox rows older than the retention age."""
+    row = await seed(sessions)
+    async with sessions() as db:
+        row = await db.get(Simulation, row.simulation_id)
+        repo = SimulationRepository(db)
+        for event_type in ("simulation.started", "simulation.paused", "simulation.completed"):
+            repo.enqueue(row, event_type, str(uuid.uuid4()))
+            row.revision += 1
+        await db.commit()
+    async with sessions() as db:
+        old, recent, pending = list((await db.execute(
+            select(SimulationOutbox).order_by(SimulationOutbox.revision))).scalars())
+        aged = {"published_at": func.now() - timedelta(days=31)}
+        if "created_at" in SimulationOutbox.__table__.c:  # migration 0030
+            aged["created_at"] = func.now() - timedelta(days=31)
+        await db.execute(update(SimulationOutbox).where(SimulationOutbox.event_id == old.event_id).values(**aged))
+        await db.execute(update(SimulationOutbox).where(SimulationOutbox.event_id == recent.event_id).values(
+            published_at=func.now() - timedelta(days=1)))
+        await db.commit()
+    worker = SimulationWorker(sessions=sessions, redis=AsyncMock(), retention_days=30, retention_batch=10)
+    assert await worker.purge_published() == 1
+    async with sessions() as db:
+        remaining = set((await db.execute(select(SimulationOutbox.event_id))).scalars())
+    assert remaining == {recent.event_id, pending.event_id}
+    # The unpublished row is still the next publication.
+    async with sessions() as db:
+        event = await SimulationRepository(db).claim_next_event()
+        await db.commit()
+    assert event.event_id == pending.event_id

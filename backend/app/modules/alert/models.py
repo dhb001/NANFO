@@ -91,6 +91,8 @@ class AlertDetectorState(Base):
 
 class AlertObservation(Base):
     __tablename__ = "alert_observations"
+    # Observation retention prunes by time; BRIN stays tiny on this append-mostly journal.
+    __table_args__ = (Index("ix_alert_observations_observed_at_brin", "observed_at", postgresql_using="brin"),)
 
     event_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
     # The detector row is inserted (lock_detector) before any of its observations.

@@ -30,6 +30,7 @@ from app.modules.telemetry.pins import EvidenceOwnerScope, EvidenceReference, Pr
 from app.modules.telemetry.reconciliation import TelemetryReconciliationService, owner_contracts
 from app.modules.telemetry.retention import ArchivalAssessmentRequest, TelemetryRetentionService
 from app.modules.telemetry.service import TelemetryPersistenceService
+from tests.report_support import authorized_workspace, stub_org_admission
 
 pytestmark = pytest.mark.skipif(not os.environ.get("RETENTION_TEST_DSN"), reason="disposable RETENTION_TEST_DSN required")
 
@@ -49,9 +50,12 @@ async def sessions():
         scripts = ScriptDirectory.from_config(config)
         with sync.begin() as conn:
             conn.execute(text(f'SET LOCAL search_path TO "{schema}"'))
-            with EnvironmentContext(config, scripts, fn=lambda rev, _: scripts._upgrade_revs("0025", rev)) as context:
+            # Head, not 0025: the owner ORM models map ADR-028 0030 columns (alert tenancy,
+            # report claim_attempts); the retention contracts under test are unchanged.
+            with EnvironmentContext(config, scripts, fn=lambda rev, _: scripts._upgrade_revs("head", rev)) as context:
                 context.configure(connection=conn)
                 context.run_migrations()
+            assert conn.scalar(text("SELECT version_num FROM alembic_version")) == scripts.get_current_head()
         engine = create_async_engine(url.set(drivername="postgresql+asyncpg"),
                                     connect_args={"server_settings": {"search_path": schema}})
         yield async_sessionmaker(engine, expire_on_commit=False)
@@ -297,8 +301,10 @@ async def test_report_service_source_capture_crash_and_idempotent_replay(session
         await db.commit()
     async with sessions() as db:
         svc = ReportService(db=db, redis=None)
-        # Authority is a separate owner-service dependency, data capture is real.
-        svc.authorize_generation = AsyncMock()
+        # Authority is a separate owner-service dependency, data capture is real. The
+        # C26 organisation admission needs the authorized workspace's org (ADR-028).
+        svc.authorize_generation = AsyncMock(return_value=authorized_workspace())
+        stub_org_admission(svc, workspaces=[workspace])
 
         async def crash():
             await db.flush()
@@ -312,7 +318,8 @@ async def test_report_service_source_capture_crash_and_idempotent_replay(session
         assert await db.scalar(select(func.count()).select_from(ReportRecord)) == 0
         assert await db.scalar(select(func.count()).select_from(TelemetryEvidencePin)) == 0
         svc = ReportService(db=db, redis=None)
-        svc.authorize_generation = AsyncMock()
+        svc.authorize_generation = AsyncMock(return_value=authorized_workspace())
+        stub_org_admission(svc, workspaces=[workspace])
         result = await svc.generate_report(**args)
         replay = await svc.generate_report(**args)
         assert replay["idempotent_replay"] and replay["report_id"] == result["report_id"]

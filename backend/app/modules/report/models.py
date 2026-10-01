@@ -11,7 +11,7 @@ from datetime import datetime
 
 from sqlalchemy import TIMESTAMP, CheckConstraint, ForeignKey, Index, Integer, Text, UniqueConstraint, func, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.postgres import Base
 
@@ -118,3 +118,7 @@ class ReportOutbox(Base):
     created_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True), nullable=False, server_default=func.now()
     )
+    # Unit-of-work ordering only: without a relationship the ORM may INSERT a new
+    # report's first outbox row before the report itself, violating
+    # fk_report_outbox_report. Never loaded; report_id stays the written column.
+    report: Mapped[ReportRecord] = relationship(lazy="raise")

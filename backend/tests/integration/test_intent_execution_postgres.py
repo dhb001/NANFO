@@ -29,7 +29,8 @@ from app.modules.intent.lab import LabResult, digest
 from app.modules.intent.models import Intent, IntentExecution, IntentOutbox
 from app.modules.intent.repository import ExecutionRepository
 from app.modules.intent.worker import ExecutionWorker
-from tests.unit.test_intent_lab import command
+from emulation.lab_contracts import verify_command
+from tests.unit.test_intent_lab import LAB_KEY, command
 
 pytestmark = pytest.mark.skipif(not os.environ.get("INTENT_TEST_DSN"), reason="INTENT_TEST_DSN not configured")
 
@@ -66,9 +67,14 @@ async def migrated_sessions():
 
 
 @pytest.fixture
-def runtime_settings(tmp_path):
+def runtime_settings(tmp_path, monkeypatch):
     for directory in ("commands", "results", "telemetry", "binding"):
         (tmp_path / directory).mkdir()
+    # ADR-028 C15: the execution worker's protected mailbox HMAC key (owner-only 0400).
+    key = tmp_path / "lab_command_key"
+    key.write_bytes(LAB_KEY)
+    key.chmod(0o400)
+    monkeypatch.setenv("NANFO_LAB_COMMAND_KEY_FILE", str(key))
     return SimpleNamespace(**{**{key: value for key, value in get_settings().model_dump().items()
                                if key.startswith("EMULATION_")}, "EXECUTION_MODE": "emulation",
         "EMULATION_CONTROL_ENABLED": True, "EMULATION_EXECUTION_POLL_SECONDS": .01,
@@ -214,7 +220,9 @@ async def test_worker_lost_result_recovery_and_verified_terminal(migrated_sessio
             break
         await asyncio.sleep(.01)
     assert command_path is not None
-    original = json.loads(command_path.read_bytes())
+    original_bytes = command_path.read_bytes()
+    # C15: the published envelope is MAC-authenticated; compare its verified content.
+    original = verify_command(LAB_KEY, json.loads(original_bytes))
     async with sessions() as db:
         persisted = await db.get(IntentExecution, uuid.UUID(original["execution_id"]))
         expiry = datetime.fromisoformat(original["dispatch_expires_at"].replace("Z", "+00:00"))
@@ -237,7 +245,8 @@ async def test_worker_lost_result_recovery_and_verified_terminal(migrated_sessio
     Path(runtime_settings.EMULATION_RESULTS_PATH, command_path.name).write_text(json.dumps(result))
     restarted = ExecutionWorker(settings=runtime_settings, sessions=sessions, redis=fake_redis)
     assert await restarted.run_one()
-    assert json.loads(command_path.read_bytes()) == original
+    assert command_path.read_bytes() == original_bytes
+    assert verify_command(LAB_KEY, json.loads(command_path.read_bytes())) == original
     assert authority.await_count == 2  # acceptance and first dispatch, never redispatch on recovery
     async with sessions() as db:
         intent = await db.get(Intent, row.intent_id)
@@ -300,7 +309,8 @@ async def test_revocation_prevents_dispatch_and_silence_never_releases_lab(migra
         job = (await db.execute(select(IntentExecution).where(IntentExecution.intent_id == row2.intent_id))).scalar_one()
         assert job.blocks_lab and job.phase == "uncertain"
         assert (await db.get(Intent, row2.intent_id)).status == "execution_started"
-        wire = json.loads(Path(runtime_settings.EMULATION_COMMANDS_PATH, f"{job.execution_id}.json").read_bytes())
+        wire = verify_command(LAB_KEY, json.loads(
+            Path(runtime_settings.EMULATION_COMMANDS_PATH, f"{job.execution_id}.json").read_bytes()))
         assert wire["operation"] == "cancel" and wire["fence"] == job.command["fence"]
         assert digest(wire["plan"]) == wire["plan_hash"]
 
@@ -397,3 +407,34 @@ async def test_execute_keeps_the_validate_key_and_rejects_another(migrated_sessi
         job = (await db.execute(select(IntentExecution))).scalar_one()
         assert job.request_key == "validate-1"
         assert (await db.get(Intent, row.intent_id)).idempotency_key == "validate-1"
+
+
+async def test_outbox_retention_deletes_only_old_published_rows_and_keeps_order(
+    migrated_sessions, runtime_settings, authority, fake_redis,
+):
+    """ADR-028: published intent_outbox rows older than the retention age are deleted in a
+    bounded statement; unpublished rows, recent rows and execution records stay."""
+    sessions = migrated_sessions
+    row = await seed(sessions)
+    async with sessions() as db:
+        await accept_execution(db=db, redis=fake_redis, **acceptance(row))
+    async with sessions() as db:
+        await accept_execution(db=db, redis=fake_redis, **{**acceptance(row), "cancel": True, "manual_approval": False})
+    async with sessions() as db:
+        accepted, cancelling = list((await db.execute(select(IntentOutbox).order_by(IntentOutbox.sequence))).scalars())
+        await db.execute(update(IntentOutbox).where(IntentOutbox.event_id == accepted.event_id).values(
+            published_at=func.now() - timedelta(days=31), created_at=func.now() - timedelta(days=31)))
+        await db.commit()
+    worker = ExecutionWorker(settings=runtime_settings, sessions=sessions, redis=fake_redis)
+    worker.retention_batch = 10
+    assert worker.retention_days == 30
+    assert await worker.purge_published() == 1
+    assert await worker.purge_published() == 0  # rate limited until the next interval
+    async with sessions() as db:
+        remaining = list((await db.execute(select(IntentOutbox))).scalars())
+        assert [event.event_id for event in remaining] == [cancelling.event_id]
+        assert await db.scalar(select(func.count()).select_from(IntentExecution)) == 1
+        # Deleting published history never unblocks or reorders the unpublished tail.
+        claimed = await ExecutionRepository(db).claim_event("retention-probe", 15)
+        await db.commit()
+        assert claimed.event_id == cancelling.event_id

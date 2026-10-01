@@ -316,3 +316,16 @@ async def test_published_outbox_retention_keeps_pending_and_recent_rows(sessions
     async with sessions() as db:
         remaining = {row.report_id for row in (await db.scalars(select(ReportOutbox))).all()}
     assert remaining == {rows["recent-published"].report_id, rows["old-pending"].report_id}
+
+
+async def test_new_report_and_first_outbox_row_commit_in_one_unit_of_work_under_the_0030_fk(sessions):
+    """ADR-028 0030: the request path adds a report and stages its first event in one flush."""
+    async with sessions() as db:
+        validated = await db.scalar(text(
+            "SELECT convalidated FROM pg_constraint WHERE conname = 'fk_report_outbox_report' "
+            "AND connamespace = current_schema()::regnamespace"))
+    assert validated is True  # the foreign key is enforced, so a child-first INSERT would fail
+    row = await seed(sessions)  # db.add(report); ReportRepository.enqueue(report); commit()
+    async with sessions() as db:
+        assert await db.scalar(select(ReportOutbox.report_id)) == row.report_id
+        assert (await db.get(ReportRecord, row.report_id)).queue_status == "outbox_pending"

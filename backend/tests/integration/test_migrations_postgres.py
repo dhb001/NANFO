@@ -37,7 +37,7 @@ CONSTRAINTS_0030 = (
 CONCURRENT_INDEXES = (
     "ix_telemetry_records_device_observed", "ix_telemetry_records_observed_at_brin", "ix_audit_logs_org_timestamp",
     "ix_alerts_workspace_updated", "ix_alerts_network_id", "ix_alert_consumed_events_alert_id",
-    "ix_alert_observations_detector_key",
+    "ix_alert_observations_detector_key", "ix_alert_observations_observed_at_brin",
 )
 
 

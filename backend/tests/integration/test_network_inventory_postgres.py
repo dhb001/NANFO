@@ -587,13 +587,16 @@ async def test_owner_blocking_queries_run_against_real_owner_tables(sessions, fa
 async def test_unreleased_autonomous_execution_blocks_network_deletion(sessions, fake_redis):
     """ADR-028: a verified/in-flight autonomous execution still owns device state."""
     from app.modules.autonomy import queries as autonomy_queries
-    from app.modules.autonomy.execution_models import AutonomousExecution
+    from app.modules.autonomy.execution_models import AutonomousExecution, AutonomousResource
     from app.modules.autonomy.models import AutonomyControl
 
     nid, _ = await _network_with_devices(sessions, fake_redis)
     execution_id = uuid.uuid4()
     async with sessions() as db:
         db.add(AutonomyControl(network_id=nid, workspace_id=WORKSPACE, mode="monitor"))
+        # 0030 fk_autonomous_executions_resource: the fenced resource row exists first
+        # (production stages it with its own INSERT before the execution).
+        db.add(AutonomousResource(resource_id=f"network:{nid}", fence=1))
         await db.flush()
         db.add(AutonomousExecution(
             execution_id=execution_id, decision_id=uuid.uuid4(), network_id=nid, workspace_id=WORKSPACE,

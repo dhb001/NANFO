@@ -33,6 +33,17 @@ def migrate(connection, direction):
         getattr(module, direction)()
 
 
+def downgrade_unless_evidence(connection):
+    """0028's downgrade drops the lab tables only while no run/receipt exists (ADR-028 guard)."""
+    evidence = connection.scalar(text("SELECT EXISTS (SELECT 1 FROM experimental_lab_runs) "
+                                      "OR EXISTS (SELECT 1 FROM experimental_lab_receipts)"))
+    if evidence:
+        with pytest.raises(RuntimeError, match="Downgrade below 0028 refused"):
+            migrate(connection, "downgrade")
+    else:
+        migrate(connection, "downgrade")
+
+
 @pytest.fixture
 async def sessions():
     root = create_async_engine(os.environ["EXPERIMENTAL_TEST_DSN"])
@@ -46,7 +57,7 @@ async def sessions():
             await conn.run_sync(lambda sync: migrate(sync, "upgrade"))
         yield async_sessionmaker(engine, expire_on_commit=False)
         async with engine.begin() as conn:
-            await conn.run_sync(lambda sync: migrate(sync, "downgrade"))
+            await conn.run_sync(downgrade_unless_evidence)
     finally:
         await engine.dispose()
         async with root.begin() as conn:
@@ -189,6 +200,27 @@ async def test_recovery_before_dispatch_and_expired_policy_without_authority(ses
     async with sessions() as db:
         assert (await db.get(LabAction, request_id)).phase == "rejected"
     assert not c.transport.executes and not c.transport.recoveries
+
+
+async def test_leases_are_granted_and_judged_on_the_database_clock(sessions):
+    """ADR-028: lease_until derives from clock_timestamp(), not this process's clock."""
+    c = case()
+    ctl = controller(sessions, c)
+    async with sessions.begin() as db:
+        repo = LabRepository(db)
+        run = await repo.create(c.policy, ctl.token)
+        database_now = await db.scalar(select(func.clock_timestamp()))
+        assert abs((run.lease_until - timedelta(seconds=c.policy.lease_seconds) - repo.clock).total_seconds()) < 1e-6
+        assert repo.clock <= database_now and run.created_at == repo.clock
+    async with sessions.begin() as db:
+        repo = LabRepository(db)
+        resource, run = await repo.lock(c.policy)
+        run.lease_until = repo.clock - timedelta(microseconds=1)
+        with pytest.raises(ValueError, match="ownership_or_lease_lost"):
+            repo.owned(resource, run, ctl.token)
+        repo.renew(run, c.policy.lease_seconds)
+        repo.owned(resource, run, ctl.token)
+    await ctl.recover()
 
 
 async def test_live_recovery_lease_cannot_be_stolen(sessions):

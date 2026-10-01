@@ -106,6 +106,12 @@ async def read(sessions):
         return await SpatialSceneService(db, None).get_scene(network_id=NETWORK_ID, actor_user_id=str(ACTOR_ID))
 
 
+async def stored_scene(db, revision):
+    """Raw history body; selects only pre-0030 columns so it also reads the legacy 0022 schema."""
+    return await db.scalar(select(SpatialSceneRevision.scene).where(
+        SpatialSceneRevision.network_id == NETWORK_ID, SpatialSceneRevision.revision == revision))
+
+
 async def test_dimensioned_save_history_restore_preserves_legacy_body_and_hash(sessions):
     legacy = await replace(sessions, objects=[spatial_object("legacy", "building"), spatial_object("null", geometry=None)])
     legacy_body = legacy.model_dump(mode="json", exclude={"revision"})
@@ -125,16 +131,16 @@ async def test_dimensioned_save_history_restore_preserves_legacy_body_and_hash(s
         assert spatial_document_hash(first) == legacy_hash
         assert first.model_dump(mode="json", exclude={"revision"}) == legacy_body
         assert second == dimensioned
-        stored = await db.get(SpatialSceneRevision, (NETWORK_ID, 1))
-        assert "geometry" not in stored.scene["objects"][0]
-        assert stored.scene["objects"][1]["geometry"] is None
+        stored = await stored_scene(db, 1)
+        assert "geometry" not in stored["objects"][0]
+        assert stored["objects"][1]["geometry"] is None
         audit = (await db.scalars(select(AuditLog).order_by(AuditLog.timestamp))).first()
         assert audit.metadata_["scene_sha256"] == expected_audit_hash
     restored = await replace(sessions, 2, legacy_body["objects"])
     assert restored.revision == 3
     assert restored.model_dump(mode="json", exclude={"revision"}) == legacy_body
     async with sessions() as db:
-        assert (await db.get(SpatialSceneRevision, (NETWORK_ID, 2))).scene == dimensioned.model_dump(mode="json", exclude={"revision"})
+        assert await stored_scene(db, 2) == dimensioned.model_dump(mode="json", exclude={"revision"})
 
 
 async def test_initial_read_persist_reload_replace_and_audit(sessions):
@@ -179,8 +185,7 @@ async def test_simultaneous_first_and_existing_writers_have_one_winner(sessions,
     async with sessions() as db:
         assert await db.scalar(select(func.count()).select_from(AuditLog)) == initial_revision + 1
         assert await db.scalar(select(func.count()).select_from(SpatialSceneRevision)) == initial_revision + 1
-        stored = await db.get(SpatialSceneRevision, (NETWORK_ID, winners[0].revision))
-        assert stored.scene == winners[0].model_dump(mode="json", exclude={"revision"})
+        assert await stored_scene(db, winners[0].revision) == winners[0].model_dump(mode="json", exclude={"revision"})
 
 
 @pytest.mark.parametrize("existing", [False, True])

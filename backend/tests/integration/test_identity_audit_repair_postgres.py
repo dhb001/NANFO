@@ -423,10 +423,11 @@ async def test_inverse_asset_inventory_parent_order_finishes_without_deadlock(se
         )
     async with sessions() as asset, sessions() as inventory, sessions() as admin:
         # Actual owner lock order: assets org->network; inventory/spatial network->org.
+        # lock_row is the exclusive Network row lock both writers take (LockPolicy EXCLUSIVE/INVENTORY).
         await WorkspaceService(asset, fake_redis).get_active_workspace(ws.workspace_id, user_id=str(ACTOR), require_write=True)
-        await NetworkRepository(inventory).lock(network.network_id)
+        await NetworkRepository(inventory).lock_row(network.network_id)
         pid = await asset.scalar(text("SELECT pg_backend_pid()"))
-        asset_task = asyncio.create_task(NetworkRepository(asset).lock(network.network_id))
+        asset_task = asyncio.create_task(NetworkRepository(asset).lock_row(network.network_id))
         admin_task = None
         try:
             await wait_for_lock(sessions, pid)

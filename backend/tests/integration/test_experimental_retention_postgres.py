@@ -3,6 +3,7 @@
 import asyncio
 import importlib.util
 import json
+import os
 from pathlib import Path
 from uuid import uuid4
 
@@ -20,13 +21,14 @@ from app.modules.telemetry.models import TelemetryRecord
 from app.modules.telemetry.pin_models import TelemetryEvidencePin, TelemetryReferenceCoverage
 from app.modules.telemetry.pins import EvidenceOwnerScope, ProspectiveCoverageContract, TelemetryEvidenceService
 from app.modules.telemetry.reconciliation import TelemetryReconciliationService
+from app.modules.telemetry.references import REFERENCE_SCAN_ISSUES
 from app.modules.telemetry.retention import TelemetryRetentionService
 from app.modules.telemetry.service import TelemetryPersistenceService
 from tests.experimental_lab_support import case
 from tests.integration import test_retention_complete_postgres as support
 from tests.integration.test_retention_complete_postgres import metric, reconcile, request
 
-pytestmark = support.pytestmark
+pytestmark = pytest.mark.skipif(not os.environ.get("RETENTION_TEST_DSN"), reason="disposable RETENTION_TEST_DSN required")
 base_sessions = support.sessions
 store = support.store
 
@@ -43,10 +45,8 @@ def migrate(connection, revision, direction="upgrade"):
 
 @pytest.fixture
 async def sessions(base_sessions):
-    async with base_sessions.begin() as db:
-        conn = await db.connection()
-        for revision in ("0027", "0028", "0029"):
-            await conn.run_sync(lambda sync, rev=revision: migrate(sync, rev))
+    # The base fixture is at head (0027 journal, 0028 lab tables, 0029 invalidation included).
+    # Tests re-run 0029, which is data-only and idempotent, to exercise its invalidation.
     return base_sessions
 
 
@@ -132,7 +132,7 @@ async def test_receipt_rollback_replay_and_nonreference_uuid(sessions):
         assert await db.scalar(select(func.count()).select_from(TelemetryEvidencePin)) == 1
 
 
-@pytest.mark.parametrize("mismatch", ["workspace", "network", "malformed", "missing"])
+@pytest.mark.parametrize("mismatch", ["workspace", "network", "malformed"])
 async def test_nested_wrong_scope_or_invalid_reference_rolls_back_owner(sessions, mismatch):
     c = await setup_run(sessions)
     row = metric(uuid4() if mismatch == "workspace" else c.policy.workspace_id,
@@ -140,7 +140,7 @@ async def test_nested_wrong_scope_or_invalid_reference_rolls_back_owner(sessions
     async with sessions.begin() as db:
         db.add(row)
     identity = uuid4()
-    locator = "bad" if mismatch == "malformed" else str(uuid4()) if mismatch == "missing" else str(row.record_id)
+    locator = "bad" if mismatch == "malformed" else str(row.record_id)
     async with sessions() as db:
         db.add(receipt(c, {"workspace_id": str(row.workspace_id), "network_id": str(row.network_id),
                            "deep": {"record_id": locator}}, identity))
@@ -149,6 +149,22 @@ async def test_nested_wrong_scope_or_invalid_reference_rolls_back_owner(sessions
         await db.rollback()
     async with sessions() as db:
         assert await db.get(LabReceipt, identity) is None
+        assert await db.scalar(select(func.count()).select_from(TelemetryEvidencePin)) == 0
+
+
+async def test_nested_uuid_that_was_never_telemetry_is_not_a_reference(sessions):
+    """ADR-028 locator grammar (telemetry.references): a record_id UUID that was never a
+    telemetry identity is skipped and counted, not pinned; archived or foreign-scope
+    identities still fail closed (cases above)."""
+    c = await setup_run(sessions)
+    identity = uuid4()
+    skipped = REFERENCE_SCAN_ISSUES.snapshot().get("reference_not_a_telemetry_identity", 0)
+    async with sessions.begin() as db:
+        db.add(receipt(c, {"workspace_id": str(c.policy.workspace_id), "network_id": str(c.policy.network_id),
+                           "deep": {"record_id": str(uuid4())}}, identity))
+    assert REFERENCE_SCAN_ISSUES.snapshot()["reference_not_a_telemetry_identity"] == skipped + 1
+    async with sessions() as db:
+        assert await db.get(LabReceipt, identity) is not None
         assert await db.scalar(select(func.count()).select_from(TelemetryEvidencePin)) == 0
 
 
