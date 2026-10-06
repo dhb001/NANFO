@@ -8,12 +8,12 @@ packages = [{include = "app"}]
 
 [tool.poetry.dependencies]
 python = "^3.12"
-fastapi = "~0.135.4"
-uvicorn = {extras = ["standard"], version = "^0.32.0"}
+fastapi = ">=0.135.4,<0.143.0"
+uvicorn = {extras = ["standard"], version = ">=0.32,<0.55"}
 pydantic = "^2.9.0"
 pydantic-settings = "^2.6.0"
 sqlalchemy = {extras = ["asyncio"], version = "^2.0.36"}
-asyncpg = "^0.30.0"
+asyncpg = ">=0.30,<0.32"
 alembic = "^1.14.0"
 neo4j = "^5.26.0"
 redis = {extras = ["asyncio"], version = "^5.2.0"}
@@ -33,7 +33,7 @@ pytest-cov = "^6.0.0"
 fakeredis = {extras = ["aioredis", "lua"], version = "^2.26.0"}
 anyio = {extras = ["trio"], version = "^4.6.0"}
 pypdf = "6.19.0"
-ruff = "0.15.6"
+ruff = "0.16.10"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
