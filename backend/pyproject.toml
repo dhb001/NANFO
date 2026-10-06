@@ -29,7 +29,7 @@ reportlab = "4.4.10"
 [tool.poetry.group.dev.dependencies]
 pytest = "^9.1.1"
 pytest-asyncio = "^1.4.0"
-pytest-cov = "^6.0.0"
+pytest-cov = ">=6,<8"
 fakeredis = {extras = ["aioredis", "lua"], version = "^2.26.0"}
 anyio = {extras = ["trio"], version = "^4.6.0"}
 pypdf = "6.19.0"
