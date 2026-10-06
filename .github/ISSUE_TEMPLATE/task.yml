@@ -1,0 +1,37 @@
+name: Task
+description: Planned work, an owner action, research evidence or technical debt.
+assignees: ["dhb001"]
+body:
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Kind
+      description: Add the matching label (none, `owner-action`, `research` or `tech-debt`) after creating the issue.
+      options:
+        - Task
+        - Owner action (GitHub setting, host install or decision)
+        - Research evidence
+        - Technical debt
+    validations:
+      required: true
+  - type: textarea
+    id: goal
+    attributes:
+      label: Goal
+      description: What should be true when this is done?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Checklist
+      placeholder: |
+        - [ ] First step
+        - [ ] Second step
+    validations:
+      required: true
+  - type: textarea
+    id: source
+    attributes:
+      label: Source
+      description: ADR section, docs/project file or review finding this comes from.

@@ -32,8 +32,15 @@
 - No new image, deployment, backup/restore or lab qualification is claimed. The successor
   lab image, the receiver successor wrapper and the FRR runtime bindings need fresh
   qualification. The research and evidence obligations below are unchanged.
+- 2026-10-01: GitHub tracking adopted (milestones M1–M19 and issues). The ADR-028 pull
+  request [#98](https://github.com/dhb001/NANFO/pull/98) had its first remote CI run;
+  triage is in [#64](https://github.com/dhb001/NANFO/issues/64): one delivery defect was
+  fixed ([#99](https://github.com/dhb001/NANFO/issues/99)) and the rest is tracked there.
 
 ## Remaining Work Master Checklist (Current Authority — ADR-028, then ADR027)
+
+Each open item below is a GitHub issue in milestones M15–M19; the linked issues hold the
+live status and discussion.
 
 ### ADR-028 owner actions (ADR-028 §8)
 
@@ -43,23 +50,28 @@
   ([#47](https://github.com/dhb001/NANFO/issues/47)).
 - [x] `git rm --cached` the two tracked `frontend/test-results/` Playwright outputs
   ([#49](https://github.com/dhb001/NANFO/issues/49)).
-- [ ] GitHub:
+- [ ] GitHub ([#64](https://github.com/dhb001/NANFO/issues/64),
+  [#65](https://github.com/dhb001/NANFO/issues/65),
+  [#66](https://github.com/dhb001/NANFO/issues/66)):
   - GitHub Pro/Team (or a public repository) for rulesets;
-  - one pull request running the 13 required checks;
+  - one pull request running the 13 required checks (first run:
+    [#98](https://github.com/dhb001/NANFO/pull/98));
   - import `.github/rulesets/main.json`;
   - Dependabot alerts and security updates;
   - read-only workflow permissions;
   - raise `COVERAGE_FLOOR` after the first green run on `main`.
 - [ ] Rewrite the history holding the 71 expired receiver tokens, re-review
-  `.gitleaksignore`, and choose a licence.
+  `.gitleaksignore`, and choose a licence ([#67](https://github.com/dhb001/NANFO/issues/67),
+  [#68](https://github.com/dhb001/NANFO/issues/68)).
 - [ ] Freshly qualify the successor lab image, the receiver successor wrapper and the FRR
-  runtime bindings before any result claim.
+  runtime bindings before any result claim ([#73](https://github.com/dhb001/NANFO/issues/73)).
 - [ ] Install the passive-observer helper `/usr/local/libexec/nanfo-proc-timens` and its
-  exact sudoers line.
+  exact sudoers line ([#74](https://github.com/dhb001/NANFO/issues/74)).
 - [ ] Install the receiver private key (`${NANFO_STATE_DIR}/receiver/`) on the FRR
-  receiver only.
-- [ ] Write and review the upgrade procedure for pre-ADR-028 (ADR-020–027) deployments.
-- [ ] Confirm or veto the bundle-cap raise.
+  receiver only ([#75](https://github.com/dhb001/NANFO/issues/75)).
+- [ ] Write and review the upgrade procedure for pre-ADR-028 (ADR-020–027) deployments
+  ([#77](https://github.com/dhb001/NANFO/issues/77)).
+- [ ] Confirm or veto the bundle-cap raise ([#63](https://github.com/dhb001/NANFO/issues/63)).
 
 ### ADR-028 integration — completed 25 September 2026
 
@@ -73,27 +85,37 @@
 - [ ] Resolve historical credential exposure/non-reuse/revocation and explicitly
   authorized history remediation; configure required remote hygiene checks (item1).
   ADR-028 prepared full-history gitleaks and the ruleset; applying them is listed under
-  the ADR-028 owner actions above.
+  the ADR-028 owner actions above ([#67](https://github.com/dhb001/NANFO/issues/67),
+  [#65](https://github.com/dhb001/NANFO/issues/65)).
 - [ ] Execute required remote CI, provision the private historical-evidence lane,
   resolve exact dependency exceptions before expiry, and audit successor images (item3).
   ADR-028 removed the ecdsa exception; the frozen exceptions now expire 2026-10-29 …
-  2026-11-26.
+  2026-11-26 ([#64](https://github.com/dhb001/NANFO/issues/64),
+  [#70](https://github.com/dhb001/NANFO/issues/70),
+  [#69](https://github.com/dhb001/NANFO/issues/69)).
 - [ ] Adopt opt-in stream retention with protected archives/backups, capacity
   monitoring and representative load evidence; retain pending/DLQ safety (item4).
   ADR-028 made stream retention a supervised deployment loop; capacity monitoring and
-  load evidence remain.
+  load evidence remain ([#79](https://github.com/dhb001/NANFO/issues/79)).
 - [ ] Arrange off-host escrow for accepted c8rorfzd, qualify optional release/recovery
-  scopes and rehearse any separately authorized0027/0028 upgrade (item5).
+  scopes and rehearse any separately authorized0027/0028 upgrade (item5)
+  ([#78](https://github.com/dhb001/NANFO/issues/78)).
 - [ ] Resolve the independently confirmed32-value operational-domain deficit through
   explicit reviewed protocol direction. Preserve genuine reservations and the
   train/validation/test split; fresh acquisition/admission and measured acceptance
-  remain blocked, not complete (item6).
+  remain blocked, not complete (item6) ([#82](https://github.com/dhb001/NANFO/issues/82)).
 - [ ] Collect genuine research evidence: proactive workloads/timing, independent
   training and safeguards comparison, intended-user study, complete recovery and
-  physical RF only for the broader RF claim (item6; `ReviewClosure-Research.md`).
+  physical RF only for the broader RF claim (item6; `ReviewClosure-Research.md`)
+  ([#83](https://github.com/dhb001/NANFO/issues/83),
+  [#84](https://github.com/dhb001/NANFO/issues/84),
+  [#85](https://github.com/dhb001/NANFO/issues/85),
+  [#86](https://github.com/dhb001/NANFO/issues/86)).
 - [ ] Address scoped observability/maintainability and repository access/licensing
   decisions when authorized; broader feature expansion remains deferred (items2/7).
-  ADR-028 added `CONTRIBUTING.md`, `SECURITY.md` and `CODEOWNERS`; the licence is open.
+  ADR-028 added `CONTRIBUTING.md`, `SECURITY.md` and `CODEOWNERS`; the licence is open
+  ([#81](https://github.com/dhb001/NANFO/issues/81),
+  [#68](https://github.com/dhb001/NANFO/issues/68)).
 
 The ADR027 matrix ([ReviewClosure-Completion](ReviewClosure-Completion.md)) records
 delivered repairs and accepted scopes alongside these open obligations. All older
