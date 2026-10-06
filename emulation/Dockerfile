@@ -6,7 +6,7 @@
 # Runtime profile (no privileged mode): cap_drop ALL, cap_add NET_ADMIN NET_RAW
 # SYS_ADMIN (+NET_BIND_SERVICE for FRR modes), no-new-privileges, read-only root,
 # nosuid/nodev tmpfs. emulation.runner refuses any other capability profile.
-FROM python:3.12.14-slim-trixie@sha256:2f17fc044b579bab302c2e8054d3a686e2cb9a83de48e70534b94cd8ebbe06a9
+FROM python:3.12.14-slim-trixie@sha256:f77ac9e44ae96ef2c90b8053ea08c31f8be030f824196b0ae4db6d462c84e51f
 
 ENV DEBIAN_FRONTEND=noninteractive PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 \
     PYTHONPATH=/opt/nanfo NANFO_ISOLATED_LAB=1 NANFO_LAB_PROFILE=successor \
