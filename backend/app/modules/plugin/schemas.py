@@ -11,13 +11,19 @@ from pydantic import BaseModel, ConfigDict, Field, JsonValue, field_validator
 
 
 class PluginInstallRequest(BaseModel):
+    """Metadata-only registry declaration; nothing is fetched, verified or executed."""
+
     model_config = ConfigDict(extra="forbid", strict=True, str_strip_whitespace=True)
 
     plugin_key: str = Field(min_length=3, max_length=120)
     name: str = Field(min_length=1, max_length=120)
     version: str = Field(min_length=1, max_length=40)
-    signer: str = Field(min_length=1, max_length=120)
-    signature: str = Field(min_length=8, max_length=256)
+    signer: str = Field(min_length=1, max_length=120, description=(
+        "Declared signer. Admission checks allowlist membership only; the signer identity is never "
+        "verified (signature_status=declared_unverified)."))
+    signature: str = Field(min_length=8, max_length=256, description=(
+        "Declared signature string. Admission checks the configured prefix and minimum length only; "
+        "it is never cryptographically verified (signature_status=declared_unverified)."))
     dependencies: dict[str, JsonValue] = Field(default_factory=dict)
     sandbox: dict[str, JsonValue] = Field(default_factory=dict)
     metadata: dict[str, JsonValue] = Field(default_factory=dict)
@@ -51,7 +57,9 @@ class PluginRecordResponse(RegistryCapabilities):
     name: str
     version: str
     manifest: dict[str, Any]
-    signature_status: Literal["declared_unverified"] = "declared_unverified"
+    # Declared-only claims: always reported unverified, whatever a historical row stored.
+    signature_status: Literal["declared_unverified"] = Field(default="declared_unverified", description=(
+        "Signatures are declarations; no cryptographic verification is performed."))
     dependency_status: Literal["declared_unverified"] = "declared_unverified"
     sandbox_status: Literal["not_executed"] = "not_executed"
     permissions_status: Literal["declared_unverified"] = "declared_unverified"

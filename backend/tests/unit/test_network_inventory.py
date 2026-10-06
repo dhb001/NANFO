@@ -85,6 +85,8 @@ async def test_exact_device_delta_nullable_clear_and_noop(inventory, mock_db):
     expected = req.model_dump(exclude_unset=True)
     assert all(getattr(result, key) == value for key, value in expected.items())
     payload = json.loads(mock_db.add.call_args.args[0].envelope["payload"])
+    sequence = payload.pop("sequence")
+    assert type(sequence) is int and sequence >= 1
     assert payload == {"network_id": str(NETWORK), "device_id": str(DEVICE), "workspace_id": str(WORKSPACE),
                        "org_id": str(ORG), "actor_id": str(ACTOR), "changed_fields": expected}
     mock_db.add.reset_mock()
@@ -171,51 +173,94 @@ async def test_each_owned_dependency_blocks(mock_db, device, results):
     assert exc.value.status_code == 409
 
 
-@pytest.mark.parametrize("workflow,status", [("simulation", "paused"), ("intent", "validated"),
-                                              ("intent", "execution_completed"), ("intent", "execution_failed")])
-async def test_workflow_dependency_via_owner_service(inventory, mock_db, fake_redis, workflow, status):
+OWNER_QUERIES = {
+    "simulations": "app.modules.simulation.queries.has_blocking_work",
+    "intents": "app.modules.intent.queries.has_blocking_work",
+    "autonomy or timed overrides": "app.modules.autonomy.queries.has_blocking_work",
+}
+
+
+@pytest.mark.parametrize("blocking", list(OWNER_QUERIES))
+async def test_workflow_dependency_via_owner_query(inventory, mock_db, fake_redis, blocking):
     _, _, network, _ = inventory
-    clear = SimpleNamespace(items=[], total=0)
-    active = SimpleNamespace(items=[SimpleNamespace(status=status, intent_id=uuid.UUID(int=30))], total=201)
     with (
-        patch("app.modules.simulation.history.SimulationHistoryService.list_page", new_callable=AsyncMock) as sim,
-        patch("app.modules.intent.history.IntentHistoryService.list_page", new_callable=AsyncMock) as intent,
-        patch("app.modules.intent.service.IntentExecutionService.get_intent_detail", new_callable=AsyncMock,
-              return_value={}),
+        patch(OWNER_QUERIES["simulations"], new_callable=AsyncMock, return_value=blocking == "simulations") as sim,
+        patch(OWNER_QUERIES["intents"], new_callable=AsyncMock, return_value=blocking == "intents"),
+        patch(OWNER_QUERIES["autonomy or timed overrides"], new_callable=AsyncMock,
+              return_value=blocking == "autonomy or timed overrides"),
+        pytest.raises(HTTPException) as exc,
     ):
-        sim.return_value = active if workflow == "simulation" else clear
-        intent.return_value = active
-        with pytest.raises(HTTPException) as exc:
-            await InventoryDeletionService(mock_db, fake_redis)._assert_workflows_safe(network, str(ACTOR))
+        await InventoryDeletionService(mock_db, fake_redis)._assert_workflows_safe(network, str(ACTOR))
     assert exc.value.status_code == 409
+    assert exc.value.detail["code"] == "INVENTORY_DEPENDENCIES_ACTIVE"
+    assert blocking in exc.value.detail["message"]
+    # Owners answer from their own tables by network only; no Network-side SQL.
+    sim.assert_awaited_once_with(mock_db, network_id=NETWORK)
 
 
-async def test_workflow_dependencies_beyond_first_page(inventory, mock_db, fake_redis):
+async def test_workflow_owner_queries_all_clear(inventory, mock_db, fake_redis):
     _, _, network, _ = inventory
-    with patch("app.modules.simulation.history.SimulationHistoryService.list_page", new_callable=AsyncMock) as sim:
-        sim.side_effect = [SimpleNamespace(items=[SimpleNamespace(status="completed")] * 200, total=201),
-                           SimpleNamespace(items=[SimpleNamespace(status="running")], total=201)]
-        with pytest.raises(HTTPException) as exc:
-            await InventoryDeletionService(mock_db, fake_redis)._assert_workflows_safe(network, str(ACTOR))
-        assert [call.kwargs["page"] for call in sim.await_args_list] == [1, 2]
-    assert exc.value.status_code == 409
-
-
-@pytest.mark.parametrize("state", [
-    {"mode": "autonomous"}, {"active_execution_id": uuid.UUID(int=10)},
-    {"cancellation_status": "uncertain"}, {"cancellation_status": "requested"},
-    {"blocked_reasons": ["timed_override_unresolved"]},
-])
-async def test_autonomy_dependency_via_owner_service(inventory, mock_db, fake_redis, state):
-    _, _, network, _ = inventory
-    snapshot = {"mode": "monitor", "active_execution_id": None, "cancellation_status": "none", "blocked_reasons": []}
     with (
-        patch("app.modules.simulation.history.SimulationHistoryService.list_page", new_callable=AsyncMock) as sim,
-        patch("app.modules.intent.history.IntentHistoryService.list_page", new_callable=AsyncMock) as intent,
-        patch("app.modules.autonomy.service.AutonomyService.snapshot", new_callable=AsyncMock) as autonomy,
+        patch(OWNER_QUERIES["simulations"], new_callable=AsyncMock, return_value=False) as sim,
+        patch(OWNER_QUERIES["intents"], new_callable=AsyncMock, return_value=False) as intent,
+        patch(OWNER_QUERIES["autonomy or timed overrides"], new_callable=AsyncMock, return_value=False) as auto,
     ):
-        sim.return_value = intent.return_value = SimpleNamespace(items=[], total=0)
-        autonomy.return_value = SimpleNamespace(**(snapshot | state))
-        with pytest.raises(HTTPException) as exc:
-            await InventoryDeletionService(mock_db, fake_redis)._assert_workflows_safe(network, str(ACTOR))
+        await InventoryDeletionService(mock_db, fake_redis)._assert_workflows_safe(network, str(ACTOR))
+    for query in (sim, intent, auto):
+        query.assert_awaited_once_with(mock_db, network_id=NETWORK)
+
+
+def test_deletion_policy_no_longer_imports_intent_internals():
+    import inspect
+
+    from app.modules.network import deletion
+
+    source = inspect.getsource(deletion)
+    for internal in ("intent.lab", "intent.service", "IntentExecutionService", "IntentHistoryService",
+                     "SimulationHistoryService", "AutonomyService"):
+        assert internal not in source
+
+
+@pytest.mark.parametrize("device_delete", [False, True])
+async def test_deletion_checks_before_lock_and_rechecks_under_lock(inventory, mock_db, device_delete):
+    net, dev, _, _ = inventory
+    order: list[str] = []
+
+    async def lock(_repo, network_id):
+        order.append("lock")
+
+    async def blocking(db, *, network_id):
+        order.append("check")
+        # Work created while the deleter waited for the lock is seen by the re-check.
+        return order.count("lock") > 0
+
+    with (
+        patch("app.modules.network.outbox.NetworkOutboxRepository.lock_inventory", lock),
+        patch("app.modules.network.deletion.InventoryDependencyRepository.assert_safe", new_callable=AsyncMock),
+        patch(OWNER_QUERIES["simulations"], side_effect=blocking),
+        patch(OWNER_QUERIES["intents"], new_callable=AsyncMock, return_value=False),
+        patch(OWNER_QUERIES["autonomy or timed overrides"], new_callable=AsyncMock, return_value=False),
+        pytest.raises(HTTPException) as exc,
+    ):
+        if device_delete:
+            await dev.delete_device(NETWORK, DEVICE, str(ACTOR), "delete")
+        else:
+            await net.delete_network(NETWORK, str(ACTOR), "delete")
     assert exc.value.status_code == 409
+    assert order == ["check", "lock", "check"]
+    mock_db.add.assert_not_called()
+    mock_db.commit.assert_not_awaited()
+
+
+async def test_unauthorized_deleter_never_takes_inventory_lock(inventory, mock_db):
+    net, _, _, _ = inventory
+    net._workspace_svc.assert_workspace_membership.side_effect = HTTPException(403, "Insufficient permissions.")
+    with (
+        patch("app.modules.network.outbox.NetworkOutboxRepository.lock_inventory", new_callable=AsyncMock) as lock,
+        patch("app.modules.network.deletion.InventoryDeletionService.assert_safe", new_callable=AsyncMock) as safe,
+        pytest.raises(HTTPException) as exc,
+    ):
+        await net.delete_network(NETWORK, str(ACTOR), "delete")
+    assert exc.value.status_code == 403
+    lock.assert_not_awaited()
+    safe.assert_not_awaited()

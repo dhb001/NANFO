@@ -1,6 +1,8 @@
-import { API_BASE_URL } from "@/shared/lib/env";
-import { ApiEnvelope, ApiSuccess } from "@/shared/types/api";
-import { ApiClientError } from "@/shared/lib/errors";
+import { apiUrl } from "@/shared/lib/env";
+import type { ApiEnvelope, ApiMeta, ApiSuccess } from "@/shared/types/api";
+import { ApiClientError, parseErrorDetails } from "@/shared/lib/errors";
+import { retryAfterMs } from "@/shared/lib/backoff";
+import { noteServerRequestId } from "@/shared/lib/errorReporting";
 import { useExecutionModeStore } from "@/shared/state/execution-mode-store";
 import { useAuthStore } from "@/shared/state/auth-store";
 import { useWorkspaceStore } from "@/shared/state/workspace-store";
@@ -8,15 +10,20 @@ import { authorityKey } from "@/features/auth/sessionScope";
 
 type Method = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
+/** Default bound for one API round trip; long uploads pass `timeoutMs`. */
+export const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
+
+// Option bags accept explicit `undefined` (callers forward optional arguments as-is).
 export interface RequestOptions {
-  method?: Method;
+  method?: Method | undefined;
   body?: unknown;
-  token?: string | null;
-  headers?: Record<string, string>;
-  signal?: AbortSignal;
+  token?: string | null | undefined;
+  headers?: Record<string, string> | undefined;
+  signal?: AbortSignal | undefined;
+  timeoutMs?: number | undefined;
 }
 
-function createHeaders(options: RequestOptions): HeadersInit {
+function createHeaders(options: RequestOptions): Record<string, string> {
   const headers: Record<string, string> = {
     ...options.headers,
   };
@@ -32,30 +39,85 @@ function createHeaders(options: RequestOptions): HeadersInit {
   return headers;
 }
 
-export async function apiRequest<T>(
-  path: string,
-  { method = "GET", body, token, headers, signal }: RequestOptions = {},
-  retryAuth = true,
-): Promise<ApiSuccess<NonNullable<T>>> {
-  const session = useAuthStore.getState();
-  const context = useWorkspaceStore.getState();
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    method,
-    headers: createHeaders({ token, headers, body }),
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-    signal,
-  });
+/** Session generation and tenant scope by value: a no-op store update is not a context change. */
+function contextOf() {
+  const scope = useWorkspaceStore.getState();
+  return `${useAuthStore.getState().generation}|${scope.organizationId}|${scope.workspaceId}|${scope.networkId}`;
+}
 
-  let payload: ApiEnvelope<T> | null = null;
+function anySignal(signals: AbortSignal[]): AbortSignal {
+  if (typeof AbortSignal.any === "function") return AbortSignal.any(signals);
+  const controller = new AbortController();
+  for (const signal of signals) {
+    if (signal.aborted) {
+      controller.abort(signal.reason);
+      break;
+    }
+    signal.addEventListener("abort", () => controller.abort(signal.reason), { once: true });
+  }
+  return controller.signal;
+}
+
+async function send(path: string, options: RequestOptions): Promise<Response> {
+  const timeout = AbortSignal.timeout(options.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS);
+  try {
+    return await fetch(apiUrl(path), {
+      ...(options.method ? { method: options.method } : {}),
+      headers: createHeaders(options),
+      ...(options.body !== undefined ? { body: JSON.stringify(options.body) } : {}),
+      signal: options.signal ? anySignal([options.signal, timeout]) : timeout,
+    });
+  } catch (error) {
+    if (timeout.aborted && !options.signal?.aborted) {
+      throw new ApiClientError(
+        options.method && options.method !== "GET"
+          ? "The request timed out. Its outcome is unknown; check the current state before retrying."
+          : "The request timed out. Retry shortly.",
+        "API_TIMEOUT", 0,
+      );
+    }
+    throw error;
+  }
+}
+
+function requestIdHeader(response: Response): string | null {
+  try { return response.headers.get("X-Request-ID"); } catch { return null; }
+}
+
+function errorFrom(response: Response, payload: ApiEnvelope<unknown> | null, fallback: string): ApiClientError {
+  const errors = payload?.success === false ? payload.errors : null;
+  return new ApiClientError(
+    errors?.message ?? fallback,
+    errors?.code ?? `HTTP_${response.status}`,
+    response.status,
+    {
+      requestId: payload?.meta?.request_id ?? response.headers.get("X-Request-ID"),
+      details: parseErrorDetails((errors as { details?: unknown } | null)?.details),
+      retryAfterMs: retryAfterMs(response.headers.get("Retry-After")),
+    },
+  );
+}
+
+export async function apiRequest<T, M extends ApiMeta = ApiMeta>(
+  path: string,
+  { method = "GET", body, token, headers, signal, timeoutMs }: RequestOptions = {},
+  retryAuth = true,
+): Promise<ApiSuccess<NonNullable<T>, M>> {
+  const session = useAuthStore.getState();
+  const context = contextOf();
+  const response = await send(path, { method, body, token, headers, signal, timeoutMs });
+
+  let payload: ApiEnvelope<T, M> | null = null;
   if (response.status !== 204) {
-    try { payload = (await response.json()) as ApiEnvelope<T>; } catch {
+    try { payload = (await response.json()) as ApiEnvelope<T, M>; } catch {
       if (response.ok) throw new ApiClientError("API returned an unreadable response. Mutation outcome may be unknown; inspect history before retrying.", "API_INVALID_RESPONSE", response.status);
     }
   }
+  noteServerRequestId(payload?.meta?.request_id ?? requestIdHeader(response));
 
   if (token && token === session.accessToken &&
       (session.generation !== useAuthStore.getState().generation ||
-        (!path.startsWith("/api/v1/auth/") && context !== useWorkspaceStore.getState()))) {
+        (!path.startsWith("/api/v1/auth/") && context !== contextOf()))) {
     throw new ApiClientError("Session context changed", "API_STALE_CONTEXT", response.status);
   }
   if (session.generation === useAuthStore.getState().generation) {
@@ -67,11 +129,11 @@ export async function apiRequest<T>(
     const current = useAuthStore.getState();
     const refreshed = current.accessToken !== token || await refreshSession();
     if (refreshed && session.generation === useAuthStore.getState().generation &&
-        context === useWorkspaceStore.getState() && !useAuthStore.getState().endingSession) {
+        context === contextOf() && !useAuthStore.getState().endingSession) {
       if (method !== "GET" && authorityKey(session.profile) !== authorityKey()) {
         throw new ApiClientError("Permissions changed. Review and explicitly approve the action again.", "API_AUTHORITY_CHANGED", 403);
       }
-      return apiRequest<T>(path, { method, body, headers, signal, token: useAuthStore.getState().accessToken }, false);
+      return apiRequest<T, M>(path, { method, body, headers, signal, timeoutMs, token: useAuthStore.getState().accessToken }, false);
     }
   }
 
@@ -79,9 +141,7 @@ export async function apiRequest<T>(
     if (response.status === 401 && !retryAuth && token === useAuthStore.getState().accessToken) {
       useAuthStore.getState().clearSession();
     }
-    const code = payload?.errors?.code ?? `HTTP_${response.status}`;
-    const message = payload?.errors?.message ?? `Request failed (${response.status})`;
-    throw new ApiClientError(message, code, response.status);
+    throw errorFrom(response, payload, `Request failed (${response.status})`);
   }
 
   if (payload === null) {
@@ -97,31 +157,24 @@ export async function apiRequest<T>(
 
 export async function apiRequestNoContent(
   path: string,
-  { method = "DELETE", body, token, headers, signal }: RequestOptions = {},
+  { method = "DELETE", body, token, headers, signal, timeoutMs }: RequestOptions = {},
   retryAuth = true,
 ): Promise<void> {
   const session = useAuthStore.getState();
-  const context = useWorkspaceStore.getState();
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    method,
-    headers: createHeaders({ token, headers, body }),
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-    signal,
-  });
+  const context = contextOf();
+  const response = await send(path, { method, body, token, headers, signal, timeoutMs });
 
-  if (token === session.accessToken && (session.generation !== useAuthStore.getState().generation ||
-      context !== useWorkspaceStore.getState())) {
+  if (token === session.accessToken && context !== contextOf()) {
     throw new ApiClientError("Session context changed", "API_STALE_CONTEXT", response.status);
   }
   if (response.status === 401 && retryAuth && token && token === session.accessToken) {
     const { refreshSession } = await import("@/features/auth/session");
     const refreshed = useAuthStore.getState().accessToken !== token || await refreshSession();
-    if (refreshed && session.generation === useAuthStore.getState().generation &&
-        context === useWorkspaceStore.getState() && !useAuthStore.getState().endingSession) {
+    if (refreshed && context === contextOf() && !useAuthStore.getState().endingSession) {
       if (authorityKey(session.profile) !== authorityKey()) {
         throw new ApiClientError("Permissions changed. Review the action again.", "API_AUTHORITY_CHANGED", 403);
       }
-      return apiRequestNoContent(path, { method, body, headers, signal, token: useAuthStore.getState().accessToken }, false);
+      return apiRequestNoContent(path, { method, body, headers, signal, timeoutMs, token: useAuthStore.getState().accessToken }, false);
     }
   }
 
@@ -129,15 +182,12 @@ export async function apiRequestNoContent(
     if (response.status === 401 && !retryAuth && token === useAuthStore.getState().accessToken) {
       useAuthStore.getState().clearSession();
     }
-    let code = `HTTP_${response.status}`;
-    let message = `Expected no-content response (${response.status})`;
+    let payload: ApiEnvelope<unknown> | null = null;
     try {
-      const payload = (await response.json()) as ApiEnvelope<unknown>;
-      code = payload.errors?.code ?? code;
-      message = payload.errors?.message ?? message;
+      payload = (await response.json()) as ApiEnvelope<unknown>;
     } catch {
-      // no-op
+      // Non-JSON proxy errors keep the HTTP status.
     }
-    throw new ApiClientError(message, code, response.status);
+    throw errorFrom(response, payload, `Expected no-content response (${response.status})`);
   }
 }

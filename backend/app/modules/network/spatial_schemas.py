@@ -9,6 +9,8 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator, model_serializer, model_validator
 
+from app.core.pagination import MAX_PAGE
+
 MAX_OBJECTS = 10_000
 MAX_POSITION_M = 1_000_000
 MAX_REVISION = 9_007_199_254_740_991
@@ -180,7 +182,8 @@ class ReplaceSpatialSceneRequest(SpatialModel):
 
 
 class SpatialHistoryQuery(SpatialModel):
-    page: Annotated[int, Field(strict=True, ge=1, le=1_000_000)] = 1
+    # Shared page bound (ADR-028 C20): deep offsets are rejected, never scanned.
+    page: Annotated[int, Field(strict=True, ge=1, le=MAX_PAGE)] = 1
     page_size: Annotated[int, Field(strict=True, ge=1, le=100)] = 20
 
 

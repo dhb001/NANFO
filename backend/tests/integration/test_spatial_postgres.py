@@ -41,6 +41,18 @@ ORG_ID = uuid.UUID(int=305)
 
 @pytest.fixture
 async def sessions():
+    async for factory in _isolated_sessions((("0022", "up"), ("0020", "down"), ("0022", "up"))):
+        yield factory
+
+
+@pytest.fixture
+async def head_sessions():
+    """Full current schema (ADR-028: migration 0030 adds the history delta columns)."""
+    async for factory in _isolated_sessions((("head", "up"),)):
+        yield factory
+
+
+async def _isolated_sessions(migrations):
     schema = "spatial_test_" + uuid.uuid4().hex
     url = make_url(os.environ["SPATIAL_TEST_DSN"])
     sync = create_engine(url.set(drivername="postgresql+psycopg2"))
@@ -53,12 +65,13 @@ async def sessions():
         scripts = ScriptDirectory.from_config(config)
         with sync.begin() as connection:
             connection.execute(text(f'SET LOCAL search_path TO "{schema}"'))
-            for target, direction in (("0022", "up"), ("0020", "down"), ("0022", "up")):
+            for target, direction in migrations:
                 migrate = scripts._upgrade_revs if direction == "up" else scripts._downgrade_revs
                 with EnvironmentContext(config, scripts, fn=lambda rev, _, t=target, m=migrate: m(t, rev)) as context:
                     context.configure(connection=connection)
                     context.run_migrations()
-                assert connection.scalar(text("SELECT version_num FROM alembic_version")) == target
+                expected = scripts.get_current_head() if target == "head" else target
+                assert connection.scalar(text("SELECT version_num FROM alembic_version")) == expected
         engine = create_async_engine(url.set(drivername="postgresql+asyncpg"),
                                      connect_args={"server_settings": {"search_path": schema}})
         factory = async_sessionmaker(engine, expire_on_commit=False)
@@ -93,6 +106,12 @@ async def read(sessions):
         return await SpatialSceneService(db, None).get_scene(network_id=NETWORK_ID, actor_user_id=str(ACTOR_ID))
 
 
+async def stored_scene(db, revision):
+    """Raw history body; selects only pre-0030 columns so it also reads the legacy 0022 schema."""
+    return await db.scalar(select(SpatialSceneRevision.scene).where(
+        SpatialSceneRevision.network_id == NETWORK_ID, SpatialSceneRevision.revision == revision))
+
+
 async def test_dimensioned_save_history_restore_preserves_legacy_body_and_hash(sessions):
     legacy = await replace(sessions, objects=[spatial_object("legacy", "building"), spatial_object("null", geometry=None)])
     legacy_body = legacy.model_dump(mode="json", exclude={"revision"})
@@ -112,16 +131,16 @@ async def test_dimensioned_save_history_restore_preserves_legacy_body_and_hash(s
         assert spatial_document_hash(first) == legacy_hash
         assert first.model_dump(mode="json", exclude={"revision"}) == legacy_body
         assert second == dimensioned
-        stored = await db.get(SpatialSceneRevision, (NETWORK_ID, 1))
-        assert "geometry" not in stored.scene["objects"][0]
-        assert stored.scene["objects"][1]["geometry"] is None
+        stored = await stored_scene(db, 1)
+        assert "geometry" not in stored["objects"][0]
+        assert stored["objects"][1]["geometry"] is None
         audit = (await db.scalars(select(AuditLog).order_by(AuditLog.timestamp))).first()
         assert audit.metadata_["scene_sha256"] == expected_audit_hash
     restored = await replace(sessions, 2, legacy_body["objects"])
     assert restored.revision == 3
     assert restored.model_dump(mode="json", exclude={"revision"}) == legacy_body
     async with sessions() as db:
-        assert (await db.get(SpatialSceneRevision, (NETWORK_ID, 2))).scene == dimensioned.model_dump(mode="json", exclude={"revision"})
+        assert await stored_scene(db, 2) == dimensioned.model_dump(mode="json", exclude={"revision"})
 
 
 async def test_initial_read_persist_reload_replace_and_audit(sessions):
@@ -166,8 +185,7 @@ async def test_simultaneous_first_and_existing_writers_have_one_winner(sessions,
     async with sessions() as db:
         assert await db.scalar(select(func.count()).select_from(AuditLog)) == initial_revision + 1
         assert await db.scalar(select(func.count()).select_from(SpatialSceneRevision)) == initial_revision + 1
-        stored = await db.get(SpatialSceneRevision, (NETWORK_ID, winners[0].revision))
-        assert stored.scene == winners[0].model_dump(mode="json", exclude={"revision"})
+        assert await stored_scene(db, winners[0].revision) == winners[0].model_dump(mode="json", exclude={"revision"})
 
 
 @pytest.mark.parametrize("existing", [False, True])
@@ -420,7 +438,10 @@ async def test_history_reads_refresh_revocation_and_enforce_tenant_scope(session
             assert error.value.status_code == 403
 
 
-async def test_migration_preserves_existing_snapshot_as_single_baseline(sessions):
+async def test_migration_downgrade_refuses_to_drop_irreproducible_scene_history(sessions):
+    """ADR-028: 0022's downgrade refuses while history exists that re-upgrading cannot
+    reproduce; every revision stays readable. (Re-creating the single baseline from the
+    current scenes is covered by tests/integration/test_migrations_postgres.py.)"""
     original = await replace(sessions, objects=[spatial_object("original")])
     current = await replace(sessions, 1, [spatial_object("current")])
 
@@ -435,18 +456,18 @@ async def test_migration_preserves_existing_snapshot_as_single_baseline(sessions
 
     async with sessions() as db:
         connection = await db.connection()
-        await connection.run_sync(migrate, "0021", True)
-        assert (await db.get(SpatialSceneRecord, NETWORK_ID)).revision == current.revision
-        await connection.run_sync(migrate, "0022", False)
-        await db.commit()
+        with pytest.raises(RuntimeError, match="Downgrade below 0022 refused"):
+            await connection.run_sync(migrate, "0021", True)
+        await db.rollback()
     async with sessions() as db:
+        assert (await db.get(SpatialSceneRecord, NETWORK_ID)).revision == current.revision
         svc = SpatialSceneService(db, None)
         history = await svc.list_history(network_id=NETWORK_ID, actor_user_id=str(ACTOR_ID))
-        assert history.total == 1 and history.items[0].revision == 2
-        assert history.items[0].origin == "baseline" and history.items[0].actor_id is None
-        assert await svc.get_revision(network_id=NETWORK_ID, revision=2, actor_user_id=str(ACTOR_ID)) == current
-        with pytest.raises(HTTPException):
-            await svc.get_revision(network_id=NETWORK_ID, revision=original.revision, actor_user_id=str(ACTOR_ID))
+        assert history.total == 2
+        assert await svc.get_revision(network_id=NETWORK_ID, revision=original.revision,
+                                      actor_user_id=str(ACTOR_ID)) == original
+        assert await svc.get_revision(network_id=NETWORK_ID, revision=current.revision,
+                                      actor_user_id=str(ACTOR_ID)) == current
     assert (await replace(sessions, 2)).revision == 3
 
 
@@ -476,3 +497,53 @@ async def test_history_network_isolation_and_restore_revalidates_deleted_device(
         assert error.value.detail["code"] == "SPATIAL_DEVICE_SCOPE_INVALID"
         assert (await svc.list_history(network_id=NETWORK_ID, actor_user_id=str(ACTOR_ID))).total == 1
         assert await db.scalar(select(func.count()).select_from(AuditLog)) == 1
+
+
+async def test_delta_history_rebuilds_every_revision_with_periodic_checkpoints(head_sessions):
+    """ADR-028 F18: per-object deltas + a full checkpoint every 20 revisions; reads unchanged."""
+    async with head_sessions() as db:
+        if not await SpatialSceneRepository(db).delta_history_enabled():
+            pytest.skip("head migration lacks the 0030 spatial history delta columns")
+    objects = [spatial_object(f"b{n}", "building") for n in range(30)]
+    written = {}
+    for revision in range(1, 46):
+        objects = [dict(obj) for obj in objects]
+        objects[revision % 30]["name"] = f"edit-{revision}"
+        if revision % 7 == 0:
+            objects.append(spatial_object(f"extra-{revision}", "building"))
+        written[revision] = await replace(head_sessions, revision - 1, objects)
+    async with head_sessions() as db:
+        kinds = dict((await db.execute(text(
+            "SELECT revision, storage_kind FROM network_spatial_scene_revisions WHERE network_id = :n"
+        ), {"n": NETWORK_ID})).all())
+        # Revision 1 has no stored base; 20 and 40 are periodic checkpoints.
+        assert {revision for revision, kind in kinds.items() if kind == "full"} == {1, 20, 40}
+        sizes = (await db.execute(text("""
+            SELECT sum(octet_length(coalesce(scene::text, ''))) AS full_bytes,
+                   sum(octet_length(coalesce(delta::text, ''))) AS delta_bytes
+            FROM network_spatial_scene_revisions WHERE network_id = :n
+        """), {"n": NETWORK_ID})).one()
+        # Storing all 45 revisions as full copies would take at least 3x the space.
+        average_full = sizes.full_bytes / 3
+        assert (sizes.full_bytes + sizes.delta_bytes) * 3 < average_full * 45
+        svc = SpatialSceneService(db, None)
+        for revision, document in written.items():
+            assert await svc.get_revision(network_id=NETWORK_ID, revision=revision,
+                                          actor_user_id=str(ACTOR_ID)) == document
+        history = await svc.list_history(network_id=NETWORK_ID, actor_user_id=str(ACTOR_ID), page_size=100)
+        assert history.total == 45
+        assert {entry.revision: entry.object_count for entry in history.items} == {
+            revision: len(document.objects) for revision, document in written.items()}
+        # Restoring an old revision appends a new (delta) revision; history stays immutable.
+        restored = await svc.replace_scene(
+            network_id=NETWORK_ID, actor_user_id=str(ACTOR_ID), correlation_id="restore",
+            req=ReplaceSpatialSceneRequest.model_validate({
+                "expected_revision": 45, "scene": written[3].model_dump(mode="json", exclude={"revision"}),
+            }),
+        )
+    async with head_sessions() as db:
+        svc = SpatialSceneService(db, None)
+        assert (await svc.get_revision(network_id=NETWORK_ID, revision=46, actor_user_id=str(ACTOR_ID))).objects \
+            == restored.objects == written[3].objects
+        with pytest.raises(DBAPIError, match="spatial scene history is immutable"):
+            await db.execute(text("UPDATE network_spatial_scene_revisions SET delta = NULL WHERE revision = 21"))

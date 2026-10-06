@@ -81,7 +81,8 @@ async def test_real_redis_bounded_reclaim_poison_and_api_exclusion(live_settings
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)
         assert len(set(calls)) == 3
-        assert any(c["name"].startswith("replacement-api-") for c in await redis.xinfo_consumers(stream, group))
+        # ADR-028: the stable instance name is used verbatim (no per-start suffix).
+        assert "replacement-api" in {c["name"] for c in await redis.xinfo_consumers(stream, group)}
 
         poison_id = await redis.xadd(stream, {**event, "payload": "["})
         messages = await redis.xreadgroup(group, "poison-probe", {stream: ">"}, count=1)

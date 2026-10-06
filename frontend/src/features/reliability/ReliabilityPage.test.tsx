@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { act, render, screen } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ReliabilityPage } from "@/features/reliability/ReliabilityPage";
 import { useAuthStore } from "@/shared/state/auth-store";
@@ -233,5 +233,51 @@ describe("ReliabilityPage", () => {
     expect(screen.getByText("Telemetry health restricted")).toBeInTheDocument();
     expect(screen.getByText("Alerts Lifecycle")).toBeInTheDocument();
     expect(screen.queryByText("Collector Status")).not.toBeInTheDocument();
+    // Platform alerts are a global-Admin view only.
+    expect(screen.queryByLabelText(/including platform runtime alerts/)).not.toBeInTheDocument();
+  });
+
+  it("colours severity and status from explicit backend maps and shows the collector SLO (ADR-028)", () => {
+    mockUseTelemetryHealth.mockReturnValue(queryResult({
+      status: "ok", ingest_lag_ms: 10, dropped_events: 0, latest_observed_at: null, total_records: 5,
+      slo: { status: "critical", stale: false, evaluated_at: "2026-08-14T12:00:00Z", severity_reason: "anomaly_streak_threshold_exceeded",
+        alert_active: true, anomaly_streak: 3, evaluation_interval_seconds: 30 },
+    }));
+    const [first, second] = mockUseAlertsQuery().data.items;
+    mockUseAlertsQuery.mockReturnValue(queryResult({ items: [first, { ...second, severity: "catastrophic" }], total: 2, status_counts: {} }, mockAlertsRefetch));
+    render(<ReliabilityPage />);
+    expect(screen.getByText("critical")).toHaveClass("badge--danger");
+    expect(screen.getByText("catastrophic")).toHaveClass("badge--neutral");
+    expect(screen.getByText("active")).toHaveClass("badge--warn");
+    expect(screen.getByText("acknowledged")).toHaveClass("badge--info");
+    expect(screen.getByText("CRITICAL")).toBeInTheDocument();
+    expect(screen.getByText(/Reason: anomaly_streak_threshold_exceeded/)).toBeInTheDocument();
+  });
+
+  it("keeps platform runtime alerts read-only and shows their evaluation window (ADR-028)", () => {
+    const [first, second] = mockUseAlertsQuery().data.items;
+    const platform = { ...first, severity: "degraded", payload: { alert_scope: "platform", severity: "degraded",
+      evaluation_window: { start: "2026-08-14T11:59:00Z", end: "2026-08-14T12:00:00Z", seconds: 60, counter_reset: false } } };
+    mockUseAlertsQuery.mockReturnValue(queryResult({ items: [platform, second], total: 2, status_counts: {} }, mockAlertsRefetch));
+    render(<ReliabilityPage />);
+    const [platformCard, tenantCard] = screen.getAllByRole("article");
+    expect(within(platformCard).getByText("platform alert (read-only)")).toBeInTheDocument();
+    expect(within(platformCard).getByText(/\(60 s\); counter reset: no\./)).toBeInTheDocument();
+    expect(within(platformCard).queryByRole("button", { name: "Acknowledge" })).not.toBeInTheDocument();
+    expect(within(platformCard).queryByRole("button", { name: "Resolve" })).not.toBeInTheDocument();
+    expect(within(platformCard).getByText(/platform runtime \(no tenant\)/)).toBeInTheDocument();
+    // Tenant alerts keep their lifecycle actions.
+    expect(within(tenantCard).getByRole("button", { name: "Resolve" })).toBeInTheDocument();
+  });
+
+  it("lets a global Admin list platform alerts without a tenant selection", async () => {
+    const user = userEvent.setup();
+    useWorkspaceStore.setState({ workspaceId: null, networkId: null });
+    render(<ReliabilityPage />);
+    expect(screen.getByText("Select a workspace")).toBeInTheDocument();
+    await user.click(screen.getByLabelText(/including platform runtime alerts/));
+    expect(mockUseAlertsQuery).toHaveBeenLastCalledWith("token-1", { status: undefined, limit: 200 }, true);
+    expect(screen.queryByText("Select a workspace")).not.toBeInTheDocument();
+    expect(screen.getByText("telemetry_runtime_adapter_slo_threshold_breach")).toBeInTheDocument();
   });
 });

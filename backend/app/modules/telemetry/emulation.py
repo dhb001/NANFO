@@ -24,7 +24,7 @@ from pydantic import (
     model_validator,
 )
 
-from app.modules.telemetry.service import RuntimeTelemetryAdapter
+from app.modules.telemetry.runtime.adapters import RuntimeTelemetryAdapter
 
 DPID = Annotated[str, Field(pattern=r"^[0-9a-f]{16}$")]
 Name = Annotated[str, Field(pattern=r"^[a-zA-Z0-9_-]{1,64}$")]

@@ -1,8 +1,18 @@
 """ADR020 cold-volume operations. Run with --help; failures never resume writers.
 
 Host requirements: Python 3.12+, cryptography and Docker Compose v2. Keep the
-32-byte encryption key separately, mode 0600; the tool never generates/logs it.
-Restore is same OS/architecture/image IDs only, not a portable database export.
+32-byte encryption key separately (never inside or beside the backup directory
+tree), mode 0600; the tool never generates/logs it. Restore is same
+OS/architecture/image IDs only, not a portable database export.
+
+Archive format 2 (ADR-028): HKDF-SHA256 derives independent archive-encryption,
+manifest-MAC and fingerprint keys from the master key. Each archive is a header
+(magic, segment size, random salt, random nonce prefix) followed by AES-256-GCM
+segments of 16 MiB plaintext; the nonce is prefix || counter and the AAD binds the
+archive identity, header, segment index and final flag, so tampering, truncation,
+reordering and appending fail per segment and plaintext is released only after its
+segment authenticates. Restore validates every archive in a streaming pass, then
+decrypts straight into tar extraction. Format 1 backups remain restorable.
 """
 
 from __future__ import annotations
@@ -10,9 +20,11 @@ from __future__ import annotations
 import argparse
 import hashlib
 import hmac
+import io
 import json
 import os
 import re
+import shutil
 import stat
 import subprocess
 import sys
@@ -22,9 +34,24 @@ import time
 from contextlib import ExitStack
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
+from typing import NamedTuple
 
 MAGIC = b"NANFO-GCM-1\0"
+MAGIC_V2 = b"NANFO-GCM-2\0"
+FORMAT = 2
 CHUNK = 1024 * 1024
+SEGMENT = 16 * 1024 * 1024
+TAG = 16
+SALT = 16
+NONCE_PREFIX = 8
+HEADER_V2 = len(MAGIC_V2) + 4 + SALT + NONCE_PREFIX
+MIN_SEGMENT, MAX_SEGMENT = 16, 64 * 1024 * 1024
+# Free-space margin for archive/staging estimates (tar headers, growth before stop).
+SPACE_MARGIN = 64 * 1024 * 1024
+NETWORK_FILESYSTEMS = frozenset({
+    "nfs", "nfs4", "cifs", "smb3", "smbfs", "ceph", "glusterfs", "9p", "afs", "davfs",
+    "fuse.sshfs", "fuse.s3fs", "fuse.rclone", "fuse.gcsfuse",
+})
 PROJECT = re.compile(r"nanfo-deploy-[a-z0-9][a-z0-9-]{0,47}\Z")
 SHA = re.compile(r"sha256:[0-9a-f]{64}\Z")
 STORES = {"postgres", "redis", "neo4j"}
@@ -35,6 +62,7 @@ STAGES = frozenset(
         "configuration",
         "archive_validation",
         "backup_inventory",
+        "backup_capacity",
         "backup_quiesce",
         "backup_checkpoint",
         "backup_stop_stores",
@@ -52,10 +80,35 @@ class OperationError(Exception):
     """Safe, operator-facing failure; never include subprocess output."""
 
 
+class BackupKeys(NamedTuple):
+    encryption: bytes
+    mac: bytes
+    fingerprint: bytes
+
+
 def canonical(value):
     return json.dumps(
         value, sort_keys=True, separators=(",", ":"), allow_nan=False
     ).encode()
+
+
+def hkdf(key, *, salt, info):
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+
+    return HKDF(algorithm=hashes.SHA256(), length=32, salt=salt, info=info).derive(key)
+
+
+def backup_keys(master, fmt):
+    """Format 1 used the master key for everything; format 2 separates every purpose."""
+    if fmt == 1:
+        return BackupKeys(master, master, master)
+    if fmt != FORMAT:
+        raise OperationError("Incomplete/unsupported backup manifest.")
+    return BackupKeys(*(
+        hkdf(master, salt=b"NANFO-backup-v2", info=b"nanfo-backup/v2 " + purpose)
+        for purpose in (b"archive-encryption", b"manifest-mac", b"external-fingerprint")
+    ))
 
 
 def protected_file(path, *, size=None):
@@ -91,6 +144,51 @@ def private_directory(path):
     return path
 
 
+def filesystem_type(path, *, mountinfo="/proc/self/mountinfo"):
+    """Type of the filesystem containing ``path`` (longest mount point), else None."""
+    try:
+        rows = Path(mountinfo).read_text().splitlines()
+    except OSError:
+        return None
+    target, best, kind = str(Path(path).resolve()), "", None
+    for row in rows:
+        fields, _, rest = row.partition(" - ")
+        parts = fields.split()
+        if len(parts) < 5 or not rest:
+            continue
+        point = parts[4].replace("\\040", " ")
+        if (target == point or target.startswith(point.rstrip("/") + "/")) and len(point) >= len(best):
+            best, kind = point, rest.split()[0]
+    return kind
+
+
+def require_local_workspace(path, needed):
+    """Plaintext staging must stay on private local storage with enough free space."""
+    path = private_directory(path)
+    if filesystem_type(path) in NETWORK_FILESYSTEMS:
+        raise OperationError("Restore work directory must be on local storage, not a network filesystem.")
+    if shutil.disk_usage(path).free < needed + SPACE_MARGIN:
+        raise OperationError("Restore work directory lacks free space for decrypted staging.")
+    return path
+
+
+def check_key_location(key_file, directory, *, warn=None):
+    """Refuse a key stored in (or beside) the backup tree; warn on a shared filesystem."""
+    key, backup = Path(key_file).resolve(), Path(directory).resolve()
+    if key.is_relative_to(backup) or key.is_relative_to(backup.parent) or backup.is_relative_to(key.parent):
+        raise OperationError(
+            "Encryption key must be stored outside the backup directory tree (not inside or beside it)."
+        )
+    try:
+        shared = os.stat(key).st_dev == os.stat(backup).st_dev
+    except OSError:
+        shared = False
+    if shared and warn is not None:
+        warn(json.dumps({"warning": "encryption_key_same_filesystem",
+                         "detail": "Escrow the key on separate media; it must not travel with backups."}))
+    return shared
+
+
 def file_hash(path):
     result = hashlib.sha256()
     with protected_file(path) as source:
@@ -99,7 +197,20 @@ def file_hash(path):
     return result.hexdigest()
 
 
+def read_full(stream, size):
+    """Read exactly ``size`` bytes unless EOF (pipes return short reads)."""
+    parts, remaining = [], size
+    while remaining:
+        block = stream.read(remaining)
+        if not block:
+            break
+        parts.append(block)
+        remaining -= len(block)
+    return b"".join(parts)
+
+
 def encrypt_stream(source, target, key, aad, *, max_bytes):
+    """Format 1 (single GCM stream). Retained for compatibility tests only."""
     from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
     nonce = os.urandom(12)
@@ -118,6 +229,7 @@ def encrypt_stream(source, target, key, aad, *, max_bytes):
 
 
 def decrypt_stream(source, target, key, aad, *, max_bytes):
+    """Format 1: the tag authenticates only at the end, so plaintext is staged first."""
     from cryptography.exceptions import InvalidTag
     from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
@@ -151,51 +263,152 @@ def decrypt_stream(source, target, key, aad, *, max_bytes):
     target.seek(0)
 
 
-def validate_tar(source, *, max_bytes, max_entries=1_000_000):
-    """Validate the entire authenticated tar before starting any extraction.
+def _segment_key(key, salt):
+    return hkdf(key, salt=salt, info=b"nanfo-backup/v2 archive-segments")
 
-    Internal links are allowed, but may never be traversal parents or leave root.
-    Devices, sockets, FIFOs, sparse files and duplicate entries are refused.
-    """
-    entries, total = {}, 0
-    source.seek(0)
-    with tarfile.open(fileobj=source, mode="r:") as archive:
-        for member in archive:
-            name = member.name
-            path = PurePosixPath(name)
-            if (
-                path.is_absolute()
-                or ".." in path.parts
-                or "\\" in name
-                or len(name) > 4096
-                or "\x00" in name
-            ):
-                raise OperationError("Unsafe archive path.")
-            name = str(path)
-            if name in entries or len(entries) >= max_entries:
-                raise OperationError("Duplicate entry or archive entry cap exceeded.")
-            if (
-                not (
-                    member.isfile()
-                    or member.isdir()
-                    or member.issym()
-                    or member.islnk()
-                )
-                or member.sparse
-            ):
-                raise OperationError("Unsupported archive entry type.")
-            if member.mode & 0o7000:
-                raise OperationError("Special permission bits are not restorable.")
-            if member.size < 0:
-                raise OperationError("Invalid archive entry size.")
-            total += member.size
-            if total > max_bytes:
-                raise OperationError("Expanded archive byte cap exceeded.")
-            if member.issym() or member.islnk():
-                link = PurePosixPath(member.linkname)
-                if link.is_absolute() or "\\" in member.linkname or ".." in link.parts:
-                    raise OperationError("Unsafe archive link.")
-            entries[name] = member
+
+def _segment_aad(aad, header, index, final):
+    return aad + header + index.to_bytes(8, "big") + (b"\x01" if final else b"\x00")
+
+
+def encrypt_segments(source, target, key, aad, *, max_bytes, segment_size=SEGMENT):
+    """Format 2 writer; returns the plaintext byte count."""
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+    if not MIN_SEGMENT <= segment_size <= MAX_SEGMENT:
+        raise OperationError("Invalid archive segment size.")
+    salt, prefix = os.urandom(SALT), os.urandom(NONCE_PREFIX)
+    header = MAGIC_V2 + segment_size.to_bytes(4, "big") + salt + prefix
+    aead = AESGCM(_segment_key(key, salt))
+    target.write(header)
+    total, index = 0, 0
+    current = read_full(source, segment_size)
+    while True:
+        total += len(current)
+        if total > max_bytes:
+            raise OperationError("Archive byte cap exceeded; backup incomplete.")
+        following = read_full(source, segment_size) if len(current) == segment_size else b""
+        final = not following
+        nonce = prefix + index.to_bytes(4, "big")
+        target.write(aead.encrypt(nonce, current, _segment_aad(aad, header, index, final)))
+        if final:
+            return total
+        index += 1
+        if index >= 2**32:
+            raise OperationError("Archive segment counter exhausted.")
+        current = following
+
+
+class SegmentReader(io.RawIOBase):
+    """Streaming format-2 reader: releases each segment only after it authenticates."""
+
+    def __init__(self, source, key, aad, *, max_bytes):
+        from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+        super().__init__()
+        header = read_full(source, HEADER_V2)
+        if len(header) != HEADER_V2 or header[: len(MAGIC_V2)] != MAGIC_V2:
+            raise OperationError("Unsupported encrypted archive.")
+        offset = len(MAGIC_V2)
+        self.segment = int.from_bytes(header[offset: offset + 4], "big")
+        if not MIN_SEGMENT <= self.segment <= MAX_SEGMENT:
+            raise OperationError("Invalid archive segment size.")
+        salt = header[offset + 4: offset + 4 + SALT]
+        self.prefix = header[offset + 4 + SALT:]
+        self.aead = AESGCM(_segment_key(key, salt))
+        self.source, self.aad, self.header, self.max_bytes = source, aad, header, max_bytes
+        self.index = self.total = 0
+        self.done = False
+        self.buffer = b""
+        self.lookahead = read_full(source, self.segment + TAG)
+
+    def readable(self):
+        return True
+
+    def _next_segment(self):
+        from cryptography.exceptions import InvalidTag
+
+        current = self.lookahead
+        if len(current) < TAG:
+            raise OperationError("Truncated archive.")
+        if len(current) == self.segment + TAG:
+            self.lookahead = read_full(self.source, self.segment + TAG)
+            final = not self.lookahead
+        else:
+            self.lookahead, final = b"", True
+        nonce = self.prefix + self.index.to_bytes(4, "big")
+        try:
+            plain = self.aead.decrypt(nonce, current, _segment_aad(self.aad, self.header, self.index, final))
+        except InvalidTag:
+            raise OperationError("Archive authentication failed; nothing extracted.") from None
+        self.index += 1
+        self.total += len(plain)
+        if self.total > self.max_bytes:
+            raise OperationError("Encrypted archive exceeds byte cap or is truncated.")
+        self.done = final
+        return plain
+
+    def readinto(self, target):
+        while not self.buffer and not self.done:
+            self.buffer = self._next_segment()
+        size = min(len(target), len(self.buffer))
+        target[:size] = self.buffer[:size]
+        self.buffer = self.buffer[size:]
+        return size
+
+    def drain(self):
+        """Authenticate every remaining segment (the whole archive, including the final flag)."""
+        while self.read(CHUNK):
+            pass
+        return self.total
+
+
+def archive_reader(source, keys, aad, *, fmt, max_bytes):
+    if fmt != FORMAT:
+        raise OperationError("Streaming reads require archive format 2.")
+    return SegmentReader(source, keys.encryption, aad, max_bytes=max_bytes)
+
+
+def _check_member(member, entries, total, *, max_bytes, max_entries):
+    name = member.name
+    path = PurePosixPath(name)
+    if (
+        path.is_absolute()
+        or ".." in path.parts
+        or "\\" in name
+        or len(name) > 4096
+        or "\x00" in name
+    ):
+        raise OperationError("Unsafe archive path.")
+    name = str(path)
+    if name in entries or len(entries) >= max_entries:
+        raise OperationError("Duplicate entry or archive entry cap exceeded.")
+    if (
+        not (
+            member.isfile()
+            or member.isdir()
+            or member.issym()
+            or member.islnk()
+        )
+        or member.sparse
+    ):
+        raise OperationError("Unsupported archive entry type.")
+    if member.mode & 0o7000:
+        raise OperationError("Special permission bits are not restorable.")
+    if member.size < 0:
+        raise OperationError("Invalid archive entry size.")
+    total += member.size
+    if total > max_bytes:
+        raise OperationError("Expanded archive byte cap exceeded.")
+    if member.issym() or member.islnk():
+        link = PurePosixPath(member.linkname)
+        if link.is_absolute() or "\\" in member.linkname or ".." in link.parts:
+            raise OperationError("Unsafe archive link.")
+    entries[name] = member
+    return total
+
+
+def _check_tree(entries):
     for name, member in entries.items():
         if any(
             str(parent) in entries and not entries[str(parent)].isdir()
@@ -208,7 +421,32 @@ def validate_tar(source, *, max_bytes, max_entries=1_000_000):
                 raise OperationError(
                     "Hardlink must reference a regular archive member."
                 )
+
+
+def validate_tar(source, *, max_bytes, max_entries=1_000_000):
+    """Validate the entire authenticated tar before starting any extraction.
+
+    Internal links are allowed, but may never be traversal parents or leave root.
+    Devices, sockets, FIFOs, sparse files and duplicate entries are refused.
+    """
+    entries, total = {}, 0
     source.seek(0)
+    with tarfile.open(fileobj=source, mode="r:") as archive:
+        for member in archive:
+            total = _check_member(member, entries, total, max_bytes=max_bytes, max_entries=max_entries)
+    _check_tree(entries)
+    source.seek(0)
+    return {"entries": len(entries), "bytes": total}
+
+
+def validate_tar_stream(reader, *, max_bytes, max_entries=1_000_000):
+    """Streaming variant for format 2: no plaintext is written anywhere."""
+    entries, total = {}, 0
+    with tarfile.open(fileobj=reader, mode="r|") as archive:
+        for member in archive:
+            total = _check_member(member, entries, total, max_bytes=max_bytes, max_entries=max_entries)
+    _check_tree(entries)
+    reader.drain()
     return {"entries": len(entries), "bytes": total}
 
 
@@ -763,6 +1001,74 @@ class Deployment:
             else ["-x", "-p", "--numeric-owner", "-f", "-", "-C", "/volume"]
         )
 
+    def volume_usage(self, image, volume, *, bind=False):
+        """Upper bound of a volume's tar stream, measured read-only before any stop."""
+        args = self.helper_args(image, volume, readonly=True, bind=bind)
+        entry = args.index("--entrypoint")
+        args = [*args[: entry + 1], "python", image, "-c", USAGE_PROBE]
+        try:
+            value = json.loads(self.run(*args, timeout=600))
+        except (ValueError, TypeError):
+            raise OperationError("Volume usage probe did not return a size.") from None
+        if not isinstance(value, dict) or type(value.get("bytes")) is not int or value["bytes"] < 0:
+            raise OperationError("Volume usage probe did not return a size.")
+        return value
+
+    def stream_into(self, args, reader, *, timeout=3600):
+        """Pipe authenticated plaintext straight into an extraction helper's stdin."""
+        with tempfile.TemporaryFile() as errors:
+            process = subprocess.Popen(list(args), stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=errors)
+            broken = False
+            try:
+                while block := reader.read(CHUNK):
+                    if broken:
+                        continue  # Keep authenticating the remaining segments.
+                    try:
+                        process.stdin.write(block)
+                    except BrokenPipeError:
+                        broken = True
+                try:
+                    process.stdin.close()
+                except BrokenPipeError:
+                    pass
+                code = process.wait(timeout=timeout)
+            except BaseException:
+                process.kill()
+                process.wait()
+                raise
+            if code:
+                errors.seek(0)
+                self.runner_failure(errors.read(65536))
+        return code
+
+    def runner_failure(self, stderr):
+        diagnostic_dir = getattr(self, "diagnostic_dir", None)
+        if diagnostic_dir is not None:
+            with tempfile.NamedTemporaryFile(prefix="docker-", suffix=".private.log", dir=diagnostic_dir) as diagnostic:
+                diagnostic.write(stderr)
+                diagnostic.flush()
+                os.link(diagnostic.name, diagnostic.name + ".retained")
+        raise OperationError(
+            "Docker operation failed; inspect scoped services locally (output suppressed for secrets)."
+        )
+
+
+# Runs inside the helper (backend image, read-only mount). Tar blocks are 512 bytes;
+# each entry needs a header, regular files round up, plus end-of-archive records.
+USAGE_PROBE = (
+    "import json,os,stat\n"
+    "total=entries=0\n"
+    "stack=['/volume']\n"
+    "while stack:\n"
+    "    for item in os.scandir(stack.pop()):\n"
+    "        info=item.stat(follow_symlinks=False)\n"
+    "        entries+=1\n"
+    "        total+=1536 if len(item.path)>99 else 512\n"
+    "        if stat.S_ISREG(info.st_mode): total+=-(-info.st_size//512)*512\n"
+    "        elif stat.S_ISDIR(info.st_mode): stack.append(item.path)\n"
+    "print(json.dumps({'bytes':total+20480,'entries':entries}))\n"
+)
+
 
 def write_json(path, value):
     with os.fdopen(
@@ -773,6 +1079,18 @@ def write_json(path, value):
         os.fsync(stream.fileno())
 
 
+def manifest_format(raw):
+    """Untrusted format hint; the MAC below authenticates it (a wrong hint fails)."""
+    try:
+        value = json.loads(raw)
+    except ValueError:
+        raise OperationError("Manifest authentication failed.") from None
+    fmt = value.get("format", 1) if isinstance(value, dict) else None
+    if fmt not in (1, FORMAT):
+        raise OperationError("Incomplete/unsupported backup manifest.")
+    return fmt
+
+
 def load_manifest(directory, key):
     directory = private_directory(directory)
     with protected_file(directory / "manifest.json") as stream:
@@ -781,12 +1099,13 @@ def load_manifest(directory, key):
         raise OperationError("Manifest exceeds cap.")
     with protected_file(directory / "manifest.hmac") as stream:
         signature = stream.read(65).decode("ascii")
+    keys = backup_keys(key, manifest_format(raw))
     if not hmac.compare_digest(
-        signature, hmac.new(key, raw, hashlib.sha256).hexdigest()
+        signature, hmac.new(keys.mac, raw, hashlib.sha256).hexdigest()
     ):
         raise OperationError("Manifest authentication failed.")
     manifest = json.loads(raw)
-    if manifest.get("format") != 1 or manifest.get("complete") is not True:
+    if manifest.get("format") not in (1, FORMAT) or manifest.get("complete") is not True:
         raise OperationError("Incomplete/unsupported backup manifest.")
     if not PROJECT.fullmatch(manifest.get("project", "")):
         raise OperationError("Invalid source project.")
@@ -804,13 +1123,30 @@ def load_manifest(directory, key):
     return manifest
 
 
-def backup(deployment, directory, key, *, max_bytes):
+def capacity_check(deployment, directory, image, volumes, binds, *, max_bytes):
+    """Measure every archive source read-only and refuse before anything is stopped."""
+    usage = {logical: deployment.volume_usage(image, name) for logical, name in sorted(volumes.items())}
+    usage.update({logical: deployment.volume_usage(image, value["source"], bind=True)
+                  for logical, value in sorted(binds.items())})
+    if any(value["bytes"] > max_bytes for value in usage.values()):
+        raise OperationError(
+            "A volume exceeds the archive byte cap; nothing was stopped (raise --max-volume-bytes or reduce data)."
+        )
+    estimate = sum(value["bytes"] for value in usage.values())
+    required = estimate + estimate // 20 + SPACE_MARGIN
+    if shutil.disk_usage(directory).free < required:
+        raise OperationError("Backup destination lacks free space for the estimated archives; nothing was stopped.")
+    return {"estimated_bytes": estimate, "required_free_bytes": required}
+
+
+def backup(deployment, directory, key, *, max_bytes, segment_size=SEGMENT):
     deployment.stage = "backup_inventory"
     directory = private_directory(directory)
     if any(directory.iterdir()):
         raise OperationError("Backup destination must be empty.")
+    keys = backup_keys(key, FORMAT)
     images = deployment.images()
-    volumes, external = deployment.inventory(key)
+    volumes, external = deployment.inventory(keys.fingerprint)
     binds = deployment.binds()
     if not volumes or not deployment.containers():
         raise OperationError("No initialized deployment to back up.")
@@ -820,6 +1156,8 @@ def backup(deployment, directory, key, *, max_bytes):
             raise OperationError(
                 "Running deployment image differs from Compose image; exact restore cannot be guaranteed."
             )
+    deployment.stage = "backup_capacity"
+    capacity = capacity_check(deployment, directory, images["api"]["id"], volumes, binds, max_bytes=max_bytes)
     # Stop admissions first; recovery workers remain alive until owner services
     # prove there is no unresolved physical work. Refusal never kills recovery.
     deployment.stage = "backup_quiesce"
@@ -870,11 +1208,11 @@ def backup(deployment, directory, key, *, max_bytes):
     deployment.compose("stop", "--timeout", "120", *sorted(STORES))
     deployment.assert_stopped()
     deployment.assert_exclusive(volumes.values())
-    current, current_external = deployment.inventory(key)
+    current, current_external = deployment.inventory(keys.fingerprint)
     if current != volumes or current_external != external:
         raise OperationError("Mount inventory changed during quiescence.")
     manifest = {
-        "format": 1,
+        "format": FORMAT,
         "complete": True,
         "project": deployment.project,
         "created_at": datetime.now(UTC).isoformat(),
@@ -882,6 +1220,9 @@ def backup(deployment, directory, key, *, max_bytes):
         "mount_contract": deployment.mount_contract(),
         "external_fingerprints": external,
         "checkpoint": checkpoint,
+        "capacity": capacity,
+        "encryption": {"cipher": "AES-256-GCM", "segment_bytes": segment_size,
+                       "kdf": "HKDF-SHA256", "nonce": "random-prefix||counter"},
         "volumes": [],
         "binds": [],
         "restore_scope": "same-image-id-os-architecture; manual writer/lab resume",
@@ -915,8 +1256,9 @@ def backup(deployment, directory, key, *, max_bytes):
                 ),
                 "wb",
             ) as target:
-                size = encrypt_stream(
-                    process.stdout, target, key, aad, max_bytes=max_bytes
+                size = encrypt_segments(
+                    process.stdout, target, keys.encryption, aad, max_bytes=max_bytes,
+                    segment_size=segment_size,
                 )
                 target.flush()
                 os.fsync(target.fileno())
@@ -934,12 +1276,11 @@ def backup(deployment, directory, key, *, max_bytes):
             "bytes": size,
             "sha256": file_hash(directory / filename),
         }
-        with (
-            protected_file(directory / filename) as source,
-            tempfile.TemporaryFile(dir=directory) as plain,
-        ):
-            decrypt_stream(source, plain, key, aad, max_bytes=max_bytes)
-            validate_tar(plain, max_bytes=max_bytes)
+        # Streaming re-authentication/validation: no plaintext is written to disk.
+        with protected_file(directory / filename) as source:
+            validate_tar_stream(
+                SegmentReader(source, keys.encryption, aad, max_bytes=max_bytes), max_bytes=max_bytes
+            )
         if kind == "bind":
             item.update(
                 references=binds[logical]["references"],
@@ -958,12 +1299,13 @@ def backup(deployment, directory, key, *, max_bytes):
         "wb",
     ) as stream:
         stream.write(
-            hmac.new(key, canonical(manifest), hashlib.sha256).hexdigest().encode()
+            hmac.new(keys.mac, canonical(manifest), hashlib.sha256).hexdigest().encode()
         )
         stream.flush()
         os.fsync(stream.fileno())
     return {
         "status": "backed_up",
+        "format": FORMAT,
         "volumes": len(volumes),
         "binds": len(binds),
         "writers": "stopped",
@@ -995,9 +1337,12 @@ def require_current_archive_checkpoint(checkpoint, volumes):
         "safe": True, "unreleased_runs": 0, "owned_resources": 0, "pending_actions": 0,
     }:
         raise OperationError("Schema 0028+ requires released experimental ownership proof.")
+    # ADR-028 C14: archived (deleted) stream entries live only in this volume.
+    if int(schema) >= 30 and "stream_archive" not in volumes:
+        raise OperationError("Schema 0030+ requires the stream retention archive volume.")
 
 
-def restore(deployment, directory, key, *, max_bytes):
+def restore(deployment, directory, key, *, max_bytes, work_dir=None):
     deployment.stage = "restore_validate"
     directory = private_directory(directory)
     manifest = load_manifest(directory, key)
@@ -1041,7 +1386,7 @@ def restore(deployment, directory, key, *, max_bytes):
         and deployment.mount_contract() != manifest["mount_contract"]
     ):
         raise OperationError("Target mount layout differs from the backed deployment.")
-    if deployment.external_fingerprints(key) != manifest["external_fingerprints"]:
+    if deployment.external_fingerprints(backup_keys(key, manifest.get("format", 1)).fingerprint) != manifest["external_fingerprints"]:
         raise OperationError(
             "Supply the original identical secret/config files before restore; plaintext is not in the backup."
         )
@@ -1079,64 +1424,91 @@ def restore(deployment, directory, key, *, max_bytes):
             raise OperationError("Unknown archive kind.")
     if len(names) != len(set(names)):
         raise OperationError("Duplicate logical volume.")
-    # Authenticate and validate ALL volumes before creating the first target volume.
-    # Plaintext temporary files are unlinked immediately and never enter the backup.
-    with (
-        tempfile.TemporaryDirectory(prefix=".restore-", dir=directory) as temp,
-        ExitStack() as stack,
-    ):
-        validated = []
-        for item in archives:
-            # The descriptor becomes subprocess stdin. Buffered seek(0) can leave
-            # the kernel offset after read-ahead; tar would see a truncated stream.
-            plain = stack.enter_context(tempfile.TemporaryFile(dir=temp, buffering=0))
-            aad = canonical(
-                {
-                    "project": manifest["project"],
-                    "volume": item["logical"],
-                    "file": item["file"],
-                }
-            )
-            with protected_file(directory / item["file"]) as source:
-                decrypt_stream(source, plain, key, aad, max_bytes=max_bytes)
-            validate_tar(plain, max_bytes=max_bytes)
-            validated.append(plain)
-        deployment.stage = "restore_extract"
-        for item, name, plain in zip(archives, names, validated, strict=True):
-            # Do not let docker volume create silently reuse an existing name.
-            is_bind = item.get("kind", "volume") == "bind"
-            if is_bind:
-                if any(Path(name).iterdir()):
-                    raise OperationError("Bind target changed before extraction.")
-            else:
-                existing = (
-                    deployment.run(
-                        "docker", "volume", "ls", "-q", "--filter", f"name=^{name}$"
-                    )
-                    .decode()
-                    .split()
-                )
-                if existing:
-                    raise OperationError(
-                        "Target volume already exists; refusing overwrite."
-                    )
-                deployment.run(
-                    "docker",
-                    "volume",
-                    "create",
-                    "--label",
-                    f"com.docker.compose.project={deployment.project}",
-                    "--label",
-                    f"com.docker.compose.volume={item['logical']}",
-                    name,
-                )
+    fmt = manifest.get("format", 1)
+    keys = backup_keys(key, fmt)
+
+    def helper(name, is_bind):
+        # Resolved only after every archive validated (never before first mutation).
+        return deployment.helper_args(manifest["images"]["api"]["id"], name, readonly=False, bind=is_bind)
+
+    def identity(item):
+        return canonical({"project": manifest["project"], "volume": item["logical"], "file": item["file"]})
+
+    def prepare_target(item, name):
+        # Do not let docker volume create silently reuse an existing name.
+        if item.get("kind", "volume") == "bind":
+            if any(Path(name).iterdir()):
+                raise OperationError("Bind target changed before extraction.")
+            return True
+        existing = (
             deployment.run(
-                *deployment.helper_args(
-                    manifest["images"]["api"]["id"], name, readonly=False, bind=is_bind
-                ),
-                stdin=plain,
-                timeout=3600,
+                "docker", "volume", "ls", "-q", "--filter", f"name=^{name}$"
             )
+            .decode()
+            .split()
+        )
+        if existing:
+            raise OperationError(
+                "Target volume already exists; refusing overwrite."
+            )
+        deployment.run(
+            "docker",
+            "volume",
+            "create",
+            "--label",
+            f"com.docker.compose.project={deployment.project}",
+            "--label",
+            f"com.docker.compose.volume={item['logical']}",
+            name,
+        )
+        return False
+
+    if fmt == FORMAT:
+        # Pass 1 authenticates every segment and validates every tar before the first
+        # target volume exists; pass 2 decrypts straight into extraction. Descriptors
+        # stay open between passes, so a replaced path cannot swap archive bytes.
+        with ExitStack() as stack:
+            if work_dir is not None:
+                require_local_workspace(work_dir, 0)
+            handles = [stack.enter_context(protected_file(directory / item["file"])) for item in archives]
+            for item, handle in zip(archives, handles, strict=True):
+                validate_tar_stream(
+                    SegmentReader(handle, keys.encryption, identity(item), max_bytes=max_bytes), max_bytes=max_bytes
+                )
+            deployment.stage = "restore_extract"
+            for item, name, handle in zip(archives, names, handles, strict=True):
+                is_bind = prepare_target(item, name)
+                handle.seek(0)
+                deployment.stream_into(
+                    helper(name, is_bind),
+                    SegmentReader(handle, keys.encryption, identity(item), max_bytes=max_bytes),
+                )
+    else:
+        # Format 1 authenticates only at each archive's end: stage plaintext on a
+        # private local work directory with checked free space (never the backup media).
+        needed = sum(int(item.get("bytes", 0)) for item in archives)
+        work = require_local_workspace(work_dir or directory, needed)
+        with (
+            tempfile.TemporaryDirectory(prefix=".restore-", dir=work) as temp,
+            ExitStack() as stack,
+        ):
+            validated = []
+            for item in archives:
+                # The descriptor becomes subprocess stdin. Buffered seek(0) can leave
+                # the kernel offset after read-ahead; tar would see a truncated stream.
+                plain = stack.enter_context(tempfile.TemporaryFile(dir=temp, buffering=0))
+                with protected_file(directory / item["file"]) as source:
+                    decrypt_stream(source, plain, keys.encryption, identity(item), max_bytes=max_bytes)
+                validate_tar(plain, max_bytes=max_bytes)
+                validated.append(plain)
+            deployment.stage = "restore_extract"
+            for item, name, plain in zip(archives, names, validated, strict=True):
+                is_bind = prepare_target(item, name)
+                deployment.run(
+                    *helper(name, is_bind),
+                    stdin=plain,
+                    timeout=3600,
+                )
     # Create only stores, never API/workers/gateway/lab. No migration on cold restore.
     deployment.stage = "restore_start_stores"
     deployment.compose(
@@ -1168,13 +1540,33 @@ def restore(deployment, directory, key, *, max_bytes):
     }
 
 
+def verify_archives(directory, key, *, max_bytes, work_dir=None):
+    """Authenticate the manifest and every archive without any Docker mutation."""
+    manifest = load_manifest(directory, key)
+    fmt = manifest["format"]
+    keys = backup_keys(key, fmt)
+    archives = manifest["volumes"] + manifest.get("binds", [])
+    if fmt == 1:
+        work = require_local_workspace(work_dir or directory, max((int(i.get("bytes", 0)) for i in archives), default=0))
+    for item in archives:
+        aad = canonical({"project": manifest["project"], "volume": item["logical"], "file": item["file"]})
+        with protected_file(Path(directory) / item["file"]) as source:
+            if fmt == FORMAT:
+                validate_tar_stream(SegmentReader(source, keys.encryption, aad, max_bytes=max_bytes), max_bytes=max_bytes)
+                continue
+            with tempfile.TemporaryFile(dir=work) as plain:
+                decrypt_stream(source, plain, keys.encryption, aad, max_bytes=max_bytes)
+                validate_tar(plain, max_bytes=max_bytes)
+    return {"status": "authenticated", "format": fmt, "volumes": len(manifest["volumes"])}
+
+
 def add_deployment_arguments(parser):
     parser.add_argument("--project", required=True)
     parser.add_argument("--compose-file", action="append", required=True)
     parser.add_argument("--env-file", required=True)
 
 
-def main():
+def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("action", choices=["backup", "restore", "verify"])
     add_deployment_arguments(parser)
@@ -1191,46 +1583,34 @@ def main():
         help="Separately stored operator-owned 0600 file containing exactly 32 random raw bytes",
     )
     parser.add_argument("--max-volume-bytes", type=int, default=100 * 1024**3)
-    args = parser.parse_args()
+    parser.add_argument(
+        "--work-dir",
+        type=Path,
+        help="Private local 0700 directory for format-1 plaintext staging and diagnostics "
+        "(format 2 streams without staging)",
+    )
+    args = parser.parse_args(argv)
     os.umask(0o077)
     stage, deployment = "arguments", None
     try:
         if not 1024 <= args.max_volume_bytes <= 1024**4:
             raise OperationError("Volume cap must be between 1 KiB and 1 TiB.")
-        if args.encryption_key_file.resolve().is_relative_to(args.directory.resolve()):
-            raise OperationError(
-                "Encryption key must be stored outside the backup directory."
-            )
+        check_key_location(args.encryption_key_file, args.directory, warn=lambda line: print(line, file=sys.stderr))
         stage = "key"
         with protected_file(args.encryption_key_file, size=32) as source:
             key = source.read()
         if args.action == "verify":
             stage = "archive_validation"
-            manifest = load_manifest(args.directory, key)
-            for item in manifest["volumes"] + manifest.get("binds", []):
-                with tempfile.TemporaryFile(
-                    dir=private_directory(args.directory)
-                ) as plain:
-                    aad = canonical(
-                        {
-                            "project": manifest["project"],
-                            "volume": item["logical"],
-                            "file": item["file"],
-                        }
-                    )
-                    with protected_file(args.directory / item["file"]) as source:
-                        decrypt_stream(
-                            source, plain, key, aad, max_bytes=args.max_volume_bytes
-                        )
-                    validate_tar(plain, max_bytes=args.max_volume_bytes)
-            result = {"status": "authenticated", "volumes": len(manifest["volumes"])}
+            result = verify_archives(args.directory, key, max_bytes=args.max_volume_bytes, work_dir=args.work_dir)
         else:
             stage = "configuration"
             deployment = Deployment(args.project, args.compose_file, args.env_file)
-            deployment.diagnostic_dir = private_directory(args.directory.parent)
-            result = (backup if args.action == "backup" else restore)(
-                deployment, args.directory, key, max_bytes=args.max_volume_bytes
-            )
+            deployment.diagnostic_dir = private_directory(args.work_dir or args.directory.parent)
+            if args.action == "backup":
+                result = backup(deployment, args.directory, key, max_bytes=args.max_volume_bytes)
+            else:
+                result = restore(deployment, args.directory, key, max_bytes=args.max_volume_bytes,
+                                 work_dir=args.work_dir)
         print(json.dumps(result, sort_keys=True))
     except (
         OperationError,

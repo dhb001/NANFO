@@ -18,6 +18,7 @@ from app.core.dependencies import (
     get_request_meta,
     require_permissions,
 )
+from app.core.pagination import PageNumber
 from app.core.responses import APIResponse, success_response
 from app.modules.network.spatial_schemas import (
     MAX_REVISION,
@@ -54,7 +55,7 @@ async def list_spatial_history(
     meta: Annotated[RequestMeta, Depends(get_request_meta)],
     db: Annotated[AsyncSession, Depends(get_db)],
     redis: Annotated[aioredis.Redis, Depends(get_redis)],
-    page: Annotated[int, Query(ge=1, le=1_000_000)] = 1,
+    page: PageNumber = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 20,
 ):
     started = time.monotonic()

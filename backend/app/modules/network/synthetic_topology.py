@@ -31,9 +31,31 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 
+# Tier vocabulary and the device-type classifier are owned by the single Network
+# classifier (ADR-028); they are re-exported here for existing importers.
+from app.modules.network.device_types import (
+    DEFAULT_TIER,
+    DEVICE_TYPE_TIERS,
+    TIER_ACCESS,
+    TIER_CORE,
+    TIER_DISTRIBUTION,
+    TIER_LEAF,
+    TIER_ORDER,
+    TIER_PERIMETER,
+    device_tier,
+)
+
 __all__ = [
+    "DEFAULT_TIER",
+    "DEVICE_TYPE_TIERS",
     "EDGE_TYPE_CONNECTED_TO",
     "SYNTHETIC_TOPOLOGY_GENERATOR",
+    "TIER_ACCESS",
+    "TIER_CORE",
+    "TIER_DISTRIBUTION",
+    "TIER_LEAF",
+    "TIER_ORDER",
+    "TIER_PERIMETER",
     "PlannedDevice",
     "PlannedEdge",
     "SyntheticTopologyPlan",
@@ -45,44 +67,6 @@ SYNTHETIC_TOPOLOGY_GENERATOR = "nanfo.synthetic_topology.v1"
 
 #: Neo4j relationship type already read by ``TopologyQueryService.get_graph``.
 EDGE_TYPE_CONNECTED_TO = "connected_to"
-
-TIER_PERIMETER = "perimeter"
-TIER_CORE = "core"
-TIER_DISTRIBUTION = "distribution"
-TIER_ACCESS = "access"
-TIER_LEAF = "leaf"
-
-#: Ordered from upstream (closest to the WAN edge) to downstream.
-TIER_ORDER: tuple[str, ...] = (
-    TIER_PERIMETER,
-    TIER_CORE,
-    TIER_DISTRIBUTION,
-    TIER_ACCESS,
-    TIER_LEAF,
-)
-
-#: ``device_type`` -> logical tier.
-#:
-#: Values match the device types emitted by the Strathmore demo generator and the
-#: generic types used elsewhere ("switch" is treated as an access switch because it
-#: is the least-privileged sane default).
-DEVICE_TYPE_TIERS: Mapping[str, str] = {
-    "firewall": TIER_PERIMETER,
-    "router": TIER_CORE,
-    "core_router": TIER_CORE,
-    "distribution_switch": TIER_DISTRIBUTION,
-    "access_switch": TIER_ACCESS,
-    "switch": TIER_ACCESS,
-    "wireless_ap": TIER_LEAF,
-    "server": TIER_LEAF,
-    "security_gateway": TIER_LEAF,
-    "ups": TIER_LEAF,
-    "lab_endpoint": TIER_LEAF,
-}
-
-#: Unknown device types are attached at the least-privileged tier so that they are
-#: still reachable in the scene without being promoted into the network core.
-DEFAULT_TIER = TIER_LEAF
 
 
 @dataclass(frozen=True)
@@ -141,13 +125,6 @@ class SyntheticTopologyPlan:
     @property
     def edge_count(self) -> int:
         return len(self.edges)
-
-
-def device_tier(device_type: str | None) -> str:
-    """Map a ``device_type`` to a logical network tier."""
-    if not device_type:
-        return DEFAULT_TIER
-    return DEVICE_TYPE_TIERS.get(device_type.strip().lower(), DEFAULT_TIER)
 
 
 def _spatial_segment(spatial_ref_id: str | None, index: int) -> str | None:

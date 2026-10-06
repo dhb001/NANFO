@@ -17,6 +17,7 @@ from .artifacts import (
     checkDistribution,
     inspectCheckpoint,
     loadCheckpoint,
+    loadCheckpointIdentity,
     runtimeVersions,
     saveCheckpoint,
     trainingDistribution,
@@ -37,6 +38,16 @@ from .env import InvalidMeasurement, RoutingEnv, encode, heuristic, rewardCompon
 from .evidence import number, validateMeasurement
 from .ppo import PPO, PPOConfig, seedRuntime
 from .transport import DockerTransport
+
+PIN_HELP = "refuse unless the checkpoint bytes have this SHA-256 (checked before parsing)"
+
+
+def checkpointPin(explicit, selection=None):
+    """The single external pin: an operator value and a selection must agree."""
+    selected = selection["checkpoint"]["checkpoint_sha256"] if selection else None
+    if explicit is not None and selected is not None and explicit != selected:
+        raise ValueError("--checkpoint-sha256 differs from the selected checkpoint")
+    return explicit if explicit is not None else selected
 
 
 class LoggedTransport:
@@ -131,7 +142,7 @@ def _runSession(args):
         raise ValueError("v3 requires balanced even episodes, 4..8 steps and rollout 16 or 32")
     if training and args.mode != "matched":
         raise ValueError("v3 training requires matched Linux/FRR mode")
-    agent, parent = None, None
+    agent, parent, checkpointIdentity = None, None, None
     if training:
         if args.resume:
             agent, parent = loadCheckpoint(args.resume, resume=True)
@@ -147,7 +158,10 @@ def _runSession(args):
     elif args.policy == "ppo":
         if args.checkpoint is None or args.mode != "matched":
             raise ValueError("PPO evaluation requires a measured checkpoint and matched mode")
-        agent, parent = loadCheckpoint(args.checkpoint)
+        # The admitted/pinned identity is the model evaluated and the one summarized.
+        agent, parent, checkpointIdentity = loadCheckpointIdentity(
+            args.checkpoint, expectedSha256=getattr(args, "checkpoint_sha256", None)
+        )
         checkDistribution(
             parent, args.window, args.steps, generalization=args.generalization, scenarios=scenarios
         )
@@ -433,7 +447,7 @@ def _runSession(args):
                     )
                     summary["checkpoint"] = inspectCheckpoint(path)
                 elif args.checkpoint:
-                    summary["checkpoint"] = inspectCheckpoint(args.checkpoint)
+                    summary["checkpoint"] = checkpointIdentity
             except (ValueError, RuntimeError, OSError) as exc:
                 failure = str(exc)[:2048]
                 summary.update(status="failed", failure=failure)
@@ -957,8 +971,10 @@ def parser():
                 default="ppo",
             )
             sub.add_argument("--checkpoint", type=Path)
+            sub.add_argument("--checkpoint-sha256", help=PIN_HELP)
     sub = commands.add_parser("infer")
     sub.add_argument("--checkpoint", type=Path, required=True)
+    sub.add_argument("--checkpoint-sha256", help=PIN_HELP)
     sub.add_argument(
         "--history",
         type=Path,
@@ -971,6 +987,7 @@ def parser():
     sub.add_argument("--selection", type=Path)
     sub = commands.add_parser("inspect")
     sub.add_argument("--checkpoint", type=Path, required=True)
+    sub.add_argument("--checkpoint-sha256", help=PIN_HELP)
     sub = commands.add_parser("report")
     sub.add_argument("summaries", type=Path, nargs="+")
     sub = commands.add_parser("plan")
@@ -986,6 +1003,96 @@ def parser():
     sub.add_argument("--candidates", type=Path, nargs="+", required=True)
     sub.add_argument("--output", type=Path, required=True)
     return root
+
+
+def infer(args):
+    """Measured-history inference; the reported policy is the pinned, loaded identity."""
+    selection = None
+    if args.selection:
+        from .qualification import validateSelection
+
+        selection = validateSelection(args.selection)
+    # One read: the pinned bytes are the policy that decides and the one reported.
+    agent, manifest, identity = loadCheckpointIdentity(
+        args.checkpoint,
+        expectedSha256=checkpointPin(args.checkpoint_sha256, selection),
+    )
+    if selection is not None and (
+        args.sample or args.generalization or selection["checkpoint"] != identity
+    ):
+        raise ValueError("qualified inference requires exact selected deterministic policy")
+    seedRuntime(args.seed)
+    if str(args.history) == "-":
+        content = sys.stdin.buffer.read(4 * 1024 * 1024 + 1)
+    else:
+        with args.history.open("rb") as source:
+            content = source.read(4 * 1024 * 1024 + 1)
+    if len(content) > 4 * 1024 * 1024:
+        raise ValueError("history too large")
+    history = parseJson(content)
+    if (
+        type(history) is not dict
+        or set(history) != {"version", "frames"}
+        or type(history["version"]) is not int
+        or history["version"] != 3
+        or type(history["frames"]) is not list
+        or not 1 <= len(history["frames"]) <= HISTORY_LENGTH
+    ):
+        raise ValueError("invalid measured history")
+    observations, previous, previousRequest = [], None, None
+    for frame in history["frames"]:
+        request = Request.model_validate(frame["request"])
+        response = Response.model_validate(frame["response"])
+        if not response.ok or request.command not in ("reset", "step"):
+            raise ValueError("history requires measured reset/step frames")
+        data = response.data
+        if validateMeasurement(data, request) != manifest.environment_spec:
+            raise ValueError("inference lab spec differs from checkpoint")
+        if data.evidence["provenance"] != manifest.lab_provenance:
+            raise ValueError("inference image/source provenance differs from checkpoint")
+        checkDistribution(
+            manifest,
+            request.window_seconds,
+            request.episode_steps,
+            generalization=args.generalization,
+        )
+        if previous and (
+            previous.terminated
+            or data.episode_id != previous.episode_id
+            or data.seed != previous.seed
+            or data.scenario != previous.scenario
+            or data.mode != previous.mode
+            or data.step_index != previous.step_index + 1
+            or request.window_seconds != previousRequest.window_seconds
+            or request.episode_steps != previousRequest.episode_steps
+        ):
+            raise ValueError("history crosses reset or skips measurements")
+        if request.mode != manifest.training_distribution["mode"]:
+            raise ValueError("inference dataplane differs from training")
+        observations.append(data.observation)
+        previous = data
+        previousRequest = request
+    state = encode(observations)
+    inferenceStart = time.perf_counter_ns()
+    action, _, value, probabilities = agent.model.decide(state, deterministic=not args.sample)
+    inferenceSeconds = (time.perf_counter_ns() - inferenceStart) / 1e9
+    result = {
+        "action": action,
+        "probabilities": probabilities,
+        "value": value,
+        "input_sha256": hashlib.sha256(jsonBytes(observations[-1].model_dump())).hexdigest(),
+        "policy_sha256": identity["checkpoint_sha256"],
+        "inference_seconds": inferenceSeconds,
+        "execution": "not_applied",
+        "qualification_checked": args.selection is not None,
+        "evidence": [observation.model_dump() for observation in observations],
+        "spec_hash": manifest.spec_hash,
+        "generalization": args.generalization,
+        "contract_hash": CONTRACT_HASH,
+        "checkpoint_weights_sha256": manifest.weights_sha256,
+        "checkpoint_provenance": manifest.provenance,
+    }
+    return result
 
 
 def main(argv=None):
@@ -1006,96 +1113,9 @@ def main(argv=None):
         if args.command in ("train", "evaluate"):
             result = runSession(args)
         elif args.command == "inspect":
-            result = inspectCheckpoint(args.checkpoint)
+            result = inspectCheckpoint(args.checkpoint, expectedSha256=args.checkpoint_sha256)
         elif args.command == "infer":
-            agent, manifest = loadCheckpoint(args.checkpoint)
-            if args.selection:
-                from .qualification import validateSelection
-
-                selection = validateSelection(args.selection)
-                if (
-                    args.sample
-                    or args.generalization
-                    or (selection["checkpoint"] != inspectCheckpoint(args.checkpoint))
-                ):
-                    raise ValueError(
-                        "qualified inference requires exact selected deterministic policy"
-                    )
-            seedRuntime(args.seed)
-            if str(args.history) == "-":
-                content = sys.stdin.buffer.read(4 * 1024 * 1024 + 1)
-            else:
-                with args.history.open("rb") as source:
-                    content = source.read(4 * 1024 * 1024 + 1)
-            if len(content) > 4 * 1024 * 1024:
-                raise ValueError("history too large")
-            history = parseJson(content)
-            if (
-                type(history) is not dict
-                or set(history) != {"version", "frames"}
-                or type(history["version"]) is not int
-                or history["version"] != 3
-                or type(history["frames"]) is not list
-                or not 1 <= len(history["frames"]) <= HISTORY_LENGTH
-            ):
-                raise ValueError("invalid measured history")
-            observations, previous, previousRequest = [], None, None
-            for frame in history["frames"]:
-                request = Request.model_validate(frame["request"])
-                response = Response.model_validate(frame["response"])
-                if not response.ok or request.command not in ("reset", "step"):
-                    raise ValueError("history requires measured reset/step frames")
-                data = response.data
-                if validateMeasurement(data, request) != manifest.environment_spec:
-                    raise ValueError("inference lab spec differs from checkpoint")
-                if data.evidence["provenance"] != manifest.lab_provenance:
-                    raise ValueError("inference image/source provenance differs from checkpoint")
-                checkDistribution(
-                    manifest,
-                    request.window_seconds,
-                    request.episode_steps,
-                    generalization=args.generalization,
-                )
-                if previous and (
-                    previous.terminated
-                    or data.episode_id != previous.episode_id
-                    or data.seed != previous.seed
-                    or data.scenario != previous.scenario
-                    or data.mode != previous.mode
-                    or data.step_index != previous.step_index + 1
-                    or request.window_seconds != previousRequest.window_seconds
-                    or request.episode_steps != previousRequest.episode_steps
-                ):
-                    raise ValueError("history crosses reset or skips measurements")
-                if request.mode != manifest.training_distribution["mode"]:
-                    raise ValueError("inference dataplane differs from training")
-                observations.append(data.observation)
-                previous = data
-                previousRequest = request
-            state = encode(observations)
-            inferenceStart = time.perf_counter_ns()
-            action, _, value, probabilities = agent.model.decide(
-                state, deterministic=not args.sample
-            )
-            inferenceSeconds = (time.perf_counter_ns() - inferenceStart) / 1e9
-            result = {
-                "action": action,
-                "probabilities": probabilities,
-                "value": value,
-                "input_sha256": hashlib.sha256(
-                    jsonBytes(observations[-1].model_dump())
-                ).hexdigest(),
-                "policy_sha256": inspectCheckpoint(args.checkpoint)["checkpoint_sha256"],
-                "inference_seconds": inferenceSeconds,
-                "execution": "not_applied",
-                "qualification_checked": args.selection is not None,
-                "evidence": [observation.model_dump() for observation in observations],
-                "spec_hash": manifest.spec_hash,
-                "generalization": args.generalization,
-                "contract_hash": CONTRACT_HASH,
-                "checkpoint_weights_sha256": manifest.weights_sha256,
-                "checkpoint_provenance": manifest.provenance,
-            }
+            result = infer(args)
         elif args.command == "report":
             result = report(args.summaries)
         elif args.command == "plan":

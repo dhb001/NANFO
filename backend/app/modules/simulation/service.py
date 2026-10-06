@@ -1,9 +1,9 @@
 """Simulation services.
 
 Scope:
-- Deterministic scenario validation handoff payload shaping
-- Internal simulation lifecycle event publication (`simulation.started`, terminal parity)
-- Fail-open publication path to preserve API availability
+- Deterministic scenario validation handoff payload shaping (legacy unconfigured runs)
+- Lifecycle events: state and a durable outbox copy commit first, publication follows
+  (ADR-028); the simulation worker republishes any unpublished outbox envelope
 - VS7 simulation persistence baseline integration
 """
 
@@ -25,21 +25,27 @@ from app.modules.organization.service import WorkspaceService as OrgWorkspaceSer
 from app.modules.simulation.modeled import (
     configured,
     create_modeled,
+    limits_respect_policy,
+    policy_floors,
     transition_modeled,
     validate_execution_reference,
-    verified_output,
+    verified_output_async,
 )
-from app.modules.simulation.repository import SimulationRepository
+from app.modules.simulation.repository import SimulationRepository, normalize_correlation
 from app.modules.simulation.schemas import ScenarioConfig
 
 logger = get_logger(__name__)
 
 _DEFAULT_SCENARIO_ID_NAMESPACE = "scenario"
 _DEFAULT_SIMULATION_OBJECT_ID = "simulation-state"
+# No evaluator is installed for unconfigured runs: they always end cancelled/blocked.
+_LEGACY_TERMINAL_STATE = "cancelled"
+_LEGACY_TERMINAL_RISK_GATE = "blocked"
+_LEGACY_TERMINAL_EVENT = "simulation.cancelled"
 
 
 def _derive_terminal_event_id(*, simulation_id: uuid.UUID, event_type: str) -> str:
-    """Return a deterministic terminal lifecycle event UUID for idempotent publication."""
+    """Return a deterministic lifecycle event UUID for idempotent (re)publication."""
     return str(uuid.uuid5(simulation_id, event_type))
 
 
@@ -50,13 +56,6 @@ def _coerce_non_empty_text(value: Any, fallback: str) -> str:
 
 def _coerce_uuid_string(value: Any) -> str:
     return str(uuid.UUID(str(value)))
-
-
-def _coerce_correlation_id(value: Any) -> str:
-    try:
-        return str(uuid.UUID(str(value)))
-    except (TypeError, ValueError, AttributeError):
-        return str(uuid.uuid4())
 
 
 def _coerce_requested_by_user_id(value: Any) -> str:
@@ -107,14 +106,6 @@ def _unavailable_metrics() -> dict[str, None]:
     }
 
 
-def _derive_terminal_transition(
-    *,
-    queue_status: Any,
-    warning: Any,
-) -> tuple[str, str, str]:
-    return "cancelled", "blocked", "simulation.cancelled"
-
-
 class ScenarioValidationHandoffService:
     """Build deterministic simulation validation handoff payloads."""
 
@@ -128,7 +119,8 @@ class ScenarioValidationHandoffService:
         requested_by_user_id: Any,
     ) -> dict[str, Any]:
         normalized_network_id = _coerce_uuid_string(network_id)
-        normalized_correlation_id = _coerce_correlation_id(correlation_id)
+        # ADR-028 C20: shared request-id mapping; the original id stays in metadata.
+        normalized_correlation_id, correlation_meta = normalize_correlation(correlation_id)
         normalized_requested_by = _coerce_requested_by_user_id(requested_by_user_id)
 
         normalized_scenario_name = _coerce_non_empty_text(
@@ -163,6 +155,7 @@ class ScenarioValidationHandoffService:
             },
             "requested_at": now_iso,
             "correlation_id": normalized_correlation_id,
+            **correlation_meta,
         }
 
 
@@ -171,18 +164,6 @@ class SimulationEventService:
 
     def __init__(self, *, redis: aioredis.Redis):
         self._redis = redis
-
-    async def publish_simulation_started_handoff(
-        self,
-        *,
-        handoff_payload: dict[str, Any],
-        correlation_id: str,
-    ) -> str:
-        return await self.publish_lifecycle_event(
-            event_type="simulation.started",
-            payload=handoff_payload,
-            correlation_id=correlation_id,
-        )
 
     async def publish_lifecycle_event(
         self,
@@ -254,10 +235,8 @@ class SimulationTerminalEventService:
             )
             return
 
-        terminal_state, terminal_risk_gate, terminal_event_type = _derive_terminal_transition(
-            queue_status=simulation.queue_status,
-            warning=simulation.warning,
-        )
+        terminal_state, terminal_risk_gate = _LEGACY_TERMINAL_STATE, _LEGACY_TERMINAL_RISK_GATE
+        terminal_event_type = _LEGACY_TERMINAL_EVENT
 
         workspace_id = str(simulation.workspace_id)
         if not workspace_id:
@@ -295,12 +274,17 @@ class SimulationTerminalEventService:
             "run_output": _unavailable_metrics(),
             "failure_reason": "evaluator_unavailable",
         }
-        correlation_id = _coerce_correlation_id(event.get("correlation_id"))
+        correlation_id, _ = normalize_correlation(event.get("correlation_id"))
         event_id = _derive_terminal_event_id(
             simulation_id=simulation.simulation_id,
             event_type=terminal_event_type,
         )
 
+        # State and its durable outbox copy commit together before any publication.
+        # This consumer commits exactly once; the worker's later outbox publication of
+        # the same event ID is an at-least-once duplicate that consumers deduplicate.
+        self._repo.enqueue_legacy(simulation, event_type=terminal_event_type, payload=terminal_payload,
+                                  correlation_id=correlation_id, event_id=event_id)
         await self._db.commit()
 
         try:
@@ -415,6 +399,7 @@ class SimulationStartService:
             model_versions={},
             audit_provenance={
                 "correlation_id": handoff.get("correlation_id"),
+                **({"request_id": handoff["request_id"]} if handoff.get("request_id") else {}),
                 "requested_by_user_id": validation.get("requested_by_user_id"),
                 "policy_reference": validation.get("policy_reference"),
             },
@@ -424,27 +409,55 @@ class SimulationStartService:
             requested_by_user_id=str(validation.get("requested_by_user_id", requested_by_user_id)),
             requested_at=_coerce_iso_datetime(handoff.get("requested_at")),
         )
-        await self._db.commit()
         return await self._publish_cancelled(record=record, handoff=handoff)
+
+    async def _commit_and_publish_legacy(
+        self,
+        *,
+        record,
+        event_type: str,
+        payload: dict[str, Any],
+        correlation_id: str,
+        event_id: str,
+        record_outcome: bool = True,
+    ) -> tuple[str, str | None, str | None]:
+        """ADR-028: commit state plus a durable outbox copy, then publish.
+
+        The same stable event ID is published immediately (best effort). On success
+        the outbox copy is marked published; otherwise the simulation worker's outbox
+        publisher delivers the stored envelope later. Nothing is published before the
+        state it describes is committed.
+        """
+        outbox = self._repo.enqueue_legacy(record, event_type=event_type, payload=payload,
+                                           correlation_id=correlation_id, event_id=event_id)
+        await self._db.commit()
+        try:
+            stream_entry_id = await SimulationEventService(redis=self._redis).publish_lifecycle_event(
+                event_type=event_type, payload=payload, correlation_id=correlation_id, event_id=event_id,
+            )
+            queue_status, warning = "queued", None
+            outbox.published_at = datetime.now(UTC)
+        except Exception as exc:  # noqa: BLE001 - the committed outbox copy is retried
+            logger.warning("simulation_event_publish_deferred", simulation_id=str(payload.get("simulation_id")),
+                           event_type=event_type, correlation_id=correlation_id, error=str(exc))
+            stream_entry_id, queue_status, warning = None, "deferred", "event_queue_unavailable"
+        if record_outcome:
+            await self._repo.update_queue_outcome(
+                record, queue_status=queue_status, stream_entry_id=stream_entry_id, warning=warning,
+            )
+        await self._db.commit()
+        return queue_status, stream_entry_id, warning
 
     async def _publish_cancelled(self, *, record, handoff: dict[str, Any]) -> dict[str, Any]:
         """Publish only after the unavailable outcome is durably stored."""
-        try:
-            stream_entry_id = await SimulationEventService(redis=self._redis).publish_lifecycle_event(
-                event_type="simulation.cancelled", payload={**handoff, "run_output": _unavailable_metrics()},
-                correlation_id=str(handoff["correlation_id"]),
-                event_id=_derive_terminal_event_id(
-                    simulation_id=uuid.UUID(handoff["simulation_id"]), event_type="simulation.cancelled",
-                ),
-            )
-            queue_status, warning = "queued", None
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("simulation_cancelled_publish_failed", simulation_id=handoff["simulation_id"], error=str(exc))
-            stream_entry_id, queue_status, warning = None, "deferred", "event_queue_unavailable"
-        await self._repo.update_queue_outcome(
-            record, queue_status=queue_status, stream_entry_id=stream_entry_id, warning=warning,
+        queue_status, stream_entry_id, warning = await self._commit_and_publish_legacy(
+            record=record, event_type="simulation.cancelled",
+            payload={**handoff, "run_output": _unavailable_metrics()},
+            correlation_id=str(handoff["correlation_id"]),
+            event_id=_derive_terminal_event_id(
+                simulation_id=uuid.UUID(handoff["simulation_id"]), event_type="simulation.cancelled",
+            ),
         )
-        await self._db.commit()
         return {"handoff": handoff, "queue_status": queue_status, "stream_entry_id": stream_entry_id, "warning": warning}
 
     async def _resume_simulation(
@@ -517,7 +530,6 @@ class SimulationStartService:
             validation=handoff["validation"],
             run_output=_unavailable_metrics(),
         )
-        await self._db.commit()
         return await self._publish_cancelled(record=simulation, handoff=handoff)
 
     async def pause_simulation(
@@ -545,6 +557,7 @@ class SimulationStartService:
             simulation = await self._repo.lock(simulation_id)
             return await transition_modeled(self, record=simulation, state="paused", correlation_id=correlation_id)
 
+        normalized_correlation_id, correlation_meta = normalize_correlation(correlation_id)
         if simulation.state == "paused":
             return {
                 "simulation_id": str(simulation.simulation_id),
@@ -554,7 +567,7 @@ class SimulationStartService:
                 "status": "paused",
                 "risk_gate": str(simulation.risk_gate),
                 "scenario_id": str(simulation.scenario_id),
-                "correlation_id": correlation_id,
+                "correlation_id": normalized_correlation_id,
             }
 
         if simulation.state not in {"queued", "running"}:
@@ -579,24 +592,15 @@ class SimulationStartService:
             "status": "paused",
             "risk_gate": "required",
             "validation": simulation.validation,
+            **correlation_meta,
         }
-        try:
-            await publish_event(
-                redis=self._redis,
-                event_type="simulation.paused",
-                source="simulation",
-                payload=event_payload,
-                correlation_id=correlation_id,
-            )
-        except Exception as exc:  # noqa: BLE001
-            logger.warning(
-                "simulation_pause_event_publish_failed",
-                simulation_id=str(simulation.simulation_id),
-                correlation_id=correlation_id,
-                error=str(exc),
-            )
-
-        await self._db.commit()
+        # ADR-028: previously published before commit; now committed state first.
+        await self._commit_and_publish_legacy(
+            record=simulation, event_type="simulation.paused", payload=event_payload,
+            correlation_id=normalized_correlation_id,
+            event_id=_derive_terminal_event_id(simulation_id=simulation.simulation_id, event_type="simulation.paused"),
+            record_outcome=False,
+        )
         return {
             "simulation_id": str(simulation.simulation_id),
             "network_id": str(simulation.network_id),
@@ -605,7 +609,7 @@ class SimulationStartService:
             "status": "paused",
             "risk_gate": "required",
             "scenario_id": str(simulation.scenario_id),
-            "correlation_id": correlation_id,
+            "correlation_id": normalized_correlation_id,
         }
 
     async def branch_simulation(
@@ -672,9 +676,11 @@ class SimulationStartService:
 
         run_output = _unavailable_metrics()
         model_versions = {}
+        normalized_correlation_id, correlation_meta = normalize_correlation(correlation_id)
         audit_provenance = {"evaluator_status": "unavailable"}
         audit_provenance["branch_from_simulation_id"] = str(parent.simulation_id)
-        audit_provenance["branch_correlation_id"] = correlation_id
+        audit_provenance["branch_correlation_id"] = normalized_correlation_id
+        audit_provenance.update(correlation_meta)
 
         branch_simulation_id = uuid.uuid4()
         branch_scenario_id = uuid.UUID(
@@ -713,7 +719,7 @@ class SimulationStartService:
             "scenario_name": str(branch.scenario_name),
             "validation": validation,
             "requested_at": requested_at_iso,
-            "correlation_id": correlation_id,
+            "correlation_id": normalized_correlation_id,
         }
 
         publish_payload = {
@@ -726,27 +732,17 @@ class SimulationStartService:
             "status": event_payload["status"],
             "risk_gate": event_payload["risk_gate"],
             "validation": event_payload["validation"],
+            **correlation_meta,
         }
 
-        try:
-            await publish_event(
-                redis=self._redis,
-                event_type="simulation.branch_created",
-                source="simulation",
-                payload=publish_payload,
-                correlation_id=correlation_id,
-            )
-        except Exception as exc:  # noqa: BLE001
-            logger.warning(
-                "simulation_branch_event_publish_failed",
-                simulation_id=str(branch.simulation_id),
-                parent_simulation_id=str(parent.simulation_id),
-                correlation_id=correlation_id,
-                error=str(exc),
-            )
-
-        await self._db.commit()
-
+        # ADR-028: previously published before commit; now committed state first.
+        await self._commit_and_publish_legacy(
+            record=branch, event_type="simulation.branch_created", payload=publish_payload,
+            correlation_id=normalized_correlation_id,
+            event_id=_derive_terminal_event_id(simulation_id=branch.simulation_id,
+                                               event_type="simulation.branch_created"),
+            record_outcome=False,
+        )
         return event_payload
 
     async def get_simulation_detail(
@@ -770,7 +766,9 @@ class SimulationStartService:
 
         validation = dict(simulation.validation) if isinstance(simulation.validation, dict) else {}
         modeled = configured(simulation)
-        result = verified_output(simulation) if modeled else None
+        # ADR-028: whole-checkpoint re-verification runs in a worker thread and is
+        # cached per (simulation, revision); it never blocks the event loop.
+        result = await verified_output_async(simulation) if modeled else None
         if not modeled:
             validation.update(evaluator_status="unavailable", failure_reason="evaluator_unavailable")
         legacy_completed = not modeled and (simulation.state == "completed" or simulation.status == "completed")
@@ -779,6 +777,12 @@ class SimulationStartService:
             validation.update(failure_reason="model_evidence_invalid", status="blocked")
         if legacy_completed:
             validation.update(status="cancelled", pipeline_stage="terminal", legacy_baseline_unverified=True)
+        execution_policy = None
+        if modeled:
+            # ADR-028 C18 (additive): whether these limits could ever authorize execution.
+            floors = policy_floors()
+            execution_policy = {"policy_floors": floors, "limits_respect_policy": limits_respect_policy(
+                simulation.scenario_config.get("limits"), floors)}
         return {
             "simulation_id": str(simulation.simulation_id),
             "parent_simulation_id": (
@@ -804,6 +808,7 @@ class SimulationStartService:
                          "duration_ticks": simulation.scenario_config.get("duration_ticks", 0)} if modeled and simulation.checkpoint else None,
             "completed_at": simulation.completed_at.isoformat() if modeled and simulation.completed_at else None,
             "evidence_expires_at": simulation.evidence_expires_at.isoformat() if modeled and simulation.evidence_expires_at else None,
+            "execution_policy": execution_policy,
             "model_versions": (
                 dict(simulation.model_versions)
                 if isinstance(simulation.model_versions, dict)
@@ -862,7 +867,8 @@ class SimulationStartService:
         simulation_metrics = _unavailable_metrics()
         baseline_metrics = _unavailable_metrics()
         deltas = _unavailable_metrics()
-        current_output, baseline_output = verified_output(simulation), verified_output(baseline)
+        current_output = await verified_output_async(simulation)
+        baseline_output = await verified_output_async(baseline)
         compatible = bool(current_output and baseline_output and simulation.state == baseline.state == "completed"
             and current_output["workload_sha256"] == baseline_output["workload_sha256"]
             and current_output["elapsed_ms"] == baseline_output["elapsed_ms"])
@@ -887,64 +893,3 @@ class SimulationStartService:
             "baseline_trace": baseline_output["trace"] if compatible else None,
         }
 
-
-async def queue_scenario_validation_handoff(
-    *,
-    redis: aioredis.Redis,
-    network_id: Any,
-    scenario_name: Any,
-    validation_checks: Any,
-    correlation_id: Any,
-    requested_by_user_id: Any,
-) -> dict[str, Any]:
-    """Queue a deterministic simulation validation handoff event.
-
-    Publication failures are logged and returned as warning metadata so the caller
-    can preserve fail-open behavior without crashing request flow.
-    """
-
-    handoff_service = ScenarioValidationHandoffService()
-    payload = handoff_service.build_handoff_payload(
-        network_id=network_id,
-        scenario_name=scenario_name,
-        validation_checks=validation_checks,
-        correlation_id=correlation_id,
-        requested_by_user_id=requested_by_user_id,
-    )
-
-    normalized_correlation_id = str(payload["correlation_id"])
-
-    try:
-        stream_entry_id = await SimulationEventService(redis=redis).publish_simulation_started_handoff(
-            handoff_payload=payload,
-            correlation_id=normalized_correlation_id,
-        )
-        logger.info(
-            "simulation_validation_handoff_queued",
-            simulation_id=payload["simulation_id"],
-            scenario_id=payload["scenario_id"],
-            network_id=payload["network_id"],
-            stream_entry_id=stream_entry_id,
-            correlation_id=normalized_correlation_id,
-        )
-        return {
-            "handoff": payload,
-            "queue_status": "queued",
-            "stream_entry_id": stream_entry_id,
-            "warning": None,
-        }
-    except Exception as exc:  # noqa: BLE001
-        logger.warning(
-            "simulation_validation_handoff_queue_failed",
-            simulation_id=payload["simulation_id"],
-            scenario_id=payload["scenario_id"],
-            network_id=payload["network_id"],
-            correlation_id=normalized_correlation_id,
-            error=str(exc),
-        )
-        return {
-            "handoff": payload,
-            "queue_status": "deferred",
-            "stream_entry_id": None,
-            "warning": "event_queue_unavailable",
-        }

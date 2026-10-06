@@ -53,6 +53,13 @@ export interface BranchSimulationResult {
   correlation_id: string;
 }
 
+/** Server policy floors for execution evidence (ADR-028 C18); limits may be stricter, never weaker. */
+export interface SimulationExecutionPolicy {
+  policy_floors: { max_loss_pct: number; max_latency_ms: number; min_throughput_mbps: number };
+  /** False: this run can never authorize a high-impact execution (SIMULATION_POLICY_VIOLATION). */
+  limits_respect_policy: boolean;
+}
+
 export interface SimulationDetail {
   simulation_id: string;
   parent_simulation_id: string | null;
@@ -68,8 +75,12 @@ export interface SimulationDetail {
   run_output: Record<string, unknown>;
   scenario_config?: ScenarioConfig | null;
   progress?: { tick: number; duration_ticks: number } | null;
+  /** Modeled evidence authorizes execution only until this instant (300 s after completion). */
   evidence_expires_at?: string | null;
+  completed_at?: string | null;
   revision?: number;
+  /** Present for modeled runs only. */
+  execution_policy?: SimulationExecutionPolicy | null;
   model_versions: Record<string, unknown>;
   audit_provenance: Record<string, unknown>;
   queue_status: string;

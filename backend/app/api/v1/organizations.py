@@ -25,6 +25,7 @@ from app.core.dependencies import (
     get_request_meta,
     require_permissions,
 )
+from app.core.pagination import PageNumber
 from app.core.responses import APIResponse, success_response
 from app.modules.organization.schemas import (
     AddMemberRequest,
@@ -88,7 +89,7 @@ async def list_orgs(
     meta: Annotated[RequestMeta, Depends(get_request_meta)],
     db: Annotated[AsyncSession, Depends(get_db)],
     redis: Annotated[aioredis.Redis, Depends(get_redis)],
-    page: int = Query(default=1, ge=1),
+    page: PageNumber = 1,
     page_size: int = Query(default=20, ge=1, le=200),
 ):
     started = time.monotonic()
@@ -100,7 +101,9 @@ async def list_orgs(
             claim_workspace_id, user_id=claims.user_id, claim_org_id=claim_org_id,
         )
         claim_org_id = workspace.org_id
-    result = await svc.list_orgs(user_id=claims.user_id, page=page, page_size=page_size, org_id=claim_org_id)
+    result = await svc.list_orgs(
+        user_id=claims.user_id, page=page, page_size=page_size, org_id=claim_org_id, include_caller_role=True,
+    )
     return success_response(result, meta.request_id, started, meta.timestamp)
 
 
@@ -190,7 +193,7 @@ async def list_workspaces(
     meta: Annotated[RequestMeta, Depends(get_request_meta)],
     db: Annotated[AsyncSession, Depends(get_db)],
     redis: Annotated[aioredis.Redis, Depends(get_redis)],
-    page: int = Query(default=1, ge=1),
+    page: PageNumber = 1,
     page_size: int = Query(default=20, ge=1, le=200),
 ):
     started = time.monotonic()
@@ -307,7 +310,7 @@ async def list_members(
     meta: Annotated[RequestMeta, Depends(get_request_meta)],
     db: Annotated[AsyncSession, Depends(get_db)],
     redis: Annotated[aioredis.Redis, Depends(get_redis)],
-    page: int = Query(default=1, ge=1),
+    page: PageNumber = 1,
     page_size: int = Query(default=20, ge=1, le=200),
 ):
     started = time.monotonic()

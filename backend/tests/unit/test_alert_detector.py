@@ -10,7 +10,7 @@ from app.modules.alert.detector import (
     DetectorRule, DetectorSettings, MeasuredObservation, advance_window, detector_identity, identity_key,
 )
 from app.modules.alert.measured import MeasuredAlertService
-from tests.alert_support import ORG, START, event_for, observation
+from tests.alert_support import ORG, RUN, START, event_for, observation
 
 
 def state():
@@ -131,3 +131,43 @@ def test_queue_bytes_or_fractional_packets_are_not_packet_measurements():
         observation(metric="queue_backlog_packets", value=80.5)
     with pytest.raises(ValidationError):
         observation(metric="queue_backlog_packets", value=80, unit="bytes")
+
+
+def test_identity_digest_is_an_explicitly_named_nan_tolerant_variant():
+    """ADR-028 C20: persisted detector keys/payload receipts keep their exact bytes."""
+    import hashlib
+    import json
+
+    from app.core.canonical import canonical_sha256
+    from app.modules.alert.detector import nan_tolerant_identity_sha256
+
+    identity = detector_identity(observation(), ORG, DetectorSettings().utilization)
+    historical = hashlib.sha256(json.dumps(identity, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    assert identity_key(identity) == nan_tolerant_identity_sha256(identity) == historical
+    # Finite values agree with the strict canonical helper...
+    assert identity_key(identity) == canonical_sha256(identity)
+    # ...but legacy payloads with non-finite numbers must still hash (strict one rejects them).
+    legacy = {"source": "telemetry", "payload": {"threshold": float("nan"), "limit": float("inf")}}
+    assert identity_key(legacy) == hashlib.sha256(
+        b'{"payload":{"limit":Infinity,"threshold":NaN},"source":"telemetry"}').hexdigest()
+    with pytest.raises(ValueError):
+        canonical_sha256(legacy)
+
+
+@pytest.mark.parametrize("correlation", ["req-opaque-123", "{%s}" % RUN, RUN.hex])
+async def test_opaque_event_correlation_still_locates_the_persisted_record(mock_db, monkeypatch, correlation):
+    """ADR-028 C20: the locator's request id maps via app.core.correlation, never drops the sample."""
+    from app.modules.alert import measured
+    from app.modules.telemetry.schemas import TelemetryDeviceHistoryResponse
+
+    sample = observation()
+    event = {**event_for(sample), "correlation_id": correlation}
+    history = AsyncMock(return_value=TelemetryDeviceHistoryResponse(device_id=sample.device_id, items=[], total=0,
+                                                                    page=1, page_size=500))
+    monkeypatch.setattr(measured.TelemetryQueryService, "get_device_history", history)
+    service = MeasuredAlertService(db=mock_db)
+    service.apply_observation = AsyncMock()
+    await service.ingest_persisted_event(event)
+    history.assert_awaited_once()
+    assert history.await_args.kwargs["device_id"] == sample.device_id
+    service.apply_observation.assert_not_awaited()  # nothing persisted under that event id

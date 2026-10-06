@@ -275,7 +275,7 @@ async def test_two_receiver_process_connections_serialize_device_io(sessions, fa
     assert device.applied == 1
 
 
-async def test_frames_immutable_history_not_reseedable_and_migration_roundtrip(sessions):
+async def test_frames_immutable_history_not_reseedable_and_migration_downgrade_refused(sessions):
     case = fixture()
     async with sessions() as db:
         repo = ProviderStateRepository(db)
@@ -289,8 +289,10 @@ async def test_frames_immutable_history_not_reseedable_and_migration_roundtrip(s
     async with sessions() as db:
         assert await db.scalar(select(func.count()).select_from(AutonomousProviderState)) == 1
         conn = await db.connection()
-        await conn.run_sync(lambda sync: migrate(sync, "downgrade"))
-        await conn.run_sync(lambda sync: migrate(sync, "upgrade"))
+        # ADR-028: the 0027 downgrade refuses (before any DDL) while frames/journals exist.
+        with pytest.raises(RuntimeError, match="Downgrade below 0027 refused"):
+            await conn.run_sync(lambda sync: migrate(sync, "downgrade"))
+        assert await db.scalar(select(func.count()).select_from(AutonomousProviderState)) == 1
         await db.commit()
 
 
@@ -466,30 +468,36 @@ async def test_core_frame_string_pins_exact_scope_atomic_rollback(sessions, scop
             assert await db.get(AutonomousObservation, contract_digest(case.observation)) is not None
 
 
-async def test_configured_factory_worker_stages_then_separate_receiver_executes(sessions, fake_redis, monkeypatch):
+async def test_configured_factory_worker_stages_then_separate_receiver_executes(sessions, fake_redis, monkeypatch, tmp_path):
     from dataclasses import replace
     from types import SimpleNamespace
     from app.modules.autonomy.execution_settings import CONFIG_PATH, CONFIG_HASH
-    from app.modules.autonomy.providers import installed_providers, IntentCancellation
+    from app.modules.autonomy.health_secret import PUBLIC_KEY_ENV, ReceiptSigner
+    from app.modules.autonomy.providers import installed_providers
     from app.modules.autonomy.receiver_health import ReceiverHealth
     from app.modules.autonomy.worker import AutonomyWorker
     from tests.autonomy_support import qualified_providers
+    from tests.unit.test_receiver_health_review import write_keys
 
     case, device, receiver, _ = await setup_case(sessions, fake_redis, monkeypatch)
     monkeypatch.setattr("app.core.config.get_settings", lambda: SimpleNamespace(EXECUTION_MODE="emulation"))
     monkeypatch.setattr("app.modules.autonomy.worker.get_settings", lambda: SimpleNamespace(EXECUTION_MODE="emulation"))
     monkeypatch.setenv(CONFIG_PATH, "/test-only/not-real-installation.json")
     monkeypatch.setenv(CONFIG_HASH, "f" * 64)
+    # C21: verifiers hold only the receiver's Ed25519 public key; legacy HMAC stays disabled.
+    signing_key, _, public_key_path = write_keys(tmp_path)
+    monkeypatch.setenv(PUBLIC_KEY_ENV, str(public_key_path))
     # Independent calibration loader seam only; no genuine calibration exists.
     config = SimpleNamespace(resource_id="unit-lab", health_max_age_seconds=10,
                              load=lambda: (case.installation, b"a" * 32),
                              model_dump=lambda **_: {"resource_id": "unit-lab", "health_max_age_seconds": 10})
     monkeypatch.setattr("app.modules.autonomy.execution_settings.load_config", lambda: config)
     providers = installed_providers(sessions, fake_redis)
-    assert isinstance(providers.cancellation, IntentCancellation)
+    # STOP/recovery use the persisted journal identity of the configured client (never Intent).
+    assert providers.recovery is providers.executor
     assert not hasattr(providers.executor, "run") and not hasattr(providers.executor, "driver")
     assert (await providers.executor.refresh_status()).status == "unavailable"
-    receiver.health_publisher = ReceiverHealth(fake_redis, case.installation, "unit-lab", b"a" * 32)
+    receiver.health_publisher = ReceiverHealth(fake_redis, case.installation, "unit-lab", signer=ReceiptSigner(signing_key))
     device.healthcheck = AsyncMock()
     assert await receiver.run_one() is False  # Real journal poll, independent receiver instance.
     device.healthcheck.assert_awaited_once()
@@ -547,29 +555,41 @@ async def test_exact_recovery_never_claims_other_work_or_executes(sessions, fake
 
 
 async def test_receiver_does_not_publish_health_for_failed_device_probe(sessions, fake_redis, monkeypatch):
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    from app.modules.autonomy.health_secret import ReceiptSigner
     from app.modules.autonomy.receiver_health import ReceiverHealth
     case, device, receiver, _ = await setup_case(sessions, fake_redis, monkeypatch)
-    receiver.health_publisher = ReceiverHealth(fake_redis, case.installation, "unit-lab", b"a" * 32)
+    receiver.health_publisher = ReceiverHealth(fake_redis, case.installation, "unit-lab",
+                                               signer=ReceiptSigner(Ed25519PrivateKey.generate()))
     device.healthcheck = AsyncMock(side_effect=ValueError("device_unreachable"))
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="device_unreachable"):
         await receiver.run_one()
     assert await fake_redis.get(receiver.health_publisher.redis_key) is None
 
 
 async def test_journal_client_accept_requires_live_receiver_and_enlists_without_commit(sessions, fake_redis, monkeypatch):
     from types import SimpleNamespace
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
     from app.modules.autonomy.execution_client import JournalExecutionClient
+    from app.modules.autonomy.health_secret import ReceiptSigner, ReceiptVerifier
     from app.modules.autonomy.receiver_health import ReceiverHealth
     case, device, receiver, _ = await setup_case(sessions, fake_redis, monkeypatch)
     monkeypatch.setattr("app.core.config.get_settings", lambda: SimpleNamespace(EXECUTION_MODE="emulation"))
-    health = ReceiverHealth(fake_redis, case.installation, "unit-lab", b"a" * 32)
+    # C21: the receiver signs; the client verifies with the public key only.
+    key = Ed25519PrivateKey.generate()
+    health = ReceiverHealth(fake_redis, case.installation, "unit-lab", verifier=ReceiptVerifier(key.public_key()))
     client = JournalExecutionClient(sessions, fake_redis, case.installation, "unit-lab", health)
     async with sessions() as db:
         with pytest.raises(ValueError, match="not_ready"):
             await client.accept(db, case.auth)
-    receiver.health_publisher = health
+    receiver.health_publisher = ReceiverHealth(fake_redis, case.installation, "unit-lab", signer=ReceiptSigner(key))
     device.healthcheck = AsyncMock()
     await receiver.run_one()
+    async with sessions() as db:
+        # A receipt alone is not readiness: accept only consults the preceding refresh (ADR-028 fix 1).
+        with pytest.raises(ValueError, match="not_ready"):
+            await client.accept(db, case.auth)
+    assert (await client.refresh_status()).status == "ready"
     async with sessions() as db:
         await client.accept(db, case.auth)
         async with sessions() as independent:

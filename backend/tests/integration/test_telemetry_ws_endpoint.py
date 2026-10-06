@@ -2,11 +2,11 @@
 
 import pytest
 from fastapi.testclient import TestClient
-from jose import jwt
 from starlette.websockets import WebSocketDisconnect
 
 from app.core.config import get_settings
 from tests.integration.test_topology_ws_endpoint import app
+from tests.jwt_support import jwt
 from tests.ws_auth_support import ws_identity as ws_identity  # noqa: PLC0414
 
 

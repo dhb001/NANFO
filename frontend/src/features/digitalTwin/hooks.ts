@@ -1,129 +1,104 @@
 import { useEffect, useMemo, useState } from "react";
 import { useLiveStore } from "@/features/realtime/store";
 import { TopologyEdge, TopologyNode } from "@/shared/types/network";
-import { topologyEdgeIdentity } from "@/features/topology/edgeIdentity";
 import {
-  buildTwinSceneModel,
+  buildTwinOverlays,
+  buildTwinTopology,
+  deriveCongestionByDevice,
   type TwinCongestion,
   type TwinLink,
   type TwinNode,
   type TwinOverlayObject,
+  type TwinTopology,
 } from "@/features/digitalTwin/sceneAdapter";
 
 export type { TwinCongestion, TwinLink, TwinNode, TwinOverlayObject };
 
-function useFreshnessClock() {
-  const [now, setNow] = useState(Date.now);
-  useEffect(() => {
-    const interval = window.setInterval(() => setNow(Date.now()), 5_000);
-    return () => window.clearInterval(interval);
-  }, []);
-  return now;
-}
+const EMPTY_NODES: TopologyNode[] = [];
+const EMPTY_EDGES: TopologyEdge[] = [];
 
-export function useTwinNodes(baseNodes: TopologyNode[] = []) {
-  const now = useFreshnessClock();
-  const topologyTombstones = useLiveStore((state) => state.topologyTombstones);
-  const baseEdges = useMemo(() => [], []);
-  const topologyByDeviceId = useLiveStore((state) => state.topologyByDeviceId);
-  const telemetryByDeviceMetric = useLiveStore((state) => state.telemetryByDeviceMetric);
-  const telemetryKeysNewestFirst = useLiveStore((state) => state.telemetryKeysNewestFirst);
-  const sceneObjects = useLiveStore((state) => state.sceneObjects);
-  const sceneObjectIdsNewestFirst = useLiveStore((state) => state.sceneObjectIdsNewestFirst);
-
-  return useMemo(() => {
-    return buildTwinSceneModel({
-      baseNodes,
-      now,
-      topologyTombstones,
-        baseEdges,
-        liveNodesByDeviceId: topologyByDeviceId,
-        telemetryByDeviceMetric,
-        telemetryKeysNewestFirst,
-        sceneObjects,
-        sceneObjectIdsNewestFirst,
-      }).nodes;
-  }, [
-    baseNodes,
-    now,
-    topologyTombstones,
-    baseEdges,
-    topologyByDeviceId,
-    telemetryByDeviceMetric,
-    telemetryKeysNewestFirst,
-    sceneObjects,
-    sceneObjectIdsNewestFirst,
-  ]);
-}
-
-export function useTwinSceneModel(
-  baseNodes: TopologyNode[] = [],
-  baseEdges: TopologyEdge[] = [],
+/**
+ * Topology and schematic placement only. Recomputed when the REST graph, a live topology
+ * delta (revision/tombstone) or the session mapping changes, never on telemetry.
+ */
+export function useTwinTopology(
+  baseNodes: TopologyNode[] = EMPTY_NODES,
+  baseEdges: TopologyEdge[] = EMPTY_EDGES,
   importedSpatialRefByDeviceId?: Record<string, string>,
-) {
-  const now = useFreshnessClock();
+): TwinTopology {
   const topologyTombstones = useLiveStore((state) => state.topologyTombstones);
   const topologyByDeviceId = useLiveStore((state) => state.topologyByDeviceId);
-  const telemetryByDeviceMetric = useLiveStore((state) => state.telemetryByDeviceMetric);
-  const telemetryKeysNewestFirst = useLiveStore((state) => state.telemetryKeysNewestFirst);
-  const sceneObjects = useLiveStore((state) => state.sceneObjects);
-  const sceneObjectIdsNewestFirst = useLiveStore((state) => state.sceneObjectIdsNewestFirst);
-
-  return useMemo(() => {
-    return buildTwinSceneModel({
-      baseNodes,
-      now,
-      topologyTombstones,
-        baseEdges,
-        liveNodesByDeviceId: topologyByDeviceId,
-        telemetryByDeviceMetric,
-        telemetryKeysNewestFirst,
-        sceneObjects,
-        sceneObjectIdsNewestFirst,
-        importedSpatialRefByDeviceId,
-    });
-  }, [
-    baseEdges,
-    now,
-    topologyTombstones,
-    baseNodes,
-    importedSpatialRefByDeviceId,
-    telemetryKeysNewestFirst,
-    sceneObjectIdsNewestFirst,
-    sceneObjects,
-    telemetryByDeviceMetric,
-    topologyByDeviceId,
-  ]);
+  return useMemo(() => buildTwinTopology({
+    baseNodes, baseEdges, topologyTombstones, liveNodesByDeviceId: topologyByDeviceId, importedSpatialRefByDeviceId,
+  }), [baseNodes, baseEdges, topologyTombstones, topologyByDeviceId, importedSpatialRefByDeviceId]);
 }
 
-export function useTwinLinks(nodes: TwinNode[], edges: TopologyEdge[] = []): TwinLink[] {
-  return useMemo(() => {
-    const seenLinkIds = new Set<string>();
-    const nodeById = nodes.reduce<Record<string, TwinNode>>((acc, node) => {
-      acc[node.id] = node;
-      return acc;
-    }, {});
+export function useTwinOverlays(): TwinOverlayObject[] {
+  const sceneObjects = useLiveStore((state) => state.sceneObjects);
+  const sceneObjectIdsNewestFirst = useLiveStore((state) => state.sceneObjectIdsNewestFirst);
+  return useMemo(() => buildTwinOverlays(sceneObjects, sceneObjectIdsNewestFirst), [sceneObjects, sceneObjectIdsNewestFirst]);
+}
 
-    return edges
-      .map((edge) => {
-        const sourceNode = nodeById[edge.source_id];
-        const targetNode = nodeById[edge.target_id];
-        const id = topologyEdgeIdentity(edge);
-        if (!sourceNode || !targetNode || seenLinkIds.has(id)) {
-          return null;
-        }
-        seenLinkIds.add(id);
+export interface FrameScheduler {
+  request: (callback: () => void) => number;
+  cancel: (handle: number) => void;
+}
 
-        return {
-          id,
-          source: [sourceNode.x, sourceNode.y, sourceNode.z],
-          target: [targetNode.x, targetNode.y, targetNode.z],
-          sourceId: sourceNode.id,
-          targetId: targetNode.id,
-          edgeType: edge.edge_type,
-          metadata: edge.metadata,
-        } satisfies TwinLink;
-      })
-      .filter((link): link is TwinLink => link !== null);
-  }, [edges, nodes]);
+export const animationFrameScheduler: FrameScheduler = {
+  request: (callback) => (typeof requestAnimationFrame === "function" ? requestAnimationFrame(() => callback()) : window.setTimeout(callback, 16)),
+  cancel: (handle) => (typeof cancelAnimationFrame === "function" ? cancelAnimationFrame(handle) : window.clearTimeout(handle)),
+};
+
+/** Freshness tick: stale samples expire from the heuristic without another push. */
+export const CONGESTION_FRESHNESS_TICK_MS = 5_000;
+
+function computeCongestion(): Record<string, TwinCongestion> {
+  const { telemetryByDeviceMetric, telemetryKeysNewestFirst } = useLiveStore.getState();
+  return deriveCongestionByDevice(telemetryByDeviceMetric, telemetryKeysNewestFirst, Date.now());
+}
+
+function sameMetrics(left: TwinCongestion, right: TwinCongestion): boolean {
+  if (left.severity !== right.severity || left.primaryMetric !== right.primaryMetric || left.metrics.length !== right.metrics.length) return false;
+  return left.metrics.every((metric, index) => {
+    const other = right.metrics[index];
+    return other !== undefined && metric.metric === other.metric && metric.value === other.value && metric.observedAt === other.observedAt && metric.stale === other.stale && metric.source === other.source;
+  });
+}
+
+export function sameCongestionMap(left: Readonly<Record<string, TwinCongestion>>, right: Readonly<Record<string, TwinCongestion>>): boolean {
+  const leftKeys = Object.keys(left);
+  if (leftKeys.length !== Object.keys(right).length) return false;
+  return leftKeys.every((key) => {
+    const leftValue = left[key], rightValue = Object.hasOwn(right, key) ? right[key] : undefined;
+    return leftValue !== undefined && rightValue !== undefined && sameMetrics(leftValue, rightValue);
+  });
+}
+
+/**
+ * Live visual-heuristic congestion per device, applied in animation-frame batches: any
+ * burst of telemetry deltas within one frame produces at most one recomputation and one
+ * render, and an unchanged result produces none.
+ */
+export function useTwinLiveCongestion(scheduler: FrameScheduler = animationFrameScheduler): Readonly<Record<string, TwinCongestion>> {
+  const [value, setValue] = useState(computeCongestion);
+  useEffect(() => {
+    let handle: number | null = null;
+    const flush = () => {
+      handle = null;
+      const next = computeCongestion();
+      setValue((current) => (sameCongestionMap(current, next) ? current : next));
+    };
+    const schedule = () => { if (handle === null) handle = scheduler.request(flush); };
+    const unsubscribe = useLiveStore.subscribe((state, previous) => {
+      if (state.telemetryByDeviceMetric !== previous.telemetryByDeviceMetric || state.telemetryKeysNewestFirst !== previous.telemetryKeysNewestFirst) schedule();
+    });
+    const tick = window.setInterval(schedule, CONGESTION_FRESHNESS_TICK_MS);
+    schedule();
+    return () => {
+      unsubscribe();
+      window.clearInterval(tick);
+      if (handle !== null) scheduler.cancel(handle);
+    };
+  }, [scheduler]);
+  return value;
 }

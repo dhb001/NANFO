@@ -54,6 +54,7 @@ async def run(args: argparse.Namespace) -> None:
         adapter = MeasuredSNMPAdapter(binding=binding, transport=transport, authorize=owner.authorize)
         ingestion = TelemetryIngestionService(redis)
         for index in range(args.samples):
+            owner.invalidate()  # full owner authorization once per cycle (batch)
             if args.publish:
                 count = await adapter.collect_and_publish(ingestion)
                 print(json.dumps({"status": "published", "cycle": index + 1, "sample_count": count}))

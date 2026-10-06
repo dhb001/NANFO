@@ -3,7 +3,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import TIMESTAMP, Boolean, Integer, Text, func
+from sqlalchemy import TIMESTAMP, Boolean, Integer, Text, func, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -37,7 +37,7 @@ class TelemetryReconciliation(Base):
     workspace_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
     owner: Mapped[str] = mapped_column(Text, primary_key=True)
     cursor: Mapped[str | None] = mapped_column(Text)
-    complete: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    scanned: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    unknown: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    complete: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=text("false"))
+    scanned: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    unknown: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     started_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), server_default=func.clock_timestamp())

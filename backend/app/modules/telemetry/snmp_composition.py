@@ -10,7 +10,7 @@ from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings
-from app.modules.telemetry.service import TelemetryIngestionService
+from app.modules.telemetry.ingestion import TelemetryIngestionService
 from app.modules.telemetry.snmp import MeasuredSNMPAdapter
 from app.modules.telemetry.snmp_config import SNMPBinding, SNMPCredentials, SNMPError, load_protected_json
 from app.modules.telemetry.snmp_ownership import SNMPOwnerBoundary
@@ -67,6 +67,9 @@ async def build_measured_snmp_poll_action(
         raise SNMPError("measured_snmp_preflight_failed") from None
 
     async def poll_action() -> None:
+        # Full owner authorization once per batch; per-GET/per-sample checks
+        # inside the batch use the boundary's revision-keyed short TTL cache.
+        boundary.invalidate()
         try:
             async with asyncio.timeout(timeout):
                 await adapter.collect_and_publish(ingestion_service)

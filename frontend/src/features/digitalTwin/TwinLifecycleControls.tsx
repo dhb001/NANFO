@@ -33,7 +33,7 @@ export function TwinLifecycleControls({ networkId, assets, selectedId, onSelect,
       if (!window.confirm(description)) return;
       scope.assertCurrent();
       if (scope.authority !== authorityKey() || !hasPermission(useAuthStore.getState().profile, "write:config") || useWorkspaceStore.getState().networkId !== networkId) throw new Error("Authority or network changed. Review the action again.");
-      await scope.request(async (token) => { await (kind === "asset" ? retireModelAsset(token, networkId!, id!) : clearTwinRecords(token, networkId!, kind)); });
+      await scope.request(async (token) => { await (kind === "asset" ? retireModelAsset(token, networkId, id!) : clearTwinRecords(token, networkId, kind)); });
       if (kind === "asset") onRetired(id!);
       setMessage(kind === "asset" ? "Selected asset retired." : `All active ${kind} cleared.`);
       if (!await onReload()) setMessage("Change succeeded, but reload failed. Reload persisted Twin records to check current state.");

@@ -6,6 +6,7 @@ import fcntl
 import hashlib
 import importlib
 import importlib.util
+import io
 import json
 import os
 from pathlib import Path
@@ -16,6 +17,7 @@ import subprocess
 import sys
 import time
 import uuid
+import zipfile
 
 import recover_qualified_runtime as recovery
 
@@ -45,6 +47,13 @@ def frozen():
     name = "_adr024_frozen"
     if name not in sys.modules:
         source = recovery.TRAIN / "source"
+        # Hash every client module against the pinned parent checkpoint BEFORE executing any.
+        bundle = recovery.CHECKPOINT.read_bytes()
+        recovery.require(recovery.sha(bundle) == recovery.CHECKPOINT_HASH, "checkpoint pin mismatch")
+        with zipfile.ZipFile(io.BytesIO(bundle)) as archive:
+            pins = json.loads(archive.read("manifest.json"))["client_source_files"]
+        recovery.require({path.name: digest(path) for path in source.glob("*.py")} == pins,
+                         "frozen client source changed; refusing to import it")
         spec = importlib.util.spec_from_file_location(name, source / "__init__.py", submodule_search_locations=[str(source)])
         package = importlib.util.module_from_spec(spec)
         sys.modules[name] = package
@@ -170,7 +179,21 @@ def command(output, label, argv, timeout=30, check=True):
     return recovery.command(output, label, argv, timeout=timeout, check=check)
 
 
+def require_frozen_lab(environ=None):
+    """ADR-028 C23: ADR024 reproduces only the recorded frozen v4 lab, which runs privileged.
+
+    The derived checkpoint and frozen client are bound to that lab's environment spec, so a
+    successor lab cannot serve this protocol; it needs a successor campaign and qualification.
+    """
+    value = (os.environ if environ is None else environ).get("NANFO_LAB_FROZEN", "")
+    recovery.require(value in ("", "0", "1"), "NANFO_LAB_FROZEN must be 1 (frozen reproduction) or unset")
+    recovery.require(value == "1", "ADR024 launches only the recorded frozen privileged lab " + IMAGE
+                     + "; set NANFO_LAB_FROZEN=1 for historical reproduction (see ai-engine/SUCCESSOR-PROTOCOL.md)")
+
+
 def start_lab(output, plan, policy):
+    require_frozen_lab()
+    recovery.require(plan["image_id"] == IMAGE, "ADR024 plan must pin the recorded frozen lab image")
     name = "nanfo-training-" + uuid.uuid4().hex
     owner = dict(name=name, campaign_id=plan["campaign_id"], policy=policy, image_id=IMAGE)
     save(output / (policy + "-owner.json"), owner)

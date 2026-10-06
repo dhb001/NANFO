@@ -31,8 +31,7 @@ describe("truth labels", () => {
   it("retains synthetic provenance in the Digital Twin metric inspector", () => {
     render(<MetricSnapshotList metrics={[{
       metric: "cpu", value: 50, unit: "%", observedAt: "2026-09-08T00:00:00Z", source: "runtime",
-      tags: { synthetic: true }, normalizedScore: 0.5, severity: "low", policyId: "cpu", policyPriority: 1,
-      lowUpperExclusive: 70, mediumUpperExclusive: 90,
+      tags: { synthetic: true }, severity: "low",
     }]} />);
     expect(screen.getByText("Synthetic telemetry")).toBeInTheDocument();
   });

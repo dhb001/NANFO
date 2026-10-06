@@ -5,11 +5,10 @@ Persistence operations for telemetry_records.
 
 from __future__ import annotations
 
-import inspect
 import uuid
 from datetime import datetime
 
-from sqlalchemy import func, select, tuple_
+from sqlalchemy import func, select, text, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.telemetry.models import TelemetryRecord
@@ -19,6 +18,13 @@ from app.modules.telemetry.schemas import (
     TelemetryHistoryQuery,
     TelemetryTimeRange,
 )
+
+
+# Rows counted exactly before a bounded API total reports "at least" (ADR-028).
+HISTORY_COUNT_CAP = 10_000
+# Planner estimates are trusted only above this size; below it a bounded exact
+# count (LIMIT cap+1) is both cheap and precise.
+ESTIMATE_EXACT_BELOW = 10_000
 
 
 class TelemetryRecordRepository:
@@ -75,7 +81,13 @@ class TelemetryRecordRepository:
         end_time: datetime | None = None,
         aggregation: TelemetryAggregation | None = None,
         bucket_seconds: int | None = None,
+        count_cap: int | None = None,
     ) -> tuple[list[TelemetryRecord] | list[TelemetryAggregateResponse], int]:
+        """Return a page and its total.
+
+        With ``count_cap`` the total is counted over at most ``count_cap + 1``
+        rows/groups, so a returned total greater than ``count_cap`` means capped.
+        """
         bounds = TelemetryHistoryQuery(
             metric=metric, start_time=start_time, end_time=end_time,
             aggregation=aggregation, bucket_seconds=bucket_seconds,
@@ -112,7 +124,8 @@ class TelemetryRecordRepository:
                 *dimensions, aggregate(TelemetryRecord.value).label("value"),
                 func.count().label("sample_count"),
             ).group_by(*dimensions)
-            total = (await self._db.execute(select(func.count()).select_from(grouped.subquery()))).scalar_one()
+            counted = grouped if count_cap is None else grouped.limit(count_cap + 1)
+            total = (await self._db.execute(select(func.count()).select_from(counted.subquery()))).scalar_one()
             result = await self._db.execute(
                 grouped.order_by(
                     bucket.desc(), TelemetryRecord.device_id, TelemetryRecord.metric,
@@ -122,9 +135,14 @@ class TelemetryRecordRepository:
             )
             return [TelemetryAggregateResponse.model_validate(row) for row in result.mappings().all()], total
 
+        return await self._raw_page(query, page=page, page_size=page_size, count_cap=count_cap)
+
+    async def _raw_page(self, query, *, page: int, page_size: int, count_cap: int | None):
         query = query.order_by(TelemetryRecord.observed_at.desc(), TelemetryRecord.record_id.desc())
-        count_query = select(func.count()).select_from(query.order_by(None).subquery())
-        total = (await self._db.execute(count_query)).scalar_one()
+        counted = query.order_by(None)
+        if count_cap is not None:
+            counted = counted.with_only_columns(TelemetryRecord.record_id).limit(count_cap + 1)
+        total = (await self._db.execute(select(func.count()).select_from(counted.subquery()))).scalar_one()
         rows = (
             await self._db.execute(
                 query.offset((page - 1) * page_size).limit(page_size)
@@ -143,6 +161,7 @@ class TelemetryRecordRepository:
         page_size: int = 50,
         start_time: datetime | None = None,
         end_time: datetime | None = None,
+        count_cap: int | None = None,
     ) -> tuple[list[TelemetryRecord], int]:
         bounds = TelemetryTimeRange(start_time=start_time, end_time=end_time)
         query = select(TelemetryRecord).where(
@@ -156,16 +175,7 @@ class TelemetryRecordRepository:
             query = query.where(TelemetryRecord.observed_at >= bounds.start_time)
         if bounds.end_time is not None:
             query = query.where(TelemetryRecord.observed_at < bounds.end_time)
-
-        query = query.order_by(TelemetryRecord.observed_at.desc(), TelemetryRecord.record_id.desc())
-        count_query = select(func.count()).select_from(query.order_by(None).subquery())
-        total = (await self._db.execute(count_query)).scalar_one()
-        rows = (
-            await self._db.execute(
-                query.offset((page - 1) * page_size).limit(page_size)
-            )
-        ).scalars().all()
-        return list(rows), total
+        return await self._raw_page(query, page=page, page_size=page_size, count_cap=count_cap)
 
     async def list_history_keyset(
         self, *, workspace_id: uuid.UUID, network_id: uuid.UUID | None,
@@ -197,24 +207,40 @@ class TelemetryRecordRepository:
         ).limit(page_size + 1))
         return list(rows.all())
 
-    async def get_latest_observed_at(self) -> datetime | None:
-        result = await self._db.execute(select(func.max(TelemetryRecord.observed_at)))
+    async def get_latest_observed_at(self, *, not_after: datetime | None = None) -> datetime | None:
+        """Latest observation, optionally ignoring rows dated beyond ``not_after``.
+
+        Health passes ``now + skew`` so a single far-future (clock-skewed) row can
+        never pin ingest lag at zero.
+        """
+        query = select(func.max(TelemetryRecord.observed_at))
+        if not_after is not None:
+            query = query.where(TelemetryRecord.observed_at <= not_after)
+        result = await self._db.execute(query)
         return result.scalar_one_or_none()
 
-    async def get_latest_scope(self) -> tuple[uuid.UUID | None, uuid.UUID | None]:
-        query = (
-            select(TelemetryRecord.workspace_id, TelemetryRecord.network_id)
-            .order_by(TelemetryRecord.observed_at.desc(), TelemetryRecord.record_id.desc())
-            .limit(1)
-        )
-        result = await self._db.execute(query)
-        row = result.first()
-        if inspect.isawaitable(row):
-            row = await row
-        if row is None:
-            return None, None
-        return row[0], row[1]
+    # ADR-028 C12: there is deliberately no "latest tenant scope" lookup. Platform
+    # SLO alerts used it to borrow whichever tenant ingested last (cross-tenant).
 
     async def count_all(self) -> int:
+        """Exact full count. Not used by health (see ``estimate_total_records``)."""
         result = await self._db.execute(select(func.count()).select_from(TelemetryRecord))
         return result.scalar_one()
+
+    async def estimate_total_records(self) -> tuple[int, bool]:
+        """Return ``(total, estimated)`` without a full-table count.
+
+        Small tables are counted exactly over a ``LIMIT`` subquery; large ones use
+        the planner's ``pg_class.reltuples`` statistic (maintained by autovacuum).
+        """
+        estimate = await self._db.scalar(text(
+            "SELECT reltuples::bigint FROM pg_class WHERE oid = to_regclass('telemetry_records')"
+        ))
+        estimate = int(estimate) if estimate is not None else -1
+        if estimate >= ESTIMATE_EXACT_BELOW:
+            return estimate, True
+        bounded = select(TelemetryRecord.record_id).limit(ESTIMATE_EXACT_BELOW + 1).subquery()
+        exact = int((await self._db.execute(select(func.count()).select_from(bounded))).scalar_one())
+        if exact > ESTIMATE_EXACT_BELOW:
+            return max(exact, estimate), True
+        return exact, False

@@ -34,7 +34,8 @@ from app.modules.simulation.evaluator import digest
 
 from tests.experimental_lab_support import case
 
-ROOT = Path(__file__).resolve().parents[3] / "ai-engine/artifacts/adr024-qualified-001/model"
+# Tracked byte-identical copies (ai-engine/qualified, ADR-028); pinned below and in its SHA256SUMS.
+ROOT = Path(__file__).resolve().parents[3] / "ai-engine/qualified/adr024-qualified-001/model"
 PINS = {
     "path0": "21529463ae34c83d6f44518b25712d6d935fdece8614628886ae59c0090d19c9",
     "path1": "253a53d91feff7ca5b31cca54b05c20123bb86e56033509bbae0ab69a0e91a32",
@@ -43,10 +44,10 @@ PINS = {
 
 def durable_case(scenario):
     path = ROOT / f"recorded-history-{scenario}.json"
-    if not path.exists():
-        pytest.skip("durable ADR024 raw artifacts not installed; synthetic tests remain mandatory")
     content = path.read_bytes()
     assert hashlib.sha256(content).hexdigest() == PINS[scenario]
+    sums = dict(reversed(line.split()) for line in (ROOT.parent / "SHA256SUMS").read_text().splitlines())
+    assert sums[f"model/recorded-history-{scenario}.json"] == PINS[scenario]
     history = json.loads(content)
     raw = history["frames"][0]["response"]["data"]
     evidence = raw["evidence"]

@@ -2,7 +2,9 @@
 
 Consumes network.device.* events and writes/updates/removes Device nodes in Neo4j.
 One of the three consumers of network.device.added (EventAPI.md §5).
-Replay ordering and tombstones are persisted atomically by Network in Neo4j.
+Replay ordering and tombstones are persisted atomically by Network in Neo4j: events
+order per network by the outbox ``sequence`` in the payload (C13), falling back to
+the envelope timestamp for events published before sequences existed.
 """
 
 from __future__ import annotations
@@ -27,7 +29,8 @@ async def handle_topology_event(event: dict) -> None:
         event_type=event_type, payload=payload,
         timestamp=event["timestamp"], event_id=event["event_id"],
     )
-    logger.info("topology_event_projected", device_id=payload["device_id"], applied=applied)
+    logger.info("topology_event_projected", device_id=payload["device_id"],
+                network_id=payload.get("network_id"), sequence=payload.get("sequence"), applied=applied)
 
 
 TOPOLOGY_HANDLERS: dict[str, object] = {

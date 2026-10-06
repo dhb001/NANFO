@@ -45,6 +45,17 @@ describe("VS19 bundle continuity checks", () => {
     expect(checks.largest_non_three_chunk_gzip_bounded).toBe(false);
   });
 
+  it("keeps the ADR-028 aggregate cap and fails above it", () => {
+    const base = {
+      chunkCount: 40, totalJsRawBytes: 1_500_000, totalJsGzipBytes: 432_466, largestChunkRawBytes: 734_055, largestChunkGzipBytes: 192_476,
+      largestChunkFile: "three-BekKIdyh.js", largestNonThreeChunkRawBytes: 177_010, largestNonThreeChunkGzipBytes: 58_100,
+      largestNonThreeChunkFile: "react--ojjDqGB.js", threeChunkRawBytes: 734_055, threeChunkGzipBytes: 192_476,
+      twinPageChunkRawBytes: 1_200, twinPageChunkGzipBytes: 660,
+    };
+    expect(evaluateContinuityChecks(base).total_js_gzip_bounded).toBe(true);
+    expect(evaluateContinuityChecks({ ...base, totalJsGzipBytes: 450_001 }).total_js_gzip_bounded).toBe(false);
+  });
+
   it("emits deterministic snapshot structure", () => {
     const snapshot = toContinuitySnapshot(
       {

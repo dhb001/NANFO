@@ -12,6 +12,7 @@ import json
 import math
 import os
 import zipfile
+from functools import lru_cache
 from typing import Annotated, Literal
 
 from pydantic import Field, ValidationError, model_validator
@@ -29,6 +30,73 @@ from app.modules.autonomy.artifact_io import (
 Policy = Literal["ppo", "constant0", "constant1", "heuristic", "ospf"]
 Seed = Annotated[int, Field(ge=1000, le=3999)]
 Number = Annotated[float, Field(ge=0, le=1e15)]
+
+
+def _continued_fraction(a, b, x):
+    tiny = 1e-300
+    c, d = 1.0, 1.0 - (a + b) * x / (a + 1.0)
+    d = 1.0 / (d if abs(d) > tiny else tiny)
+    result = d
+    for m in range(1, 400):
+        for numerator in (
+            m * (b - m) * x / ((a + 2 * m - 1) * (a + 2 * m)),
+            -(a + m) * (a + b + m) * x / ((a + 2 * m) * (a + 2 * m + 1)),
+        ):
+            d = 1.0 + numerator * d
+            d = 1.0 / (d if abs(d) > tiny else tiny)
+            c = 1.0 + numerator / c
+            c = c if abs(c) > tiny else tiny
+            result *= d * c
+        if abs(d * c - 1.0) < 1e-15:
+            break
+    return result
+
+
+def _student_t_cdf(value, df):
+    x = df / (df + value * value)
+    if x >= 1:
+        return 0.5
+    a, b = df / 2, 0.5
+    front = math.exp(math.lgamma(a + b) - math.lgamma(a) - math.lgamma(b) + a * math.log(x) + b * math.log1p(-x))
+    beta = front * _continued_fraction(a, b, x) / a if x < (a + 1) / (a + b + 2) else (
+        1.0 - front * _continued_fraction(b, a, 1.0 - x) / b)
+    return 1.0 - 0.5 * beta if value > 0 else 0.5 * beta
+
+
+@lru_cache(maxsize=256)
+def student_t_quantile(probability: float, df: int) -> float:
+    """Upper quantile of Student's t with ``df`` degrees of freedom (exact, bisection)."""
+    if not 0.5 < probability < 1 or type(df) is not int or df < 1:
+        raise ValueError("invalid Student-t quantile request")
+    low, high = 0.0, 1.0
+    while _student_t_cdf(high, df) < probability:
+        high *= 2
+    for _ in range(200):
+        middle = (low + high) / 2
+        low, high = (middle, high) if _student_t_cdf(middle, df) < probability else (low, middle)
+    return (low + high) / 2
+
+
+def paired_student_t_lower(differences) -> float | None:
+    """Lower bound of the two-sided 95% Student-t interval, df = pairs - 1; None if undefined."""
+    count = len(differences)
+    if count < 2:
+        return None
+    mean = math.fsum(differences) / count
+    variance = math.fsum((value - mean) ** 2 for value in differences) / (count - 1)
+    return mean - student_t_quantile(0.975, count - 1) * math.sqrt(variance / count)
+
+
+def constant_advantage_established(differences, minimum_mean: float, minimum_lower: float) -> bool:
+    """The explicit fail-closed held-out gate against a constant policy.
+
+    Established only when the mean paired reward difference exceeds the declared margin AND
+    the Student-t lower bound (df = pairs - 1) exceeds the declared lower margin. An undefined
+    bound (fewer than two pairs) never passes; the normal approximation never gates.
+    """
+    mean = math.fsum(differences) / len(differences) if differences else None
+    lower = paired_student_t_lower(differences)
+    return mean is not None and lower is not None and mean > minimum_mean and lower > minimum_lower
 
 
 class EvaluationPlan(StrictEvidence):
@@ -290,16 +358,16 @@ def import_qualification(store: ArtifactStore, path: str) -> dict:
             variance = sum((value - mean) ** 2 for value in differences) / (
                 len(differences) - 1
             )
-            # Diagnostic normal approximation, not a small-sample safety confidence.
-            lower = mean - 1.96 * math.sqrt(variance / len(differences))
             comparisons[split][policy] = {
                 "paired_mean_reward_difference": mean,
-                "normal_approximation_lower_95": lower,
+                # Retained diagnostic only: too narrow for few pairs, it never gates.
+                "normal_approximation_lower_95": mean - 1.96 * math.sqrt(variance / len(differences)),
+                "student_t_lower_95": paired_student_t_lower(differences),
+                "degrees_of_freedom": len(differences) - 1,
                 "pairs": len(seeds),
             }
-            if policy.startswith("constant") and (
-                mean <= plan.minimum_constant_margin
-                or lower <= plan.minimum_paired_lower_margin
+            if policy.startswith("constant") and not constant_advantage_established(
+                differences, plan.minimum_constant_margin, plan.minimum_paired_lower_margin
             ):
                 reasons.append("heldout_constant_advantage_not_established")
     return {

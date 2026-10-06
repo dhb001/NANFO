@@ -45,12 +45,11 @@ async def test_get_roles_for_user_returns_empty_list_when_no_roles(mock_db):
     ([], []), (["unknown"], []),
     (["Operator"], ["read:topology", "read:telemetry", "write:config", "execute:rollback"]),
     (["Read-Only"], ["read:topology", "read:telemetry"]),
-    (["Admin"], ["read:topology", "write:config"]),
+    (["Admin"], ["read:topology", "read:telemetry", "write:config", "execute:rollback",
+                 "manage:users", "manage:orgs"]),
+    (["Read-Only", "Operator"], ["read:topology", "read:telemetry", "write:config", "execute:rollback"]),
 ])
 async def test_permission_semantics(mock_db, roles, expected):
-    result = MagicMock()
-    result.scalars.return_value.all.return_value = [
-        SimpleNamespace(name="read:topology"), SimpleNamespace(name="write:config"),
-    ]
-    mock_db.execute.return_value = result
+    """ADR-028: one declared role→permission policy; no per-request permissions query."""
     assert await UserRepository(mock_db).get_permissions_for_roles(roles) == expected
+    mock_db.execute.assert_not_awaited()

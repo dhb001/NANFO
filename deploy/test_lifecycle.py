@@ -9,6 +9,7 @@ import pytest
 import yaml
 
 from deploy import backup_restore, manage, verify
+from deploy.schema_contract import CURRENT_SCHEMA
 
 
 @pytest.fixture
@@ -19,10 +20,11 @@ def restored(tmp_path, monkeypatch):
         "NANFO_BACKEND_IMAGE": "backend",
         "NANFO_FRONTEND_IMAGE": "frontend",
         "NANFO_NEO4J_IMAGE": "neo4j",
+        "NANFO_REDIS_IMAGE": "redis",
     }
     checkpoint = {
         "safe": True,
-        "schema": "0029",
+        "schema": CURRENT_SCHEMA,
         "reports": {"verified_reports": 1},
         "model_references": {},
         "telemetry_archive": {name: {} for name in (
@@ -36,7 +38,7 @@ def restored(tmp_path, monkeypatch):
         "images": {"api": {"id": "exact"}},
         "mount_contract": {},
         "external_fingerprints": {},
-        "volumes": [{"logical": "reports"}, {"logical": "telemetry_archive"}],
+        "volumes": [{"logical": "reports"}, {"logical": "telemetry_archive"}, {"logical": "stream_archive"}],
         "checkpoint": checkpoint,
     }
     deployment = Mock(spec=backup_restore.Deployment)
@@ -45,7 +47,8 @@ def restored(tmp_path, monkeypatch):
     deployment.mount_contract.return_value = {}
     deployment.external_fingerprints.return_value = {}
     deployment.inventory.return_value = ({"reports": "nanfo-deploy-target_reports",
-                                          "telemetry_archive": "nanfo-deploy-target_telemetry_archive"}, {})
+                                          "telemetry_archive": "nanfo-deploy-target_telemetry_archive",
+                                          "stream_archive": "nanfo-deploy-target_stream_archive"}, {})
     deployment.maintenance.return_value = checkpoint.copy()
     monkeypatch.setattr(manage, "load_config", lambda _: config)
     monkeypatch.setattr(backup_restore, "load_manifest", lambda *args: manifest)
@@ -63,7 +66,8 @@ def test_verified_restore_records_marker_without_initializing(restored):
     state, key, _, deployment = restored
     manage.adopt_restored(state, state, key)
     assert (state / "initialized.json").exists()
-    assert json.loads((state / "initialized.json").read_text())["schema"] == "0029"
+    assert json.loads((state / "initialized.json").read_text())["schema"] == CURRENT_SCHEMA
+    assert set(json.loads((state / "initialized.json").read_text())["images"]) == set(manage.IMAGE_KEYS)
     deployment.compose.assert_not_called()
     assert [call.args[0] for call in deployment.maintenance.call_args_list] == [
         "checkpoint",
@@ -101,14 +105,14 @@ def test_restore_proof_failure_never_creates_marker(restored, failure):
     assert not (state / "initialized.json").exists()
 
 
-@pytest.mark.parametrize("schema", ["0019", "0027", "0028"])
+@pytest.mark.parametrize("schema", ["0019", "0027", "0028", "0029"])
 def test_historical_backup_not_adopted_into_current_composition(restored, monkeypatch, schema):
     state, key, _, deployment = restored
     manifest = backup_restore.load_manifest(state, b"x" * 32)
     manifest["checkpoint"]["schema"] = schema
     monkeypatch.setattr(backup_restore, "load_manifest", lambda *args: manifest)
     deployment.maintenance.return_value = manifest["checkpoint"].copy()
-    with pytest.raises(ValueError, match="requires schema 0029"):
+    with pytest.raises(ValueError, match=f"requires schema {CURRENT_SCHEMA}"):
         manage.adopt_restored(state, state, key)
     assert not (state / "initialized.json").exists()
     assert all(
@@ -127,7 +131,9 @@ def test_network_worker_compose_and_lifecycle_contract():
         "network",
     ]
     assert worker["read_only"] is True
-    assert worker["volumes"] == ["runtime_secrets:/run/secrets:ro"]
+    # C24: workers mount the JWT-free worker secret volume only.
+    assert worker["volumes"] == ["runtime_secrets_worker:/run/secrets:ro"]
+    assert worker["environment"]["NANFO_SERVICE_ROLE"] == "worker"
     assert "ports" not in worker
     assert "network-outbox-worker" in manage.SERVICES
 
@@ -156,7 +162,7 @@ def test_stop_includes_network_publisher_after_checkpoint(restored, monkeypatch)
     assert calls[3] == ("stop", *manage.STORES)
 
 
-@pytest.mark.parametrize("schema", [None, "0019", "0020", "0024", "0026", "0027", "0028"])
+@pytest.mark.parametrize("schema", [None, "0019", "0020", "0024", "0026", "0027", "0028", "0029"])
 def test_start_refuses_old_marker_before_any_lifecycle(restored, monkeypatch, schema):
     state, _, config, _ = restored
     (state / "initialized.json").write_text(
@@ -165,7 +171,7 @@ def test_start_refuses_old_marker_before_any_lifecycle(restored, monkeypatch, sc
     commands = Mock()
     monkeypatch.setattr(manage, "compose", commands)
     monkeypatch.setattr("sys.argv", ["manage.py", "--state", str(state), "start"])
-    with pytest.raises(ValueError, match="schema 0029"):
+    with pytest.raises(ValueError, match=f"schema {CURRENT_SCHEMA}"):
         manage.main()
     commands.assert_not_called()
 

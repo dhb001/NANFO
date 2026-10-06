@@ -14,7 +14,7 @@ from app.modules.autonomy.artifact_io import ArtifactStore, EvidenceError, parse
 from app.modules.autonomy.live_schemas import LiveInstallation, MeasuredFeatures, PassiveSnapshot
 from app.modules.autonomy.live_settings import LiveSettings
 from app.modules.autonomy.qualification import inspect_checkpoint_bytes
-from scripts.frozen_model_diagnostic import canonical_hash
+from app.core.canonical import canonical_sha256 as canonical_hash
 
 
 def protected_path(path: Path):

@@ -6,7 +6,7 @@ import { QueryState } from "@/shared/ui/QueryState";
 import { Panel } from "@/shared/ui/Panel";
 import { StatTile } from "@/shared/ui/StatTile";
 import { Badge } from "@/shared/ui/Badge";
-import { formatNumber, formatTimestamp } from "@/shared/lib/format";
+import { displayValue, formatNumber, formatTimestamp } from "@/shared/lib/format";
 import { useLiveStore } from "@/features/realtime/store";
 import { useDevices } from "@/features/networks/hooks";
 import { useIsNarrowViewport } from "@/shared/lib/viewport";
@@ -21,6 +21,12 @@ import { TimeSeriesChart } from "./TimeSeriesChart";
 import { telemetryChartSeries } from "./chartSeries";
 import { FlowCounterIdentity } from "./FlowCounterIdentity";
 import { useSessionScope } from "@/features/auth/sessionScope";
+import { telemetryHealthTone } from "@/shared/lib/statusTones";
+import { formatCappedTotal, formatPageCount, formatRecordTotal, hasNextPage } from "./totals";
+import { SloStatusTile } from "./SloStatusTile";
+import { useDebouncedValue } from "@/shared/lib/useDebouncedValue";
+
+export const METRIC_FILTER_DEBOUNCE_MS = 300;
 
 export function TelemetryPage() {
   const { key } = useSessionScope();
@@ -32,12 +38,15 @@ function TelemetryPageContent() {
   const token = useAuthStore((state) => state.accessToken);
   const workspaceId = useWorkspaceStore((state) => state.workspaceId);
   const networkId = useWorkspaceStore((state) => state.networkId);
-  const [metricFilter, setMetricFilter] = useState("");
+  const [metricInput, setMetricInput] = useState("");
+  // Queries follow the metric only once typing pauses; validation feedback stays immediate.
+  const metricFilter = useDebouncedValue(metricInput, METRIC_FILTER_DEBOUNCE_MS);
   const [startTime, setStartTime] = useState("");
   const [endTime, setEndTime] = useState("");
   const [aggregation, setAggregation] = useState<TelemetryAggregation | "">("");
   const [bucketSeconds, setBucketSeconds] = useState(60);
-  const filterError = validateHistoryFilters(startTime, endTime, metricFilter, aggregation, bucketSeconds);
+  const inputError = validateHistoryFilters(startTime, endTime, metricInput, aggregation, bucketSeconds);
+  const filterError = inputError ?? validateHistoryFilters(startTime, endTime, metricFilter, aggregation, bucketSeconds);
   const range = {
     startTime: !filterError && startTime ? new Date(startTime).toISOString() : undefined,
     endTime: !filterError && endTime ? new Date(endTime).toISOString() : undefined,
@@ -97,14 +106,15 @@ function TelemetryPageContent() {
             <div
               style={{
                 display: "grid",
-                gridTemplateColumns: isNarrowViewport ? "repeat(2, minmax(0, 1fr))" : "repeat(4, minmax(0, 1fr))",
+                gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 160px), 1fr))",
                 gap: "0.6rem",
               }}
             >
-              <StatTile label="Status" value={health.status.toUpperCase()} tone={health.status === "ok" ? "ok" : "warn"} />
+              <StatTile label="Status" value={health.status.toUpperCase()} tone={telemetryHealthTone(health.status)} />
               <StatTile label="Ingest Lag" value={health.ingest_lag_ms === null ? "Unavailable (no observations)" : `${formatNumber(health.ingest_lag_ms, 0)} ms`} />
               <StatTile label="Dropped Events" value={String(health.dropped_events)} tone={health.dropped_events > 0 ? "warn" : "ok"} />
-              <StatTile label="Total Records" value={String(health.total_records)} />
+              <StatTile label="Total Records" value={formatRecordTotal(health)} caption={health.total_records_estimated ? "Planner estimate, not an exact count" : undefined} />
+              <SloStatusTile slo={health.slo} />
             </div>
           )}
         </QueryState>}
@@ -118,8 +128,8 @@ function TelemetryPageContent() {
             <label className="mono" style={{ fontSize: "0.75rem", color: "var(--ink-3)", display: "flex", gap: "0.4rem", alignItems: "center" }}>
               metric
               <input
-                value={metricFilter}
-                onChange={(event) => setMetricFilter(event.target.value)}
+                value={metricInput}
+                onChange={(event) => setMetricInput(event.target.value)}
                 aria-label="Filter telemetry metric"
                 placeholder="cpu_usage"
                 list="telemetry-metrics"
@@ -146,7 +156,7 @@ function TelemetryPageContent() {
             {aggregation && <label>Bucket seconds <input aria-label="Bucket seconds" type="number" min={1} max={86400} step={1} value={bucketSeconds} onChange={(event) => setBucketSeconds(Number(event.target.value))} style={{ width: 90 }} /></label>}
           </div>
           <p style={{ color: "var(--ink-3)", fontSize: "0.78rem" }}>Times are sent in UTC. Aggregation: maximum 7 days, grouped by device, metric, unit, source, port, peer and run. Flow counters require raw history: snapshot v1 has no durable flow match identity. Queue backlog is bytes or packets, not occupancy percent. Emulation latency is ping RTT; probe loss is not application delivery ratio. Missing measurements are unavailable, not zero.</p>
-          {filterError ? <p role="alert">{filterError}</p> : <QueryState query={historyQuery} hasData={(data) => data.items.length > 0} emptyTitle="No telemetry history" emptyDescription="Measurements are unavailable for this filter. No zero values are inferred.">
+          {inputError ? <p role="alert">{inputError}</p> : filterError ? <p role="status">Applying the metric filter…</p> : <QueryState query={historyQuery} hasData={(data) => data.items.length > 0} emptyTitle="No telemetry history" emptyDescription="Measurements are unavailable for this filter. No zero values are inferred.">
             {() => (<>
               <p role="status">Fetched {historyRows.length} {aggregation ? "buckets" : "records"} on this page (limit 120). This is a bounded filtered view, not a full-network total. Invalid timestamps are omitted from the chart.</p>
               <TimeSeriesChart title="Telemetry time series" series={telemetryChartSeries(historyRows, aggregation ? bucketSeconds : undefined)} />
@@ -202,9 +212,9 @@ function TelemetryPageContent() {
                           {row.device_id}
                         </div>
                         <div style={{ color: "var(--ink-3)", fontSize: "0.78rem" }}>
-                          {"bucket_start" in row ? "Bucket start: " : ""}{formatTimestamp("observed_at" in row ? row.observed_at : row.bucket_start)} | {row.source} | Port {String("tags" in row ? row.tags.port_no ?? "unavailable" : row.port_no ?? "unavailable")}
-                          {"tags" in row && row.tags.measurement_method ? ` | ${String(row.tags.measurement_method)}` : ""}
-                          {` | Peer ${String("tags" in row ? row.tags.peer_host ?? "unavailable" : row.peer_host ?? "unavailable")} | Run ${String("tags" in row ? row.tags.run_id ?? "unavailable" : row.run_id ?? "unavailable")}`}
+                          {"bucket_start" in row ? "Bucket start: " : ""}{formatTimestamp("observed_at" in row ? row.observed_at : row.bucket_start)} | {row.source} | Port {displayValue("tags" in row ? row.tags.port_no : row.port_no)}
+                          {"tags" in row && row.tags.measurement_method ? ` | ${displayValue(row.tags.measurement_method)}` : ""}
+                          {` | Peer ${displayValue("tags" in row ? row.tags.peer_host : row.peer_host)} | Run ${displayValue("tags" in row ? row.tags.run_id : row.run_id)}`}
                           {"tags" in row && <FlowCounterIdentity metric={row.metric} observedAt={row.observed_at} tags={row.tags} />}
                         </div>
                       </button>
@@ -217,8 +227,8 @@ function TelemetryPageContent() {
           </QueryState>}
           {!filterError && historyQuery.data && <nav aria-label="Telemetry history pagination" style={{ display: "flex", flexWrap: "wrap", gap: "0.6rem", alignItems: "center", marginTop: "0.6rem" }}>
             <Button disabled={page <= 1 || historyQuery.isFetching} onClick={() => setPagination({ key: filterKey, page: page - 1 })}>Previous</Button>
-            <span>Page {page} / {Math.max(1, Math.ceil(historyQuery.data.total / historyQuery.data.page_size))} | {historyQuery.data.total} {aggregation ? "buckets" : "records"}</span>
-            <Button disabled={page * historyQuery.data.page_size >= historyQuery.data.total || historyQuery.isFetching} onClick={() => setPagination({ key: filterKey, page: page + 1 })}>Next</Button>
+            <span>Page {page} / {formatPageCount(historyQuery.data.total, historyQuery.data.page_size, historyQuery.data.total_capped)} | {formatCappedTotal(historyQuery.data.total, historyQuery.data.total_capped)} {aggregation ? "buckets" : "records"}</span>
+            <Button disabled={!hasNextPage(page, historyQuery.data.page_size, historyQuery.data.total, historyQuery.data.items.length, historyQuery.data.total_capped) || historyQuery.isFetching} onClick={() => setPagination({ key: filterKey, page: page + 1 })}>Next</Button>
           </nav>}
         </Panel>
 
@@ -246,14 +256,14 @@ function TelemetryPageContent() {
                   ))}
                 </select>
 
-                {filterError ? <p>Correct the history filters to view device measurements.</p> : <QueryState
+                {filterError ? <p>{inputError ? "Correct the history filters to view device measurements." : "Applying the metric filter…"}</p> : <QueryState
                   query={deviceHistoryQuery}
                   hasData={(data) => data.items.length > 0}
                   emptyTitle="No device telemetry"
                   emptyDescription="No records available for the selected device."
                 >
                   {(deviceHistory) => (<>
-                    <p>Fetched {deviceHistory.items.length} of {deviceHistory.total} filtered device records (fetch limit 100); preview limited to 20. Not a network total.</p>
+                    <p>Fetched {deviceHistory.items.length} of {formatCappedTotal(deviceHistory.total, deviceHistory.total_capped)} filtered device records (fetch limit 100); preview limited to 20. Not a network total.</p>
                     <div style={{ display: "grid", gap: "0.35rem", maxHeight: 280, overflow: "auto" }}>
                       {deviceHistory.items.slice(0, 20).map((row) => (
                         <div
@@ -267,7 +277,7 @@ function TelemetryPageContent() {
                               {Number.isFinite(row.value) ? `${formatNumber(row.value)} ${row.unit ?? "(unit unavailable)"}` : "Unavailable"}
                             </span>
                           </div>
-                           <div style={{ color: "var(--ink-3)", fontSize: "0.76rem" }}>{formatTimestamp(row.observed_at)} | {row.source} | Port {String(row.tags.port_no ?? "unavailable")}</div>
+                           <div style={{ color: "var(--ink-3)", fontSize: "0.76rem" }}>{formatTimestamp(row.observed_at)} | {row.source} | Port {displayValue(row.tags.port_no)}</div>
                            <FlowCounterIdentity metric={row.metric} observedAt={row.observed_at} tags={row.tags} />
                         </div>
                       ))}
@@ -279,7 +289,7 @@ function TelemetryPageContent() {
           </QueryState>
           <nav aria-label="Telemetry device pagination">
             <Button disabled={devicePage <= 1 || devicesQuery.isFetching} onClick={() => setDevicePage(devicePage - 1)}>Previous devices</Button>
-            <span> Page {devicePage} | {devicesQuery.data?.total ?? "Unknown"} devices </span>
+            <span aria-live="polite"> Page {devicePage}{devicesQuery.isPlaceholderData ? " (loading…)" : ""} | {devicesQuery.data?.total ?? "Unknown"} devices </span>
             <Button disabled={!devicesQuery.data || devicePage * devicesQuery.data.page_size >= devicesQuery.data.total || devicesQuery.isFetching} onClick={() => setDevicePage(devicePage + 1)}>Next devices</Button>
           </nav>
         </Panel>
@@ -316,7 +326,7 @@ function TelemetryPageContent() {
                 </div>
                 <div className="mono" style={{ color: "var(--ink-3)", fontSize: "0.72rem" }}>
                   {metric.device_id.slice(0, 8)}
-                  {` | ${metric.source} | Port ${String(metric.tags.port_no ?? "unavailable")}`}
+                  {` | ${metric.source} | Port ${displayValue(metric.tags.port_no)}`}
                 </div>
               </div>
             ))

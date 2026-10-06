@@ -17,7 +17,8 @@ asyncpg = "^0.30.0"
 alembic = "^1.14.0"
 neo4j = "^5.26.0"
 redis = {extras = ["asyncio"], version = "^5.2.0"}
-python-jose = {extras = ["cryptography"], version = "^3.3.0"}
+pyjwt = "^2.13.0"
+cryptography = "^50.0.0"
 bcrypt = "^4.0.1"
 structlog = "^24.4.0"
 httpx = "^0.28.0"
@@ -39,6 +40,9 @@ asyncio_mode = "auto"
 testpaths = ["tests"]
 pythonpath = [".", ".."]
 addopts = "--cov=app --cov-report=term-missing"
+markers = [
+  "private_artifacts: reads ignored local evidence under ai-engine/artifacts; skipped when absent, deselected in portable CI (ADR-028)",
+]
 filterwarnings = [
   'ignore:.*iscoroutinefunction.*:DeprecationWarning:neo4j\._meta',
   'ignore:.*iscoroutinefunction.*:DeprecationWarning:fastapi\.routing',

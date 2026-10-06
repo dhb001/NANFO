@@ -44,7 +44,7 @@ Addresses/CIDRs are returned in canonical form. Invalid request values return 42
 In PATCH, omission preserves a field; explicit null clears nullable fields.
 `name`, `hostname`, and `device_type` cannot be null. `{}` is invalid. Submitting
 unchanged values returns the existing representation without a new event.
-Network and device lists use `page>=1`, `page_size=1..200` (default 1/20), sorted
+Network and device lists use `page` 1..10000 (ADR-028 `PageNumber`), `page_size=1..200` (default 1/20), sorted
 by `created_at ASC, primary UUID ASC`, scoped before pagination. Internal service
 and repository callers retain batches up to 500. Data remains
 `{items,total,page,page_size}`; out-of-range pages return empty items and the total.
@@ -89,13 +89,55 @@ deletion compares UUID identity across all active mappings and blocks409 on matc
 malformed or ambiguous historical references. Retirement explicitly removes an
 active mapping from dependency checks without rewriting the retained metadata.
 
-- `GET /api/v1/networks/{network_id}/campus/model-assets` — List active persisted campus-model asset records for network.
-- `POST /api/v1/networks/{network_id}/campus/model-assets` — Upsert campus-model asset record with optional `replace_existing` soft-replace behavior.
-- `DELETE /api/v1/networks/{network_id}/campus/model-assets/{asset_id}` — Retire exactly one active metadata row, returning204 with no body. Requires current writable scope and `write:config`. Missing, foreign-network and already-retired assets return404. Retains bytes, hashes, registration, mappings and scene history; no garbage collection. Retirement removes the row from active lists/downloads and inventory-deletion dependency checks. No new domain event is emitted, consistent with asset upsert.
+- `GET /api/v1/networks/{network_id}/campus/model-assets` — List active persisted campus-model asset records for network. Since ADR-028 C4 (**BREAKING default**) this returns metadata pages by default (`include_data=false`); see §3.6.
+- `POST /api/v1/networks/{network_id}/campus/model-assets` — Upsert campus-model asset record with optional `replace_existing` soft-replace behavior. The response is metadata only (ADR-028).
+- `GET /api/v1/networks/{network_id}/campus-model-assets/{asset_id}/download` — Verified binary download (ADR-022/027), with a digest ETag and, since ADR-028, 304 support.
+- `DELETE /api/v1/networks/{network_id}/campus/model-assets/{asset_id}` — Retire exactly one active metadata row, returning204 with no body. Requires current writable scope and `write:config`. Missing, foreign-network and already-retired assets return404. Retains bytes, hashes, registration, mappings and scene history; retirement never deletes stored bytes. (The ADR-028 collector `python -m app.modules.network.asset_gc` removes only objects that no asset row, active, retired or inline, references.) Retirement removes the row from active lists/downloads and inventory-deletion dependency checks. No new domain event is emitted, consistent with asset upsert.
 
 ### 3.5 Device Groups (Network-owned targeting primitive)
 - `GET /api/v1/networks/{network_id}/device-groups` — List active network-scoped device groups and resolved active members.
 - `POST /api/v1/networks/{network_id}/device-groups` — Upsert device groups with optional `replace_existing` soft-replace behavior.
+
+### 3.6 ADR-028 contract changes (C4, C8, C13)
+
+Contract index: `docs/api/ADR028-ContractChanges.md`.
+
+- **Campus model assets (C4, BREAKING default).** Lists default to metadata pages
+  `{items,total,page,page_size}` (`page` 1..10000, `page_size` 1..100, default 20), without
+  `model_data_base64`.
+  - `include_data=true` is an explicit opt-in: `page_size <= 10` (else 400
+    `CAMPUS_MODEL_ASSET_INLINE_PAGE_TOO_LARGE`), and at most 32 MiB of bodies per page,
+    checked from metadata before any body is read (else 400
+    `CAMPUS_MODEL_ASSET_INLINE_LIMIT_EXCEEDED`).
+  - The upload body limit is 12 MiB.
+  - Per-network quotas are counted in the database from active rows:
+    `NETWORK_ASSET_NETWORK_MAX_ACTIVE_BYTES` (256 MiB) and
+    `NETWORK_ASSET_NETWORK_MAX_ACTIVE_ASSETS` (64). They and the global store caps return
+    507 `CAMPUS_MODEL_ASSET_QUOTA_EXCEEDED`.
+  - Downloads send `ETag: "sha256:<hex>"` and answer a matching `If-None-Match` with 304.
+  - `NETWORK_ASSET_*` settings are read from the process environment only.
+- **Device groups (C8).** Each upsert item may carry `expected_updated_at` (ISO-8601 with
+  a UTC offset, copied from the listed `updated_at`). A changed or missing active group
+  returns 409 `DEVICE_GROUP_CONFLICT`. Responses always carry the real `updated_at`.
+  Device-type selectors use the shared device-type normaliser.
+- **Campus buildings.** Buildings are upserted in place under the inventory lock.
+  Migration 0030 enforces one active row per `(network_id, building_id)`; older duplicate
+  active rows were soft-deleted.
+- **Deletion.** Network deletion is also blocked (409 `INVENTORY_DEPENDENCIES_ACTIVE`)
+  while an autonomous execution of the network is unreleased. A verified execution stays
+  unreleased because its policy is still applied on the device. Owner answers come from
+  the read-only `{simulation,intent,autonomy}/queries.py` functions.
+- **Topology.** Deleted devices are excluded from every graph query and lose their edges.
+  Neighbour and impact traversal is a bounded breadth-first walk. Reconcile
+  (`POST /api/v1/topology/reconcile`) resynchronises Neo4j from PostgreSQL and adds
+  `active_devices`, `upserted_nodes`, `tombstoned_nodes`, `skipped_newer_nodes` and
+  `watermark_sequence`.
+- **Public owner reads for other modules.**
+  - `NetworkService.get_device_for_owner(...)`;
+  - `NetworkService.get_devices_for_owner(...)` (up to 1000 IDs);
+  - `NetworkService.has_active_networks(workspace_id=, actor_user_id=)`;
+  - `app.modules.network.emulation.build_emulation_discovery(...)`.
+  All authorize through the single `NetworkAccessGuard`.
 
 ## 4. Data Model & Ownership
 Network module owns:
@@ -130,7 +172,9 @@ changed fields with their new values, including explicit nulls. Neo4j and websoc
 device deltas retain hostname/type/IP/vendor/model/location/spatial changes. Existing
 events and historical audits without org scope are preserved; no backfill is implicit.
 
-Campus-building/model-asset/group persistence currently does not publish dedicated domain events; state is read through the documented REST surfaces above.
+Campus-building/model-asset/group persistence currently does not publish dedicated domain events; state is read through the documented REST surfaces above. Since ADR-028 these writes append audit-only actions with the org id (`network.campus_model_asset.uploaded`, `network.campus_model_asset.retired`, `network.campus_buildings.upserted`, `network.device_groups.upserted`, and the existing `network.spatial_scene.replaced`). These are not bus events.
+
+ADR-028 C13: every inventory event payload also carries `sequence` (the per-network outbox sequence). Consumers order by `(network_id, sequence)` and fall back to the timestamp for older events (`docs/api/EventAPI.md` §6).
 
 ## 6. Risks
 - Tenant leakage if workspace/org claim checks are bypassed in network-scoped flows.

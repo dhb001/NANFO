@@ -11,7 +11,7 @@ import pytest
 
 from deploy import adr023_checkpoint, backup_restore, manage, verify
 from deploy.release_manifest import project_result
-from deploy.schema_contract import CURRENT_SCHEMA
+from deploy.schema_contract import CURRENT_SCHEMA, migration_head, require_consistent_schema
 
 
 def checkpoint(schema=CURRENT_SCHEMA):
@@ -34,18 +34,19 @@ def test_explicit_current_contract_matches_entire_chain_and_readiness():
     config = Config()
     config.set_main_option("script_location", str(Path(__file__).resolve().parents[2] / "backend/alembic"))
     scripts = ScriptDirectory.from_config(config)
-    assert CURRENT_SCHEMA == SCHEMA_HEAD == "0029"
+    assert CURRENT_SCHEMA == SCHEMA_HEAD == "0030"
     assert scripts.get_heads() == [CURRENT_SCHEMA]
     assert [rev.revision for rev in scripts.walk_revisions("base", CURRENT_SCHEMA)] == [
         f"{number:04d}" for number in range(int(CURRENT_SCHEMA), 0, -1)
     ]
-    assert scripts.get_revision("0029").down_revision == "0028"
+    assert scripts.get_revision("0030").down_revision == "0029"
+    assert migration_head() == require_consistent_schema() == CURRENT_SCHEMA
     assert ACCEPTANCE_SCHEMA == "0027"  # Historical verifier not silently retargeted.
     assert verify.runtime_source("deploy/schema_contract.py")
     assert verify.runtime_source("backend/app/core/schema_version.py")
 
 
-@pytest.mark.parametrize("schema", ["0019", "0021", "0024", "0027", "0028", "0029"])
+@pytest.mark.parametrize("schema", ["0019", "0021", "0024", "0027", "0028", "0029", "0030"])
 def test_historical_evidence_names_export_unchanged(schema):
     case = f"migration_{schema}"
     original = json.dumps({"cases": {case: {"status": "passed"}}}).encode()
@@ -53,18 +54,26 @@ def test_historical_evidence_names_export_unchanged(schema):
     assert (case in verify.CASES) == (schema == CURRENT_SCHEMA)
 
 
-@pytest.mark.parametrize("schema", ["0027", "0028", "0029"])
+@pytest.mark.parametrize("schema", ["0027", "0028", "0029", "0030"])
 @pytest.mark.parametrize("missing", ["volume", "telemetry_archive", "autonomous_execution"])
 def test_archive_safety_floor_cannot_be_bypassed_by_new_revision(schema, missing):
     value = checkpoint(schema)
-    volumes = ["telemetry_archive"]
+    volumes = ["telemetry_archive", *(["stream_archive"] if int(schema) >= 30 else [])]
     backup_restore.require_current_archive_checkpoint(value, volumes)
     if missing == "volume":
-        volumes = []
+        volumes = [name for name in volumes if name != "telemetry_archive"]
     else:
         del value[missing]
     with pytest.raises(backup_restore.OperationError, match="0027\\+"):
         backup_restore.require_current_archive_checkpoint(value, volumes)
+
+
+@pytest.mark.parametrize("schema", ["0030", "0031"])
+def test_0030_backup_requires_the_stream_retention_archive(schema):
+    backup_restore.require_current_archive_checkpoint(checkpoint("0029"), ["telemetry_archive"])
+    with pytest.raises(backup_restore.OperationError, match="0030\\+ requires the stream retention archive"):
+        backup_restore.require_current_archive_checkpoint(checkpoint(schema), ["telemetry_archive"])
+    backup_restore.require_current_archive_checkpoint(checkpoint(schema), ["telemetry_archive", "stream_archive"])
 
 
 @pytest.mark.parametrize("field", ["unreleased_runs", "owned_resources", "pending_actions", "missing"])
@@ -93,10 +102,10 @@ def test_experimental_checkpoint_is_readonly_and_all_ownership_must_be_released(
     db.commit.assert_not_called()
 
 
-@pytest.mark.parametrize("schema", ["0027", "0028", "0029"])
+@pytest.mark.parametrize("schema", ["0027", "0028", "0029", "0030"])
 def test_fresh_start_marks_actual_current_schema_only(tmp_path, monkeypatch, schema):
     config = {"NANFO_PROJECT": "nanfo-deploy-fresh", "NANFO_BACKEND_IMAGE": "backend",
-              "NANFO_FRONTEND_IMAGE": "frontend", "NANFO_NEO4J_IMAGE": "neo4j"}
+              "NANFO_FRONTEND_IMAGE": "frontend", "NANFO_NEO4J_IMAGE": "neo4j", "NANFO_REDIS_IMAGE": "redis"}
     monkeypatch.setattr(manage, "load_config", lambda _: config)
     commands = Mock(return_value=SimpleNamespace(stdout=json.dumps({"safe": True, "schema": schema})))
     monkeypatch.setattr(manage, "compose", commands)

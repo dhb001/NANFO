@@ -18,7 +18,8 @@ from neo4j import AsyncGraphDatabase
 from neo4j.exceptions import Neo4jError, ServiceUnavailable
 
 from app.events.consumers.topology_consumer import handle_topology_event
-from app.modules.network.topology import TopologyQueryService
+from app.modules.network.synthetic_topology import EDGE_TYPE_CONNECTED_TO, PlannedEdge
+from app.modules.network.topology import TopologyQueryService, ensure_graph_schema
 
 
 @pytest.fixture
@@ -85,6 +86,8 @@ async def state(driver, device_id):
 
 
 async def test_real_neo4j_replay_tombstones_updates_and_atomic_concurrency(graph):
+    # Schema is created once at startup, never per event (ADR-028).
+    assert set((await ensure_graph_schema(graph)).values()) == {"ok"}
     # Use the actual consumer: timestamp/id must survive its boundary unchanged.
     with patch("app.events.consumers.topology_consumer.get_neo4j_driver", return_value=graph):
         add = device_event("added")
@@ -181,12 +184,63 @@ async def test_real_neo4j_replay_tombstones_updates_and_atomic_concurrency(graph
         await handle_topology_event(early_update)
         assert (await state(graph, late_id))["device"]["hostname"] == "new-name"
 
-        # Direct helper semantics remain unchanged for discovery/seed callers.
+        # C13: outbox sequence order wins over skewed producer timestamps; a replayed
+        # (not newer) sequence never applies, even with a later timestamp.
+        seq_add = device_event("added", timestamp="2026-09-09T00:00:09Z")
+        seq_add["payload"]["sequence"] = 10
+        seq_id = seq_add["payload"]["device_id"]
+        skewed = device_event("updated", device_id=seq_id, timestamp="2026-09-09T00:00:01Z",
+                              changes={"hostname": "sequenced"})
+        skewed["payload"]["sequence"] = 11
+        replayed = device_event("updated", device_id=seq_id, timestamp="2026-09-09T00:00:30Z",
+                                changes={"hostname": "stale"})
+        replayed["payload"]["sequence"] = 11
+        for event in (seq_add, skewed, replayed):
+            await handle_topology_event(event)
+        row = await state(graph, seq_id)
+        assert row["device"]["hostname"] == "sequenced" and row["revision"]["sequence"] == 11
+        legacy = device_event("updated", device_id=seq_id, timestamp="2026-09-09T00:00:05Z",
+                              changes={"hostname": "legacy-older"})
+        await handle_topology_event(legacy)  # pre-sequence event: timestamp fallback, older -> ignored
+        assert (await state(graph, seq_id))["device"]["hostname"] == "sequenced"
+
+        # Deleting a device removes its relationships; traversals never cross it.
+        scope = {"network_id": str(uuid.uuid4()), "workspace_id": str(uuid.uuid4())}
+        chain = [device_event("added") for _ in range(3)]
+        for event in chain:
+            event["payload"].update(scope)
+            await handle_topology_event(event)
+        a, b, c = (event["payload"]["device_id"] for event in chain)
         svc = TopologyQueryService(graph)
-        direct_id = str(uuid.uuid4())
-        args = {**add["payload"], "device_id": direct_id}
-        await svc.create_device_node(**args, status="offline")
-        await svc.create_device_node(**args, status="active")
+        plan = [PlannedEdge(a, b, EDGE_TYPE_CONNECTED_TO, {"synthetic": True, "generator": "live"}),
+                PlannedEdge(b, c, EDGE_TYPE_CONNECTED_TO, {"synthetic": True, "generator": "live"})]
+        assert await svc.replace_synthetic_device_edges(**scope, edges=plan, generator="live") == (0, 2)
+        root = uuid.UUID(a)
+        found = await svc.get_device_neighbours(device_id=root, network_id=scope["network_id"],
+                                                workspace_id=scope["workspace_id"], depth=6)
+        assert {item.device_id: item.hop_depth for item in found.neighbours} == {b: 1, c: 2}
+        await handle_topology_event(device_event("deleted", device_id=b, timestamp="2026-09-10T00:00:00Z"))
+        found = await svc.get_device_neighbours(device_id=root, network_id=scope["network_id"],
+                                                workspace_id=scope["workspace_id"], depth=6)
+        assert found.neighbours == []
         async with graph.session() as session:
-            result = await session.run("MATCH (d:Device {device_id: $id}) RETURN d.status AS status", id=direct_id)
-            assert (await result.single())["status"] == "active"
+            result = await session.run("MATCH (d:Device {device_id: $id})-[e]-() RETURN count(e) AS n", id=b)
+            assert (await result.single())["n"] == 0
+
+        # ADR-028 fix 7: seed/discovery edge MERGEs take the endpoint revision locks,
+        # so a concurrent delete can never leave an edge attached to a tombstone.
+        racers = [device_event("added") for _ in range(2)]
+        for event in racers:
+            event["payload"].update(scope)
+            await handle_topology_event(event)
+        x, y = (event["payload"]["device_id"] for event in racers)
+        edge = [PlannedEdge(x, y, EDGE_TYPE_CONNECTED_TO, {"synthetic": True, "generator": "race"})]
+        await asyncio.wait_for(asyncio.gather(
+            *[svc.replace_synthetic_device_edges(**scope, edges=edge, generator="race") for _ in range(4)],
+            handle_topology_event(device_event("deleted", device_id=y, timestamp="2026-09-11T00:00:00Z")),
+        ), 30)
+        async with graph.session() as session:
+            result = await session.run("MATCH (d:Device {device_id: $id})-[e]-() RETURN count(e) AS n", id=y)
+            assert (await result.single())["n"] == 0
+        # Replaying the seed after the delete still cannot attach to the tombstone.
+        assert await svc.replace_synthetic_device_edges(**scope, edges=edge, generator="race") == (0, 0)

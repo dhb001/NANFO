@@ -45,9 +45,9 @@ export function parseMappingRows(value: unknown): Array<{ object_name: string; d
     .filter((item): item is Record<string, unknown> => typeof item === "object" && item !== null)
     .map((item) => {
       return {
-        object_name: String(item.object_name ?? "").trim(),
-        device_id: typeof item.device_id === "string" ? item.device_id.trim() : undefined,
-        spatial_ref_id: typeof item.spatial_ref_id === "string" ? item.spatial_ref_id.trim() : undefined,
+        object_name: (typeof item.object_name === "string" ? item.object_name : typeof item.object_name === "number" && Number.isFinite(item.object_name) ? String(item.object_name) : "").trim(),
+        ...(typeof item.device_id === "string" ? { device_id: item.device_id.trim() } : {}),
+        ...(typeof item.spatial_ref_id === "string" ? { spatial_ref_id: item.spatial_ref_id.trim() } : {}),
       };
     })
     .filter((item) => item.object_name.length > 0);
@@ -134,8 +134,9 @@ export async function parseImportSummary(
 
     if (targetSpatialRef) {
       const candidateDeviceIds = deviceIdsBySpatialRef[targetSpatialRef] ?? [];
-      if (candidateDeviceIds.length === 1) {
-        mappingByDeviceId[candidateDeviceIds[0]] = targetSpatialRef;
+      const [onlyDeviceId] = candidateDeviceIds;
+      if (candidateDeviceIds.length === 1 && onlyDeviceId) {
+        mappingByDeviceId[onlyDeviceId] = targetSpatialRef;
         matched += 1;
       } else {
         unmatched += 1;

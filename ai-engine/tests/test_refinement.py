@@ -2,7 +2,6 @@
 
 import copy
 import hashlib
-import runpy
 import sys
 from pathlib import Path
 
@@ -12,8 +11,13 @@ import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts/refinement"))
 
+from private_store import requirePrivateStore  # noqa: E402
+
+requirePrivateStore(__file__)
+pytestmark = pytest.mark.private_artifacts
+
 from evidence import Request, Transport, phase, validate  # noqa: E402
-from frozen import PARENT_HASH, ROOT, digest, incumbent, module  # noqa: E402
+from frozen import PARENT_HASH, digest, incumbent, module  # noqa: E402
 from launch import argv  # noqa: E402
 from model import load, save, warmstart  # noqa: E402
 from plan import PROFILES, admission, compare, declaration, interval, schedule  # noqa: E402
@@ -27,7 +31,7 @@ def v5(monkeypatch, observation):
     # Unit fixture generation uses the historical fixture's actual V4 schema,
     # then constructs a clearly synthetic V5 specimen. Never a live adapter rewrite.
     monkeypatch.setattr(conftest, "producerSpec", lambda: metadata.environment_spec)
-    profiles = runpy.run_path(str(ROOT.parent / "emulation/workloads.py"))["MATCHED_PROFILES"]
+    profiles = conftest.successorLabModule("workloads.py")["MATCHED_PROFILES"]
     spec = {
         **metadata.environment_spec,
         "version": 5,
@@ -186,7 +190,9 @@ def testV5RejectsForgedOrIncompleteRawEvidence(v5, mutation):
 
 
 def testSeedReplayAllProfilesAndMirrors(v5):
-    producer = runpy.run_path(str(ROOT.parent / "emulation/workloads.py"))["schedule"]
+    import conftest
+
+    producer = conftest.successorLabModule("workloads.py")["schedule"]
     for seed in (1800, 1999, 2800, 3610):
         for profile in PROFILES:
             expected = producer(seed, profile, 4, "matched")

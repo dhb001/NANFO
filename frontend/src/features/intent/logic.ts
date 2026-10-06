@@ -1,4 +1,5 @@
 import { IntentDetailResult } from "@/shared/types/intent";
+import { displayValue } from "@/shared/lib/format";
 
 export interface LabActionInput {
   operation: "reroute" | "multipath" | "shape" | "police" | "restore";
@@ -29,7 +30,7 @@ export interface LifecycleEvent {
   key: string;
   label: string;
   status: "success" | "failed" | "pending";
-  timestamp?: string;
+  timestamp?: string | undefined;
 }
 
 export interface IntentExecutionDiagnostics {
@@ -46,15 +47,25 @@ export interface IntentExecutionDiagnostics {
   noMutationVerified: boolean;
 }
 
+// Backend `intents.status` value set (intent/models.py INTENT_STATUSES).
 const knownIntentStatuses = new Set([
+  "draft",
   "validated",
   "rejected",
   "execution_started",
   "execution_completed",
   "execution_failed",
+  "cancelled",
+  "compensated",
+  "execution_cancelled",
+  "execution_compensated",
 ]);
 
-const terminalIntentStatuses = new Set(["rejected", "execution_completed", "execution_failed"]);
+// Settled intents cannot change the network any more (intent/models.py _SETTLED).
+const terminalIntentStatuses = new Set([
+  "rejected", "execution_completed", "execution_failed",
+  "cancelled", "compensated", "execution_cancelled", "execution_compensated",
+]);
 
 export function mapIntentLifecycle(detail: IntentDetailResult): LifecycleEvent[] {
   const validationResult = detail.validation_result;
@@ -91,16 +102,6 @@ export function mapIntentLifecycle(detail: IntentDetailResult): LifecycleEvent[]
   ];
 }
 
-export function resolveConfidenceTone(score: number): "ok" | "warn" | "danger" {
-  if (score >= 0.8) {
-    return "ok";
-  }
-  if (score >= 0.6) {
-    return "warn";
-  }
-  return "danger";
-}
-
 export function explainabilitySummary(detail: IntentDetailResult): string {
   const explainability = detail.explainability;
   if (typeof explainability.execution_summary === "string" && explainability.execution_summary.trim()) {
@@ -130,11 +131,12 @@ export function mapExecutionDiagnostics(detail: IntentDetailResult): IntentExecu
     : evidenceText(rollback.status);
   const rollbackAttempted = rollback.attempted === true;
   const rollbackReferenceId = evidenceText(rollback.rollback_reference_id);
-  const validProbe = typeof probe.sent === "number" && Number.isInteger(probe.sent) && probe.sent > 0 &&
-    typeof probe.received === "number" && Number.isInteger(probe.received) && probe.received >= 0 && probe.received <= probe.sent;
-  const probeSummary = validProbe ? `${probe.received}/${probe.sent} received` : null;
+  const sent = typeof probe.sent === "number" && Number.isInteger(probe.sent) && probe.sent > 0 ? probe.sent : null;
+  const received = typeof probe.received === "number" && Number.isInteger(probe.received) && probe.received >= 0 ? probe.received : null;
+  const validProbe = sent !== null && received !== null && received <= sent;
+  const probeSummary = validProbe ? `${received}/${sent} received` : null;
   const completionScope = evidenceText(verification.completion_scope) ?? evidenceText(provenance.completion_scope) ??
-    (readbackVerified && validProbe && probe.received === probe.sent ? "config_readback_and_reachability" : null);
+    (readbackVerified && validProbe && received === sent ? "config_readback_and_reachability" : null);
 
   const failureReason =
     typeof provenance.failure_reason === "string" && provenance.failure_reason.trim()
@@ -144,7 +146,7 @@ export function mapExecutionDiagnostics(detail: IntentDetailResult): IntentExecu
   const eventPublicationRaw = provenance.event_publication;
   const eventPublicationWarning =
     eventPublicationRaw && typeof eventPublicationRaw === "object" && "warning" in eventPublicationRaw
-      ? String((eventPublicationRaw as { warning?: unknown }).warning ?? "").trim() || null
+      ? displayValue((eventPublicationRaw as { warning?: unknown }).warning, "").trim() || null
       : null;
 
   return {

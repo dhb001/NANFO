@@ -1,0 +1,116 @@
+# Dependabot version updates (ADR-028). Weekly; minor and patch updates are grouped per
+# ecosystem, majors arrive as separate PRs for review. Every PR runs the full required
+# check set (lint, tests, audits, packaging/trivy) before it can merge.
+#
+# Frozen runtimes are never bumped (ADR-028 section 1): they change only as successor
+# artifacts with fresh qualification. That excludes the historical lab recipe
+# (emulation/Dockerfile.frozen with emulation/requirements.frozen.txt; no pip entry for
+# emulation below) and the qualified AI runtime's torch build (ai-engine). The C23
+# successor lab image (emulation/Dockerfile) is tracked; its uv-compiled, hash-pinned
+# requirements are regenerated from emulation/requirements.in and audited weekly by
+# dependency-security.yml (lane `emulation`).
+version: 2
+
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: "Deps(actions)"
+    groups:
+      github-actions-minor-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 10
+    commit-message:
+      prefix: "Deps(frontend)"
+    groups:
+      frontend-minor-patch:
+        update-types: [minor, patch]
+
+  # Poetry projects use the `pip` ecosystem (pyproject.toml + poetry.lock).
+  - package-ecosystem: pip
+    directory: /backend
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 10
+    commit-message:
+      prefix: "Deps(backend)"
+    groups:
+      backend-minor-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: uv
+    directory: /ai-engine
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: "Deps(ai)"
+    ignore:
+      # torch 2.8.0+cpu is part of the frozen, qualified AI runtime identity; a newer build
+      # ships only as a successor runtime with requalification.
+      - dependency-name: torch
+    groups:
+      ai-minor-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: docker
+    directories:
+      - /deploy
+      - /emulation
+    # emulation/Dockerfile.frozen is the frozen historical lab recipe (ADR-028 section 1,
+    # C23: opt-in reproduction only). Patterns are relative to each directory above.
+    exclude-paths:
+      - "Dockerfile.frozen"
+    schedule:
+      interval: weekly
+      day: tuesday
+    commit-message:
+      prefix: "Deps(images)"
+    ignore:
+      # Store and runtime majors need planned migrations (pg_upgrade, Neo4j calendar
+      # versions, Node LTS, Python minor with .python-version/CI/poetry in lockstep).
+      - dependency-name: postgres
+        update-types: [version-update:semver-major]
+      - dependency-name: redis
+        update-types: [version-update:semver-major]
+      - dependency-name: neo4j
+        update-types: [version-update:semver-major]
+      - dependency-name: node
+        update-types: [version-update:semver-major]
+      - dependency-name: python
+        update-types: [version-update:semver-major, version-update:semver-minor]
+    groups:
+      images-minor-patch:
+        update-types: [minor, patch]
+
+  # Compose files pin the upstream PostgreSQL image (production) and all dev store images
+  # (backend/docker-compose.yml mirrors production digests); one grouped PR keeps them equal.
+  - package-ecosystem: docker-compose
+    directories:
+      - /deploy
+      - /backend
+    schedule:
+      interval: weekly
+      day: tuesday
+    commit-message:
+      prefix: "Deps(images)"
+    ignore:
+      - dependency-name: postgres
+        update-types: [version-update:semver-major]
+      - dependency-name: redis
+        update-types: [version-update:semver-major]
+      - dependency-name: neo4j
+        update-types: [version-update:semver-major]
+    groups:
+      compose-images-minor-patch:
+        update-types: [minor, patch]

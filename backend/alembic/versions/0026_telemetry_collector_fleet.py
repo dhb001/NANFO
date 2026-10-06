@@ -4,7 +4,6 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql as pg
 
 from alembic import op
-from app.modules.telemetry.fleet_models import FleetBatch, FleetDevice  # noqa: F401 -- owning metadata
 
 revision = "0026"
 down_revision = "0025"
@@ -47,6 +46,9 @@ def upgrade():
 
 
 def downgrade():
+    if op.get_context().as_sql:
+        raise RuntimeError("Downgrade below 0026 must run online (not --sql): it must first verify that "
+                           "the fleet spool has no pending batch")
     if op.get_bind().scalar(sa.text("SELECT EXISTS (SELECT 1 FROM telemetry_fleet_spool WHERE status = 'pending')")):
         raise RuntimeError("Pending fleet spool must be drained or expired before downgrade")
     op.drop_table("telemetry_fleet_spool")

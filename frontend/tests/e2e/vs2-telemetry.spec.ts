@@ -4,6 +4,7 @@ import {
   installSessionMocks,
   loginFromUi,
 } from "./support/session";
+import { inspectNode } from "./support/twin";
 
 test.describe("VS2 telemetry and topology", () => {
   test("telemetry dashboard and digital twin inspector flow", async ({ page }) => {
@@ -98,7 +99,7 @@ test.describe("VS2 telemetry and topology", () => {
       });
     });
 
-    await page.route("**/api/v1/topology/graph?network_id=00000000-0000-0000-0000-000000000333&limit=200", async (route) => {
+    await page.route("**/api/v1/topology/graph?network_id=00000000-0000-0000-0000-000000000333&limit=500", async (route) => {
       await route.fulfill({
         status: 200,
         contentType: "application/json",
@@ -183,7 +184,7 @@ test.describe("VS2 telemetry and topology", () => {
 
     await page.getByRole("link", { name: "Digital Twin" }).click();
     await expect(page).toHaveURL(/\/ops\/digital-twin$/);
-    await page.getByLabel("Inspect node").selectOption("00000000-0000-0000-0000-000000000444");
+    await inspectNode(page, "00000000-0000-0000-0000-000000000444");
 
     const inspectorPanel = page.locator("section").filter({ has: page.getByRole("heading", { name: "Inspector" }) });
     await expect(inspectorPanel.locator("strong", { hasText: "edge-1" })).toBeVisible();

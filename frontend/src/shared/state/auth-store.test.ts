@@ -36,4 +36,40 @@ describe("tab-local session persistence", () => {
     expect(useAuthStore.getState().accessToken).toBeNull();
     expect(sessionStorage.getItem("nanfo.auth.session")).toBeNull();
   });
+  it("discards a session copied by a duplicated tab locally, without revoking the original's family", async () => {
+    sessionStorage.setItem("nanfo.auth.session", JSON.stringify(session));
+    sessionStorage.setItem("nanfo.tab.id", "tab-original");
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    // The original tab is alive and answers probes for its id.
+    class OriginalTabChannel {
+      onmessage: ((event: MessageEvent) => void) | null = null;
+      postMessage(message: { type: string; tabId: string; nonce: string }) {
+        if (message.type === "probe" && message.tabId === "tab-original") {
+          queueMicrotask(() => this.onmessage?.(new MessageEvent("message", { data: { type: "present", tabId: "tab-original", nonce: message.nonce } })));
+        }
+      }
+      close() {}
+    }
+    vi.stubGlobal("BroadcastChannel", OriginalTabChannel);
+    const { useAuthStore } = await import("@/shared/state/auth-store");
+    await vi.waitFor(() => expect(useAuthStore.getState().ownership).toBe("duplicate"));
+    expect(useAuthStore.getState().accessToken).toBeNull();
+    expect(useAuthStore.getState().refreshToken).toBeNull();
+    expect(useAuthStore.getState().notice).toBe("copied_tab");
+    expect(sessionStorage.getItem("nanfo.auth.session")).toBeNull();
+    expect(sessionStorage.getItem("nanfo.tab.id")).not.toBe("tab-original");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps the session across a reload of the same tab (no live owner answers)", async () => {
+    sessionStorage.setItem("nanfo.auth.session", JSON.stringify(session));
+    sessionStorage.setItem("nanfo.tab.id", "tab-reloaded");
+    class SilentChannel { onmessage = null; postMessage() {} close() {} }
+    vi.stubGlobal("BroadcastChannel", SilentChannel);
+    const { useAuthStore } = await import("@/shared/state/auth-store");
+    await vi.waitFor(() => expect(useAuthStore.getState().ownership).toBe("owner"));
+    expect(useAuthStore.getState().accessToken).toBe("access");
+    expect(sessionStorage.getItem("nanfo.tab.id")).toBe("tab-reloaded");
+  });
 });

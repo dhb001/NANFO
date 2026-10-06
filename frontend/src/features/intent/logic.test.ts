@@ -5,11 +5,11 @@ import {
   isIntentTerminalStatus,
   mapExecutionDiagnostics,
   mapIntentLifecycle,
-  resolveConfidenceTone,
   shouldRefetchIntentFromRealtime,
   buildLabIntent,
   canCancelIntent,
 } from "@/features/intent/logic";
+import { intentConfidenceBandTone } from "@/shared/lib/statusTones";
 import { IntentDetailResult } from "@/shared/types/intent";
 
 function createDetail(overrides: Partial<IntentDetailResult> = {}): IntentDetailResult {
@@ -144,10 +144,12 @@ describe("intent logic", () => {
     expect(failed[2].status).toBe("failed");
   });
 
-  it("resolves confidence tones", () => {
-    expect(resolveConfidenceTone(0.9)).toBe("ok");
-    expect(resolveConfidenceTone(0.64)).toBe("warn");
-    expect(resolveConfidenceTone(0.33)).toBe("danger");
+  it("resolves confidence tones from the backend band, not a re-derived score threshold", () => {
+    expect(intentConfidenceBandTone("95-100")).toBe("ok");
+    expect(intentConfidenceBandTone("80-94")).toBe("ok");
+    expect(intentConfidenceBandTone("60-79")).toBe("warn");
+    expect(intentConfidenceBandTone("below_60")).toBe("danger");
+    expect(intentConfidenceBandTone("high")).toBe("neutral");
   });
 
   it("maps scene object id", () => {
@@ -161,12 +163,18 @@ describe("intent logic", () => {
     expect(isIntentTerminalStatus("execution_completed")).toBe(true);
     expect(isIntentTerminalStatus("execution_failed")).toBe(true);
     expect(isIntentTerminalStatus(undefined)).toBe(false);
+    // The rest of the backend settled set (intent/models.py _SETTLED) also stops polling.
+    for (const status of ["cancelled", "compensated", "execution_cancelled", "execution_compensated"]) {
+      expect(isIntentTerminalStatus(status)).toBe(true);
+    }
+    expect(isIntentTerminalStatus("completed")).toBe(false);
   });
 
   it("decides whether to refetch from realtime deltas", () => {
     expect(shouldRefetchIntentFromRealtime(undefined, "execution_started")).toBe(true);
     expect(shouldRefetchIntentFromRealtime("execution_started", "execution_started")).toBe(false);
     expect(shouldRefetchIntentFromRealtime("execution_started", "execution_failed")).toBe(true);
+    expect(shouldRefetchIntentFromRealtime("execution_started", "execution_cancelled")).toBe(true);
     expect(shouldRefetchIntentFromRealtime("execution_started", "unknown_state")).toBe(false);
     expect(shouldRefetchIntentFromRealtime("execution_started", undefined)).toBe(false);
   });

@@ -9,16 +9,13 @@ import contextlib
 import ctypes
 import ctypes.util
 import errno
-import hashlib
 import importlib
 import importlib.util
 import io
-import json
 import os
 from pathlib import Path
 import re
 import resource
-import stat
 import sys
 import sysconfig
 import tempfile
@@ -28,40 +25,10 @@ import uuid
 if __name__ == "__main__":
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app.modules.autonomy.artifact_io import ArtifactStore, EvidenceError, parse_json
-from app.modules.autonomy.model_diagnostic_schemas import ModelDiagnosticRegistry
-
-CONFIG_KEYS = ("NANFO_MODEL_REGISTRY", "NANFO_MODEL_REGISTRY_SHA256", "NANFO_MODEL_ROOT", "NANFO_MODEL_PYTHON")
-
-
-def canonical_hash(value):
-    return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()).hexdigest()
-
-
-def load_registry():
-    if not all(os.environ.get(key) for key in CONFIG_KEYS):
-        raise EvidenceError("model_registry_unconfigured")
-    path = Path(os.environ["NANFO_MODEL_REGISTRY"])
-    root = Path(os.environ["NANFO_MODEL_ROOT"])
-    pin = os.environ["NANFO_MODEL_REGISTRY_SHA256"]
-    if not path.is_absolute() or not root.is_absolute() or not re.fullmatch(r"[a-f0-9]{64}", pin):
-        raise EvidenceError("model_registry_configuration_invalid")
-    if path.resolve().is_relative_to(root.resolve()):
-        raise EvidenceError("registry_inside_producer_root")
-    for component in (path, *path.parents):
-        info = component.lstat()
-        # A root-owned sticky /tmp is safe for a privately owned child directory.
-        sticky_root = component != path and info.st_uid == 0 and info.st_mode & stat.S_ISVTX
-        if stat.S_ISLNK(info.st_mode) or (info.st_mode & 0o022 and not sticky_root):
-            raise EvidenceError("model_registry_not_protected")
-        if info.st_uid not in (0, os.geteuid()):
-            raise EvidenceError("model_registry_owner_invalid")
-    content = ArtifactStore(str(path.parent)).read(path.name, limit=256 * 1024, sha256=pin)
-    return ModelDiagnosticRegistry.model_validate(parse_json(content)), pin, ArtifactStore(str(root))
-
-
-def select_model(registry, network_id):
-    return next((model for model in registry.models if network_id in model.network_ids), None)
+from app.core.canonical import canonical_sha256 as canonical_hash  # noqa: F401 - byte-identical public alias
+from app.modules.autonomy.artifact_io import EvidenceError, parse_json
+# The registry loader is application-owned (ADR-028); re-exported for runner/tests compatibility.
+from app.modules.autonomy.model_diagnostic_registry import CONFIG_KEYS, load_registry, select_model  # noqa: F401
 
 
 def confine_filesystem(stage, scratch):

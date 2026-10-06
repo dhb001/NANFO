@@ -20,6 +20,16 @@ from packaging.version import InvalidVersion, Version
 ROOT = Path(__file__).resolve().parents[1]
 POLICY = ROOT / "security/dependency-exceptions.v1.json"
 ADVISORY_ID = re.compile(r"(?:PYSEC-\d{4}-\d+|CVE-\d{4}-\d{4,}|GHSA-[23456789cfghjmpqrvwx]{4}-[23456789cfghjmpqrvwx]{4}-[23456789cfghjmpqrvwx]{4}|BIT-[a-z0-9-]+-\d{4}-\d+)")
+# emulation = the C23 successor lab (hash-pinned uv lock + its build-backend lock);
+# emulation-frozen = the frozen historical lab pins (Dockerfile.frozen, ADR-028 section 1).
+LANES = ("backend", "ai", "ai-upstream", "emulation", "emulation-frozen")
+REQUIREMENT_FILES = {
+    "emulation": (("emulation/requirements.txt", True), ("emulation/requirements-build.txt", True)),
+    "emulation-frozen": (("emulation/requirements.frozen.txt", False),),
+}
+PIN = re.compile(r"(?P<name>[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?)(?:\[[A-Za-z0-9._,-]+\])?"
+                 r"==(?P<version>[A-Za-z0-9.+!-]+)(?:\s*;\s*[^;]+)?")
+HASH_OPTION = re.compile(r"\s--hash=sha256:[0-9a-f]{64}(?=\s|$)")
 
 
 def require(condition, message):
@@ -102,7 +112,7 @@ def validate_policy(policy):
             required.add("advisories" if kind == "exceptions" else "reason")
             require(isinstance(entry, dict) and set(entry) == required, "Invalid policy entry schema")
             require(all(text(entry[key]) for key in required - {"advisories"}), "Incomplete exception metadata")
-            require(entry["lane"] in ("backend", "ai", "ai-upstream", "emulation"), "Invalid policy lane")
+            require(entry["lane"] in LANES, "Invalid policy lane")
             require(re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", entry["package"]), "Invalid policy package")
             valid_version(entry["version"])
             dt.date.fromisoformat(entry["expires"])
@@ -116,6 +126,38 @@ def normalized(name):
     return re.sub(r"[-_.]+", "-", name).lower()
 
 
+def requirement_pins(path, *, hashes):
+    """Exact pins of a pip requirements file; anything but `name==version` fails closed.
+
+    Handles compiled locks (continuation lines, `--hash` options, `# via` comments).
+    With hashes=True every requirement must carry at least one sha256 hash.
+    """
+    logical, current = [], ""
+    for raw in path.read_text().splitlines():
+        stripped = raw.strip()
+        if not current and (not stripped or stripped.startswith("#")):
+            continue
+        require(not stripped.startswith("#"), f"Comment inside a continued requirement in {path.name}")
+        current += " " + stripped.removesuffix("\\").strip()
+        if not stripped.endswith("\\"):
+            logical.append(current.strip())
+            current = ""
+    require(not current, f"Dangling line continuation in {path.name}")
+    pins = {}
+    for line in logical:
+        hashed = HASH_OPTION.findall(" " + line)
+        spec = HASH_OPTION.sub("", " " + line).strip()
+        match = PIN.fullmatch(spec)
+        require(match is not None, f"Not an exact pin in {path.name}: {(spec.split() or ['<empty>'])[0]}")
+        require(hashed or not hashes, f"Unhashed requirement in {path.name}: {match['name']}")
+        valid_version(match["version"])
+        name = normalized(match["name"])
+        require(pins.get(name, match["version"]) == match["version"], f"Conflicting pins for {name}")
+        pins[name] = match["version"]
+    require(pins, f"No requirements in {path.name}")
+    return pins
+
+
 def inventory(lane):
     if lane == "ai-upstream":
         # Supplemental public-release query, never a substitute for +cpu coverage.
@@ -123,10 +165,14 @@ def inventory(lane):
         if cpu != "2.8.0+cpu":
             raise ValueError("Review supplemental Torch version after any frozen pin change")
         return {"torch": "2.8.0"}
-    if lane == "emulation":
-        lines = (ROOT / "emulation/requirements.txt").read_text().splitlines()
-        return dict((normalized(line.split("==")[0]), line.split("==")[1])
-                    for line in lines if line and not line.startswith("#"))
+    if lane in REQUIREMENT_FILES:
+        pins = {}
+        for relative, hashes in REQUIREMENT_FILES[lane]:
+            for name, version in requirement_pins(ROOT / relative, hashes=hashes).items():
+                # The build-backend lock must agree with the runtime lock (same setuptools).
+                require(pins.get(name, version) == version, f"Conflicting pins for {name} in the {lane} lane")
+                pins[name] = version
+        return pins
     path = ROOT / ("backend/poetry.lock" if lane == "backend" else "ai-engine/uv.lock")
     packages = tomllib.loads(path.read_text())["package"]
     return {normalized(p["name"]): p["version"] for p in packages
@@ -145,6 +191,8 @@ def findings(report):
 def evaluate(lane, report, policy, today):
     raw, unique, skipped = findings(report)
     validate_policy(policy)
+    # Exact audited pins. Skipped rows carry the version restored by main().
+    audited = {(normalized(p["name"]), p.get("version")) for p in report["dependencies"]}
     errors = []
     accepted = set()
     for exception in policy["exceptions"]:
@@ -153,11 +201,20 @@ def evaluate(lane, report, policy, today):
         if not all(exception.get(key) for key in ("owner", "rationale", "remediation", "expires")):
             errors.append("Incomplete exception metadata")
             continue
+        if (exception["package"], exception["version"]) not in audited:
+            # Dead policy must be removed: it would silently re-accept the advisories
+            # if a dependency ever reintroduced that exact pin (e.g. ecdsa, ADR-028 C10).
+            errors.append(f"Stale exception: {exception['package']}=={exception['version']} "
+                          f"is not in the {lane} inventory")
+            continue
         if dt.date.fromisoformat(exception["expires"]) <= today:
             errors.append(f"Expired exception: {exception['package']}")
             continue
         accepted.update((exception["package"], exception["version"], advisory)
                         for advisory in exception["advisories"])
+    for gap in policy.get("coverage_gaps", []):
+        if gap["lane"] == lane and (gap["package"], gap["version"]) not in audited:
+            errors.append(f"Stale coverage gap: {gap['package']}=={gap['version']} is not in the {lane} inventory")
     for row in sorted(unique - accepted):
         errors.append("Unreviewed advisory: " + " / ".join(row))
     for name, version, reason in sorted(skipped):
@@ -176,7 +233,7 @@ def evaluate(lane, report, policy, today):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("lane", choices=("backend", "ai", "ai-upstream", "emulation"))
+    parser.add_argument("lane", choices=LANES)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--policy", type=Path, default=POLICY)
     args = parser.parse_args()

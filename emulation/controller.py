@@ -1,27 +1,31 @@
-"""Ryu OpenFlow 1.3 discovery, deterministic unicast, and actual reply producer."""
+"""os-ken OpenFlow 1.3 discovery, deterministic unicast, and actual reply producer.
+
+ADR-028 C23 successor: a straight import port of the frozen Ryu 4.34 controller to
+os-ken (the maintained OpenStack fork); handlers and wire behaviour are unchanged.
+"""
 
 import os
 import time
 from typing import ClassVar
 
-from ryu.base import app_manager
-from ryu.controller import ofp_event
-from ryu.controller.handler import (
+from os_ken.base import app_manager
+from os_ken.controller import ofp_event
+from os_ken.controller.handler import (
     CONFIG_DISPATCHER,
     DEAD_DISPATCHER,
     MAIN_DISPATCHER,
     set_ev_cls,
 )
-from ryu.lib import hub
-from ryu.lib.packet import ether_types, ethernet, ipv4, packet
-from ryu.ofproto import ofproto_v1_3
-from ryu.topology import event
+from os_ken.lib import hub
+from os_ken.lib.packet import ether_types, ethernet, ipv4, packet
+from os_ken.ofproto import ofproto_v1_3
+from os_ken.topology import event
 
 from emulation.measurements import MultipartReplies, atomicJson, utcNow
 from emulation.topology import HOSTS, SWITCHES, expectedLinks, nextPort, portCapacities
 
 
-class CampusController(app_manager.RyuApp):
+class CampusController(app_manager.OSKenApp):
     OFP_VERSIONS: ClassVar[list] = [ofproto_v1_3.OFP_VERSION]
 
     def __init__(self, *args, **kwargs):
@@ -123,7 +127,7 @@ class CampusController(app_manager.RyuApp):
         frame = packet.Packet(msg.data)
         eth, ip = frame.get_protocol(ethernet.ethernet), frame.get_protocol(ipv4.ipv4)
         if not eth or eth.ethertype != ether_types.ETH_TYPE_IP or not ip:
-            return  # Ryu's topology.switches consumes actual LLDP PacketIns separately.
+            return  # os-ken topology.switches consumes actual LLDP PacketIns separately.
         source = next((h for h in HOSTS if h["mac"] == eth.src and h["ipv4"] == ip.src), None)
         target = next((h for h in HOSTS if h["mac"] == eth.dst and h["ipv4"] == ip.dst), None)
         if source is None or target is None:

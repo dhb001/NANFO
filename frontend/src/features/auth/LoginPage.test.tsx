@@ -10,6 +10,7 @@ import { operatorProfile } from "@/test/profile";
 const navigateMock = vi.fn();
 const mutateAsyncMock = vi.fn();
 const getProfileMock = vi.fn();
+const logoutMock = vi.fn();
 
 vi.mock("react-router-dom", async () => {
   const actual = await vi.importActual<typeof import("react-router-dom")>("react-router-dom");
@@ -30,6 +31,8 @@ vi.mock("@/features/auth/hooks", () => ({
 
 vi.mock("@/features/auth/api", () => ({
   getProfile: (...args: unknown[]) => getProfileMock(...args),
+  logout: (...args: unknown[]) => logoutMock(...args),
+  refresh: vi.fn(),
 }));
 
 describe("LoginPage", () => {
@@ -104,5 +107,41 @@ describe("LoginPage", () => {
     expect(sessionStorage.getItem("nanfo.auth.session")).toBeNull();
     await act(async () => resolve(operatorProfile));
     expect(useAuthStore.getState().profile).toEqual(operatorProfile);
+  });
+  it("revokes this tab's previous session before signing in again", async () => {
+    useAuthStore.getState().setSession({ accessToken: "old-access", refreshToken: "old-refresh", userId: "user-0", profile: { ...operatorProfile, user_id: "user-0" } });
+    logoutMock.mockResolvedValue({ logged_out: true });
+    getProfileMock.mockResolvedValue({ ...operatorProfile, user_id: "user-1" });
+    const user = userEvent.setup();
+    render(<LoginPage />);
+    await user.type(screen.getByLabelText("Email"), "operator@example.com");
+    await user.type(screen.getByLabelText("Password"), "test-password");
+    await user.click(screen.getByRole("button", { name: "Sign In" }));
+    await waitFor(() => expect(useAuthStore.getState().accessToken).toBe("access-1"));
+    expect(logoutMock).toHaveBeenCalledWith("old-access");
+    expect(logoutMock.mock.invocationCallOrder[0]).toBeLessThan(mutateAsyncMock.mock.invocationCallOrder[0]);
+    expect(useAuthStore.getState().userId).toBe("user-1");
+    expect(useUiStore.getState().toasts).toEqual([]);
+  });
+
+  it("still signs in, with a warning, when the previous revocation cannot be confirmed", async () => {
+    useAuthStore.getState().setSession({ accessToken: "old-access", refreshToken: "old-refresh", userId: "user-0", profile: { ...operatorProfile, user_id: "user-0" } });
+    logoutMock.mockRejectedValue(new TypeError("offline"));
+    getProfileMock.mockResolvedValue({ ...operatorProfile, user_id: "user-1" });
+    const user = userEvent.setup();
+    render(<LoginPage />);
+    await user.type(screen.getByLabelText("Email"), "operator@example.com");
+    await user.type(screen.getByLabelText("Password"), "test-password");
+    await user.click(screen.getByRole("button", { name: "Sign In" }));
+    await waitFor(() => expect(navigateMock).toHaveBeenCalledWith("/ops/overview"));
+    expect(useAuthStore.getState().accessToken).toBe("access-1");
+    expect(useUiStore.getState().toasts.at(-1)).toMatchObject({ tone: "warn", title: "Previous session not confirmed revoked" });
+  });
+
+  it("explains why a copied tab must sign in separately", () => {
+    useAuthStore.setState({ notice: "copied_tab" });
+    render(<LoginPage />);
+    expect(screen.getByRole("status")).toHaveTextContent("copied from another NANFO tab");
+    act(() => useAuthStore.setState({ notice: null }));
   });
 });

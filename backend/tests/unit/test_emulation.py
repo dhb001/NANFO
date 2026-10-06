@@ -304,9 +304,71 @@ async def test_discovery_rejects_unexpected_identities(mutation):
     service.topology.replace_observed_device_edges.assert_not_awaited()
 
 
+def owner_read_discovery(order):
+    """Discovery composed like ``build_emulation_discovery``: no repository argument."""
+    service, binding, devices = discovery()
+    network = SimpleNamespace(assert_network_workspace_access=AsyncMock())
+
+    async def owner_read(**kwargs):
+        order.append("read")
+        return {device_id: devices[device_id] for device_id in kwargs["device_ids"] if device_id in devices}
+
+    network.get_devices_for_owner = AsyncMock(side_effect=owner_read)
+
+    async def release():
+        order.append("release")
+
+    async def write(**kwargs):
+        order.append("graph")
+
+    service.topology.replace_observed_device_edges.side_effect = write
+    return EmulationDiscoveryService(identity=service.identity, network=network, topology=service.topology,
+                                     expected_topology=service.expected_topology, release=release), binding, devices
+
+
+async def test_discovery_reads_devices_through_the_network_service_and_releases_before_graph_io():
+    order = []
+    service, binding, _ = owner_read_discovery(order)
+    await service.apply_snapshot(binding, parse(snapshot_data()))
+    assert order == ["read", "release", "graph"]
+    kwargs = service.network.get_devices_for_owner.await_args.kwargs
+    assert kwargs["network_id"] == binding.network_id and kwargs["requested_workspace_id"] == binding.workspace_id
+    assert set(kwargs["device_ids"]) == {*binding.switches.values(), *binding.hosts.values()}
+    assert service.devices is None
+
+
+@pytest.mark.parametrize("failure", ["missing", "inactive", "tenant"])
+async def test_owner_read_validation_failures_never_release_or_write(failure):
+    order = []
+    service, binding, devices = owner_read_discovery(order)
+    device_id = binding.switches[DPID]
+    if failure == "missing":
+        devices.pop(device_id)
+    elif failure == "inactive":
+        devices[device_id].status = "inactive"
+    else:
+        devices[device_id].network_id = uuid.uuid4()
+    with pytest.raises(ValueError):
+        await service.apply_snapshot(binding, parse(snapshot_data()))
+    assert order == ["read"]
+
+
+def test_build_emulation_discovery_composes_public_services_per_session():
+    from app.modules.identity.service import AuthService
+    from app.modules.network.emulation import build_emulation_discovery
+    from app.modules.network.service import NetworkService
+
+    db = AsyncMock()
+    first = build_emulation_discovery(db, None, expected_topology={"topology_id": "t"})
+    second = build_emulation_discovery(AsyncMock(), None, expected_topology={"topology_id": "t"})
+    assert isinstance(first.identity, AuthService) and isinstance(first.network, NetworkService)
+    assert first.devices is None and first.topology is None and first.release == db.rollback
+    assert first.network is not second.network
+
+
 @pytest.mark.parametrize("mode", ["demo", "production", "emulation"])
 def test_factory_emulation_mode_only(mode):
-    with patch("app.modules.telemetry.service.get_settings", return_value=SimpleNamespace(EXECUTION_MODE=mode)):
+    with patch("app.modules.telemetry.runtime.adapters.get_settings", return_value=SimpleNamespace(EXECUTION_MODE=mode)):
         kwargs = {"mode": "emulation", "seeded_sample_key": "", "seeded_metric": "", "seeded_value": 0,
                   "seeded_unit": "", "seeded_source": "", "emulation_adapter": adapter()}
         if mode == "emulation":
@@ -333,11 +395,16 @@ async def test_observed_replace_is_atomic_and_owner_scoped():
     driver.session.return_value.__aenter__ = AsyncMock(return_value=session)
     driver.session.return_value.__aexit__ = AsyncMock(return_value=False)
     assert await TopologyQueryService(driver).replace_observed_device_edges(**kwargs) == 2
-    delete = tx.run.await_args_list[1]
+    # ADR-028: endpoint revision locks (sorted, de-duplicated) precede every read/write.
+    lock = tx.run.await_args_list[0]
+    assert "MERGE (r:DeviceEventRevision {device_id: device_id})" in lock.args[0]
+    endpoints = {edge.source_id for edge in kwargs["edges"]} | {edge.target_id for edge in kwargs["edges"]}
+    assert lock.kwargs["device_ids"] == sorted(endpoints)
+    delete = tx.run.await_args_list[2]
     assert "r.observation_owner = $owner_id AND r.synthetic = false" in delete.args[0]
     assert "r.execution_mode = 'emulation'" in delete.args[0]
     assert delete.kwargs["owner_id"] == binding.owner_id
-    assert "edge_key: edge.key" in tx.run.await_args_list[2].args[0]
+    assert "edge_key: edge.key" in tx.run.await_args_list[3].args[0]
 
 
 async def test_graph_cross_page_and_parallel_ports_are_preserved():
@@ -351,6 +418,11 @@ async def test_graph_cross_page_and_parallel_ports_are_preserved():
         for port in (1, 2)]
     session = AsyncMock()
     session.run.side_effect = [node_result, edge_result]
+
+    async def execute_read(work):
+        return await work(session)
+
+    session.execute_read.side_effect = execute_read
     driver = MagicMock()
     driver.session.return_value.__aenter__ = AsyncMock(return_value=session)
     driver.session.return_value.__aexit__ = AsyncMock()
@@ -379,7 +451,10 @@ async def test_missing_projection_aborts_before_cleanup():
     driver.session.return_value.__aexit__ = AsyncMock(return_value=False)
     with pytest.raises(ValueError, match="projection incomplete"):
         await TopologyQueryService(driver).replace_observed_device_edges(**kwargs)
-    assert tx.run.await_count == 1
+    # Only the endpoint lock and the activity check ran: no cleanup, no merge.
+    assert tx.run.await_count == 2
+    assert "DeviceEventRevision" in tx.run.await_args_list[0].args[0]
+    assert "AS matched" in tx.run.await_args_list[1].args[0]
 
 
 async def test_parallel_discovery_pairs_and_empty_cleanup():
@@ -420,15 +495,28 @@ async def test_runtime_composition_checks_trusted_manifest_and_fresh_session(tmp
     sessions = MagicMock()
     sessions.return_value.__aenter__ = AsyncMock(return_value=db)
     sessions.return_value.__aexit__ = AsyncMock()
+    services = []
+
+    async def apply(self, bound, snapshot):
+        services.append(self)
+        return data
+
     with (
         patch("app.main.AsyncSessionLocal", sessions),
         patch("app.main.get_neo4j_driver", return_value=MagicMock()),
-        patch("app.modules.network.emulation.EmulationDiscoveryService.apply_snapshot", new_callable=AsyncMock) as apply,
+        patch("app.modules.network.emulation.EmulationDiscoveryService.apply_snapshot", apply),
     ):
-        apply.return_value = data
         await collector.prepare_snapshot(parse(snapshot_data()))
         await collector.prepare_snapshot(parse(snapshot_data()))
-    assert sessions.call_count == 2 and apply.await_count == 2
+    assert sessions.call_count == 2 and len(services) == 2
+    # ADR-028: Network's public composition per poll — owner device reads (no repository),
+    # a graph writer, and the session released before any graph write.
+    from app.modules.network.service import NetworkService
+
+    first, second = services
+    assert first is not second and first.network is not second.network
+    assert all(service.devices is None and isinstance(service.network, NetworkService)
+               and service.topology is not None and service.release is db.rollback for service in services)
 
 
 def test_flow_entries_with_same_table_priority_cookie_keep_independent_raw_counters():

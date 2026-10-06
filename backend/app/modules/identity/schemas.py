@@ -8,18 +8,38 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, BeforeValidator, EmailStr, StringConstraints
+
+# RFC 5321 bound on a forward-path address; rejected before address parsing.
+EMAIL_MAX_LENGTH = 254
+# Issued refresh tokens are well under 1 KiB; anything larger is never a NANFO token.
+REFRESH_TOKEN_MAX_LENGTH = 4096
+
+
+def _bounded_email(value: object) -> object:
+    if isinstance(value, str) and len(value) > EMAIL_MAX_LENGTH:
+        raise ValueError("Email address is too long.")
+    return value
+
+
+BoundedEmail = Annotated[EmailStr, BeforeValidator(_bounded_email)]
+
+AuditScope = Literal["org", "platform"]
+
 
 # ── Request schemas ───────────────────────────────────────────────────────────
 
 class LoginRequest(BaseModel):
-    email: EmailStr
+    email: BoundedEmail
+    # Deliberately unbounded here: >72-byte secrets must receive the generic 401
+    # (ADR-028 C11), not a distinguishable 422. The request body limit caps size.
     password: str
 
 
 class RefreshRequest(BaseModel):
-    refresh_token: str
+    refresh_token: Annotated[str, StringConstraints(min_length=1, max_length=REFRESH_TOKEN_MAX_LENGTH)]
 
 
 # ── Response schemas ──────────────────────────────────────────────────────────
@@ -58,3 +78,11 @@ class AuditLogEntry(BaseModel):
     metadata: dict | None = None
 
     model_config = {"from_attributes": True}
+
+
+class AuditLogPage(BaseModel):
+    items: list[AuditLogEntry]
+    total: int
+    page: int
+    page_size: int
+    scope: AuditScope = "org"

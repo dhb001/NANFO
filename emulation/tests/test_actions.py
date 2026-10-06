@@ -11,7 +11,15 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from emulation.actions import Actions, tcRead
+from emulation.lab_contracts import sign_command
 from emulation.mailbox import Mailbox, planHash, safeRead, safeWrite, validateEnvelope, validatePlan
+
+KEY = b"0123456789abcdef" * 4
+
+
+def publish(path, cmd, key=KEY):
+    """The provisioned writer: C15-signed canonical command envelope."""
+    safeWrite(path, sign_command(key, cmd))
 
 
 def command():
@@ -145,7 +153,12 @@ class MailboxTests(unittest.TestCase):
 
     def newBox(self):
         return Mailbox(
-            self.driver, self.cmd["run_id"], self.cmd["binding_digest"], self.commands, self.results
+            self.driver,
+            self.cmd["run_id"],
+            self.cmd["binding_digest"],
+            self.commands,
+            self.results,
+            command_key=KEY,
         )
 
     def tearDown(self):
@@ -192,7 +205,7 @@ class MailboxTests(unittest.TestCase):
 
     def testCancelledDuringAction(self):
         def apply(prepared, check):
-            safeWrite(
+            publish(
                 self.commands / (self.cmd["execution_id"] + ".json"),
                 {**self.cmd, "operation": "cancel", "fence": 2},
             )
@@ -394,7 +407,7 @@ class MailboxTests(unittest.TestCase):
         self.box.recover(self.box.load())
         proof = safeRead(self.results / (self.cmd["execution_id"] + ".json"))
         self.assertTrue(proof["rollback"]["verified"])
-        safeWrite(self.commands / (self.cmd["execution_id"] + ".json"), self.cmd)
+        publish(self.commands / (self.cmd["execution_id"] + ".json"), self.cmd)
         self.box.poll()
         self.assertEqual(safeRead(self.results / (self.cmd["execution_id"] + ".json")), proof)
 
@@ -451,7 +464,7 @@ class MailboxTests(unittest.TestCase):
         self.driver.rollback.assert_not_called()
 
     def testCancelOnlyPollNeverDispatchesPendingExecute(self):
-        safeWrite(self.commands / (self.cmd["execution_id"] + ".json"), self.cmd)
+        publish(self.commands / (self.cmd["execution_id"] + ".json"), self.cmd)
         self.box.poll(cancel_only=True)
         self.driver.apply.assert_not_called()
         self.assertNotIn(self.cmd["execution_id"] + ".json", self.box.seen)
@@ -461,7 +474,7 @@ class MailboxTests(unittest.TestCase):
     def testPollSeparatesMetadataAndRejectsCapacityDurably(self):
         for _ in range(33):
             cmd = {**self.cmd, "execution_id": str(uuid.uuid4()), "operation": "cancel"}
-            safeWrite(self.commands / (cmd["execution_id"] + ".json"), cmd)
+            publish(self.commands / (cmd["execution_id"] + ".json"), cmd)
             safeWrite(self.commands / ("." + cmd["execution_id"] + ".lock"), {})
             safeWrite(self.commands / ("." + cmd["execution_id"] + ".tmp"), {})
         self.box.poll()

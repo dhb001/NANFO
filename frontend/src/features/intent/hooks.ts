@@ -1,4 +1,5 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { samePageSeries } from "@/shared/lib/queryKeys";
 import { executeIntent, getIntentDetail, validateIntent, listIntents } from "@/features/intent/api";
 import { ExecuteIntentRequest, ValidateIntentRequest } from "@/shared/types/intent";
 import { useEffect } from "react";
@@ -11,10 +12,12 @@ const MAX_DETAIL_READS = 40;
 
 export function useIntentHistory(token: string | null, workspaceId: string | null, networkId: string | null, page: number) {
   const session = useSessionScope();
+  const queryKey = ["intent", session.key, session.authority, "history", page];
   return useQuery({
-    queryKey: ["intent", session.key, session.authority, "history", page],
+    queryKey,
     queryFn: ({ signal }) => session.read((credential) => listIntents(credential, workspaceId!, networkId, page, signal), signal).then((response) => response.data),
     enabled: Boolean(token && workspaceId),
+    placeholderData: (previous, previousQuery) => samePageSeries(previousQuery?.queryKey, queryKey, 4) ? keepPreviousData(previous) : undefined,
   });
 }
 
@@ -22,7 +25,7 @@ export function useValidateIntent(token: string | null) {
   const session = useSessionScope();
   const client = useQueryClient();
   return useMutation({
-    mutationFn: (input: { request: ValidateIntentRequest; idempotencyKey?: string }) =>
+    mutationFn: (input: { request: ValidateIntentRequest; idempotencyKey?: string | undefined }) =>
       session.request((credential) => validateIntent(credential || token!, input.request, input.idempotencyKey)).then((response) => response.data),
     retry: false,
     onSuccess: () => client.invalidateQueries({ queryKey: ["intent", session.key] }),
@@ -33,7 +36,7 @@ export function useExecuteIntent(token: string | null) {
   const session = useSessionScope();
   const client = useQueryClient();
   return useMutation({
-    mutationFn: (input: { request: ExecuteIntentRequest; idempotencyKey?: string }) =>
+    mutationFn: (input: { request: ExecuteIntentRequest; idempotencyKey?: string | undefined }) =>
       session.request((credential) => executeIntent(credential || token!, input.request, input.idempotencyKey)).then((response) => response.data),
     retry: false,
     // A long-idle validated view may have exhausted its polling budget before dispatch.

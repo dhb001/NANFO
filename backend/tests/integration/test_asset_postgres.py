@@ -157,13 +157,20 @@ async def test_backfill_soft_deleted_reverse_and_downgrade_guard(database):
     assert len(list(store.settings.root.iterdir())) == 1
 
 
-async def test_commit_failure_rolls_back_metadata_retains_verified_object(database, monkeypatch):
+async def test_commit_failure_rolls_back_metadata_and_removes_orphan_object(database, monkeypatch):
     sessions, store, _ = database
     first = await upload(database)
     async with sessions() as db:
-        async def fail():
-            raise RuntimeError("injected commit failure")
-        monkeypatch.setattr(db, "commit", fail)
+        original = db.commit
+        failures = []
+
+        async def fail_once():
+            if not failures:
+                failures.append(1)
+                raise RuntimeError("injected commit failure")
+            await original()
+
+        monkeypatch.setattr(db, "commit", fail_once)
         with pytest.raises(RuntimeError):
             await CampusModelAssetService(db, None, asset_store=store).upsert_asset(
                 network_id=NETWORK_ID, actor_id=str(ACTOR_ID), req=request(b"new"),
@@ -172,7 +179,83 @@ async def test_commit_failure_rolls_back_metadata_retains_verified_object(databa
         rows = (await db.scalars(select(CampusModelAssetRecord))).all()
         assert len(rows) == 1 and rows[0].campus_model_asset_id == first.campus_model_asset_id
         assert rows[0].deleted_at is None
-    assert len(list(store.settings.root.iterdir())) == 2
+    # The unreferenced blob of the failed upload is removed; the committed one stays.
+    assert [path.name for path in store.settings.root.iterdir()] == [first.model_sha256]
+
+
+async def test_same_body_metadata_change_returns_real_updated_at(database):
+    """Regression: an in-place re-upload flushed an UPDATE and then lazy-loaded updated_at."""
+    sessions, store, _ = database
+    created = await upload(database)
+    renamed = await upload(database, replace_existing=False, model_file_name="renamed.glb",
+                           mapping_by_device_id={})
+    assert renamed.campus_model_asset_id == created.campus_model_asset_id
+    assert renamed.model_file_name == "renamed.glb" and renamed.model_data_base64 is None
+    assert renamed.updated_at >= created.updated_at
+    async with sessions() as db:
+        stored = await db.get(CampusModelAssetRecord, created.campus_model_asset_id)
+        assert stored.updated_at == renamed.updated_at and stored.model_file_name == "renamed.glb"
+
+
+async def test_upload_and_retirement_audits_are_org_scoped(database):
+    from app.modules.identity.models import AuditLog
+
+    sessions, store, _ = database
+    created = await upload(database)
+    async with sessions() as db:
+        await CampusModelAssetService(db, None, asset_store=store).retire_asset(
+            network_id=NETWORK_ID, asset_id=created.campus_model_asset_id, actor_id=str(ACTOR_ID),
+            correlation_id="retire-asset",
+        )
+    async with sessions() as db:
+        audits = (await db.scalars(select(AuditLog).order_by(AuditLog.timestamp))).all()
+        assert [audit.event_type for audit in audits] == [
+            "network.campus_model_asset.uploaded", "network.campus_model_asset.retired",
+        ]
+        assert all(audit.org_id == ORG_ID and audit.resource_id == created.campus_model_asset_id for audit in audits)
+        assert audits[1].metadata_["request_id"] == "retire-asset"
+
+
+async def test_network_quota_counts_only_active_assets(database):
+    sessions, store, _ = database
+    limited = LocalAssetStore(store.settings.model_copy(update={"network_max_active_assets": 1}))
+
+    async def put(body, **changes):
+        async with sessions() as db:
+            return (await CampusModelAssetService(db, None, asset_store=limited).upsert_asset(
+                network_id=NETWORK_ID, actor_id=str(ACTOR_ID), req=request(body, **changes),
+            )).items[0]
+
+    first = await put(b"first")
+    with pytest.raises(HTTPException) as exceeded:
+        await put(b"second", replace_existing=False)
+    assert exceeded.value.status_code == 507
+    async with sessions() as db:
+        await CampusModelAssetService(db, None, asset_store=limited).retire_asset(
+            network_id=NETWORK_ID, asset_id=first.campus_model_asset_id, actor_id=str(ACTOR_ID),
+        )
+    # Retirement frees quota (it counts ACTIVE rows) while the retired bytes are retained.
+    await put(b"second", replace_existing=False)
+    assert first.model_sha256 in {path.name for path in store.settings.root.iterdir()}
+
+
+async def test_collector_removes_only_objects_no_row_references(database):
+    import hashlib
+
+    from app.modules.network.asset_gc import collect_garbage
+
+    sessions, store, _ = database
+    kept = await upload(database)
+    retired = await upload(database, body=b"retired", replace_existing=False)
+    async with sessions() as db:
+        await CampusModelAssetService(db, None, asset_store=store).retire_asset(
+            network_id=NETWORK_ID, asset_id=retired.campus_model_asset_id, actor_id=str(ACTOR_ID),
+        )
+    orphan = hashlib.sha256(b"orphan").hexdigest()
+    store.put(b"orphan", orphan, len(b"orphan"))
+    report = await collect_garbage(sessions, store)
+    assert report["removed"] == 1 and report["retained"] == 2
+    assert {path.name for path in store.settings.root.iterdir()} == {kept.model_sha256, retired.model_sha256}
 
 
 async def test_current_membership_scope_download(database):
@@ -248,21 +331,21 @@ async def test_current_authority_reloaded_after_network_lock_wait(database):
 
 
 @pytest.mark.parametrize("revocation", ["downgrade", "remove"])
-async def test_revocation_during_final_response_read_rolls_back_replacement(database, monkeypatch, revocation):
+async def test_revocation_during_blob_publication_rolls_back_replacement(database, monkeypatch, revocation):
     sessions, store, _ = database
     original = await upload(database)
     reached = asyncio.Event()
     release = threading.Event()
     loop = asyncio.get_running_loop()
-    original_read = store.read
+    original_put = store.put
 
-    def blocked_read(digest, size):
+    def blocked_put(*args, **kwargs):
         loop.call_soon_threadsafe(reached.set)
         if not release.wait(10):
-            raise RuntimeError("final response read was not released")
-        return original_read(digest, size)
+            raise RuntimeError("blob publication was not released")
+        return original_put(*args, **kwargs)
 
-    monkeypatch.setattr(store, "read", blocked_read)
+    monkeypatch.setattr(store, "put", blocked_put)
     async with sessions() as writer:
         retained = (await writer.scalars(select(OrgMember))).one()
         task = asyncio.create_task(CampusModelAssetService(writer, None, asset_store=store).upsert_asset(
@@ -288,4 +371,5 @@ async def test_revocation_during_final_response_read_rolls_back_replacement(data
         rows = (await db.scalars(select(CampusModelAssetRecord))).all()
         assert len(rows) == 1 and rows[0].campus_model_asset_id == original.campus_model_asset_id
         assert rows[0].deleted_at is None
-    assert original_read(request(b"replacement").model_sha256, len(b"replacement")) == b"replacement"
+    # The denied upload's unreferenced object is discarded after rollback.
+    assert [path.name for path in store.settings.root.iterdir()] == [original.model_sha256]

@@ -208,12 +208,13 @@ async def test_composition_rechecks_binding_owner_and_actual_network(path_eviden
                           "permissions": ["read:telemetry"], "jti": "test", "sid": "test", "exp": 9999999999})
     access = AsyncMock(return_value=SimpleNamespace(network_id=e.binding.network_id,
                                                    workspace_id=e.binding.workspace_id))
-    monkeypatch.setattr("app.api.v1.telemetry_paths.NetworkService.assert_network_workspace_access", access)
+    monkeypatch.setattr("app.modules.telemetry.probe_paths.NetworkService.assert_network_workspace_access", access)
     validation = AsyncMock()
-    monkeypatch.setattr("app.api.v1.telemetry_paths.EmulationDiscoveryService.validate_binding", validation)
+    monkeypatch.setattr("app.modules.telemetry.probe_paths.EmulationDiscoveryService.validate_binding", validation)
     reader = AsyncMock(return_value=await e.reader.read(**e.args))
-    monkeypatch.setattr("app.api.v1.telemetry_paths.ProbePathsReader.read", reader)
-    args = dict(settings=settings, db=None, redis=None, claims=claims, network_id=e.binding.network_id)
+    monkeypatch.setattr("app.modules.telemetry.probe_paths.ProbePathsReader.read", reader)
+    # A session double: Network's discovery composition binds its release to the session.
+    args = dict(settings=settings, db=AsyncMock(), redis=None, claims=claims, network_id=e.binding.network_id)
     assert (await read_paths(**args)).status == "measured"
     assert validation.await_args.args[0].actor_user_id == e.binding.actor_user_id
     assert access.await_args.kwargs["actor_user_id"] == claims.user_id
@@ -231,10 +232,41 @@ async def test_binding_symlink_is_not_accepted(path_evidence, monkeypatch):
     alias.symlink_to(e.binding_path)
     settings = get_settings().model_copy(update={"EXECUTION_MODE": "emulation",
         "EMULATION_BINDING_PATH": str(alias), "EMULATION_SNAPSHOT_PATH": str(e.snapshot_path)})
-    monkeypatch.setattr("app.api.v1.telemetry_paths.NetworkService.assert_network_workspace_access",
+    monkeypatch.setattr("app.modules.telemetry.probe_paths.NetworkService.assert_network_workspace_access",
                         AsyncMock(return_value=SimpleNamespace(network_id=e.binding.network_id,
                                                                workspace_id=e.binding.workspace_id)))
     claims = TokenClaims({"sub": str(uuid.uuid4()), "email": "reader@example.com", "roles": [],
                           "permissions": ["read:telemetry"], "jti": "test", "sid": "test", "exp": 9999999999})
     result = await read_paths(settings=settings, db=None, redis=None, claims=claims, network_id=e.binding.network_id)
     assert result.reason == "trusted_binding_unavailable" and not result.paths
+
+
+def test_router_holds_no_cross_module_repository_or_identity_composition():
+    """ADR-028: composition moved from the router into Telemetry's ProbePathsService."""
+    import app.api.v1.telemetry_paths as router_module
+
+    for name in ("DeviceRepository", "AuthService", "NetworkService", "EmulationDiscoveryService"):
+        assert not hasattr(router_module, name), name
+
+
+def test_emulation_discovery_composition_is_built_per_session():
+    from unittest.mock import AsyncMock
+
+    from app.modules.network.service import NetworkService
+    from app.modules.telemetry.probe_paths import build_emulation_discovery
+
+    first_db, second_db = AsyncMock(), AsyncMock()
+    first = build_emulation_discovery(first_db, None, expected_topology={"topology_id": "t"})
+    second = build_emulation_discovery(second_db, None, expected_topology={"topology_id": "t"})
+    # ADR-028: Network's public composition; bound devices come from the owner read
+    # (NetworkService.get_devices_for_owner), never an injected Network repository.
+    assert first.devices is None and second.devices is None and first.topology is None
+    assert isinstance(first.network, NetworkService) and first.network is not second.network
+    assert first.identity is not second.identity
+    assert first.release is first_db.rollback and second.release is second_db.rollback
+
+
+def test_telemetry_composition_builds_no_network_repository():
+    import app.modules.telemetry.probe_paths as probe_paths
+
+    assert not hasattr(probe_paths, "DeviceRepository") and not hasattr(probe_paths, "AuthService")

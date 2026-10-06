@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { TwinPage } from "@/features/digitalTwin/TwinPage";
 import { parseImportSummary } from "@/features/digitalTwin/twinImport";
@@ -23,6 +23,11 @@ const mockUseUpsertCampusModelAssets = vi.fn();
 const mockUseUpsertDeviceGroups = vi.fn();
 
 const navigateMock = vi.fn();
+const mockUseAlertsQuery = vi.fn();
+
+vi.mock("@/features/reliability/hooks", () => ({
+  useAlertsQuery: (...args: unknown[]) => mockUseAlertsQuery(...args),
+}));
 
 const cryptoSubtleDigestMock = vi.fn();
 const spatialMocks = vi.hoisted(() => ({ data: undefined as import("@/shared/types/spatial").SpatialSceneSnapshot | undefined }));
@@ -68,30 +73,51 @@ vi.mock("@/features/networks/hooks", () => ({
 }));
 
 const twinScenePropsSpy = vi.fn();
+const twinSceneMounts = vi.fn();
 
-vi.mock("@/features/digitalTwin/TwinScene", () => ({
-  TwinScene: (props: {
-    layers: Record<string, boolean>;
-    nodes: unknown[];
-    links: unknown[];
-    overlays: unknown[];
-    alerts?: Array<{ event_type: string; payload: Record<string, unknown> }>;
-    buildingViewState?: {
-      selectedBuildingId?: string | null;
-      selectedFloorKey?: string | null;
-      floorFilterEnabled?: boolean;
-      visibleBuildingIds?: ReadonlySet<string>;
-    };
-    onSelectBuilding?: (buildingId: string) => void;
-  }) => {
-    twinScenePropsSpy(props);
-    return (
-    <div data-testid="twin-scene">
-      scene nodes={props.nodes.length} links={props.links.length} overlays={props.overlays.length} congestion={String(props.layers.showCongestion)}
-    </div>
-    );
-  },
+// jsdom has no WebGL: the page tests exercise the 3D path (TwinScene is mocked below);
+// the 2D fallback is covered by TwinViewport.test.tsx.
+vi.mock("@/features/digitalTwin/webglSupport", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/features/digitalTwin/webglSupport")>()),
+  detectWebGLSupport: () => true,
 }));
+
+vi.mock("@/features/digitalTwin/TwinScene", async () => {
+  const { useEffect } = await vi.importActual<typeof import("react")>("react");
+  return {
+    TwinScene: (props: {
+      layers: Record<string, boolean>;
+      nodes: unknown[];
+      links: unknown[];
+      overlays: unknown[];
+      alerts?: Array<{ event_type: string; payload: Record<string, unknown> }>;
+      buildingViewState?: {
+        selectedBuildingId?: string | null;
+        selectedFloorKey?: string | null;
+        floorFilterEnabled?: boolean;
+        visibleBuildingIds?: ReadonlySet<string>;
+      };
+      onSelectBuilding?: (buildingId: string) => void;
+    }) => {
+      twinScenePropsSpy(props);
+      useEffect(() => { twinSceneMounts(); }, []);
+      return (
+      <div data-testid="twin-scene">
+        scene nodes={props.nodes.length} links={props.links.length} overlays={props.overlays.length} congestion={String(props.layers.showCongestion)}
+      </div>
+      );
+    },
+  };
+});
+
+/** Keyboard selection through the Inspect node combobox (replaces the old 12,800-option select). */
+async function inspectNode(user: ReturnType<typeof userEvent.setup>, deviceId: string) {
+  const input = screen.getByLabelText("Inspect node");
+  await user.clear(input);
+  await user.type(input, deviceId);
+  await user.keyboard("{Enter}");
+  expect(input).toHaveAttribute("data-selected-node-id", deviceId);
+}
 
 vi.mock("@/features/digitalTwin/twinImport", async () => {
   const actual = await vi.importActual<typeof import("@/features/digitalTwin/twinImport")>("@/features/digitalTwin/twinImport");
@@ -107,6 +133,17 @@ function queryResult<T>(data: T | null, options?: { isLoading?: boolean; isError
   };
 }
 
+/** Minimal valid GLB (JSON chunk only) so session imports pass structural validation. */
+function glbFile(name = "campus.glb", document: Record<string, unknown> = { asset: { version: "2.0" }, scene: 0, scenes: [{ nodes: [0] }], nodes: [{ name: "campus" }] }) {
+  const json = JSON.stringify(document);
+  const data = new TextEncoder().encode(json.padEnd(Math.ceil(json.length / 4) * 4, " "));
+  const buffer = new ArrayBuffer(20 + data.length);
+  const view = new DataView(buffer);
+  [0x46546c67, 2, buffer.byteLength, data.length, 0x4e4f534a].forEach((value, index) => view.setUint32(index * 4, value, true));
+  new Uint8Array(buffer, 20).set(data);
+  return new File([buffer], name, { type: "model/gltf-binary" });
+}
+
 async function waitForTwinScene() {
   return screen.findByTestId("twin-scene", {}, { timeout: 5000 });
 }
@@ -117,7 +154,10 @@ describe("TwinPage", () => {
     vi.clearAllMocks();
     navigateMock.mockReset();
     twinScenePropsSpy.mockReset();
+    twinSceneMounts.mockReset();
     mockUseCampusBuildings.mockReset();
+    mockUseAlertsQuery.mockReset();
+    mockUseAlertsQuery.mockReturnValue(queryResult({ items: [], total: 0, status_counts: {} }));
     mockUseCampusModelAssets.mockReset();
     mockUseDeviceGroups.mockReset();
     mockUseUpsertCampusBuildings.mockReset();
@@ -218,13 +258,36 @@ describe("TwinPage", () => {
     });
   });
 
-  it("renders loading state", async () => {
+  it("renders loading state as an overlay over the mounted 3D view", async () => {
     mockUseTopologyGraph.mockReturnValue(queryResult(null, { isLoading: true }));
     mockUseTopologyNode.mockReturnValue(queryResult(null));
 
     render(<TwinPage />);
 
-    expect(await screen.findByText(/loading/i)).toBeInTheDocument();
+    expect(await screen.findByText("Loading topology", {}, { timeout: 5000 })).toBeInTheDocument();
+    // The Canvas lives outside the query state: loading never unmounts the view.
+    expect(screen.getByTestId("twin-scene")).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Digital twin view" })).toHaveAttribute("aria-busy", "true");
+  });
+
+  it("keeps one 3D view mounted across loading, error, retry and data states", async () => {
+    const refetch = vi.fn().mockResolvedValue({ data: undefined, isError: true });
+    mockUseTopologyNode.mockReturnValue(queryResult(null));
+    mockUseTopologyGraph.mockReturnValue(queryResult(null, { isLoading: true }));
+    const { rerender } = render(<TwinPage />);
+    await waitForTwinScene();
+    mockUseTopologyGraph.mockReturnValue({ ...queryResult(null, { isError: true, refetch }), error: new Error("graph down") });
+    rerender(<TwinPage />);
+    const view = screen.getByRole("group", { name: "Digital twin view" });
+    expect(await within(view).findByRole("alert")).toHaveTextContent("Topology request failed");
+    expect(within(view).getByText(/graph down/)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Retry loading topology" }));
+    expect(refetch).toHaveBeenCalledTimes(1);
+    mockUseTopologyGraph.mockReturnValue(queryResult({ data: { nodes: [{ device_id: "d", hostname: "edge", device_type: "switch", status: "active", spatial_ref_id: null }], edges: [] }, nextCursor: null }));
+    rerender(<TwinPage />);
+    await waitFor(() => expect(screen.queryByText("Topology request failed")).not.toBeInTheDocument());
+    expect(screen.getByTestId("twin-scene")).toHaveTextContent("scene nodes=1");
+    expect(twinSceneMounts).toHaveBeenCalledTimes(1);
   });
 
   it("restores explicitly, confirms replacement, and revokes URLs on scope change and unmount", async () => {
@@ -250,7 +313,7 @@ describe("TwinPage", () => {
     expect(screen.getByRole("button", { name: "Restore Persisted Model" })).toBeDisabled();
     await user.selectOptions(screen.getByLabelText("Persisted model asset"), "asset");
     expect(create).not.toHaveBeenCalled();
-    await user.selectOptions(screen.getByLabelText("Inspect node"), id);
+    await inspectNode(user, id);
     await user.click(screen.getByRole("button", { name: "Restore Persisted Model" }));
     await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
     expect(twinScenePropsSpy.mock.calls.at(-1)?.[0].nodes[0].spatialRefId).toBe("campus/building/f1");
@@ -393,7 +456,8 @@ describe("TwinPage", () => {
 
     render(<TwinPage />);
 
-    expect(await screen.findByText("Request failed")).toBeInTheDocument();
+    expect(await screen.findByText("Topology request failed", {}, { timeout: 5000 })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Retry loading topology" })).toBeEnabled();
   });
 
   it("renders success state and toggles overlays", async () => {
@@ -548,12 +612,30 @@ describe("TwinPage", () => {
     expect(screen.getByText(/Core router/i)).toBeInTheDocument();
     expect(screen.getByText(/Access switch/i)).toBeInTheDocument();
 
-    const latestTwinSceneProps = twinScenePropsSpy.mock.calls.at(-1)?.[0] as {
-      alerts?: Array<{ event_type: string; payload: Record<string, unknown> }>;
-    };
-    expect(latestTwinSceneProps.alerts).toHaveLength(1);
-    expect(latestTwinSceneProps.alerts?.[0]?.event_type).toBe("alert.generated");
-    expect(latestTwinSceneProps.alerts?.[0]?.payload.device_id).toBe("00000000-0000-0000-0000-000000000444");
+    const latestTwinSceneProps = twinScenePropsSpy.mock.calls.at(-1)?.[0] as { alertingDeviceIds?: ReadonlySet<string> };
+    expect([...(latestTwinSceneProps.alertingDeviceIds ?? [])]).toEqual(["00000000-0000-0000-0000-000000000444"]);
+    expect(mockUseAlertsQuery).toHaveBeenCalledWith("token-1", expect.objectContaining({ status: "active", networkId: "00000000-0000-0000-0000-000000000333" }), true);
+  });
+
+  it("uses the REST snapshot of active backend alerts as the authoritative device severity", async () => {
+    mockUseTopologyGraph.mockReturnValue(queryResult({ data: { nodes: [
+      { device_id: "00000000-0000-0000-0000-000000000444", hostname: "edge-1", device_type: "switch", status: "active", spatial_ref_id: null },
+      { device_id: "00000000-0000-0000-0000-000000000445", hostname: "edge-2", device_type: "switch", status: "active", spatial_ref_id: null },
+    ], edges: [] } }));
+    mockUseTopologyNode.mockReturnValue(queryResult(null));
+    mockUseAlertsQuery.mockReturnValue(queryResult({ items: [
+      { alert_id: "a-1", alert_key: "measured:k1", source: "telemetry", status: "active", severity: "warning", correlation_id: "c", updated_at: "2026-09-24T00:00:00Z",
+        payload: { device_id: "00000000-0000-0000-0000-000000000445", metric: "latency_ms", value: 130, unit: "ms", rule: { breach: 100, recover: 70 } } },
+    ], total: 1, status_counts: { active: 1 } }));
+    useLiveStore.setState({ alerts: [{ event_id: "e", event_type: "alert.resolved", source: "telemetry", timestamp: "2026-09-23T00:00:00Z",
+      payload: { alert_id: "a-1", device_id: "00000000-0000-0000-0000-000000000445" } }] });
+    render(<TwinPage />);
+    await waitForTwinScene();
+    const props = twinScenePropsSpy.mock.calls.at(-1)?.[0] as { alertingDeviceIds?: ReadonlySet<string> };
+    // The older live resolution does not override the newer REST record.
+    expect([...(props.alertingDeviceIds ?? [])]).toEqual(["00000000-0000-0000-0000-000000000445"]);
+    expect(screen.getByText("1 device with active backend alerts.")).toBeInTheDocument();
+    expect(screen.getAllByText(/Visual heuristic/).length).toBeGreaterThan(0);
   });
 
   it("validates invalid import files and shows import summary for valid model", async () => {
@@ -579,16 +661,46 @@ describe("TwinPage", () => {
     render(<TwinPage />);
     await waitForTwinScene();
 
-    const modelInput = screen.getByLabelText("Campus model file") as HTMLInputElement;
+    const modelInput = screen.getByLabelText("Campus model file");
 
     const invalidModel = new File(["hello"], "campus.txt", { type: "text/plain" });
     await user.upload(modelInput, invalidModel);
     expect(await screen.findByText("Model file must be .glb or .gltf.")).toBeInTheDocument();
 
-    const validModel = new File(["binary"], "campus.glb", { type: "model/gltf-binary" });
-    await user.upload(modelInput, validModel);
+    const corruptModel = new File(["binary"], "campus.glb", { type: "model/gltf-binary" });
+    await user.upload(modelInput, corruptModel);
+    expect(await screen.findByText("Invalid GLB version or declared length.")).toBeInTheDocument();
+
+    await user.upload(modelInput, glbFile());
     expect(await screen.findByText(/model GLB/i)).toBeInTheDocument();
     expect(screen.getByText(/Imported mapping is session-only/i)).toBeInTheDocument();
+  });
+
+  it("rejects a session glTF with an absolute external URI before creating an object URL", async () => {
+    const user = userEvent.setup({ applyAccept: false });
+    mockUseTopologyGraph.mockReturnValue(queryResult({ data: { nodes: [{ device_id: "d", hostname: "edge", device_type: "switch", status: "active", spatial_ref_id: null }], edges: [] } }));
+    mockUseTopologyNode.mockReturnValue(queryResult(null));
+    const create = vi.fn().mockReturnValue("blob:never");
+    const previousCreate = URL.createObjectURL;
+    URL.createObjectURL = create;
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    render(<TwinPage />);
+    await waitForTwinScene();
+    const external = new File([JSON.stringify({ asset: { version: "2.0" }, buffers: [{ uri: "https://attacker.example/model.bin", byteLength: 4 }] })], "campus.gltf", { type: "model/gltf+json" });
+    await user.upload(screen.getByLabelText("Campus model file"), external);
+    expect(await screen.findByText("Model must be self-contained; external resource URIs are not supported.")).toBeInTheDocument();
+    const relative = new File([JSON.stringify({ asset: { version: "2.0" }, images: [{ uri: "texture.png" }] })], "campus.gltf", { type: "model/gltf+json" });
+    await user.upload(screen.getByLabelText("Campus model file"), relative);
+    await waitFor(() => expect(screen.getAllByText("Model must be self-contained; external resource URIs are not supported.")).toHaveLength(1));
+    const oversized = new File([new Uint8Array(8 * 1024 * 1024 + 1)], "big.glb", { type: "model/gltf-binary" });
+    await user.upload(screen.getByLabelText("Campus model file"), oversized);
+    expect(await screen.findByText("Model must be between 1 byte and 8 MiB.")).toBeInTheDocument();
+    expect(create).not.toHaveBeenCalled();
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(twinScenePropsSpy.mock.calls.at(-1)?.[0].importedModelUrl).toBeNull();
+    expect(screen.queryByText(/model GLTF/i)).not.toBeInTheDocument();
+    URL.createObjectURL = previousCreate;
+    fetchSpy.mockRestore();
   });
 
   it("routes configure action to existing intent workflow", async () => {
@@ -625,20 +737,25 @@ describe("TwinPage", () => {
     render(<TwinPage />);
     await waitForTwinScene();
 
-    await user.selectOptions(screen.getByLabelText("Inspect node"), "00000000-0000-0000-0000-000000000444");
+    await inspectNode(user, "00000000-0000-0000-0000-000000000444");
     await user.click(screen.getByRole("button", { name: "Configure in Intent Workflow" }));
 
     await waitFor(() => {
       expect(navigateMock).toHaveBeenCalled();
     });
 
-    const call = navigateMock.mock.calls[0]?.[0];
-    expect(typeof call).toBe("string");
-    expect(call).toContain("/ops/intent?");
-    expect(call).toContain("source=digital-twin");
-    expect(call).toContain("action=optimize_wireless_capacity");
-    expect(call).toContain("scope=");
-    expect(call).toContain("constraints=");
+    const [target, options] = navigateMock.mock.calls[0] ?? [];
+    // Router state, never the URL (ADR-028 intent handoff): nothing lands in history or referrers.
+    expect(target).toBe("/ops/intent");
+    const handoff = options.state.intentHandoff;
+    expect(handoff.source).toBe("digital-twin");
+    // The visual heuristic never selects an action or travels as a policy.
+    expect(handoff.action).toBeNull();
+    const scope = JSON.parse(handoff.scopeJson);
+    expect(scope).toEqual({ source: "digital_twin", device_id: "00000000-0000-0000-0000-000000000444",
+      spatial_ref_id: "campus-a/building-1/floor-1/rack-2/device-1", backend_alerts: [] });
+    expect(handoff.scopeJson).not.toMatch(/policy|congestion|heuristic|score/);
+    expect(handoff.constraintsJson).toContain("simulation_required");
   });
 
   it("persists imported mapping with existing update device API path", async () => {
@@ -678,11 +795,11 @@ describe("TwinPage", () => {
     render(<TwinPage />);
     await waitForTwinScene();
 
-    await user.upload(screen.getByLabelText("Campus model file"), new File(["binary"], "campus.glb", { type: "model/gltf-binary" }));
+    await user.upload(screen.getByLabelText("Campus model file"), glbFile());
     expect(await screen.findByText(/model GLB/i)).toBeInTheDocument();
     expect(parseImportSummarySpy).toHaveBeenCalled();
 
-    await user.selectOptions(screen.getByLabelText("Inspect node"), "00000000-0000-0000-0000-000000000444");
+    await inspectNode(user, "00000000-0000-0000-0000-000000000444");
     const persistButton = await screen.findByRole("button", { name: "Persist Mapping to Device" });
     expect(persistButton).toBeEnabled();
 
@@ -735,7 +852,21 @@ describe("TwinPage", () => {
 
     await user.selectOptions(screen.getByLabelText("Twin building focus"), "campus-a:building-1");
     await user.selectOptions(screen.getByLabelText("Twin floor focus"), "f01");
-    await user.click(screen.getByRole("button", { name: "Persist Device Groups" }));
+    const trigger = screen.getByRole("button", { name: "Persist Device Groups" });
+    await user.click(trigger);
+
+    // Preview first: nothing is written until the operator confirms.
+    const dialog = await screen.findByRole("dialog", { name: "Review device groups before persisting" });
+    expect(mockUpsertDeviceGroupsMutateAsync).not.toHaveBeenCalled();
+    expect(dialog).toHaveTextContent("site_prefix campus-a/building-1/f01");
+    expect(dialog).toHaveTextContent("2 devices currently in scope");
+    expect(screen.getByRole("button", { name: "Cancel" })).toHaveFocus();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+
+    await user.click(trigger);
+    await user.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Confirm and persist groups" }));
 
     await waitFor(() => {
       expect(mockUpsertDeviceGroupsMutateAsync).toHaveBeenCalledWith({
@@ -746,10 +877,11 @@ describe("TwinPage", () => {
             name: "BUILDING-1 F01 Wireless",
             group_type: "functional",
             selector: {
-              site_prefix: "campus-a/building-1/f01",
               functional_group: "wireless",
+              site_prefix: "campus-a/building-1/f01",
             },
-            device_ids: ["00000000-0000-0000-0000-000000000444"],
+            // Membership is resolved by the server's classifier, never in the browser.
+            device_ids: [],
           },
           {
             group_key: "ops-campus-a-building-1-f01",
@@ -758,14 +890,56 @@ describe("TwinPage", () => {
             selector: {
               site_prefix: "campus-a/building-1/f01",
             },
-            device_ids: [
-              "00000000-0000-0000-0000-000000000444",
-              "00000000-0000-0000-0000-000000000445",
-            ],
+            device_ids: [],
           },
         ],
       });
     });
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("sends expected_updated_at and reloads with a diff on 409 DEVICE_GROUP_CONFLICT", async () => {
+    const user = userEvent.setup();
+    mockUseTopologyGraph.mockReturnValue(queryResult({ data: { nodes: [
+      { device_id: "00000000-0000-0000-0000-000000000444", hostname: "ap-1", device_type: "wireless_ap", status: "active", spatial_ref_id: "campus-a/building-1/f01/wireless/ap-1" },
+    ], edges: [] } }));
+    mockUseTopologyNode.mockReturnValue(queryResult(null));
+    const existing = { device_group_id: "g1", network_id: "n", group_key: "wireless-campus-a-building-1-f01", name: "BUILDING-1 F01 Wireless", group_type: "functional",
+      description: null, selector: { functional_group: "wireless", site_prefix: "campus-a/building-1/f01" }, device_ids: [], created_at: "2026-09-01T00:00:00Z", updated_at: "2026-09-02T00:00:00Z" };
+    const concurrent = { ...existing, updated_at: "2026-09-03T00:00:00Z", name: "Renamed elsewhere", device_ids: ["00000000-0000-0000-0000-000000000444"] };
+    const refetch = vi.fn().mockResolvedValue({ data: { items: [concurrent], total: 1 }, isError: false });
+    mockUseDeviceGroups.mockReturnValue({ ...queryResult({ items: [existing], total: 1 }), refetch });
+    const { ApiClientError } = await import("@/shared/lib/errors");
+    mockUpsertDeviceGroupsMutateAsync.mockRejectedValueOnce(new ApiClientError("Device group changed", "DEVICE_GROUP_CONFLICT", 409)).mockResolvedValueOnce({ items: [], total: 0 });
+    render(<TwinPage />);
+    await waitForTwinScene();
+    await user.click(screen.getByRole("button", { name: "Persist Device Groups" }));
+    await user.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Confirm and persist groups" }));
+    expect(mockUpsertDeviceGroupsMutateAsync.mock.calls[0][0].groups[0]).toMatchObject({ group_key: existing.group_key, expected_updated_at: "2026-09-02T00:00:00Z" });
+    expect(mockUpsertDeviceGroupsMutateAsync.mock.calls[0][0].groups[1]).not.toHaveProperty("expected_updated_at");
+    const dialog = await screen.findByRole("dialog");
+    expect(await within(dialog).findByText(/changed on the server since they were read/)).toBeInTheDocument();
+    expect(within(dialog).getByRole("list", { name: "Server changes since last read" })).toHaveTextContent(
+      "wireless-campus-a-building-1-f01: modified (name, device_ids) · updated 2026-09-02T00:00:00Z → 2026-09-03T00:00:00Z · members 0 → 1");
+    expect(refetch).toHaveBeenCalledTimes(1);
+    await user.click(within(dialog).getByRole("button", { name: "Confirm and persist groups" }));
+    await waitFor(() => expect(mockUpsertDeviceGroupsMutateAsync).toHaveBeenCalledTimes(2));
+    expect(mockUpsertDeviceGroupsMutateAsync.mock.calls[1][0].groups[0].expected_updated_at).toBe("2026-09-03T00:00:00Z");
+  });
+
+  it("shows explicit error and retry states instead of zero counts for persisted groups", async () => {
+    mockUseTopologyGraph.mockReturnValue(queryResult({ data: { nodes: [{ device_id: "d", hostname: "edge", device_type: "switch", status: "active", spatial_ref_id: null }], edges: [] } }));
+    mockUseTopologyNode.mockReturnValue(queryResult(null));
+    const retryGroups = vi.fn().mockResolvedValue({ data: undefined, isError: true });
+    mockUseDeviceGroups.mockReturnValue({ ...queryResult(null, { isError: true }), error: new Error("groups down"), refetch: retryGroups });
+    render(<TwinPage />);
+    await waitForTwinScene();
+    const groups = screen.getByRole("region", { name: "Device groups" });
+    expect(within(groups).getByRole("alert")).toHaveTextContent("Persisted device groups unavailable: groups down");
+    expect(within(groups).queryByText(/persisted \d/)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Persist Device Groups" })).toBeDisabled();
+    await userEvent.click(screen.getByRole("button", { name: "Retry loading groups" }));
+    expect(retryGroups).toHaveBeenCalled();
   });
 
   it("parses sidecar mapping and reports duplicates/unmatched deterministically", async () => {

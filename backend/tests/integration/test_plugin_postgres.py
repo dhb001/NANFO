@@ -148,6 +148,9 @@ async def test_uninstall_wins_after_inflight_enable_and_audit_failure_rolls_back
     async with sessions() as db:
         row = await db.get(PluginRecord, original.plugin_id)
         assert row.status == "uninstalled" and row.enabled is False
+        # ADR-028: enable committed before publishing; its late publication outcome
+        # must not overwrite the newer uninstall transition.
+        assert row.queue_status == "not_applicable" and row.stream_entry_id is None
     await install(sessions)
     monkeypatch.setattr("app.modules.plugin.service.append_audit_log", AsyncMock(side_effect=RuntimeError("audit down")))
     with pytest.raises(RuntimeError):

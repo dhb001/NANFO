@@ -1,5 +1,39 @@
 # Isolated Campus SDN Lab
 
+## ADR-028 successor lab (C23) and command authentication (C15)
+
+The default lab image is now the **successor** runtime: `Dockerfile` (Debian 13 trixie,
+CPython 3.12, os-ken 4.2.2 — the maintained OpenStack fork of the unmaintained Ryu — plus
+hash-pinned `requirements.txt`/`requirements-build.txt` compiled from `requirements.in`
+with uv). It runs **unprivileged**: `cap_drop: [ALL]`, `cap_add: [NET_ADMIN, NET_RAW,
+SYS_ADMIN]` (FRR experiment modes add `NET_BIND_SERVICE`; FRR keeps uid 0 via
+`-u root -g root`), `no-new-privileges`, read-only root and `nosuid,nodev` tmpfs.
+`emulation.runner` refuses to start under any other capability profile. The successor
+is a new runtime identity and requires fresh qualification before any result claim.
+On AppArmor hosts, FRR modes also need a lab profile permitting per-namespace
+`/proc/sys/net/**` writes (Docker's default profile denies them); the SDN lab does not.
+
+`python3 emulation/control.py build` prints `{"tag","image_id","source_sha256"}`; pin
+the printed `sha256:` image ID (`NANFO_EMULATION_IMAGE`, deploy `NANFO_LAB_IMAGE`).
+Without `DAC_OVERRIDE` the lab must own `output/` and `results/` (`root:<gid> 0750`) and
+reads the writer's `0640` commands through `NANFO_LAB_READER_GID`; `control.py` checks
+this and prints the exact `chown`/`chmod` remedy. Lab publications are `0640` with the
+parent directory's group.
+
+The frozen privileged EOL image (Python 3.9 / Debian 11 / Ryu 4.34) is used only for
+historical reproduction: `NANFO_LAB_FROZEN=1 NANFO_EMULATION_IMAGE=sha256:<recorded id>
+python3 emulation/control.py start` (`compose.frozen.yaml`; never rebuilt). Its recipe
+is preserved byte-identically as `Dockerfile.frozen` and `requirements.frozen.txt`;
+rebuilding it does not recreate the recorded identity.
+
+Manual-control command files carry `hmac_sha256` over their canonical envelope (C15),
+keyed by `NANFO_LAB_COMMAND_KEY_FILE` (owner-only `0400`/`0600`, 32..16384 bytes; the
+lab's copy is mounted by `compose.control.yaml` from `NANFO_LAB_COMMAND_KEY_DIR`). The
+lab rejects unauthenticated, group/world-writable or foreign-owned command files without
+publishing a result; the backend writer refuses to publish without the key. Shared
+stdlib contracts (topology/action map/reserved tables/MACs/publication) live in
+`lab_contracts.py`. Historical sections below describe the frozen runtime.
+
 For the explicit opt-in ADR-011 measured reset/step environment, fixed AI client
 transport, baseline smoke and real OSPF mode, see [EXPERIMENT.md](EXPERIMENT.md).
 ADR-013 adds matched Linux/FRR learned routing and stationary V3 scenarios; see

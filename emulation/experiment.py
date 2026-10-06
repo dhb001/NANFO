@@ -15,6 +15,7 @@ from pathlib import Path
 
 from emulation.actions import HOST_MAP, NAMES, PORTS, Actions
 from emulation.experiment_client import REQUEST_LIMIT, RESPONSE_LIMIT, SOCKET, decode
+from emulation.lab_contracts import ACTION_PATHS
 from emulation.measurements import atomicJson, parsePing, parseQueue, utcNow
 from emulation.runner import stopProcess
 from emulation.topology import LINKS
@@ -67,9 +68,13 @@ SOURCE_FILES = (
     "measurements.py",
     "runner.py",
     "controller.py",
+    "controller_main.py",
+    "lab_contracts.py",
     "experiment_client.py",
     "Dockerfile",
+    "debian-snapshot.sources",
     "requirements.txt",
+    "requirements-build.txt",
     "compose.yaml",
 )
 
@@ -115,7 +120,7 @@ def environmentSpec(mode="sdn"):
     return spec, digest
 
 
-ROUTES = (("access1", "dist1", "access2"), ("access1", "dist2", "access2"))
+ROUTES = ACTION_PATHS
 FIXTURE_COOKIE = "0x4e414e4600000007"
 FIELDS = {
     "version",

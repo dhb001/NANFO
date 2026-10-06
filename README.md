@@ -14,10 +14,11 @@ This repository contains both backend and frontend code, plus architecture, API,
 
 For the complete supervised runtime, start with
 [`deploy/README.md` — Fresh Install](deploy/README.md#fresh-install) and the
-[current0029 acceptance handoff](docs/project/ReviewClosure-Deployment.md).
+[0029 acceptance handoff (pre-ADR-028; schema head is now 0030)](docs/project/ReviewClosure-Deployment.md).
 That path provisions the API, frontend gateway, **six core workers** (simulation,
-report, alert, execution, autonomy and network outbox), private stores and persistent
-storage. Optional fleet and stream-retention operations have separate configuration.
+report, alert, execution, autonomy and network outbox), the supervised stream-retention,
+telemetry-retention and asset-GC services (ADR-028), private stores and persistent
+storage. Optional fleet operations have separate configuration.
 
 The commands below start development stores and API/UI processes. Async workflows
 also require their workers. Model uploads need a private persistent
@@ -60,7 +61,26 @@ Open:
 
 Note: You must create a bootstrap user first (see "Create a Local Bootstrap User" in this README) because there is no public registration endpoint.
 
-## Current Status — 21 September 2026
+## Current Status — 25 September 2026 (ADR-028)
+
+Authority: [ADR-028](docs/adr/ADR-028-full-stack-review-remediation.md) (outcome §6,
+decisions §7, owner actions §8, final verification) and the
+[remaining checklist](docs/project/CurrentSprint.md). Contract changes, including four
+BREAKING ones (C3, C4, C5, C10), are listed in
+[ADR028-ContractChanges](docs/api/ADR028-ContractChanges.md).
+
+- Every finding of the 23 September full-stack review is remediated; schema head **0030**.
+  The change is committed per ADR-028 workstream on top of `e55a4f5` and reaches `main`
+  through the ADR-028 pull request ([#47](https://github.com/dhb001/NANFO/issues/47)).
+- Final verification: backend **5,335 passed/0 failed** (coverage **85.64 %**, floor 84),
+  private lane **94**, PostgreSQL 17/Redis lanes **323 + 29** with a clean migration round
+  trip, portable lane **750** cases with zero skips, ai-engine **520**, frontend
+  **909** unit and **71** e2e tests, evidence scan and gitleaks **0** findings.
+- Not proven locally: image builds/trivy, the production-browser lane and any live lab
+  qualification. The successor lab image and receiver need fresh qualification before any
+  result claim ([KnownIssues](docs/project/KnownIssues.md)).
+
+## Previous Status — 21 September 2026 (ADR027)
 
 Current authority: [seven-workstream review matrix](docs/project/ReviewClosure-Completion.md)
 and [remaining checklist](docs/project/CurrentSprint.md). Source is the ADR027
@@ -151,16 +171,23 @@ Frontend operator routes are delivered under `/ops/*` (overview, tenancy, topolo
 
 - PostgreSQL: primary relational module data
 - Neo4j: topology graph queries and relationships
-- Redis: event bus streams, rate limiting, token deny-list, websocket support
+- Redis: event bus streams, rate limiting, refresh-session store, websocket support
 
 Planned/deferred architecture breadth (for later roadmap phases) remains documented in ADRs and chapter conformance artifacts.
 
 ## Repository Layout
 
-- `backend/` - FastAPI app, domain modules, migrations, tests
+- `backend/` - FastAPI app, domain modules, migrations, workers, tests
 - `frontend/` - React operator console, tests, perf gates
+- `ai-engine/` - DRL routing training, qualification and the tracked qualified model
+- `emulation/` - isolated SDN/FRR lab, experiment tooling and the frozen lab archive
+- `deploy/` - supervised deployment package, gateway, backup/restore and verification
+- `scripts/` - local environment helpers, evidence hygiene, dependency audits, research tooling
+- `security/` - dependency exceptions and evidence-hygiene fixtures/exceptions
 - `docs/` - architecture, API contracts, feature PRDs, sprint tracking, ADRs
-- `scripts/` - local environment helper scripts (`dev-start.sh`, `dev-stop.sh`)
+- `ISPR2/` - research proposal, report chapters and their diagrams
+- `.github/` - CI workflows, issue forms, PR template, CODEOWNERS, branch ruleset
+- `.agents/` - agent rules, workflows and skills
 
 ## API and Realtime Surfaces
 
@@ -201,7 +228,7 @@ Install these first:
 - Docker with Compose supporting `up --wait --wait-timeout`
 - Python 3.12+
 - Poetry
-- Node.js 20+ and npm
+- Node.js 22.12+ and npm (`frontend/.nvmrc` pins 22.22.0)
 
 Arch Linux helper installer is available at `scripts/install-deps-arch.sh`.
 
@@ -232,7 +259,7 @@ Notes:
 - Keep the generated `backend/.env`; it is used by the app and Alembic. Never copy
   the empty-secret sample over it. Privately correct an existing invalid env before
   rerunning setup; the helper does not replace it.
-- `upgrade head` is for the owned development database and currently reaches0029.
+- `upgrade head` is for the owned development database and currently reaches 0030.
   Supervised0027/0028 installations need the separately reviewed upgrade procedure
   in [the deployment handoff](docs/project/ReviewClosure-Deployment.md); cold restore
   uses identical images/schema and does not migrate.
@@ -341,25 +368,19 @@ Remove containers and volumes (full reset):
 
 ### Validation and Test Commands
 
-Backend:
+The exact commands CI runs are in
+[CONTRIBUTING.md → Test commands](CONTRIBUTING.md#test-commands-identical-to-ci), for each
+area: backend, frontend, AI engine, the portable deployment/emulation/script lane,
+dependency audits, packaging and the production-browser lane. CONTRIBUTING.md also covers
+the private-artifact lanes and the 13 required checks. A quick local subset:
 
 ```bash
-cd backend
-poetry run pytest tests -q
-poetry run ruff check app tests
+cd backend && make check     # ruff + unit/integration tests, excluding private artifacts
+cd frontend && npm run lint && npm run typecheck && npm test
 ```
 
-Frontend:
-
-```bash
-cd frontend
-npm run lint
-npm run typecheck
-npm run test
-npm run test:e2e
-npm run build
-npm run perf:bundle
-```
+Report security problems privately as described in [SECURITY.md](SECURITY.md); do not
+open a public issue.
 
 The earlier repository-wide Ruff debt label is obsolete; the review baseline passed
 full backend lint. Current run counts and exact execution scopes are recorded in
@@ -408,3 +429,13 @@ Use these as source-of-truth references:
 - API standards/contracts: `docs/api/`
 - Feature PRDs: `docs/features/`
 - ADRs: `docs/adr/`
+
+## Project Tracking
+
+Work is tracked on GitHub: [issues](https://github.com/dhb001/NANFO/issues),
+[milestones](https://github.com/dhb001/NANFO/milestones) and
+[pull requests](https://github.com/dhb001/NANFO/pulls). Every change starts from an issue,
+is developed on a branch and reaches `main` through a reviewed pull request; see
+[CONTRIBUTING.md](CONTRIBUTING.md#issues-milestones-and-branches). Milestones M1–M14
+(closed) and the issues labelled `retrospective` record the work completed before this
+workflow was adopted.

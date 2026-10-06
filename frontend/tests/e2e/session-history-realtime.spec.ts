@@ -25,6 +25,19 @@ test("rotated session reconciles lifecycle history and paged telemetry on actual
     sockets.set(request.channel, socket);
     socket.send(JSON.stringify({ event: "subscribed", channel: request.channel, filters: request.filters }));
   }));
+  // Record the URL and offered subprotocols of every socket the app opens (observation only). Registered
+  // after routeWebSocket so it wraps the routed WebSocket class instead of being replaced by it.
+  await page.addInitScript(() => {
+    const Native = window.WebSocket;
+    const seen: string[][] = [];
+    Object.assign(window, { nanfoSockets: seen });
+    window.WebSocket = new Proxy(Native, {
+      construct(target, args: [string | URL, (string | string[])?]) {
+        seen.push([String(args[0]), ...([] as string[]).concat(args[1] ?? [])]);
+        return Reflect.construct(target, args);
+      },
+    });
+  });
   let status = "paused";
   let expire = false;
   const reads: { path: string; authorization: string }[] = [];
@@ -50,7 +63,20 @@ test("rotated session reconciles lifecycle history and paged telemetry on actual
   await page.getByLabel("Scenario Name", { exact: true }).fill("Keep my draft");
   expire = true;
   await page.getByRole("button", { name: "Refresh simulation status" }).click();
-  await expect.poll(() => sockets.get("digital-twin")?.url()).toContain("rotated-access");
+  // C1: credentials travel as the "nanfo.bearer.<token>" subprotocol, never in the URL, and a
+  // rotation keeps healthy sockets open (no reconnect storm); later reads use the rotated token.
+  await expect.poll(() => reads.some((read) => read.authorization === "Bearer rotated-access")).toBe(true);
+  const twinSocket = sockets.get("digital-twin");
+  expect(twinSocket?.url()).not.toMatch(/token/);
+  // Application channels only (the Vite dev server's own HMR socket is not an app socket).
+  const offered = (await page.evaluate(() => (window as unknown as { nanfoSockets: string[][] }).nanfoSockets))
+    .filter(([url]) => new URL(url).pathname.startsWith("/ws/"));
+  expect(offered.length).toBeGreaterThan(0);
+  for (const [url, ...protocols] of offered) {
+    expect(url).not.toMatch(/token=|access/);
+    expect(protocols[0]).toBe("nanfo.v1");
+    expect(protocols[1]).toMatch(/^nanfo\.bearer\./);
+  }
   await expect(page.getByLabel("Scenario Name", { exact: true })).toHaveValue("Keep my draft");
   await expect(page.getByLabel("Simulation ID", { exact: true })).toHaveValue(simulation);
   status = "cancelled";
@@ -60,6 +86,7 @@ test("rotated session reconciles lifecycle history and paged telemetry on actual
     delta_type: "update", scene_object: { id: `simulation:${simulation}`, object_type: "simulation_state", simulation_id: simulation, status },
   } }));
   await expect(page.getByRole("button", { name: "Persisted run — cancelled" })).toBeVisible();
+  expect(sockets.get("digital-twin")).toBe(twinSocket);
   expect(reads.slice(before).filter((read) => read.path.includes("/simulations")).every((read) => read.authorization === "Bearer rotated-access")).toBe(true);
 
   await page.getByRole("link", { name: /^Telemetry/ }).click();

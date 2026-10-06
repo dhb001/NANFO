@@ -100,4 +100,32 @@ describe("CommandPalette", () => {
 
     expect(screen.getByText("Go to Reports")).toBeInTheDocument();
   });
+
+  it("exposes combobox/listbox semantics with an active descendant and keeps focus in the input (ADR-028)", async () => {
+    const user = userEvent.setup();
+    useUiStore.setState({ commandPaletteOpen: true, toasts: [] });
+    render(<MemoryRouter><CommandPalette /></MemoryRouter>);
+    const combobox = screen.getByRole("combobox", { name: "Search commands" });
+    const listbox = screen.getByRole("listbox", { name: "Commands" });
+    expect(combobox).toHaveFocus();
+    expect(combobox).toHaveAttribute("aria-controls", listbox.id);
+    expect(combobox).toHaveAttribute("aria-expanded", "true");
+    const options = screen.getAllByRole("option");
+    expect(options[0]).toHaveAttribute("aria-selected", "true");
+    expect(combobox).toHaveAttribute("aria-activedescendant", options[0].id);
+    await user.keyboard("{ArrowDown}");
+    expect(combobox).toHaveAttribute("aria-activedescendant", options[1].id);
+    expect(options[1]).toHaveAttribute("aria-selected", "true");
+    expect(options[0]).toHaveAttribute("aria-selected", "false");
+    await user.keyboard("{End}");
+    expect(combobox).toHaveAttribute("aria-activedescendant", options.at(-1)!.id);
+    await user.keyboard("{Home}");
+    expect(combobox).toHaveAttribute("aria-activedescendant", options[0].id);
+    await user.tab();
+    expect(combobox).toHaveFocus();
+    await user.type(combobox, "zzz-no-match");
+    expect(screen.getByRole("status")).toHaveTextContent("No commands match this filter.");
+    expect(combobox).toHaveAttribute("aria-expanded", "false");
+    expect(combobox).not.toHaveAttribute("aria-activedescendant");
+  });
 });

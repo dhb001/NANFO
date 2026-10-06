@@ -1,4 +1,6 @@
 # Explicit operator-provisioned fleet; combine AFTER distributed overlay if used.
+# Restrict the collector's egress to SNMP (UDP/161) with the host DOCKER-USER rules in
+# deploy/NETSNMP.md; they match the pinned NANFO_FLEET_EGRESS_SUBNET below.
 services:
   api:
     environment:
@@ -13,6 +15,15 @@ services:
     command: [python, -m, scripts.run_fleet_collector]
     environment:
       NANFO_FLEET_MANIFEST_PATH: /var/lib/nanfo/fleet/manifest.json
+      # Per-request SNMPv3 USM config files live only in this private memory-backed base
+      # (backend/app/modules/telemetry/snmp_transport.py requires 0700 owned by the UID).
+      NANFO_SNMP_RUNTIME_DIR: /run/nanfo-snmp
+    # The inherited scratch mounts are restated verbatim so the merged list is identical
+    # whether Compose merges or replaces tmpfs sequences; only the SNMP base is new.
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=256m,mode=1777
+      - /run/nanfo:rw,noexec,nosuid,nodev,size=1m,uid=10001,gid=10001,mode=0700
+      - /run/nanfo-snmp:rw,noexec,nosuid,nodev,size=1m,uid=10001,gid=10001,mode=0700
     networks: [fleet_egress]
     volumes:
       - type: bind
@@ -32,4 +43,9 @@ services:
       retries: 4
       start_period: 60s
 networks:
-  fleet_egress: {}
+  # Pinned so the host egress firewall keeps matching after the network is recreated
+  # (an unpinned bridge could move to a new subnet and silently escape the rules).
+  fleet_egress:
+    ipam:
+      config:
+        - subnet: ${NANFO_FLEET_EGRESS_SUBNET:?Pin the fleet egress subnet used by the DOCKER-USER rules (deploy/NETSNMP.md)}

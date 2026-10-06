@@ -88,3 +88,29 @@ async def test_empty_id_section_is_explicit(mock_db):
     assert result["sections"]["intent"]["omissions"] == [
         "explicit_ids_required_no_discovery"
     ]
+
+
+async def test_alert_section_filters_in_alert_sql_and_reports_exact_total(mock_db):
+    # Regression: 500 newest alerts were fetched and date/network-filtered in Python,
+    # so older in-range alerts vanished and the total was unknown.
+    from app.modules.alert.schemas import AlertListResponse, AlertRecordResponse
+
+    network = uuid.uuid4()
+    req = request(report_type="alerts", network_id=str(network), filters={"alert_status": "active", "max_rows": 2})
+    created = datetime(2026, 8, 1, 6, tzinfo=UTC)
+    item = AlertRecordResponse(alert_id=uuid.uuid4(), alert_key="secret-key", source="telemetry", status="active",
+        severity="warning", correlation_id=uuid.uuid4(), payload={"value": 91.5, "unit": "%", "password": "x"},
+        acknowledged_by_user_id=None, resolved_by_user_id=None, acknowledged_at=None, resolved_at=None,
+        created_at=created, updated_at=created)
+    listing = AsyncMock(return_value=AlertListResponse(items=[item, item], total=37, status_counts={"active": 37}))
+    with patch("app.modules.report.sources.AlertService.list_alerts", listing):
+        result = await ReportSources(mock_db, None).snapshot(req, "user-1")
+    kwargs = listing.await_args.kwargs
+    assert kwargs["limit"] == 2 and kwargs["network_id_filter"] == network
+    assert kwargs["created_from"] == req.date_range.start and kwargs["created_before"] == req.date_range.end
+    assert kwargs["status_filter"] == "active" and kwargs["requested_workspace_id"] == req.workspace_id
+    section = result["sections"]["alerts"]
+    assert section["total"] == 37 and section["truncated"] is True and len(section["rows"]) == 2
+    assert section["rows"][0]["measurement"] == {"value": 91.5, "unit": "%"}
+    assert "secret-key" not in str(section) and "password" not in str(section)
+    assert section["omissions"] == ["arbitrary_payload"]

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import uuid
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
@@ -9,13 +10,35 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from fastapi import HTTPException
 
+from app.core.correlation import correlation_uuid
+from app.modules.simulation import service as simulation_service
+from app.modules.simulation.models import SimulationOutbox
 from app.modules.simulation.service import (
     ScenarioValidationHandoffService,
     SimulationStartService,
     SimulationTerminalEventService,
     _derive_terminal_event_id,
-    queue_scenario_validation_handoff,
 )
+
+
+def _ordered(mock_db, mock_publish):
+    """Record commit/publish order so publish-before-commit regressions fail loudly."""
+    operations = []
+    mock_db.commit.side_effect = lambda: operations.append("commit")
+    original = mock_publish.side_effect
+
+    async def publish(*args, **kwargs):
+        operations.append("publish")
+        if isinstance(original, BaseException) or (isinstance(original, type) and issubclass(original, BaseException)):
+            raise original
+        return mock_publish.return_value
+
+    mock_publish.side_effect = publish
+    return operations
+
+
+def _outbox_rows(mock_db):
+    return [call.args[0] for call in mock_db.add.call_args_list if isinstance(call.args[0], SimulationOutbox)]
 
 
 def test_build_handoff_payload_derives_deterministic_scenario_id_and_defaults():
@@ -42,56 +65,16 @@ def test_build_handoff_payload_derives_deterministic_scenario_id_and_defaults():
     assert payload["validation"]["policy_reference"] == "ADR-008"
     assert payload["validation"]["requested_by_user_id"] == "operator-1"
     assert isinstance(uuid.UUID(payload["simulation_id"]), uuid.UUID)
-    assert isinstance(uuid.UUID(payload["correlation_id"]), uuid.UUID)
+    # ADR-028 C20: opaque request ids map deterministically (never a random uuid4)
+    # and the original id is preserved.
+    assert payload["correlation_id"] == str(correlation_uuid("not-a-uuid"))
+    assert payload["request_id"] == "not-a-uuid"
 
 
-@pytest.mark.asyncio
-async def test_queue_scenario_validation_handoff_publishes_simulation_started_event():
-    fake_redis = AsyncMock()
-
-    with patch("app.modules.simulation.service.publish_event", new_callable=AsyncMock) as mock_publish:
-        mock_publish.return_value = "901-0"
-
-        result = await queue_scenario_validation_handoff(
-            redis=fake_redis,
-            network_id=str(uuid.uuid4()),
-            scenario_name="RF Expansion",
-            validation_checks=["simulation_before_deployment", "blast_radius_assessment"],
-            correlation_id=str(uuid.uuid4()),
-            requested_by_user_id=str(uuid.uuid4()),
-        )
-
-    assert result["queue_status"] == "queued"
-    assert result["stream_entry_id"] == "901-0"
-    assert result["warning"] is None
-    mock_publish.assert_awaited_once()
-    kwargs = mock_publish.await_args.kwargs
-    assert kwargs["redis"] is fake_redis
-    assert kwargs["event_type"] == "simulation.started"
-    assert kwargs["source"] == "simulation"
-    assert kwargs["payload"]["simulation_id"] == result["handoff"]["simulation_id"]
-    assert kwargs["correlation_id"] == result["handoff"]["correlation_id"]
-
-
-@pytest.mark.asyncio
-async def test_queue_scenario_validation_handoff_publish_failure_is_fail_open():
-    with patch(
-        "app.modules.simulation.service.publish_event",
-        new=AsyncMock(side_effect=RuntimeError("redis unavailable")),
-    ):
-        result = await queue_scenario_validation_handoff(
-            redis=AsyncMock(),
-            network_id=str(uuid.uuid4()),
-            scenario_name="Risk Drill",
-            validation_checks=["simulation_before_deployment"],
-            correlation_id=str(uuid.uuid4()),
-            requested_by_user_id=str(uuid.uuid4()),
-        )
-
-    assert result["queue_status"] == "deferred"
-    assert result["stream_entry_id"] is None
-    assert result["warning"] == "event_queue_unavailable"
-    assert result["handoff"]["state"] == "queued"
+def test_dead_handoff_queue_helper_removed():
+    assert not hasattr(simulation_service, "queue_scenario_validation_handoff")
+    assert not hasattr(simulation_service, "_derive_terminal_transition")
+    assert not hasattr(simulation_service.SimulationEventService, "publish_simulation_started_handoff")
 
 
 @pytest.mark.asyncio
@@ -144,6 +127,9 @@ async def test_start_simulation_persists_handoff_with_workspace_validation(mock_
     assert create_kwargs["state"] == "cancelled"
     assert mock_queue.await_args.kwargs["event_type"] == "simulation.cancelled"
     assert mock_db.commit.await_count == 2
+    (outbox,) = _outbox_rows(mock_db)
+    assert outbox.envelope["event_id"] == mock_queue.await_args.kwargs["event_id"]
+    assert outbox.published_at is not None  # immediate publication succeeded
 
 
 @pytest.mark.asyncio
@@ -186,6 +172,9 @@ async def test_start_simulation_persists_deferred_queue_outcome_fail_open(mock_d
     assert create_kwargs["stream_entry_id"] is None
     assert result["warning"] == "event_queue_unavailable"
     assert result["handoff"]["state"] == "cancelled"
+    (outbox,) = _outbox_rows(mock_db)
+    assert outbox.published_at is None  # the simulation worker republishes the committed copy
+    assert json.loads(outbox.envelope["payload"])["state"] == "cancelled"
 
 
 @pytest.mark.asyncio
@@ -309,6 +298,8 @@ async def test_pause_simulation_updates_state_and_publishes_event(mock_db, fake_
     ):
         mock_get.return_value = existing
         mock_ws.return_value = AsyncMock()
+        mock_publish.return_value = "1500-0"
+        operations = _ordered(mock_db, mock_publish)
 
         svc = SimulationStartService(db=mock_db, redis=fake_redis)
         result = await svc.pause_simulation(
@@ -325,7 +316,12 @@ async def test_pause_simulation_updates_state_and_publishes_event(mock_db, fake_
     mock_update.assert_awaited_once()
     mock_publish.assert_awaited_once()
     assert mock_publish.await_args.kwargs["event_type"] == "simulation.paused"
-    mock_db.commit.assert_awaited_once()
+    # Regression (ADR-028): state and outbox commit before publication.
+    assert operations == ["commit", "publish", "commit"]
+    (outbox,) = _outbox_rows(mock_db)
+    assert outbox.envelope["event_id"] == mock_publish.await_args.kwargs["event_id"] == _derive_terminal_event_id(
+        simulation_id=simulation_id, event_type="simulation.paused")
+    assert outbox.published_at is not None
 
 
 @pytest.mark.asyncio
@@ -350,6 +346,7 @@ async def test_pause_simulation_event_publish_failure_is_fail_open(mock_db, fake
         mock_get.return_value = existing
         mock_ws.return_value = AsyncMock()
         mock_publish.side_effect = RuntimeError("stream unavailable")
+        operations = _ordered(mock_db, mock_publish)
 
         svc = SimulationStartService(db=mock_db, redis=fake_redis)
         result = await svc.pause_simulation(
@@ -362,7 +359,9 @@ async def test_pause_simulation_event_publish_failure_is_fail_open(mock_db, fake
 
     assert result["state"] == "paused"
     mock_ws.assert_awaited_once_with(existing.workspace_id, user_id=actor_user_id, claim_org_id=None, require_write=True)
-    mock_db.commit.assert_awaited_once()
+    assert operations == ["commit", "publish", "commit"]
+    (outbox,) = _outbox_rows(mock_db)
+    assert outbox.published_at is None  # retried by the worker's outbox publisher
 
 
 @pytest.mark.asyncio
@@ -435,6 +434,7 @@ async def test_branch_simulation_creates_draft_lineage_record(mock_db, fake_redi
         mock_ws.return_value = AsyncMock()
         mock_create.return_value = branch
         mock_publish.return_value = "1400-0"
+        operations = _ordered(mock_db, mock_publish)
 
         svc = SimulationStartService(db=mock_db, redis=fake_redis)
         result = await svc.branch_simulation(
@@ -464,7 +464,9 @@ async def test_branch_simulation_creates_draft_lineage_record(mock_db, fake_redi
     assert result["validation"]["pipeline_stage"] == "branch_draft"
     mock_publish.assert_awaited_once()
     assert mock_publish.await_args.kwargs["event_type"] == "simulation.branch_created"
-    mock_db.commit.assert_awaited_once()
+    assert operations == ["commit", "publish", "commit"]
+    (outbox,) = _outbox_rows(mock_db)
+    assert outbox.published_at is not None and outbox.revision == 1
 
 
 @pytest.mark.asyncio
@@ -750,6 +752,7 @@ async def test_branch_simulation_event_publish_failure_is_fail_open(mock_db, fak
         mock_ws.return_value = AsyncMock()
         mock_create.return_value = branch
         mock_publish.side_effect = RuntimeError("stream unavailable")
+        operations = _ordered(mock_db, mock_publish)
 
         svc = SimulationStartService(db=mock_db, redis=fake_redis)
         result = await svc.branch_simulation(
@@ -763,7 +766,9 @@ async def test_branch_simulation_event_publish_failure_is_fail_open(mock_db, fak
 
     assert result["simulation_id"] == str(branch.simulation_id)
     assert result["state"] == "draft"
-    mock_db.commit.assert_awaited_once()
+    assert operations == ["commit", "publish", "commit"]
+    (outbox,) = _outbox_rows(mock_db)
+    assert outbox.published_at is None
 
 
 @pytest.mark.asyncio
@@ -814,6 +819,8 @@ async def test_terminal_consumer_cancels_without_evaluator(mock_db, fake_redis):
         == _derive_terminal_event_id(simulation_id=simulation_id, event_type="simulation.cancelled")
     )
     mock_db.commit.assert_awaited_once()
+    (outbox,) = _outbox_rows(mock_db)
+    assert outbox.envelope["event_id"] == mock_publish.await_args.kwargs["event_id"]
 
 
 @pytest.mark.asyncio
@@ -925,17 +932,25 @@ async def test_terminal_consumer_publish_failure_is_fail_open(mock_db, fake_redi
         ),
     ):
         mock_get.return_value = simulation
+        operations = []
+        mock_db.commit.side_effect = lambda: operations.append("commit")
 
         svc = SimulationTerminalEventService(db=mock_db, redis=fake_redis)
         await svc.process_started_event(
             event={
                 "event_type": "simulation.started",
-                "correlation_id": str(uuid.uuid4()),
+                "correlation_id": "opaque-consumer-trace",
                 "payload": {"simulation_id": str(simulation_id)},
             }
         )
 
-    mock_db.commit.assert_awaited_once()
+    assert operations == ["commit"]
+    # The committed outbox copy (same stable event id) is what the worker republishes.
+    (outbox,) = _outbox_rows(mock_db)
+    assert outbox.published_at is None
+    assert outbox.envelope["event_id"] == _derive_terminal_event_id(
+        simulation_id=simulation_id, event_type="simulation.cancelled")
+    assert outbox.envelope["correlation_id"] == str(correlation_uuid("opaque-consumer-trace"))
 
 
 @pytest.mark.asyncio

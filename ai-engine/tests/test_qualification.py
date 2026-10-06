@@ -251,8 +251,9 @@ def test_qualification_gate_matrix_injected_only(
         return action, 0.0, 0.0, [0.5, 0.5]
 
     agent = SimpleNamespace(model=SimpleNamespace(decide=decide))
-    monkeypatch.setattr(qualification, "loadCheckpoint", lambda path: (agent, manifest))
-    monkeypatch.setattr(qualification, "inspectCheckpoint", lambda path: identity)
+    monkeypatch.setattr(
+        qualification, "loadCheckpointIdentity", lambda path: (agent, manifest, identity)
+    )
     base = {
         "kind": "evaluation",
         "status": "completed",

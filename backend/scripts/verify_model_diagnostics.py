@@ -201,7 +201,7 @@ async def verify():
                     else:
                         raise AssertionError("immutable trigger did not reject update")
                     assert len(list(await db.scalars(select(ModelDiagnostic)))) == 2
-                    await db.execute(text("UPDATE org_members SET org_role='Viewer' WHERE user_id=:actor"), {"actor": actor_id})
+                    await db.execute(text("UPDATE org_members SET org_role='Read-Only' WHERE user_id=:actor"), {"actor": actor_id})
                     await db.commit()
                 assert (await client.post(path + "/diagnose", json=payload, headers=headers)).status_code == 403
                 async with sessions() as db:

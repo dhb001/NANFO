@@ -4,8 +4,12 @@ x-logging: &logging
   driver: json-file
   options: {max-size: 5m, max-file: "3"}
 
+# Shared non-secret settings. Every backend-image service states APP_ENV and
+# NANFO_SERVICE_ROLE explicitly (ADR-028: APP_ENV defaults to production and the
+# worker role never receives or requires the JWT signing key, C10/C24).
 x-environment: &environment
   APP_ENV: production
+  NANFO_SERVICE_ROLE: worker
   EXECUTION_MODE: ${EXECUTION_MODE:-demo}
   LOG_LEVEL: INFO
   POSTGRES_HOST: postgres
@@ -13,6 +17,8 @@ x-environment: &environment
   POSTGRES_DB: nanfo
   POSTGRES_USER: nanfo_runtime
   REDIS_HOST: redis
+  # C24: the Redis `default` user is disabled; every client authenticates as `nanfo`.
+  REDIS_USERNAME: nanfo
   NEO4J_URI: bolt://neo4j:7687
   NEO4J_USER: neo4j
   CORS_ALLOW_ORIGINS: http://127.0.0.1:${NANFO_HTTP_PORT:-8787}
@@ -26,7 +32,8 @@ x-environment: &environment
   EMULATION_BINDING_PATH: /var/lib/nanfo/binding/binding.json
   EMULATION_COMMANDS_PATH: /var/lib/nanfo/lab/commands
   EMULATION_RESULTS_PATH: /var/lib/nanfo/lab/results
-  NANFO_WORKER_HEARTBEAT_PATH: /run/nanfo/heartbeat.json
+  # The only heartbeat setting read by the backend (app/core/runtime_health.py) and
+  # by deploy/supervise.py; each loop appends ".<loop>" under the private tmpfs.
   WORKER_HEARTBEAT_PATH: /run/nanfo/heartbeat.json
 
 x-application: &application
@@ -45,6 +52,7 @@ x-application: &application
     - /run/nanfo:rw,noexec,nosuid,nodev,size=1m,uid=10001,gid=10001,mode=0700
   environment: *environment
   networks: [private]
+  # Restarts every exit, including watchdog exit 70 and retention refusal exit 3.
   restart: unless-stopped
   pids_limit: 128
   mem_limit: 768m
@@ -55,8 +63,9 @@ x-application: &application
     postgres: {condition: service_healthy}
     redis: {condition: service_healthy}
     neo4j: {condition: service_healthy}
+  # Worker secret volume: no JWT signing key (C24). The API overrides it.
   volumes:
-    - runtime_secrets:/run/secrets:ro
+    - runtime_secrets_worker:/run/secrets:ro
 
 services:
   volume-init:
@@ -69,15 +78,22 @@ services:
     cap_add: [CHOWN, FOWNER, DAC_OVERRIDE]
     security_opt: [no-new-privileges:true]
     entrypoint: [python, /opt/nanfo/deploy/volume_init.py]
+    environment:
+      APP_ENV: production
+      NANFO_SERVICE_ROLE: worker
     volumes:
       - ${NANFO_STATE_DIR:?Initialize configuration}/secrets:/source-secrets:ro
       - reports:/volumes/reports
       - network_assets:/volumes/network_assets
       - telemetry_archive:/volumes/telemetry_archive
+      - stream_archive:/volumes/stream_archive
       - lab_output:/volumes/lab_output
       - lab_commands:/volumes/lab_commands
       - lab_results:/volumes/lab_results
-      - runtime_secrets:/volumes/runtime_secrets
+      - runtime_secrets_api:/volumes/runtime_secrets_api
+      - runtime_secrets_worker:/volumes/runtime_secrets_worker
+      - execution_secrets:/volumes/execution_secrets
+      - lab_secrets:/volumes/lab_secrets
       - init_secrets:/volumes/init_secrets
     logging: *logging
     pids_limit: 32
@@ -89,12 +105,28 @@ services:
     command: [python, /opt/nanfo/deploy/initialize.py]
     environment:
       <<: *environment
+      # Fresh-only initializer: the init volume holds every staged secret.
+      NANFO_SERVICE_ROLE: api
       NANFO_BOOTSTRAP_EMAIL: ${NANFO_BOOTSTRAP_EMAIL:?Initialize configuration}
+    volumes:
+      - init_secrets:/run/secrets:ro
+  # Operator-only store credential rotation (manage.py rotate); never a lifecycle service.
+  secret-rotation:
+    <<: *application
+    profiles: [rotation]
+    restart: "no"
+    command: [python, /opt/nanfo/deploy/secret_rotation.py, --help]
+    environment:
+      <<: *environment
+      NANFO_SERVICE_ROLE: api
     volumes:
       - init_secrets:/run/secrets:ro
 
   postgres:
-    image: postgres:17.6-bookworm@sha256:f3bd19c606e442c3d7bdfa8002e03fe260a1023351e0ea4598032022b68dd6e3
+    image: postgres:17.11-bookworm@sha256:639ab7ceb90e13123085b741fb31ef493fba25463002f6da665352e7b534b652
+    # Connection budget (deploy/README.md "Capacity Limits"): API/api2 and every
+    # worker pool 5 + 5 overflow, retention/probes/maintenance, 3 superuser slots.
+    command: [postgres, -c, max_connections=200]
     environment:
       POSTGRES_DB: nanfo
       POSTGRES_USER: postgres
@@ -111,7 +143,8 @@ services:
     restart: unless-stopped
     mem_limit: 1g
     cpus: 1.0
-    pids_limit: 128
+    # One backend process per connection: max_connections + background/parallel workers.
+    pids_limit: 300
     shm_size: 128m
     stop_grace_period: 60s
     logging: *logging
@@ -121,12 +154,11 @@ services:
       timeout: 3s
       retries: 30
   redis:
-    image: redis:7.4.5-bookworm@sha256:90e7a336d044f1abc9e9dbc05d65566850896d11453bbd1dd0fb7e5059f0e8fb
-    entrypoint: [sh, /deploy/redis-entrypoint.sh]
-    secrets: [redis_password]
-    volumes:
-      - redis_data:/data
-      - ./redis-entrypoint.sh:/deploy/redis-entrypoint.sh:ro
+    # Entrypoint baked into the image (Dockerfile.redis); no working-tree bind mount.
+    image: ${NANFO_REDIS_IMAGE:?Initialize configuration}
+    build: {context: .., dockerfile: deploy/Dockerfile.redis}
+    secrets: [redis_password, redis_admin_password]
+    volumes: [redis_data:/data]
     networks: [private]
     read_only: true
     tmpfs: ["/run/redis:rw,noexec,nosuid,nodev,size=1m", "/tmp:rw,noexec,nosuid,nodev,size=8m"]
@@ -140,7 +172,9 @@ services:
     stop_grace_period: 60s
     logging: *logging
     healthcheck:
-      test: [CMD-SHELL, 'REDISCLI_AUTH=$$(cat /run/secrets/redis_password) redis-cli ping | test "$$(cat)" = PONG']
+      # The operator ACL user is never rotated in place, so the probe survives a
+      # `nanfo` password rotation that replaces this container's secret file.
+      test: [CMD-SHELL, 'REDISCLI_AUTH=$$(cat /run/secrets/redis_admin_password) redis-cli --no-auth-warning --user nanfo-admin ping | test "$$(cat)" = PONG']
       interval: 5s
       timeout: 3s
       retries: 30
@@ -183,10 +217,13 @@ services:
     # Only nginx's exact address on the isolated proxy network is trusted.
     environment:
       <<: *environment
+      NANFO_SERVICE_ROLE: api
       FORWARDED_ALLOW_IPS: ${NANFO_PROXY_GATEWAY_IP:-172.30.27.2}
+      # C21 verifier: Ed25519 public key only; the signing key never enters Compose.
+      NANFO_RECEIVER_HEALTH_PUBLIC_KEY_FILE: /run/secrets/receiver_health_public_key.pem
     networks: [private, proxy]
     volumes:
-      - runtime_secrets:/run/secrets:ro
+      - runtime_secrets_api:/run/secrets:ro
       - reports:/var/lib/nanfo/reports:ro
       - network_assets:/var/lib/nanfo/network-assets
       - lab_output:/var/lib/nanfo/lab/output:ro
@@ -198,6 +235,7 @@ services:
         read_only: true
         bind: {create_host_path: false}
     healthcheck:
+      # Readiness is private: the gateway answers /ready with 404 (deploy/nginx.conf).
       test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/ready', timeout=4).read()"]
       interval: 10s
       timeout: 6s
@@ -209,7 +247,7 @@ services:
     restart: "no"
     command: [python, /opt/nanfo/deploy/maintenance.py, checkpoint]
     volumes:
-      - runtime_secrets:/run/secrets:ro
+      - runtime_secrets_worker:/run/secrets:ro
       - reports:/var/lib/nanfo/reports:ro
       - network_assets:/var/lib/nanfo/network-assets:ro
       - telemetry_archive:/var/lib/nanfo/telemetry-archive:ro
@@ -221,13 +259,89 @@ services:
         target: /var/lib/nanfo/binding
         read_only: true
         bind: {create_host_path: false}
+  # C14: supervised archive-before-delete retention of every domain stream and the DLQ.
+  stream-retention:
+    <<: *application
+    command:
+      [python, /opt/nanfo/deploy/supervise.py, run, --loop, stream-retention, --,
+       python, -m, scripts.stream_retention, schedule]
+    environment:
+      <<: *environment
+      NANFO_STREAM_ARCHIVE_ROOT: /var/lib/nanfo/stream-archive
+      NANFO_STREAM_RETENTION_INTERVAL_SECONDS: ${NANFO_STREAM_RETENTION_INTERVAL_SECONDS:-300}
+      NANFO_STREAM_RETENTION_MAX_ENTRIES: ${NANFO_STREAM_RETENTION_MAX_ENTRIES:-1000}
+      NANFO_STREAM_RETENTION_MIN_AGE_SECONDS: ${NANFO_STREAM_RETENTION_MIN_AGE_SECONDS:-86400}
+      NANFO_STREAM_RETENTION_DLQ_MIN_AGE_SECONDS: ${NANFO_STREAM_RETENTION_DLQ_MIN_AGE_SECONDS:-604800}
+      NANFO_STREAM_RETENTION_MIN_FREE_BYTES: ${NANFO_STREAM_RETENTION_MIN_FREE_BYTES:-1073741824}
+      NANFO_STREAM_RETENTION_MAX_REFUSALS: ${NANFO_STREAM_RETENTION_MAX_REFUSALS:-5}
+    volumes:
+      - runtime_secrets_worker:/run/secrets:ro
+      - stream_archive:/var/lib/nanfo/stream-archive
+    mem_limit: 384m
+    cpus: 0.5
+    healthcheck:
+      test: [CMD, python, /opt/nanfo/deploy/supervise.py, check, --loop, stream-retention]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+  # BE-Telemetry supervised retention loop; the DSN is derived from staged secrets.
   telemetry-retention:
+    <<: *application
+    command:
+      [python, /opt/nanfo/deploy/supervise.py, run, --loop, telemetry-retention, --,
+       python, scripts/telemetry_retention.py, apply, --loop,
+       --archive-root, /var/lib/nanfo/telemetry-archive]
+    environment:
+      <<: *environment
+      NANFO_TELEMETRY_RETENTION_DSN_FROM_SECRETS: "true"
+      NANFO_TELEMETRY_RETENTION_INTERVAL_SECONDS: ${NANFO_TELEMETRY_RETENTION_INTERVAL_SECONDS:-3600}
+      NANFO_TELEMETRY_RETENTION_MIN_AGE_DAYS: ${NANFO_TELEMETRY_RETENTION_MIN_AGE_DAYS:-30}
+    volumes:
+      - runtime_secrets_worker:/run/secrets:ro
+      - telemetry_archive:/var/lib/nanfo/telemetry-archive
+    mem_limit: 512m
+    cpus: 0.5
+    healthcheck:
+      test: [CMD, python, /opt/nanfo/deploy/supervise.py, check, --loop, telemetry-retention]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+  # Periodic unreferenced campus-model object collector (Network owner CLI) on the
+  # API's asset volume. The collector re-checks references under the upload advisory
+  # lock, so it is safe while serving; one-off preview: `run --rm asset-gc python -m
+  # app.modules.network.asset_gc --dry-run`.
+  asset-gc:
+    <<: *application
+    command:
+      [python, /opt/nanfo/deploy/supervise.py, every, --loop, asset-gc, --,
+       python, -m, app.modules.network.asset_gc]
+    environment:
+      <<: *environment
+      NANFO_ASSET_GC_INTERVAL_SECONDS: ${NANFO_ASSET_GC_INTERVAL_SECONDS:-86400}
+      NANFO_ASSET_GC_TIMEOUT_SECONDS: ${NANFO_ASSET_GC_TIMEOUT_SECONDS:-1800}
+      NANFO_ASSET_GC_RETRY_SECONDS: ${NANFO_ASSET_GC_RETRY_SECONDS:-300}
+      NANFO_ASSET_GC_MAX_FAILURES: ${NANFO_ASSET_GC_MAX_FAILURES:-3}
+    volumes:
+      - runtime_secrets_worker:/run/secrets:ro
+      - network_assets:/var/lib/nanfo/network-assets
+    mem_limit: 384m
+    cpus: 0.5
+    healthcheck:
+      test: [CMD, python, /opt/nanfo/deploy/supervise.py, check, --loop, asset-gc]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+  # Finite operator invocations of the same CLI (dry-run/restore/reconcile/fixtures).
+  telemetry-retention-cli:
     <<: *application
     profiles: [retention]
     restart: "no"
     command: [python, /opt/nanfo/deploy/telemetry_retention.py]
     volumes:
-      - runtime_secrets:/run/secrets:ro
+      - runtime_secrets_worker:/run/secrets:ro
       - telemetry_archive:/var/lib/nanfo/telemetry-archive
   network-outbox-worker:
     <<: *application
@@ -251,7 +365,7 @@ services:
     <<: *application
     command: [python, scripts/run_report_worker.py]
     volumes:
-      - runtime_secrets:/run/secrets:ro
+      - runtime_secrets_worker:/run/secrets:ro
       - reports:/var/lib/nanfo/reports
     healthcheck:
       test: [CMD, python, /opt/nanfo/deploy/entrypoint.py, python, scripts/check_worker_health.py, --worker, report]
@@ -271,8 +385,16 @@ services:
   execution-worker:
     <<: *application
     command: [python, scripts/run_execution_worker.py]
+    environment:
+      <<: *environment
+      # C15: HMAC key for mailbox command envelopes (execution worker + lab only).
+      NANFO_LAB_COMMAND_KEY_FILE: /run/nanfo-lab-key/lab_command_key
+      # Command files 0640: a C23 lab without DAC_OVERRIDE reads them via group 10001.
+      NANFO_UMASK: "027"
+      NANFO_RECEIVER_HEALTH_PUBLIC_KEY_FILE: /run/secrets/receiver_health_public_key.pem
     volumes:
-      - runtime_secrets:/run/secrets:ro
+      - runtime_secrets_worker:/run/secrets:ro
+      - execution_secrets:/run/nanfo-lab-key:ro
       - lab_output:/var/lib/nanfo/lab/output:ro
       - lab_commands:/var/lib/nanfo/lab/commands
       - lab_results:/var/lib/nanfo/lab/results:ro
@@ -290,8 +412,11 @@ services:
   autonomy-worker:
     <<: *application
     command: [python, scripts/run_autonomy_worker.py]
+    environment:
+      <<: *environment
+      NANFO_RECEIVER_HEALTH_PUBLIC_KEY_FILE: /run/secrets/receiver_health_public_key.pem
     volumes:
-      - runtime_secrets:/run/secrets:ro
+      - runtime_secrets_worker:/run/secrets:ro
       - lab_output:/var/lib/nanfo/lab/output:ro
       - lab_commands:/var/lib/nanfo/lab/commands:ro
       - lab_results:/var/lib/nanfo/lab/results:ro
@@ -314,6 +439,12 @@ services:
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     tmpfs: ["/tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777"]
+    environment:
+      # R06: the host TLS proxy reaches nginx through the loopback-published port,
+      # i.e. from this bridge's gateway address. Only that hop may supply
+      # X-Forwarded-For/-Proto; every other peer's headers are ignored.
+      NANFO_GATEWAY_TRUSTED_HOP: ${NANFO_GATEWAY_BRIDGE_IP:-172.31.87.1}
+      NANFO_GATEWAY_UPSTREAM: single
     ports: ["127.0.0.1:${NANFO_HTTP_PORT:-8787}:8080"]
     networks:
       proxy:
@@ -326,7 +457,8 @@ services:
     pids_limit: 64
     logging: *logging
     healthcheck:
-      test: [CMD, wget, -q, --spider, http://127.0.0.1:8080/health]
+      # nginx itself (static shell); API health is the API container's own probe.
+      test: [CMD, wget, -q, --spider, http://127.0.0.1:8080/index.html]
       interval: 10s
       timeout: 5s
       retries: 6
@@ -340,7 +472,12 @@ networks:
     ipam:
       config:
         - subnet: ${NANFO_PROXY_SUBNET:-172.30.27.0/24}
-  gateway: {}
+  # Pinned so the published port's source address (the bridge gateway) is known.
+  gateway:
+    ipam:
+      config:
+        - subnet: ${NANFO_GATEWAY_SUBNET:-172.31.87.0/24}
+          gateway: ${NANFO_GATEWAY_BRIDGE_IP:-172.31.87.1}
 volumes:
   postgres_data: {}
   redis_data: {}
@@ -348,12 +485,17 @@ volumes:
   reports: {}
   network_assets: {}
   telemetry_archive: {}
+  stream_archive: {}
   lab_output: {}
   lab_commands: {}
   lab_results: {}
-  runtime_secrets: {}
+  runtime_secrets_api: {}
+  runtime_secrets_worker: {}
+  execution_secrets: {}
+  lab_secrets: {}
   init_secrets: {}
 secrets:
   postgres_admin_password: {file: "${NANFO_STATE_DIR}/secrets/postgres_admin_password"}
   redis_password: {file: "${NANFO_STATE_DIR}/secrets/redis_password"}
+  redis_admin_password: {file: "${NANFO_STATE_DIR}/secrets/redis_admin_password"}
   neo4j_password: {file: "${NANFO_STATE_DIR}/secrets/neo4j_password"}

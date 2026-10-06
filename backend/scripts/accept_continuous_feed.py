@@ -53,7 +53,8 @@ def preregister(output):
     assert len(seeds) == 2
     save(output / "seed-audit.json", audit | {"reserved_including_operational": sorted(reserved)})
     template = json.loads((CAMPAIGN / "live-registry.template.json").read_bytes())
-    files = [Path(__file__), ROOT / "scripts/live_feed_evaluate.py", ROOT / "emulation/passive_observer.py",
+    files = [Path(__file__), ROOT / "scripts/live_feed_evaluate.py",
+             ROOT / "backend/app/modules/autonomy/experimental/passive_observer.py",
              *sorted((ROOT / "backend/app/modules/autonomy").glob("*.py")),
              ROOT / "backend/scripts/frozen_live_inference.py", ROOT / "backend/scripts/verify_fresh_live_provider.py"]
     save(output / "source-manifest.json", {str(p.relative_to(ROOT)): digest(p) for p in files})
@@ -88,7 +89,7 @@ async def acceptance(output):
     from app.modules.autonomy.registry import LiveRegistry
     from app.modules.autonomy.worker import AutonomyWorker
     from app.modules.autonomy.model_provider import _QUALIFICATION_TASKS
-    from emulation.passive_observer import Admission, process_identity
+    from app.modules.autonomy.experimental.passive_observer import Admission, process_identity
     from scripts.verify_fresh_live_provider import verify_fresh
 
     logging.disable(logging.CRITICAL)
@@ -241,7 +242,8 @@ async def acceptance(output):
                 save(directory / "admission.json", admission.model_dump(mode="json"))
                 bridge_log = (directory / "bridge.log").open("wb")
                 env = dict(os.environ, PYTHONPATH=str(ROOT / "backend") + ":" + str(ROOT))
-                bridge = subprocess.Popen([sys.executable, "-B", "-m", "emulation.passive_observer", "--admission", str(directory / "admission.json"),
+                bridge = subprocess.Popen([sys.executable, "-B", "-m", "app.modules.autonomy.experimental.passive_observer",
+                    "--admission", str(directory / "admission.json"),
                     "--sha256", digest(directory / "admission.json"), "--duration-seconds", "200"], env=env, cwd=ROOT,
                     stdout=bridge_log, stderr=subprocess.STDOUT)
                 children.append(bridge)
@@ -290,7 +292,7 @@ async def acceptance(output):
                 # New expired admission uses actual past time; no measurement alteration.
                 expired = admission.model_copy(update={"expires_at": datetime.now(UTC) - timedelta(seconds=1)})
                 save(directory / "expired-admission.json", expired.model_dump(mode="json"))
-                from emulation.passive_observer import observe_feed
+                from app.modules.autonomy.experimental.passive_observer import observe_feed
                 try:
                     await observe_feed(directory / "expired-admission.json", digest(directory / "expired-admission.json"), duration_seconds=1)
                 except ValueError as exc:
@@ -308,7 +310,7 @@ async def acceptance(output):
                 lab_ids.remove(cid)
             # Actual current organization permission revocation, no auth monkeypatch.
             async with sessions() as db:
-                await db.execute(text("UPDATE org_members SET org_role='Viewer' WHERE user_id=:actor"), {"actor": actor_id})
+                await db.execute(text("UPDATE org_members SET org_role='Read-Only' WHERE user_id=:actor"), {"actor": actor_id})
                 await db.commit()
             denied = await client.put("/api/v1/autonomy", headers=headers, json={"network_id": str(network),
                 "expected_revision": revision, "mode": "recommend", "checkpoint_sha256": checkpoint})

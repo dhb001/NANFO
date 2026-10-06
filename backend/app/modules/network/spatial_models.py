@@ -16,6 +16,7 @@ class SpatialSceneRecord(Base):
     __table_args__ = (
         CheckConstraint("revision >= 0 AND revision <= 9007199254740991", name="ck_spatial_scene_revision"),
     )
+    __mapper_args__ = {"eager_defaults": True}
 
     network_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("networks.network_id", ondelete="CASCADE"), primary_key=True,
@@ -27,20 +28,33 @@ class SpatialSceneRecord(Base):
 
 
 class SpatialSceneRevision(Base):
-    """Immutable owner history; migration0022 installs write-protection triggers."""
+    """Immutable owner history; migration0022 installs write-protection triggers.
+
+    Migration 0030 adds delta storage: a ``full`` row carries ``scene``; a ``delta`` row
+    carries ``delta`` against ``base_revision`` (scene NULL).
+    """
 
     __tablename__ = "network_spatial_scene_revisions"
     __table_args__ = (
         CheckConstraint("revision >= 0 AND revision <= 9007199254740991", name="ck_spatial_history_revision"),
         CheckConstraint("origin IN ('baseline', 'replacement')", name="ck_spatial_history_origin"),
         CheckConstraint("origin = 'baseline' OR actor_id IS NOT NULL", name="ck_spatial_history_actor"),
+        CheckConstraint("storage_kind IN ('full', 'delta')", name="ck_spatial_history_storage_kind"),
+        CheckConstraint(
+            "(storage_kind = 'full' AND scene IS NOT NULL) OR "
+            "(storage_kind = 'delta' AND delta IS NOT NULL AND base_revision IS NOT NULL)",
+            name="ck_spatial_history_body",
+        ),
     )
 
     network_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("networks.network_id"), primary_key=True,
     )
     revision: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    scene: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    scene: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    storage_kind: Mapped[str] = mapped_column(Text, nullable=False, default="full", server_default="full")
+    delta: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    base_revision: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     recorded_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), server_default=func.now())
     # Logical Identity reference, never a cross-owner FK.
     actor_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)

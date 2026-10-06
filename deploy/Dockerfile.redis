@@ -1,0 +1,5 @@
+# Pinned multi-arch index digest (7.4.11 >= 7.4.6 fixes CVE-2025-49844). The ACL
+# entrypoint is part of the image, so no working-tree file is bind-mounted at runtime.
+FROM redis:7.4.11-bookworm@sha256:c6eabf748fc7a61dbb5a705c78bcf3d6377b1127a97d0ce965c11c44ba46896f
+COPY deploy/redis-entrypoint.sh /usr/local/bin/nanfo-redis-entrypoint.sh
+ENTRYPOINT ["sh", "/usr/local/bin/nanfo-redis-entrypoint.sh"]

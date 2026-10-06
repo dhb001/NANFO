@@ -29,7 +29,8 @@ from app.modules.intent.lab import LabResult, digest
 from app.modules.intent.models import Intent, IntentExecution, IntentOutbox
 from app.modules.intent.repository import ExecutionRepository
 from app.modules.intent.worker import ExecutionWorker
-from tests.unit.test_intent_lab import command
+from emulation.lab_contracts import verify_command
+from tests.unit.test_intent_lab import LAB_KEY, command
 
 pytestmark = pytest.mark.skipif(not os.environ.get("INTENT_TEST_DSN"), reason="INTENT_TEST_DSN not configured")
 
@@ -48,10 +49,11 @@ async def migrated_sessions():
         scripts = ScriptDirectory.from_config(config)
         with sync.begin() as connection:
             connection.execute(text(f'SET LOCAL search_path TO "{schema}"'))
-            with EnvironmentContext(config, scripts, fn=lambda rev, _: scripts._upgrade_revs("0014", rev)) as context:
+            # ORM models follow head (ADR-028 migration 0030: unique intent keys).
+            with EnvironmentContext(config, scripts, fn=lambda rev, _: scripts._upgrade_revs("head", rev)) as context:
                 context.configure(connection=connection)
                 context.run_migrations()
-            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "0014"
+            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == scripts.get_current_head()
             assert connection.scalar(text("SELECT count(*) FROM intent_executions")) == 0
         engine = create_async_engine(url.set(drivername="postgresql+asyncpg"),
                                      connect_args={"server_settings": {"search_path": schema}})
@@ -65,9 +67,14 @@ async def migrated_sessions():
 
 
 @pytest.fixture
-def runtime_settings(tmp_path):
+def runtime_settings(tmp_path, monkeypatch):
     for directory in ("commands", "results", "telemetry", "binding"):
         (tmp_path / directory).mkdir()
+    # ADR-028 C15: the execution worker's protected mailbox HMAC key (owner-only 0400).
+    key = tmp_path / "lab_command_key"
+    key.write_bytes(LAB_KEY)
+    key.chmod(0o400)
+    monkeypatch.setenv("NANFO_LAB_COMMAND_KEY_FILE", str(key))
     return SimpleNamespace(**{**{key: value for key, value in get_settings().model_dump().items()
                                if key.startswith("EMULATION_")}, "EXECUTION_MODE": "emulation",
         "EMULATION_CONTROL_ENABLED": True, "EMULATION_EXECUTION_POLL_SECONDS": .01,
@@ -76,10 +83,17 @@ def runtime_settings(tmp_path):
         "EMULATION_BINDING_PATH": str(tmp_path / "binding" / "binding.json")})
 
 
+# ADR-028 four-eyes rule: the approver differs from the intent's requester.
+APPROVER = str(uuid.uuid4())
+# Filled by the ``authority`` fixture: the server's current lab identity to approve.
+CURRENT = {}
+
+
 async def seed(sessions, *, workspace_id=None):
     now = datetime.now(UTC)
+    # Not a high-impact action: these CAS/outbox tests do not exercise C18 evidence.
     row = Intent(intent_id=uuid.uuid4(), workspace_id=workspace_id or uuid.uuid4(), network_id=uuid.uuid4(),
-        intent_kind="reroute_path", intent_payload={"action": "reroute_path"}, status="validated",
+        intent_kind="throttle_qos", intent_payload={"action": "throttle_qos"}, status="validated",
         validation_result={"validation_kind": "manual_lab_plan"}, execution_provenance={}, explainability={},
         correlation_id=uuid.uuid4(), requested_by_user_id=str(uuid.uuid4()), requested_at=now)
     async with sessions() as db:
@@ -90,8 +104,9 @@ async def seed(sessions, *, workspace_id=None):
 
 def acceptance(row):
     return {"workspace_id": row.workspace_id, "intent_id": row.intent_id, "idempotency_key": "request-1",
-        "correlation_id": row.correlation_id, "actor_id": row.requested_by_user_id,
-        "permissions": ["write:config", "execute:rollback"], "manual_approval": True, "cancel": False}
+        "correlation_id": row.correlation_id, "actor_id": APPROVER,
+        "permissions": ["write:config", "execute:rollback"], "manual_approval": True, "cancel": False,
+        "approval_binding": dict(CURRENT["approval_binding"])}
 
 
 @pytest.fixture
@@ -132,6 +147,8 @@ def authority(monkeypatch, runtime_settings):
     prepare = AsyncMock(return_value=result)
     monkeypatch.setattr("app.modules.intent.execution.prepare_plan", prepare)
     monkeypatch.setattr("app.modules.intent.worker.prepare_plan", prepare)
+    CURRENT["approval_binding"] = {"plan_hash": digest(cmd.plan.model_dump(mode="json")),
+                                   "binding_digest": digest({"approved_binding": True}), "run_id": str(cmd.run_id)}
     return prepare
 
 
@@ -160,6 +177,7 @@ async def test_migrated_atomic_acceptance_concurrency_cas_and_outbox(migrated_se
     async with sessions() as db:
         assert (await db.get(Intent, another.intent_id)).status == "validated"
         claim = await ExecutionRepository(db).claim("old", 15)
+        await db.commit()  # ADR-028: repositories never commit; the worker does
         original_command = dict(claim.command)
     async with sessions() as db:
         assert await ExecutionRepository(db).claim("new", 15) is None
@@ -167,10 +185,13 @@ async def test_migrated_atomic_acceptance_concurrency_cas_and_outbox(migrated_se
         await db.commit()
     async with sessions() as db:
         recovered = await ExecutionRepository(db).claim("new", 15)
+        await db.commit()
         assert recovered.fence == claim.fence + 1
         assert recovered.command == original_command
+        assert recovered.lease_until is not None  # server-computed expiry loaded by the claim
         assert not await ExecutionRepository(db).renew(claim.execution_id, "old", claim.fence, 15)
         assert await ExecutionRepository(db).renew(recovered.execution_id, "new", recovered.fence, 15)
+        await db.commit()
     worker = ExecutionWorker(settings=runtime_settings, sessions=sessions, redis=fake_redis)
     assert await worker.publish_one()
     first_envelope = (await fake_redis.xrange("stream:intent"))[0][1]
@@ -199,7 +220,9 @@ async def test_worker_lost_result_recovery_and_verified_terminal(migrated_sessio
             break
         await asyncio.sleep(.01)
     assert command_path is not None
-    original = json.loads(command_path.read_bytes())
+    original_bytes = command_path.read_bytes()
+    # C15: the published envelope is MAC-authenticated; compare its verified content.
+    original = verify_command(LAB_KEY, json.loads(original_bytes))
     async with sessions() as db:
         persisted = await db.get(IntentExecution, uuid.UUID(original["execution_id"]))
         expiry = datetime.fromisoformat(original["dispatch_expires_at"].replace("Z", "+00:00"))
@@ -222,7 +245,8 @@ async def test_worker_lost_result_recovery_and_verified_terminal(migrated_sessio
     Path(runtime_settings.EMULATION_RESULTS_PATH, command_path.name).write_text(json.dumps(result))
     restarted = ExecutionWorker(settings=runtime_settings, sessions=sessions, redis=fake_redis)
     assert await restarted.run_one()
-    assert json.loads(command_path.read_bytes()) == original
+    assert command_path.read_bytes() == original_bytes
+    assert verify_command(LAB_KEY, json.loads(command_path.read_bytes())) == original
     assert authority.await_count == 2  # acceptance and first dispatch, never redispatch on recovery
     async with sessions() as db:
         intent = await db.get(Intent, row.intent_id)
@@ -285,7 +309,8 @@ async def test_revocation_prevents_dispatch_and_silence_never_releases_lab(migra
         job = (await db.execute(select(IntentExecution).where(IntentExecution.intent_id == row2.intent_id))).scalar_one()
         assert job.blocks_lab and job.phase == "uncertain"
         assert (await db.get(Intent, row2.intent_id)).status == "execution_started"
-        wire = json.loads(Path(runtime_settings.EMULATION_COMMANDS_PATH, f"{job.execution_id}.json").read_bytes())
+        wire = verify_command(LAB_KEY, json.loads(
+            Path(runtime_settings.EMULATION_COMMANDS_PATH, f"{job.execution_id}.json").read_bytes()))
         assert wire["operation"] == "cancel" and wire["fence"] == job.command["fence"]
         assert digest(wire["plan"]) == wire["plan_hash"]
 
@@ -302,6 +327,7 @@ async def test_started_publish_failure_blocks_concurrent_terminal_and_audits_can
     # A publisher holds the earlier event lease when a different actor cancels.
     async with sessions() as db:
         started = await ExecutionRepository(db).claim_event("failed-publisher", 15)
+        await db.commit()
         assert started.sequence == 1
     canceller = str(uuid.uuid4())
     async with sessions() as db:
@@ -313,7 +339,7 @@ async def test_started_publish_failure_blocks_concurrent_terminal_and_audits_can
         assert await ExecutionRepository(db).claim_event("successor", 15) is None
         job = await db.get(IntentExecution, execution_id)
         assert job.org_id == uuid.UUID(int=123)
-        assert job.actor_id == row.requested_by_user_id
+        assert job.actor_id == APPROVER != row.requested_by_user_id
         assert job.cancelled_by_user_id == canceller and job.cancellation_requested_at is not None
         assert not job.blocks_lab and job.phase == "cancelled"
         events = list((await db.execute(select(IntentOutbox).order_by(IntentOutbox.sequence))).scalars())
@@ -321,7 +347,11 @@ async def test_started_publish_failure_blocks_concurrent_terminal_and_audits_can
         assert all(json.loads(event.envelope["payload"])["org_id"] == str(uuid.UUID(int=123)) for event in events)
         terminal_payload = json.loads(events[-1].envelope["payload"])
         assert terminal_payload["actor_id"] == canceller
-        assert terminal_payload["execution_provenance"]["approved_by_user_id"] == row.requested_by_user_id
+        assert terminal_payload["execution_provenance"]["approved_by_user_id"] == APPROVER
+        # ADR-028: deterministic per-transition event IDs and distinguishable phases.
+        assert [json.loads(event.envelope["payload"])["phase"] for event in events] == [
+            "accepted", "cancelling", "cancelled"]
+        assert all(event.event_id == uuid.uuid5(execution_id, f"intent-outbox:{event.sequence}") for event in events)
         await db.execute(update(IntentOutbox).where(IntentOutbox.event_id == started.event_id).values(
             lease_until=func.now() - timedelta(seconds=1)))
         await db.commit()
@@ -329,14 +359,82 @@ async def test_started_publish_failure_blocks_concurrent_terminal_and_audits_can
     # with SKIP LOCKED. A failed attempt cannot make terminal overtake started.
     async def claim(owner):
         async with sessions() as db:
-            return await ExecutionRepository(db).claim_event(owner, 15)
+            event = await ExecutionRepository(db).claim_event(owner, 15)
+            await db.commit()
+            return event
 
     claimed = await asyncio.gather(claim("a"), claim("b"))
     winners = [event for event in claimed if event is not None]
     assert len(winners) == 1 and winners[0].sequence == 1
     async with sessions() as db:
-        await ExecutionRepository(db).acknowledge_event(winners[0].event_id, winners[0].lease_owner)
+        assert await ExecutionRepository(db).acknowledge_event(winners[0].event_id, winners[0].lease_owner)
+        await db.commit()
     assert await worker.publish_one()
     assert await worker.publish_one()
     delivered = await fake_redis.xrange("stream:intent")
     assert [json.loads(fields["payload"])["execution_provenance"]["phase"] for _, fields in delivered] == ["cancelling", "cancelled"]
+
+
+async def test_requester_cannot_approve_and_binding_must_match(migrated_sessions, runtime_settings, authority, fake_redis):
+    sessions = migrated_sessions
+    row = await seed(sessions)
+    for params, code in (({**acceptance(row), "actor_id": row.requested_by_user_id}, "DISTINCT_APPROVER_REQUIRED"),
+                         ({**acceptance(row), "approval_binding": None}, "APPROVAL_BINDING_MISMATCH"),
+                         ({**acceptance(row), "approval_binding": {**CURRENT["approval_binding"], "run_id": str(uuid.uuid4())}},
+                          "APPROVAL_BINDING_MISMATCH")):
+        async with sessions() as db:
+            with pytest.raises(HTTPException) as error:
+                await accept_execution(db=db, redis=fake_redis, **params)
+        assert error.value.detail["code"] == code
+    async with sessions() as db:
+        assert await db.scalar(select(func.count()).select_from(IntentExecution)) == 0
+        assert (await db.get(Intent, row.intent_id)).status == "validated"
+
+
+async def test_execute_keeps_the_validate_key_and_rejects_another(migrated_sessions, runtime_settings, authority, fake_redis):
+    sessions = migrated_sessions
+    row = await seed(sessions)
+    async with sessions() as db:
+        await db.execute(update(Intent).where(Intent.intent_id == row.intent_id).values(idempotency_key="validate-1"))
+        await db.commit()
+    async with sessions() as db:
+        with pytest.raises(HTTPException) as error:
+            await accept_execution(db=db, redis=fake_redis, **acceptance(row))  # supplies "request-1"
+    assert error.value.detail["code"] == "INTENT_IDEMPOTENCY_CONFLICT"
+    async with sessions() as db:
+        _, replay = await accept_execution(db=db, redis=fake_redis, **{**acceptance(row), "idempotency_key": None})
+        assert replay is False
+        job = (await db.execute(select(IntentExecution))).scalar_one()
+        assert job.request_key == "validate-1"
+        assert (await db.get(Intent, row.intent_id)).idempotency_key == "validate-1"
+
+
+async def test_outbox_retention_deletes_only_old_published_rows_and_keeps_order(
+    migrated_sessions, runtime_settings, authority, fake_redis,
+):
+    """ADR-028: published intent_outbox rows older than the retention age are deleted in a
+    bounded statement; unpublished rows, recent rows and execution records stay."""
+    sessions = migrated_sessions
+    row = await seed(sessions)
+    async with sessions() as db:
+        await accept_execution(db=db, redis=fake_redis, **acceptance(row))
+    async with sessions() as db:
+        await accept_execution(db=db, redis=fake_redis, **{**acceptance(row), "cancel": True, "manual_approval": False})
+    async with sessions() as db:
+        accepted, cancelling = list((await db.execute(select(IntentOutbox).order_by(IntentOutbox.sequence))).scalars())
+        await db.execute(update(IntentOutbox).where(IntentOutbox.event_id == accepted.event_id).values(
+            published_at=func.now() - timedelta(days=31), created_at=func.now() - timedelta(days=31)))
+        await db.commit()
+    worker = ExecutionWorker(settings=runtime_settings, sessions=sessions, redis=fake_redis)
+    worker.retention_batch = 10
+    assert worker.retention_days == 30
+    assert await worker.purge_published() == 1
+    assert await worker.purge_published() == 0  # rate limited until the next interval
+    async with sessions() as db:
+        remaining = list((await db.execute(select(IntentOutbox))).scalars())
+        assert [event.event_id for event in remaining] == [cancelling.event_id]
+        assert await db.scalar(select(func.count()).select_from(IntentExecution)) == 1
+        # Deleting published history never unblocks or reorders the unpublished tail.
+        claimed = await ExecutionRepository(db).claim_event("retention-probe", 15)
+        await db.commit()
+        assert claimed.event_id == cancelling.event_id

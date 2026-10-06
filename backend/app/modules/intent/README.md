@@ -1,5 +1,52 @@
 # Manual Lab Execution (ADR-010)
 
+## ADR-028 contract changes (read first)
+
+No new endpoints or event names. Additive response fields unless marked BREAKING.
+
+- **Idempotent validate (C3, BREAKING for duplicate keys).** `Idempotency-Key` is
+  unique per workspace (migration 0030). Re-submitting the same key with the same
+  `network_id` and the same normalized intent returns the stored intent with
+  `meta.idempotent_replay=true` (and `data.idempotent_replay=true`); any other reuse
+  is **409 `IDEMPOTENCY_KEY_REUSED`**. A concurrent duplicate that loses the unique
+  index race is resolved the same way. Keys longer than 120 characters are 400
+  `IDEMPOTENCY_KEY_INVALID`. Clients generate a fresh key per validate submission.
+- **Execution identity.** Execute and cancel use the intent's stored
+  `idempotency_key`. Omit the key or send the stored one; a different key is 409
+  `INTENT_IDEMPOTENCY_CONFLICT`. Cancel never fails on a stale key. The stored key
+  is never overwritten; an intent without one adopts the first execute key.
+  The legacy (no controller) path locks the intent row and transitions with a
+  conditional `validated -> execution_started` update, so concurrent executes
+  cannot both run (the loser gets 409 `INTENT_ALREADY_EXECUTING`).
+- **Approval binding (contract 3).** Lab-plan validate/detail/execute responses
+  carry `approval_binding: {plan_hash, binding_digest, run_id} | null` (the durable
+  execution's identity once accepted). Manual-approval lab execution requires the
+  request field `approval_binding` equal to the server's current values, else
+  409 `APPROVAL_BINDING_MISMATCH` (re-read detail and re-approve).
+- **Four-eyes.** With `INTENT_REQUIRE_DISTINCT_APPROVER` (default true) a new manual
+  lab execution by the intent's `requested_by_user_id` is 409
+  `DISTINCT_APPROVER_REQUIRED`. Cancellation and replays are unaffected.
+- **Simulation before execution (C18).** High-impact actions (`reroute_path`,
+  `isolate_vlan`) require `simulation_id` of a completed, passing simulation of the
+  same network whose limits respect the server policy floors (see
+  `../simulation/README.md`), else 409 `SIMULATION_REQUIRED` /
+  `SIMULATION_POLICY_VIOLATION` / `SIMULATION_EVIDENCE_REJECTED`. Validate returns
+  `simulation_action_binding: {intent_id, plan_sha256, network_state_sha256}`; copy it
+  into `scenario_config.action_binding`. `network_state_sha256` is the stable v2
+  topology/configuration digest. Accepted evidence (simulation ID, plan hash, policy
+  floors) is bound into the execution record and exposed as
+  `execution_provenance.simulation_id` / `.simulation_evidence`.
+- **Events.** State commits before publication. Validate/legacy events use stable
+  IDs `uuid5(intent_id, event_type)`; the row stays `queue_status=deferred` until a
+  publication succeeds and the execution worker sweeps deferred rows every 30 s.
+  Outbox events use `uuid5(execution_id, "intent-outbox:<sequence>")` and add
+  `phase` and `sequence` payload fields, so accepted/cancelling/uncertain
+  transitions that share `intent.execution_started` are distinguishable.
+- **Bounded intent documents.** `intent` must be JSON-native (finite numbers),
+  at most 64 KiB serialized, depth 10, 128 keys per object, 1024 array items; else 422.
+- Correlation uses `app.core.correlation.normalize_audit_correlation`; an opaque
+  `X-Request-ID` is kept as `execution_provenance.request_id`.
+
 No new endpoints. Existing `POST /api/v1/intents/execute` accepts strict boolean
 `manual_approval` and `cancel`, both defaulting to false. Execution acceptance is
 HTTP 202, domain status `execution_started`, with durable metadata under
@@ -50,8 +97,8 @@ capability/membership revocation blocks first dispatch.
 
 ## Plans and Evidence
 
-ADR-017 adds optional `simulation_id` to execute, without changing the lab command
-schema or making model evidence mandatory for existing manual operations. Unreleased
+ADR-017 adds `simulation_id` to execute without changing the lab command schema;
+ADR-028 C18 makes it mandatory for high-impact actions (optional otherwise). Unreleased
 migration0014 adds immutable `intent_executions.simulation_evidence`: exact scoped
 reference, plan/current-network/input/checkpoint/output digests and original expiry.
 The Simulation owning service validates it at acceptance and again from the worker's

@@ -13,7 +13,7 @@ vi.mock("./hooks", () => ({
   useReportDetail: mocks.detail, useReportHistory: mocks.history,
 }));
 const record = { report_id: "r1", workspace_id: "w1", network_id: "n1", report_type: "executive_summary", format: "csv", status: "failed",
-  artifacts: [], requested_at: "2026-09-11T00:00:00Z", completed_at: null, queue_status: "deferred", error: { code: "REPORT_GENERATION_FAILED", message: "Worker failed" } };
+  artifacts: [], requested_at: "2026-09-11T00:00:00Z", completed_at: null, queue_status: "queued", error: { code: "REPORT_GENERATION_FAILED", message: "Worker failed" } };
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -57,7 +57,7 @@ it("shows backend validation and failed generation diagnostics; retry uses a new
   mocks.detail.mockReturnValue({ data: record, refetch: vi.fn() });
   render(<ReportsPage />);
   expect(screen.getByText("Worker failed")).toBeInTheDocument();
-  const before = (screen.getByLabelText("Idempotency Key") as HTMLInputElement).value;
+  const before = screen.getByLabelText<HTMLInputElement>("Idempotency Key").value;
   await userEvent.click(screen.getByRole("button", { name: "Retry Failed Report" }));
   expect(screen.getByLabelText("Idempotency Key")).not.toHaveValue(before);
   expect(mocks.generate).not.toHaveBeenCalled();

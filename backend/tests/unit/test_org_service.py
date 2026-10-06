@@ -5,7 +5,6 @@ All external dependencies are mocked.
 
 import uuid
 from datetime import UTC, datetime
-from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -128,7 +127,7 @@ class TestOrgService:
 
     @pytest.mark.asyncio
     async def test_get_org_requires_membership(self, org_svc):
-        """Non-member requesting an org must get 403 (Organization.md §6: cross-org leakage)."""
+        """Non-member and absent orgs are indistinguishable (Organization.md §6, ADR-028 C6)."""
         org = _make_org()
         with (
             patch.object(org_svc._repo, "get_by_id", return_value=org),
@@ -136,7 +135,13 @@ class TestOrgService:
             pytest.raises(HTTPException) as exc_info,
         ):
             await org_svc.get_org(org_id=org.org_id, user_id=str(uuid.uuid4()))
-        assert exc_info.value.status_code == 403
+        with (
+            patch.object(org_svc._repo, "get_by_id", return_value=None),
+            pytest.raises(HTTPException) as absent,
+        ):
+            await org_svc.get_org(org_id=uuid.uuid4(), user_id=str(uuid.uuid4()))
+        assert exc_info.value.status_code == 404
+        assert (exc_info.value.status_code, exc_info.value.detail) == (absent.value.status_code, absent.value.detail)
 
     @pytest.mark.asyncio
     async def test_update_org_success_and_event_publish(self, org_svc):
@@ -358,7 +363,9 @@ class TestWorkspaceService:
             patch.object(ws_svc._member_repo, "get_member", return_value=_make_member(ws.org_id, uuid.UUID(actor_id))),
             patch.object(ws_svc._repo, "get_by_org_and_id", return_value=ws),
             patch.object(ws_svc._repo, "soft_delete", new_callable=AsyncMock),
-            patch("app.modules.network.service.NetworkService.list_networks", return_value=SimpleNamespace(total=0)),
+            # ADR-028: the default inventory adapter asks Network's existence probe.
+            patch("app.modules.network.service.NetworkService.has_active_networks",
+                  new_callable=AsyncMock, return_value=False) as probe,
             patch("app.modules.organization.service.publish_event", new_callable=AsyncMock) as mock_publish,
         ):
             await ws_svc.delete_workspace(
@@ -369,6 +376,7 @@ class TestWorkspaceService:
                 correlation_id=str(uuid.uuid4()),
             )
 
+        probe.assert_awaited_once_with(workspace_id=ws.workspace_id, actor_user_id=actor_id)
         assert mock_publish.await_count == 1
         assert mock_publish.await_args.kwargs["event_type"] == "org.workspace.deleted"
 
@@ -407,7 +415,7 @@ class TestMemberService:
         with (
             patch.object(member_svc._org_repo, "get_by_id", return_value=org),
             patch.object(member_svc._identity_directory, "user_exists", return_value=True),
-            patch.object(member_svc._repo, "get_member", side_effect=[actor_member, None]),
+            patch.object(member_svc._repo, "get_member", side_effect=[actor_member, actor_member, None]),
             patch.object(member_svc._repo, "add_member", return_value=member),
             patch("app.modules.organization.service.publish_event", new_callable=AsyncMock),
         ):
@@ -434,7 +442,7 @@ class TestMemberService:
         with (
             patch.object(member_svc._org_repo, "get_by_id", return_value=org),
             patch.object(member_svc._identity_directory, "user_exists", return_value=True),
-            patch.object(member_svc._repo, "get_member", side_effect=[actor_member, None]),
+            patch.object(member_svc._repo, "get_member", side_effect=[actor_member, actor_member, None]),
             patch.object(member_svc._repo, "add_member", return_value=member),
             patch(
                 "app.modules.organization.service.publish_event",
@@ -478,7 +486,7 @@ class TestMemberService:
         actor_member = _make_member(org_id, uuid.UUID(actor_user_id))
 
         with (
-            patch.object(member_svc._repo, "get_member", side_effect=[actor_member, member]),
+            patch.object(member_svc._repo, "get_member", side_effect=[actor_member, actor_member, member]),
             patch.object(member_svc._repo, "remove_member", new_callable=AsyncMock),
             patch.object(member_svc._repo, "list_admin_ids", return_value=[uuid.UUID(actor_user_id)]),
             patch.object(member_svc._identity_directory, "can_administer_organization", return_value=True),

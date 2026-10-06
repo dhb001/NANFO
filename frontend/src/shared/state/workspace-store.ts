@@ -72,13 +72,15 @@ export const useWorkspaceStore = create<WorkspaceSelection>((set) => ({
   reset: () => {
     const next = { organizationId: null, workspaceId: null, networkId: null };
     persistWorkspaceSelection(next);
-    set(next);
+    set((state) => (state.organizationId || state.workspaceId || state.networkId ? next : state));
   },
   organizationId: initialSelection.organizationId,
   workspaceId: initialSelection.workspaceId,
   networkId: initialSelection.networkId,
+  // Re-selecting the current value is not a context change: keep children and caches.
   setOrganizationId: (organizationId) =>
-    set(() => {
+    set((state) => {
+      if (state.organizationId === organizationId) return state;
       const next = {
         organizationId,
         workspaceId: null,
@@ -89,6 +91,7 @@ export const useWorkspaceStore = create<WorkspaceSelection>((set) => ({
     }),
   setWorkspaceId: (workspaceId) =>
     set((state) => {
+      if (state.workspaceId === workspaceId) return state;
       const next = {
         organizationId: state.organizationId,
         workspaceId,
@@ -99,6 +102,7 @@ export const useWorkspaceStore = create<WorkspaceSelection>((set) => ({
     }),
   setNetworkId: (networkId) =>
     set((state) => {
+      if (state.networkId === networkId) return state;
       const next = {
         organizationId: state.organizationId,
         workspaceId: state.workspaceId,

@@ -2,19 +2,26 @@
 
 Manages channel subscriptions and delta push semantics.
 Per WebSocket.md §4: delta payloads only — never full state snapshots.
-Per WebSocket.md §2: JWT re-validated before every push.
+Per WebSocket.md §2 and ADR-028 C1: token expiry is checked before every push; the
+full identity/capability/membership decision is cached per connection for at most
+``WS_AUTH_CACHE_SECONDS`` (<= 15 s) and never beyond token ``exp``. A dependency
+outage during revalidation closes with ``WS_UNAVAILABLE`` + 1013 (client retries);
+a revocation closes with ``WS_UNAUTHORIZED`` + 1008.
 """
 
 from __future__ import annotations
 
 import asyncio
 import json
+import time
 from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from fastapi import WebSocket
 
+from app.core.failures import dependency_name
 from app.core.logging import get_logger
 from app.db.redis import get_redis_client
 from app.websocket.auth import authorized_workspaces
@@ -31,6 +38,16 @@ _WS_UNAUTHORIZED_FRAME = json.dumps({
         "message": "Token expired. Reconnect with a valid token.",
     },
 })
+
+_WS_UNAVAILABLE_FRAME = json.dumps({
+    "event": "error",
+    "data": {
+        "code": "WS_UNAVAILABLE",
+        "message": "Realtime temporarily unavailable.",
+    },
+})
+
+UNAVAILABLE_REASON = "unavailable"
 
 _WS_BACKPRESSURE_FRAME = json.dumps({
     "event": "error",
@@ -50,6 +67,8 @@ class _ConnectionAuth:
     token: str | None = None
     channel: str = ""
     network_id: str | None = None
+    # Monotonic instant until which the last full authorization decision is reused.
+    authorized_until: float = 0.0
 
 
 def _coerce_token_exp(value: object) -> int | None:
@@ -95,20 +114,10 @@ def _is_token_expired(auth: _ConnectionAuth | None) -> bool:
     return int(datetime.now(UTC).timestamp()) >= auth.token_exp
 
 
-async def _is_token_revoked(auth: _ConnectionAuth | None) -> bool:
-    if auth is None or not auth.token:
-        return True
-    try:
-        allowed = await authorized_workspaces(
-            token=auth.token, channel=auth.channel, network_id=auth.network_id,
-        )
-        if not allowed or (auth.workspace_id is not None and auth.workspace_id not in allowed):
-            return True
-        auth.allowed_workspace_ids = frozenset(allowed)
-        return False
-    except Exception:  # noqa: BLE001
-        logger.warning("ws_authorization_revalidation_failed", channel=auth.channel)
-        return True
+def _seconds_until_expiry(auth: _ConnectionAuth) -> float:
+    if auth.token_exp is None:
+        return 0.0
+    return max(0.0, auth.token_exp - datetime.now(UTC).timestamp())
 
 
 async def _record_security_close_reason(*, reason: str, network_id: str) -> None:
@@ -121,7 +130,7 @@ async def _record_security_close_reason(*, reason: str, network_id: str) -> None
             "ws_digital_twin_security_close_counter_client_unavailable",
             reason=reason,
             network_id=network_id,
-            error=str(exc),
+            error_type=type(exc).__name__,
         )
         return
 
@@ -133,7 +142,7 @@ async def _record_security_close_reason(*, reason: str, network_id: str) -> None
             reason=reason,
             network_id=network_id,
             counter_key=counter_key,
-            error=str(exc),
+            error_type=type(exc).__name__,
         )
         return
 
@@ -148,7 +157,10 @@ async def _record_security_close_reason(*, reason: str, network_id: str) -> None
 class _QueuedManager:
     """Connection-local transport; channel envelopes and authorization stay here."""
 
-    def __init__(self, *, delivery_limits: DeliveryLimits | None = None):
+    def __init__(self, *, delivery_limits: DeliveryLimits | None = None,
+                 auth_cache_seconds: float | None = None, clock: Callable[[], float] = time.monotonic):
+        self._auth_cache_seconds = auth_cache_seconds
+        self._clock = clock
         self._subscriptions: dict[str, set[WebSocket]] = defaultdict(set)
         self._subscribers: set[WebSocket] = set()
         self._connection_auth: dict[WebSocket, _ConnectionAuth] = {}
@@ -195,16 +207,41 @@ class _QueuedManager:
             except Exception:  # noqa: BLE001
                 logger.debug("ws_terminal_transport_failed", close_code=code)
 
+    @property
+    def auth_cache_seconds(self) -> float:
+        if self._auth_cache_seconds is None:
+            from app.core.config import get_settings
+
+            self._auth_cache_seconds = get_settings().WS_AUTH_CACHE_SECONDS
+        return self._auth_cache_seconds
+
+    def cache_deadline(self, auth: _ConnectionAuth) -> float:
+        """Reuse window for a decision made now: <= cache seconds, never past exp."""
+        return self._clock() + min(self.auth_cache_seconds, _seconds_until_expiry(auth))
+
     async def _authorize(self, auth: _ConnectionAuth) -> None:
-        reason = "expired" if _is_token_expired(auth) else None
-        if reason is None and await _is_token_revoked(auth):
-            reason = "revoked"
-        # Authorization may have awaited external services across token expiry.
-        if reason is None and _is_token_expired(auth):
-            reason = "expired"
-        if reason is None:
+        if _is_token_expired(auth):
+            raise DeliveryDenied("expired")
+        if auth.authorized_until > self._clock():
             return
-        raise DeliveryDenied(reason)
+        if not auth.token:
+            raise DeliveryDenied("revoked")
+        try:
+            allowed = await authorized_workspaces(
+                token=auth.token, channel=auth.channel, network_id=auth.network_id,
+            )
+        except Exception as exc:  # noqa: BLE001 - never grants delivery
+            logger.warning("ws_authorization_revalidation_failed", channel=auth.channel,
+                           error_type=type(exc).__name__)
+            outage = dependency_name(exc) is not None or isinstance(exc, TimeoutError)
+            raise DeliveryDenied(UNAVAILABLE_REASON if outage else "revoked") from None
+        if not allowed or (auth.workspace_id is not None and auth.workspace_id not in allowed):
+            raise DeliveryDenied("revoked")
+        auth.allowed_workspace_ids = frozenset(allowed)
+        # Authorization may have awaited external services across token expiry.
+        if _is_token_expired(auth):
+            raise DeliveryDenied("expired")
+        auth.authorized_until = self.cache_deadline(auth)
 
     def _delivery(self, ws: WebSocket) -> ConnectionDelivery:
         existing = self._deliveries.get(ws)
@@ -213,8 +250,11 @@ class _QueuedManager:
         auth = self._connection_auth[ws]
 
         async def denied(reason: str) -> None:
-            await self._close(ws, _WS_UNAUTHORIZED_FRAME, 1008)
-            if auth.channel == "digital-twin":
+            if reason == UNAVAILABLE_REASON:
+                await self._close(ws, _WS_UNAVAILABLE_FRAME, 1013)
+            else:
+                await self._close(ws, _WS_UNAUTHORIZED_FRAME, 1008)
+            if auth.channel == "digital-twin" and reason != UNAVAILABLE_REASON:
                 try:
                     async with asyncio.timeout(self._delivery_limits.timeout_seconds):
                         await _record_security_close_reason(reason=reason, network_id=auth.network_id)
@@ -243,8 +283,9 @@ class _QueuedManager:
                 await denied(str(exc))
                 return
             except TimeoutError:
-                # Auth unavailability cannot grant delivery, including queued deltas.
-                await self._close(ws, _WS_UNAUTHORIZED_FRAME, 1008)
+                # Auth unavailability cannot grant delivery, including queued deltas;
+                # the client retries with backoff instead of rotating its token (C1).
+                await self._close(ws, _WS_UNAVAILABLE_FRAME, 1013)
                 return
             await self._close(ws, _WS_BACKPRESSURE_FRAME, 1013)
 
@@ -302,6 +343,7 @@ class TopologyWSManager(_QueuedManager):
         token_jti: str | None = None,
         workspace_id: str | None = None,
         token: str | None = None,
+        authorized_until: float | None = None,
     ) -> None:
         async with self._lock:
             self._subscriptions[network_id].add(websocket)
@@ -310,6 +352,7 @@ class TopologyWSManager(_QueuedManager):
                 token_jti=_coerce_token_jti(token_jti),
                 workspace_id=_coerce_workspace_id(workspace_id),
                 token=token, channel="topology", network_id=network_id,
+                authorized_until=authorized_until or 0.0,
             )
             self._check_realtime(websocket)
         logger.info("ws_subscribed", network_id=network_id)
@@ -358,6 +401,7 @@ class TelemetryWSManager(_QueuedManager):
         token_jti: str | None = None,
         workspace_id: str | None = None,
         token: str | None = None,
+        authorized_until: float | None = None,
     ) -> None:
         async with self._lock:
             self._subscriptions[network_id].add(websocket)
@@ -366,6 +410,7 @@ class TelemetryWSManager(_QueuedManager):
                 token_jti=_coerce_token_jti(token_jti),
                 workspace_id=_coerce_workspace_id(workspace_id),
                 token=token, channel="telemetry", network_id=network_id,
+                authorized_until=authorized_until or 0.0,
             )
             self._check_realtime(websocket)
         logger.info("ws_telemetry_subscribed", network_id=network_id)
@@ -409,6 +454,7 @@ class DigitalTwinWSManager(_QueuedManager):
         token_jti: str | None = None,
         workspace_id: str | None = None,
         token: str | None = None,
+        authorized_until: float | None = None,
     ) -> None:
         async with self._lock:
             self._subscriptions[network_id].add(websocket)
@@ -417,6 +463,7 @@ class DigitalTwinWSManager(_QueuedManager):
                 token_jti=_coerce_token_jti(token_jti),
                 workspace_id=_coerce_workspace_id(workspace_id),
                 token=token, channel="digital-twin", network_id=network_id,
+                authorized_until=authorized_until or 0.0,
             )
             self._check_realtime(websocket)
         logger.info("ws_digital_twin_subscribed", network_id=network_id)
@@ -461,12 +508,13 @@ class AlertsWSManager(_QueuedManager):
         token_jti: str | None = None,
         allowed_workspace_ids: set[str] | None = None,
         token: str | None = None,
+        authorized_until: float | None = None,
     ) -> None:
         auth = _ConnectionAuth(
             token_exp=_coerce_token_exp(token_exp),
             token_jti=_coerce_token_jti(token_jti),
             allowed_workspace_ids=_coerce_allowed_workspace_ids(allowed_workspace_ids),
-            token=token, channel="alerts",
+            token=token, channel="alerts", authorized_until=authorized_until or 0.0,
         )
         # The endpoint supplies validated scopes. Direct manager callers that
         # omit them must resolve them once before becoming routing candidates.
@@ -474,8 +522,13 @@ class AlertsWSManager(_QueuedManager):
             try:
                 async with asyncio.timeout(self._delivery_limits.timeout_seconds):
                     await self._authorize(auth)
-            except (DeliveryDenied, TimeoutError):
-                await self._close(websocket, _WS_UNAUTHORIZED_FRAME, 1008)
+            except DeliveryDenied as exc:
+                frame, code = ((_WS_UNAVAILABLE_FRAME, 1013) if str(exc) == UNAVAILABLE_REASON
+                               else (_WS_UNAUTHORIZED_FRAME, 1008))
+                await self._close(websocket, frame, code)
+                return
+            except TimeoutError:
+                await self._close(websocket, _WS_UNAVAILABLE_FRAME, 1013)
                 return
         async with self._lock:
             self._subscribers.add(websocket)

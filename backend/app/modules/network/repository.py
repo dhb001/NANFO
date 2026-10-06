@@ -2,14 +2,18 @@
 
 All DB operations for the Network module.
 networks.workspace_id is a stored UUID reference — no SQL join to Organization (ADR-004, C5).
+Bulk upserts and soft-deletes use single set-based statements against the owning
+tables' partial unique indexes (ADR-028); callers reload rows before building responses.
 """
 
 from __future__ import annotations
 
 import uuid
+from collections.abc import Iterable, Iterator, Sequence
 from datetime import UTC, datetime
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.network.models import (
@@ -21,11 +25,30 @@ from app.modules.network.models import (
     Network,
 )
 
+#: Mutable campus-building columns written by an upsert (identity columns excluded).
+CAMPUS_BUILDING_FIELDS: tuple[str, ...] = (
+    "campus_key", "building_key", "label", "geometry", "x", "z", "base_y", "width", "depth",
+    "height", "floors", "footprint", "wall_material", "attenuation_db", "source",
+)
+_BULK_ROWS = 200
+#: Upper bound of one owner-trusted batch device read (emulation bindings need <= 320).
+MAX_OWNER_DEVICE_READ = 1000
+
 
 def validate_inventory_page(page: int, page_size: int) -> None:
     """Internal callers retain bounded 500-row batches; REST is capped at 200."""
     if page < 1 or not 1 <= page_size <= 500:
         raise ValueError("Inventory page must be positive and page_size between 1 and 500")
+
+
+def _chunks(values: Sequence, size: int) -> Iterator[Sequence]:
+    for start in range(0, len(values), size):
+        yield values[start:start + size]
+
+
+def _asset_digest_lock_key(digest: str):
+    # Separate advisory key space from inventory locks (text-derived bigint).
+    return func.hashtextextended(f"nanfo:campus-model-asset:{digest}", 0)
 
 
 class NetworkRepository:
@@ -46,20 +69,31 @@ class NetworkRepository:
         return network
 
     async def get_by_id(self, network_id: uuid.UUID) -> Network | None:
+        # Authorization re-checks after lock waits must observe committed state,
+        # never a stale identity-map copy (READ COMMITTED + populate_existing).
         result = await self._db.execute(
             select(Network).where(Network.network_id == network_id, Network.deleted_at.is_(None))
+            .execution_options(populate_existing=True)
         )
         return result.scalar_one_or_none()
 
-    async def lock(self, network_id: uuid.UUID) -> Network | None:
-        return await self._db.scalar(select(Network).where(
-            Network.network_id == network_id, Network.deleted_at.is_(None),
-        ).with_for_update().execution_options(populate_existing=True))
+    async def has_active_for_workspace(self, workspace_id: uuid.UUID) -> bool:
+        """One indexed probe (``ix_networks_workspace_id``); no count, no page."""
+        return await self._db.scalar(select(Network.network_id).where(
+            Network.workspace_id == workspace_id, Network.deleted_at.is_(None),
+        ).limit(1)) is not None
 
     async def lock_active(self, network_id: uuid.UUID) -> None:
+        """Shared parent fence used by write-authorized workflow creation."""
         await self._db.execute(select(Network.network_id).where(
             Network.network_id == network_id, Network.deleted_at.is_(None),
         ).with_for_update(read=True))
+
+    async def lock_row(self, network_id: uuid.UUID) -> None:
+        """Exclusive parent lock for asset and device-group writers."""
+        await self._db.execute(select(Network.network_id).where(
+            Network.network_id == network_id,
+        ).with_for_update())
 
     async def update(self, network: Network, fields: dict) -> Network:
         for key, value in fields.items():
@@ -155,23 +189,6 @@ class DeviceRepository:
         device.status = "deleted"
         await self._db.flush()
 
-    async def update_spatial_ref_id(
-        self,
-        *,
-        network_id: uuid.UUID,
-        device_id: uuid.UUID,
-        spatial_ref_id: str | None,
-    ) -> Device | None:
-        device = await self.get_by_id(device_id)
-        if device is None:
-            return None
-        if device.network_id != network_id:
-            return None
-
-        device.spatial_ref_id = spatial_ref_id
-        await self._db.flush()
-        return device
-
     async def list_for_network(
         self, network_id: uuid.UUID, page: int = 1, page_size: int = 20
     ) -> tuple[list[Device], int]:
@@ -189,6 +206,21 @@ class DeviceRepository:
             .order_by(Device.device_id.asc())
         )
         return list(result.scalars().all())
+
+    async def list_projection_page(
+        self, network_id: uuid.UUID, *, after: uuid.UUID | None = None, limit: int = 500,
+    ) -> list[dict]:
+        """Keyset page of active devices as plain graph-projection values."""
+        if type(limit) is not int or not 1 <= limit <= 1000:
+            raise ValueError("Projection page limit must be between 1 and 1000")
+        query = select(
+            Device.device_id, Device.hostname, Device.device_type, Device.ip_address, Device.vendor,
+            Device.model, Device.location_hint, Device.spatial_ref_id,
+        ).where(Device.network_id == network_id, Device.deleted_at.is_(None))
+        if after is not None:
+            query = query.where(Device.device_id > after)
+        result = await self._db.execute(query.order_by(Device.device_id.asc()).limit(limit))
+        return [dict(row) for row in result.mappings().all()]
 
     async def list_device_ids_for_network(
         self,
@@ -209,6 +241,20 @@ class DeviceRepository:
         rows = (await self._db.execute(query)).scalars().all()
         return {row for row in rows}
 
+    async def list_active_by_ids(self, network_id: uuid.UUID, device_ids: Iterable[uuid.UUID]) -> list[Device]:
+        """Active devices of ``network_id`` among ``device_ids`` (bounded, current state)."""
+        ids = sorted(set(device_ids))
+        if not ids:
+            return []
+        if len(ids) > MAX_OWNER_DEVICE_READ:
+            raise ValueError(f"At most {MAX_OWNER_DEVICE_READ} devices may be read at once")
+        result = await self._db.execute(
+            select(Device).where(
+                Device.network_id == network_id, Device.device_id.in_(ids), Device.deleted_at.is_(None),
+            ).order_by(Device.device_id).execution_options(populate_existing=True)
+        )
+        return list(result.scalars().all())
+
 
 class CampusBuildingRepository:
 
@@ -226,111 +272,57 @@ class CampusBuildingRepository:
         )
         return list(result.scalars().all())
 
-    async def get_active_by_network_and_building_id(
-        self,
-        *,
-        network_id: uuid.UUID,
-        building_id: str,
-    ) -> CampusBuildingRecord | None:
+    async def active_building_ids(self, network_id: uuid.UUID) -> set[str]:
+        rows = await self._db.scalars(select(CampusBuildingRecord.building_id).where(
+            CampusBuildingRecord.network_id == network_id, CampusBuildingRecord.deleted_at.is_(None),
+        ))
+        return set(rows.all())
+
+    async def upsert_many(self, *, network_id: uuid.UUID, buildings: Sequence[dict]) -> None:
+        """Insert or update in place on unique active ``(network_id, building_id)``.
+
+        Callers pass unique building identifiers (PostgreSQL rejects a statement
+        that would update the same conflicting row twice).
+        """
+        table = CampusBuildingRecord.__table__
+        for chunk in _chunks(list(buildings), _BULK_ROWS):
+            statement = insert(table).values([
+                {"campus_building_id": uuid.uuid4(), "network_id": network_id, **building}
+                for building in chunk
+            ])
+            statement = statement.on_conflict_do_update(
+                index_elements=[table.c.network_id, table.c.building_id],
+                index_where=table.c.deleted_at.is_(None),
+                set_={**{name: statement.excluded[name] for name in CAMPUS_BUILDING_FIELDS},
+                      "updated_at": func.now()},
+            )
+            await self._db.execute(statement)
+
+    async def soft_delete_absent(self, network_id: uuid.UUID, keep_building_ids: Iterable[str]) -> int:
+        """Soft-delete active buildings not named in ``keep_building_ids`` (one UPDATE)."""
+        table = CampusBuildingRecord.__table__
+        keep = sorted(set(keep_building_ids))
+        statement = update(table).where(table.c.network_id == network_id, table.c.deleted_at.is_(None))
+        if keep:
+            statement = statement.where(table.c.building_id.not_in(keep))
+        result = await self._db.execute(
+            statement.values(deleted_at=func.now(), updated_at=func.now()).returning(table.c.campus_building_id)
+        )
+        return len(result.scalars().all())
+
+    async def list_active_by_building_ids(
+        self, network_id: uuid.UUID, building_ids: Sequence[str],
+    ) -> dict[str, CampusBuildingRecord]:
+        if not building_ids:
+            return {}
         result = await self._db.execute(
             select(CampusBuildingRecord).where(
                 CampusBuildingRecord.network_id == network_id,
-                CampusBuildingRecord.building_id == building_id,
+                CampusBuildingRecord.building_id.in_(list(building_ids)),
                 CampusBuildingRecord.deleted_at.is_(None),
-            )
+            ).execution_options(populate_existing=True)
         )
-        return result.scalar_one_or_none()
-
-    async def soft_delete_for_network(self, network_id: uuid.UUID) -> int:
-        rows = await self.list_for_network(network_id)
-        now = datetime.now(UTC)
-        for row in rows:
-            row.deleted_at = now
-        await self._db.flush()
-        return len(rows)
-
-    async def create(
-        self,
-        *,
-        network_id: uuid.UUID,
-        building_id: str,
-        campus_key: str,
-        building_key: str,
-        label: str,
-        geometry: str,
-        x: float,
-        z: float,
-        base_y: float,
-        width: float,
-        depth: float,
-        height: float,
-        floors: int,
-        footprint: list,
-        wall_material: str | None,
-        attenuation_db: float | None,
-        source: str | None,
-    ) -> CampusBuildingRecord:
-        row = CampusBuildingRecord(
-            network_id=network_id,
-            building_id=building_id,
-            campus_key=campus_key,
-            building_key=building_key,
-            label=label,
-            geometry=geometry,
-            x=x,
-            z=z,
-            base_y=base_y,
-            width=width,
-            depth=depth,
-            height=height,
-            floors=floors,
-            footprint=footprint,
-            wall_material=wall_material,
-            attenuation_db=attenuation_db,
-            source=source,
-        )
-        self._db.add(row)
-        await self._db.flush()
-        return row
-
-    async def update(
-        self,
-        row: CampusBuildingRecord,
-        *,
-        campus_key: str,
-        building_key: str,
-        label: str,
-        geometry: str,
-        x: float,
-        z: float,
-        base_y: float,
-        width: float,
-        depth: float,
-        height: float,
-        floors: int,
-        footprint: list,
-        wall_material: str | None,
-        attenuation_db: float | None,
-        source: str | None,
-    ) -> CampusBuildingRecord:
-        row.campus_key = campus_key
-        row.building_key = building_key
-        row.label = label
-        row.geometry = geometry
-        row.x = x
-        row.z = z
-        row.base_y = base_y
-        row.width = width
-        row.depth = depth
-        row.height = height
-        row.floors = floors
-        row.footprint = footprint
-        row.wall_material = wall_material
-        row.attenuation_db = attenuation_db
-        row.source = source
-        row.deleted_at = None
-        await self._db.flush()
-        return row
+        return {row.building_id: row for row in result.scalars().all()}
 
 
 class CampusModelAssetRepository:
@@ -338,8 +330,32 @@ class CampusModelAssetRepository:
     def __init__(self, db: AsyncSession):
         self._db = db
 
-    async def lock_network(self, network_id: uuid.UUID) -> None:
-        await self._db.execute(select(Network.network_id).where(Network.network_id == network_id).with_for_update())
+    async def lock_digest(self, digest: str) -> None:
+        """Transaction lock fencing blob publication/reference against collection."""
+        await self._db.execute(select(func.pg_advisory_xact_lock(_asset_digest_lock_key(digest))))
+
+    async def digest_referenced(self, digest: str) -> bool:
+        """Whether *any* asset row (active, retired or inline) names ``digest``."""
+        return await self._db.scalar(select(CampusModelAssetRecord.campus_model_asset_id).where(
+            CampusModelAssetRecord.model_sha256 == digest,
+        ).limit(1)) is not None
+
+    async def referenced_digests(self, digests: Sequence[str]) -> set[str]:
+        if not digests:
+            return set()
+        rows = await self._db.scalars(select(CampusModelAssetRecord.model_sha256).where(
+            CampusModelAssetRecord.model_sha256.in_(list(digests)),
+        ).distinct())
+        return set(rows.all())
+
+    async def active_usage(self, network_id: uuid.UUID) -> tuple[int, int]:
+        """(bytes, rows) of the network's ACTIVE assets — the per-network quota basis."""
+        row = (await self._db.execute(select(
+            func.coalesce(func.sum(CampusModelAssetRecord.model_size_bytes), 0), func.count(),
+        ).where(
+            CampusModelAssetRecord.network_id == network_id, CampusModelAssetRecord.deleted_at.is_(None),
+        ))).one()
+        return int(row[0]), int(row[1])
 
     async def get_scoped(self, network_id: uuid.UUID, asset_id: uuid.UUID) -> CampusModelAssetRecord | None:
         result = await self._db.execute(select(CampusModelAssetRecord).where(
@@ -374,6 +390,21 @@ class CampusModelAssetRepository:
         )
         return list(result.scalars().all())
 
+    async def list_page_for_network(
+        self, network_id: uuid.UUID, *, page: int, page_size: int,
+    ) -> tuple[list[CampusModelAssetRecord], int]:
+        """Bounded page of full rows (legacy inline bodies included) for include_data."""
+        if page < 1 or not 1 <= page_size <= 10:
+            raise ValueError("Inline asset page must be positive and page_size between 1 and 10")
+        scope = (CampusModelAssetRecord.network_id == network_id, CampusModelAssetRecord.deleted_at.is_(None))
+        total = await self._db.scalar(select(func.count()).select_from(CampusModelAssetRecord).where(*scope))
+        result = await self._db.execute(
+            select(CampusModelAssetRecord).where(*scope)
+            .order_by(CampusModelAssetRecord.created_at.asc(), CampusModelAssetRecord.campus_model_asset_id.asc())
+            .offset((page - 1) * page_size).limit(page_size)
+        )
+        return list(result.scalars().all()), total
+
     async def list_metadata_for_network(self, network_id: uuid.UUID, *, page: int, page_size: int):
         if page < 1 or not 1 <= page_size <= 100:
             raise ValueError("Asset page must be positive and page_size between 1 and 100")
@@ -402,12 +433,13 @@ class CampusModelAssetRepository:
         return result.scalar_one_or_none()
 
     async def soft_delete_for_network(self, network_id: uuid.UUID) -> int:
-        rows = await self.list_for_network(network_id)
-        now = datetime.now(UTC)
-        for row in rows:
-            row.deleted_at = now
-        await self._db.flush()
-        return len(rows)
+        """Retire every active asset of the network in one UPDATE (bytes are retained)."""
+        table = CampusModelAssetRecord.__table__
+        result = await self._db.execute(
+            update(table).where(table.c.network_id == network_id, table.c.deleted_at.is_(None))
+            .values(deleted_at=func.now(), updated_at=func.now()).returning(table.c.campus_model_asset_id)
+        )
+        return len(result.scalars().all())
 
     async def create(
         self,
@@ -511,44 +543,28 @@ class DeviceGroupRepository:
                 bucket.append(device_id)
         return members
 
-    async def get_active_by_group_key(
-        self,
-        *,
-        network_id: uuid.UUID,
-        group_key: str,
-    ) -> DeviceGroup | None:
+    async def get_active_by_keys(self, network_id: uuid.UUID, group_keys: Sequence[str]) -> dict[str, DeviceGroup]:
+        if not group_keys:
+            return {}
         result = await self._db.execute(
             select(DeviceGroup).where(
                 DeviceGroup.network_id == network_id,
-                DeviceGroup.group_key == group_key,
+                DeviceGroup.group_key.in_(list(group_keys)),
                 DeviceGroup.deleted_at.is_(None),
-            )
+            ).execution_options(populate_existing=True)
         )
-        return result.scalar_one_or_none()
+        return {row.group_key: row for row in result.scalars().all()}
 
-    async def soft_delete_for_network(self, network_id: uuid.UUID) -> int:
-        rows = await self.list_groups_for_network(network_id)
-        if not rows:
-            return 0
-
-        now = datetime.now(UTC)
-        group_ids = [row.device_group_id for row in rows]
-        for row in rows:
-            row.deleted_at = now
-
-        existing_members = await self._db.execute(
-            select(DeviceGroupMember).where(
-                DeviceGroupMember.device_group_id.in_(group_ids),
-                DeviceGroupMember.deleted_at.is_(None),
-            )
+    async def get_groups_by_ids(self, group_ids: Sequence[uuid.UUID]) -> dict[uuid.UUID, DeviceGroup]:
+        if not group_ids:
+            return {}
+        result = await self._db.execute(
+            select(DeviceGroup).where(DeviceGroup.device_group_id.in_(list(group_ids)))
+            .execution_options(populate_existing=True)
         )
-        for member in existing_members.scalars().all():
-            member.deleted_at = now
+        return {row.device_group_id: row for row in result.scalars().all()}
 
-        await self._db.flush()
-        return len(rows)
-
-    async def create_group(
+    async def upsert_group(
         self,
         *,
         network_id: uuid.UUID,
@@ -557,58 +573,74 @@ class DeviceGroupRepository:
         group_type: str,
         description: str | None,
         selector: dict[str, str],
-    ) -> DeviceGroup:
-        row = DeviceGroup(
-            network_id=network_id,
-            group_key=group_key,
-            name=name,
-            group_type=group_type,
-            description=description,
-            selector=selector,
+    ) -> uuid.UUID:
+        """Create (or, on a concurrent-create race, update) the active group key."""
+        table = DeviceGroup.__table__
+        statement = insert(table).values(
+            device_group_id=uuid.uuid4(), network_id=network_id, group_key=group_key, name=name,
+            group_type=group_type, description=description, selector=selector,
         )
-        self._db.add(row)
-        await self._db.flush()
-        return row
+        statement = statement.on_conflict_do_update(
+            index_elements=[table.c.network_id, table.c.group_key],
+            index_where=table.c.deleted_at.is_(None),
+            set_={"name": statement.excluded.name, "group_type": statement.excluded.group_type,
+                  "description": statement.excluded.description, "selector": statement.excluded.selector,
+                  "updated_at": func.clock_timestamp()},
+        ).returning(table.c.device_group_id)
+        return (await self._db.execute(statement)).scalar_one()
 
     async def update_group(
         self,
-        row: DeviceGroup,
+        group_id: uuid.UUID,
         *,
         name: str,
         group_type: str,
         description: str | None,
         selector: dict[str, str],
-    ) -> DeviceGroup:
-        row.name = name
-        row.group_type = group_type
-        row.description = description
-        row.selector = selector
-        row.deleted_at = None
-        await self._db.flush()
-        return row
-
-    async def replace_members(
-        self,
-        *,
-        group_id: uuid.UUID,
-        device_ids: list[uuid.UUID],
     ) -> None:
-        now = datetime.now(UTC)
-        existing = await self._db.execute(
-            select(DeviceGroupMember).where(
-                DeviceGroupMember.device_group_id == group_id,
-                DeviceGroupMember.deleted_at.is_(None),
-            )
+        # clock_timestamp() (not transaction now()) keeps C8 versions strictly
+        # increasing across serialized writers that started in the same instant.
+        table = DeviceGroup.__table__
+        await self._db.execute(update(table).where(table.c.device_group_id == group_id).values(
+            name=name, group_type=group_type, description=description, selector=selector,
+            updated_at=func.clock_timestamp(),
+        ))
+
+    async def apply_member_diff(
+        self, group_id: uuid.UUID, *, add: Sequence[uuid.UUID], remove: Sequence[uuid.UUID],
+    ) -> None:
+        """Soft-delete removed memberships and insert only the missing ones."""
+        members = DeviceGroupMember.__table__
+        if remove:
+            await self._db.execute(update(members).where(
+                members.c.device_group_id == group_id, members.c.device_id.in_(list(remove)),
+                members.c.deleted_at.is_(None),
+            ).values(deleted_at=func.now()))
+        for chunk in _chunks(list(add), 1000):
+            statement = insert(members).values([
+                {"device_group_member_id": uuid.uuid4(), "device_group_id": group_id, "device_id": device_id}
+                for device_id in chunk
+            ])
+            await self._db.execute(statement.on_conflict_do_nothing(
+                index_elements=[members.c.device_group_id, members.c.device_id],
+                index_where=members.c.deleted_at.is_(None),
+            ))
+
+    async def soft_delete_absent(self, network_id: uuid.UUID, keep_group_keys: Iterable[str]) -> list[uuid.UUID]:
+        """Soft-delete active groups (and their memberships) not named in ``keep_group_keys``."""
+        table = DeviceGroup.__table__
+        keep = sorted(set(keep_group_keys))
+        statement = update(table).where(table.c.network_id == network_id, table.c.deleted_at.is_(None))
+        if keep:
+            statement = statement.where(table.c.group_key.not_in(keep))
+        result = await self._db.execute(
+            statement.values(deleted_at=func.now(), updated_at=func.clock_timestamp())
+            .returning(table.c.device_group_id)
         )
-        for row in existing.scalars().all():
-            row.deleted_at = now
-
-        for device_id in device_ids:
-            self._db.add(
-                DeviceGroupMember(
-                    device_group_id=group_id,
-                    device_id=device_id,
-                )
-            )
-
-        await self._db.flush()
+        group_ids = list(result.scalars().all())
+        if group_ids:
+            members = DeviceGroupMember.__table__
+            await self._db.execute(update(members).where(
+                members.c.device_group_id.in_(group_ids), members.c.deleted_at.is_(None),
+            ).values(deleted_at=func.now()))
+        return group_ids

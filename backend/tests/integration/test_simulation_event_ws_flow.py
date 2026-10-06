@@ -10,25 +10,18 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from app.events.consumers.ws_push_consumer import handle_ws_digital_twin_event
-from app.modules.simulation.service import queue_scenario_validation_handoff
+from app.modules.simulation.service import ScenarioValidationHandoffService
 
 
 @pytest.mark.asyncio
-async def test_simulation_handoff_event_is_fanned_out_to_digital_twin_ws(integration_fake_redis):
-    await integration_fake_redis.delete("stream:simulation")
-
-    with patch("app.modules.simulation.service.publish_event", new_callable=AsyncMock) as mock_publish:
-        mock_publish.return_value = "1200-0"
-        handoff_result = await queue_scenario_validation_handoff(
-            redis=integration_fake_redis,
-            network_id=str(uuid.uuid4()),
-            scenario_name="WS fanout scenario",
-            validation_checks=["simulation_before_deployment"],
-            correlation_id=str(uuid.uuid4()),
-            requested_by_user_id=str(uuid.uuid4()),
-        )
-
-    handoff_payload = handoff_result["handoff"]
+async def test_simulation_handoff_event_is_fanned_out_to_digital_twin_ws():
+    handoff_payload = ScenarioValidationHandoffService().build_handoff_payload(
+        network_id=str(uuid.uuid4()),
+        scenario_name="WS fanout scenario",
+        validation_checks=["simulation_before_deployment"],
+        correlation_id=str(uuid.uuid4()),
+        requested_by_user_id=str(uuid.uuid4()),
+    )
     event = {
         "event_id": str(uuid.uuid4()),
         "event_type": "simulation.started",

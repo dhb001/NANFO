@@ -1,9 +1,15 @@
-"""ADR027 bounded operator-only archive-before-delete for durable domain streams.
+"""ADR027/ADR-028 bounded archive-before-delete for durable domain streams and the DLQ.
 
 Eligibility assumes enrolled groups use XREADGROUP without NOACK, ACK only after
 durable handling, and never skip/reset cursors or destroy consumers with pending
 work. Redis has no historical ACK ledger: administrative violations are not provable
-from a PEL. Unknown group/state and all observed state races fail closed.
+from a PEL. Unknown groups/state fail closed. Races that invalidate a planned batch
+(cursor moved backwards, entry now pending or changed) refuse that batch and it is
+re-planned from current state a bounded number of times; harmless concurrency (ACKs,
+new consumers, appends) no longer aborts. The dead-letter stream has no consumer
+groups: its entries are eligible by age alone and are archived before deletion.
+
+Refusals carry a stable machine-readable ``reason`` (see :func:`refusal_reason`).
 """
 
 from __future__ import annotations
@@ -17,12 +23,89 @@ import time
 from contextlib import nullcontext
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from redis.asyncio import Redis
 
-from app.events.bus import STREAM_GROUPS
+from redis.exceptions import RedisError, ResponseError
+
+from app.events.bus import DEAD_LETTER_STREAM, STREAM_GROUPS
 from app.events.retention_archive import MAX_BUNDLE_BYTES, StreamArchive
-from app.events.retention_lua import DELETE, PLAN, RESTORE
+from app.events.retention_lua import DELETE, PLAN, RESTORE, RETRYABLE_REFUSALS
+
+RETAINED_STREAMS = frozenset({*STREAM_GROUPS, DEAD_LETTER_STREAM})
+MAX_PENDING_CONSUMERS = 64
+MARKER_PATTERN = "event:completed:*"
+
+
+class RetentionRefused(ValueError):
+    """A precondition refused retention; ``reason`` is machine-readable."""
+
+    def __init__(self, reason: str, message: str | None = None) -> None:
+        super().__init__(message or reason)
+        self.reason = reason
+
+
+_VALUE_REASONS = (
+    ("archive_disk_admission", "archive_disk_admission"),
+    ("archive root requires owner mode0700", "archive_root_unprotected"),
+    ("unprotected archive ancestor", "archive_root_unprotected"),
+    ("absolute private archive root required", "archive_root_invalid"),
+    ("archive path identity changed", "archive_path_changed"),
+    ("archive verification failed", "archive_verification_failed"),
+    ("archive readback mismatch", "archive_verification_failed"),
+    ("archive checksum mismatch", "archive_verification_failed"),
+    ("archive bundle", "archive_bundle_invalid"),
+    ("archive file protection or size invalid", "archive_file_invalid"),
+    ("invalid archive", "archive_invalid"),
+    ("archive manifest mismatch", "archive_invalid"),
+    ("archive source stream mismatch", "archive_stream_mismatch"),
+    ("durable streams require noeviction", "unsafe_eviction_policy"),
+    ("unknown group count", "retention_group_count"),
+    ("consumer groups on a group-less stream", "retention_unknown_groups"),
+    ("explicit dry-run/apply", "invalid_mode"),
+    ("archive and isolated recovery", "invalid_recovery_target"),
+    ("archive required", "archive_required"),
+)
+
+
+def refusal_reason(exc: BaseException) -> str:
+    """Stable reason code for an exception; never includes exception text."""
+    if isinstance(exc, RetentionRefused):
+        return exc.reason
+    if isinstance(exc, ResponseError):
+        match = re.search(r"retention_[a-z_]+", str(exc))
+        return match.group(0) if match else "redis_response_error"
+    if isinstance(exc, RedisError):
+        return "redis_unavailable"
+    if isinstance(exc, BlockingIOError):
+        return "archive_locked"
+    if isinstance(exc, TimeoutError):
+        return "timeout"
+    if isinstance(exc, OSError):
+        return "archive_io_failed"
+    if isinstance(exc, KeyError):
+        return "missing_environment"
+    if isinstance(exc, ValueError):
+        text = str(exc)
+        if "validation error" in text:
+            return "invalid_policy"
+        for needle, reason in _VALUE_REASONS:
+            if needle in text:
+                return reason
+        return "precondition_failed"
+    return "unexpected_failure"
+
+
+async def completion_marker_count(redis: Redis, *, limit: int = 100000, page: int = 1000) -> dict:
+    """Bounded SCAN count of bus completion markers (diagnostics only)."""
+    count, cursor, scanned = 0, 0, 0
+    while True:
+        cursor, keys = await redis.scan(cursor=cursor, match=MARKER_PATTERN, count=page)
+        count += len(keys)
+        scanned += 1
+        if not cursor or count >= limit or scanned * page >= limit:
+            # Examines at most ``limit`` keys; ``capped`` means the count is a lower bound.
+            return {"completion_markers": min(count, limit), "capped": bool(cursor)}
 
 
 class RetentionPolicy(BaseModel):
@@ -41,20 +124,41 @@ class RetentionPolicy(BaseModel):
     lag_warn_entries: int = Field(default=10000, ge=1)
     pending_warn_seconds: int = Field(default=3600, ge=1)
 
+    max_delete_attempts: int = Field(default=3, ge=1, le=10)
+
     @field_validator('stream')
     @classmethod
     def domain_stream(cls, value):
-        if value not in STREAM_GROUPS:
-            raise ValueError('registered domain stream required; DLQ/fanout excluded')
+        if value not in RETAINED_STREAMS:
+            raise ValueError('registered domain stream or dead-letter stream required; fanout excluded')
         return value
 
     @field_validator('groups')
     @classmethod
     def known_groups(cls, value):
-        if (not 1 <= len(value) <= 64 or len(set(value)) != len(value)
+        if (not 0 <= len(value) <= 64 or len(set(value)) != len(value)
                 or any(not re.fullmatch(r'[A-Za-z0-9:_-]{1,128}', item) for item in value)):
             raise ValueError('explicit unique group allowlist required')
         return tuple(sorted(value))
+
+    @model_validator(mode='after')
+    def groups_match_stream_kind(self):
+        # Domain streams always have consumer groups; the DLQ never does.
+        if (self.stream == DEAD_LETTER_STREAM) != (not self.groups):
+            raise ValueError('explicit unique group allowlist required')
+        return self
+
+    @property
+    def group_less(self) -> bool:
+        return not self.groups
+
+
+def dead_letter_policy(**overrides) -> 'RetentionPolicy':
+    return RetentionPolicy(stream=DEAD_LETTER_STREAM, groups=(), **overrides)
+
+
+def _ascii(value) -> str:
+    return value.decode('ascii') if isinstance(value, bytes) else str(value)
 
 
 def canonical(value) -> bytes:
@@ -97,7 +201,7 @@ def decode_bundle(data):
                    for row in encoded)):
         raise ValueError('invalid archive structure')
     payload = canonical(encoded)
-    if (manifest['stream'] not in STREAM_GROUPS or not 1 <= len(encoded) <= 100
+    if (manifest['stream'] not in RETAINED_STREAMS or not 1 <= len(encoded) <= 100
             or manifest['count'] != len(encoded) or manifest['first_id'] != encoded[0][0]
             or manifest['last_id'] != encoded[-1][0] or manifest['entries_bytes'] != len(payload)
             or manifest['entries_sha256'] != hashlib.sha256(payload).hexdigest()):
@@ -125,24 +229,38 @@ class StreamRetention:
             raise ValueError('retention requires decode_responses=False')
         self.redis, self.policy, self.archive = redis, policy, archive
 
+    async def _require_group_less(self):
+        if self.policy.group_less and await self.redis.xinfo_groups(self.policy.stream):
+            raise RetentionRefused('retention_unknown_groups', 'consumer groups on a group-less stream')
+
     async def diagnostics(self):
         """Bounded read-only health sample; errors are unknown, never healthy."""
         p = self.policy
         memory = await self.redis.info('memory')
         used, maximum = memory['used_memory'], memory['maxmemory']
-        info = await self.redis.xinfo_stream(p.stream)
-        if not 1 <= info['groups'] <= 64:
-            raise ValueError('unknown group count')
-        groups = await self.redis.xinfo_groups(p.stream)
+        try:
+            info = await self.redis.xinfo_stream(p.stream)
+        except ResponseError:
+            if not p.group_less:
+                raise
+            info = {'groups': 0, 'length': 0, 'first-entry': None}  # DLQ not created yet
+        expected = (0, 0) if p.group_less else (1, 64)
+        if not expected[0] <= info['groups'] <= expected[1]:
+            raise RetentionRefused('retention_group_count', 'unknown group count')
+        groups = await self.redis.xinfo_groups(p.stream) if info['groups'] else []
         alerts = []
         if tuple(sorted(g['name'].decode('ascii') for g in groups)) != p.groups:
             alerts.append('unknown_groups')
         details = []
         now = int(time.time() * 1000)
         for g in groups:
-            if g['consumers'] > 64:
-                raise ValueError('consumer count exceeds diagnostic bound')
             pending = await self.redis.xpending(p.stream, g['name'])
+            holders = len(pending.get('consumers') or ())
+            if holders > MAX_PENDING_CONSUMERS:
+                # Only consumers that hold pending entries are bounded (ADR-028).
+                alerts.append('pending_consumers_exceed_bound')
+            if g['consumers'] > MAX_PENDING_CONSUMERS:
+                alerts.append('consumer_churn')
             first = pending['min']
             age = max(0, (now - int(first.split(b'-')[0])) // 1000) if first else None
             idle = None
@@ -157,6 +275,7 @@ class StreamRetention:
             if age is not None and age >= p.pending_warn_seconds:
                 alerts.append('old_pending_entry')
             details.append({'name': g['name'].decode('ascii'), 'pending': pending['pending'],
+                            'consumers': g['consumers'], 'pending_consumers': holders,
                             'lag': lag, 'last_delivered_id': g['last-delivered-id'].decode('ascii'),
                             'oldest_pending_age_seconds': age, 'oldest_pending_idle_ms': idle})
         ratio = used / maximum if maximum else None
@@ -179,15 +298,21 @@ class StreamRetention:
 
     async def run(self, *, mode: Literal['dry-run', 'apply']):
         if mode not in {'dry-run', 'apply'} or (mode == 'apply' and self.archive is None):
-            raise ValueError('explicit dry-run/apply and apply archive required')
+            raise RetentionRefused('invalid_mode', 'explicit dry-run/apply and apply archive required')
         p = self.policy
         start = time.monotonic()
         async with asyncio.timeout(p.max_seconds):
             seconds, micros = await self.redis.time()
+            present = await self.redis.exists(p.stream)
         cutoff = f'{seconds * 1000 + micros // 1000 - p.min_age_seconds * 1000}-0'
         result = {'mode': mode, 'stream': p.stream, 'cutoff_exclusive': cutoff,
                   'batches': 0, 'entries': 0, 'deleted': 0, 'archive_bytes': 0,
                   'archives': [], 'stop': 'max_batches'}
+        if not present:
+            # Nothing was ever appended (or the API has not provisioned it yet).
+            result.update(stop='stream_absent', health={'status': 'ok', 'alerts': []},
+                          elapsed_seconds=round(time.monotonic() - start, 3))
+            return result
         # Total budget includes diagnostics, archive I/O and Redis round trips.
         deadline = start + p.max_seconds
         cursor = '-'
@@ -196,8 +321,10 @@ class StreamRetention:
             async with asyncio.timeout(max(0, deadline - time.monotonic())):
                 result['health'] = await self.diagnostics()
                 if mode == 'apply' and 'unsafe_eviction_policy' in result['health']['alerts']:
-                    raise ValueError('durable streams require noeviction')
-                for _ in range(p.max_batches):
+                    raise RetentionRefused('unsafe_eviction_policy', 'durable streams require noeviction')
+                retries = 0
+                batch = 0
+                while batch < p.max_batches:
                     if time.monotonic() >= deadline:
                         result['stop'] = 'max_seconds'
                         break
@@ -205,7 +332,8 @@ class StreamRetention:
                     if remaining <= 0:
                         result['stop'] = 'max_entries'
                         break
-                    state, entries, _ = await self.redis.eval(
+                    await self._require_group_less()
+                    state, entries, groups = await self.redis.eval(
                         PLAN, 1, p.stream, json.dumps(p.groups), cursor, cutoff,
                         min(p.batch_size, remaining))
                     if not entries:
@@ -220,28 +348,43 @@ class StreamRetention:
                         # Archive + manifest are one atomic bundle. Re-read immediately
                         # before deletion; an interrupted call can leave a safe orphan.
                         if self.archive.read(digest) != data:
-                            raise ValueError('archive verification failed')
+                            raise RetentionRefused('archive_verification_failed', 'archive verification failed')
                         result['archives'].append(digest)
                         if time.monotonic() >= deadline:
                             result['stop'] = 'max_seconds'
                             break
-                        result['deleted'] += await self.redis.eval(
-                            DELETE, 1, p.stream, json.dumps(p.groups), state, cutoff,
-                            len(entries), *entry_arguments(entries))
+                        planned = json.dumps([[_ascii(g[0]), _ascii(g[1])] for g in groups or ()])
+                        try:
+                            await self._require_group_less()
+                            result['deleted'] += await self.redis.eval(
+                                DELETE, 1, p.stream, json.dumps(p.groups), planned, cutoff,
+                                len(entries), *entry_arguments(entries))
+                        except ResponseError as exc:
+                            reason = refusal_reason(exc)
+                            if reason not in RETRYABLE_REFUSALS or retries + 1 >= p.max_delete_attempts:
+                                raise
+                            # Re-plan the same range from current state (bounded).
+                            retries += 1
+                            result['replans'] = retries
+                            result['archive_bytes'] += len(data)
+                            continue
+                    batch += 1
                     result['batches'] += 1
                     result['entries'] += len(entries)
                     result['archive_bytes'] += len(data)
                     cursor = '(' + entries[-1][0].decode('ascii')
+                else:
+                    result['stop'] = 'max_batches'
         result['elapsed_seconds'] = round(time.monotonic() - start, 3)
         return result
 
     async def restore(self, digest: str, target: str):
         """Restore one verified bundle into an isolated, group-free recovery stream."""
         if self.archive is None or not re.fullmatch(r'recovery:[A-Za-z0-9:_-]{1,128}', target):
-            raise ValueError('archive and isolated recovery: target required')
+            raise RetentionRefused('invalid_recovery_target', 'archive and isolated recovery: target required')
         async with asyncio.timeout(self.policy.max_seconds):
             with self.archive.exclusive():
                 manifest, entries = decode_bundle(self.archive.read(digest))
                 if manifest['stream'] != self.policy.stream:
-                    raise ValueError('archive source stream mismatch')
+                    raise RetentionRefused('archive_stream_mismatch', 'archive source stream mismatch')
                 return await self.redis.eval(RESTORE, 1, target, len(entries), *entry_arguments(entries))

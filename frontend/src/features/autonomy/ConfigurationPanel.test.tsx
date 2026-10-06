@@ -41,4 +41,18 @@ describe("configuration operator panel", () => {
     await screen.findByText(/Configuration read unavailable/);
     expect(screen.getByRole("button", { name: "Edit current revision" })).toBeDisabled(); expect(put).not.toHaveBeenCalled();
   });
+  it("shows the C17 confidence gate honestly and round-trips it in every saved revision", async () => {
+    read.mockResolvedValue({ ...data, operational: { ...data.operational, min_confidence: 0.97, allow_uncalibrated_confidence: true }, allow_uncalibrated_confidence_honoured: false });
+    render(<QueryClientProvider client={client}><ConfigurationPanel now={Date.now()} /></QueryClientProvider>);
+    const gate = await screen.findByRole("note", { name: "Confidence gate" });
+    expect(gate).toHaveTextContent("requires calibrated confidence of at least 0.97");
+    expect(gate).toHaveTextContent("allowed by this policy but NOT honoured in this deployment; uncalibrated proposals are still refused.");
+    await userEvent.click(screen.getByRole("button", { name: "Edit current revision" }));
+    expect(screen.getByLabelText(/Allow uncalibrated confidence \(experimental lab only; ignored in this deployment\)/)).toBeChecked();
+    await userEvent.type(screen.getByLabelText("Configuration change reason"), "Tighten");
+    await userEvent.click(screen.getByRole("button", { name: "Save new configuration revision" }));
+    await waitFor(() => expect(put).toHaveBeenCalledTimes(1));
+    // A save never drops (and so silently resets) the confidence gate.
+    expect(put.mock.calls[0][2].operational).toMatchObject({ min_confidence: 0.97, allow_uncalibrated_confidence: true });
+  });
 });

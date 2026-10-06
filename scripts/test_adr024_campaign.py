@@ -1,9 +1,15 @@
 """Preregistration, exact tensor lineage and strict qualification regression tests."""
 
 import copy
+import io
+import json
+import os
 from pathlib import Path
+import sys
 import tempfile
 import unittest
+from unittest import mock
+import zipfile
 
 import adr024_campaign as campaign
 
@@ -68,6 +74,94 @@ class CampaignTests(unittest.TestCase):
         self.assertFalse(result["qualified"])
         self.assertFalse(result["safety_calibrated"])
         self.assertFalse(result["autonomous_activation"])
+
+
+class FrozenClientImportTests(unittest.TestCase):
+    """The ADR014 client is hashed against the pinned parent manifest before execution."""
+
+    def test_tampered_client_is_refused_before_any_module_executes(self):
+        with tempfile.TemporaryDirectory(dir="/tmp/opencode") as directory:
+            root = Path(directory)
+            source, marker = root / "train/source", root / "executed"
+            source.mkdir(parents=True)
+            names = ("__init__", "artifacts", "cli", "contracts", "env", "qualification", "transport")
+            for name in names:
+                body = f"open({str(marker)!r}, 'w').close()\n" if name == "__init__" else ""
+                (source / (name + ".py")).write_text(body)
+            pins = {path.name: campaign.digest(path) for path in source.glob("*.py")}
+            bundle = io.BytesIO()
+            with zipfile.ZipFile(bundle, "w") as archive:
+                archive.writestr("manifest.json", json.dumps({"client_source_files": pins}))
+            checkpoint = root / "checkpoint.ptz"
+            checkpoint.write_bytes(bundle.getvalue())
+            (source / "env.py").write_text("raise SystemExit('tampered code executed')\n")
+            patches = (mock.patch.object(campaign.recovery, "TRAIN", root / "train"),
+                       mock.patch.object(campaign.recovery, "CHECKPOINT", checkpoint),
+                       mock.patch.object(campaign.recovery, "CHECKPOINT_HASH", campaign.digest(checkpoint)))
+            cached = {n: sys.modules.pop(n) for n in list(sys.modules) if n.startswith("_adr024_frozen")}
+            try:
+                with patches[0], patches[1], patches[2]:
+                    with self.assertRaisesRegex(ValueError, "frozen client source changed"):
+                        campaign.frozen()
+                    self.assertFalse(marker.exists())
+                    (source / "env.py").write_text("")
+                    self.assertEqual(sorted(campaign.frozen()), sorted(names[1:]))
+                    self.assertTrue(marker.exists())
+            finally:
+                for name in [n for n in sys.modules if n.startswith("_adr024_frozen")]:
+                    sys.modules.pop(name)
+                sys.modules.update(cached)
+
+
+class FrozenLabLaunchTests(unittest.TestCase):
+    """ADR-028 C23: the privileged frozen v4 lab starts only by explicit NANFO_LAB_FROZEN=1."""
+
+    plan = dict(campaign_id="a" * 32, image_id=campaign.IMAGE)
+
+    def launch(self, environ, plan=None):
+        calls = []
+
+        def command(output, label, argv, timeout=30, check=True):
+            calls.append(argv)
+            if label.endswith("-create"):
+                (output / "ppo.cid").write_text("c" * 64)
+                return mock.Mock(stdout=b"c" * 64)
+            if label.endswith("-inspect"):
+                details = dict(Image=campaign.IMAGE, Mounts=[], HostConfig=dict(NetworkMode="none"))
+                return mock.Mock(stdout=json.dumps([details]).encode())
+            return mock.Mock(stdout=b"")
+
+        with tempfile.TemporaryDirectory(dir="/tmp/opencode") as directory, \
+                mock.patch.object(campaign, "command", command), \
+                mock.patch.dict(os.environ, environ, clear=True):
+            output = Path(directory)
+            try:
+                campaign.start_lab(output, plan or self.plan, "ppo")
+            finally:
+                written = sorted(path.name for path in output.iterdir())
+        return calls, written
+
+    def test_refused_without_explicit_opt_in_before_any_write_or_docker_call(self):
+        for environ, reason in (({}, "NANFO_LAB_FROZEN=1"), ({"NANFO_LAB_FROZEN": "0"}, "NANFO_LAB_FROZEN=1"),
+                                ({"NANFO_LAB_FROZEN": "yes"}, "must be 1")):
+            calls = []
+            with self.subTest(environ=environ), mock.patch.object(campaign, "command", lambda *a, **k: calls.append(a)), \
+                    tempfile.TemporaryDirectory(dir="/tmp/opencode") as directory, \
+                    mock.patch.dict(os.environ, environ, clear=True):
+                with self.assertRaisesRegex(ValueError, reason):
+                    campaign.start_lab(Path(directory), self.plan, "ppo")
+                self.assertEqual((calls, list(Path(directory).iterdir())), ([], []))
+
+    def test_opted_in_launch_is_the_recorded_privileged_isolated_image(self):
+        calls, written = self.launch({"NANFO_LAB_FROZEN": "1"})
+        create = calls[0]
+        self.assertEqual(create[:2], ["docker", "create"])
+        self.assertIn("--privileged", create)
+        self.assertEqual(create[create.index("--network") + 1], "none")
+        self.assertEqual(create[create.index("--experiment") - 1], campaign.IMAGE)
+        self.assertEqual(written, ["ppo-owner.json", "ppo.cid"])
+        with self.assertRaisesRegex(ValueError, "recorded frozen lab image"):
+            self.launch({"NANFO_LAB_FROZEN": "1"}, dict(self.plan, image_id="sha256:" + "b" * 64))
 
 
 if __name__ == "__main__":

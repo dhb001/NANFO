@@ -186,12 +186,17 @@ async def test_provider_missing_history_is_explicitly_blocked():
     assert valid_readback({"readback_sha256": "a" * 64, "readback_verified": True, "probe": {"sent": 3, "received": 2}}) is False
 
 
-async def test_intent_boundary_only_enlists_autonomous_contract():
-    from app.modules.intent.autonomous import AutonomousAcceptance
-    executor = SimpleNamespace(accept=AsyncMock())
-    db, auth = object(), fixture().auth
-    await AutonomousAcceptance(executor).accept(db, auth)
-    executor.accept.assert_awaited_once_with(db, auth)
+def test_intent_exposes_no_autonomous_acceptance_path():
+    """The unused Intent-side acceptance wrapper is removed (ADR-028): autonomous work enters only
+    through Autonomy's executor, and Intent never handles autonomy execution authorizations."""
+    import importlib.util
+    from pathlib import Path
+
+    assert importlib.util.find_spec("app.modules.intent.autonomous") is None
+    intent = Path(__file__).resolve().parents[2] / "app" / "modules" / "intent"
+    for path in intent.rglob("*.py"):
+        source = path.read_text()
+        assert "ExecutionAuthorization" not in source and "autonomy.execution" not in source, path
 
 
 def test_independent_validator_exact_profiles_transitions_and_capacity():

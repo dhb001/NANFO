@@ -2,14 +2,19 @@
 
 Scope:
 - Metadata-only registry lifecycle (list/install/enable/disable/uninstall)
-- Declaration admission checks, not signature verification or sandbox enforcement
-- Fail-open lifecycle event publication for plugin.* contracts
+- Declaration admission checks only: a *declared* signer/signature is format- and
+  allowlist-checked, never cryptographically verified (``declared_unverified``);
+  no sandbox is executed
+- Lifecycle events for plugin.* contracts are published only after the state they
+  describe is committed (ADR-028). A failed publication leaves the row ``deferred``;
+  :func:`republish_deferred_plugin_events` (run by the simulation worker process)
+  republishes it with the same deterministic event ID.
 """
 
 from __future__ import annotations
 
-import json
 import uuid
+from datetime import datetime
 from typing import Any
 
 import redis.asyncio as aioredis
@@ -17,7 +22,9 @@ from fastapi import HTTPException, status
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.canonical import canonical_json_bytes, canonical_sha256
 from app.core.config import get_settings
+from app.core.correlation import normalize_audit_correlation
 from app.core.logging import get_logger
 from app.events.publisher import publish_event
 from app.modules.identity.service import append_audit_log
@@ -31,6 +38,15 @@ from app.modules.plugin.schemas import (
 )
 
 logger = get_logger(__name__)
+
+_DEFERRED = "deferred"
+_QUEUE_UNAVAILABLE = "event_queue_unavailable"
+_STATUS_EVENTS = {
+    "installed": "plugin.installed",
+    "enabled": "plugin.enabled",
+    "disabled": "plugin.disabled",
+    "failed": "plugin.failed",
+}
 
 _PLUGIN_STATUS_INSTALLED = "installed"
 _PLUGIN_STATUS_ENABLED = "enabled"
@@ -69,11 +85,75 @@ def _coerce_bool(value: Any) -> bool | None:
     return None
 
 
-def _coerce_correlation_uuid(value: Any) -> uuid.UUID:
-    try:
-        return uuid.UUID(str(value))
-    except (TypeError, ValueError, AttributeError):
-        return uuid.uuid4()
+def lifecycle_event_id(plugin_id: uuid.UUID, event_type: str, updated_at: datetime) -> str:
+    """Deterministic per-transition event ID: request path and sweep agree on it."""
+    return str(uuid.uuid5(plugin_id, f"{event_type}:{updated_at.isoformat()}"))
+
+
+def plugin_event_payload(
+    plugin,
+    *,
+    requested_by_user_id: str | None,
+    status_override: str | None = None,
+    enabled_override: bool | None = None,
+    failure_reason_override: str | None = None,
+) -> dict[str, Any]:
+    status_value = status_override or _normalize_text(plugin.status)
+    enabled_value = plugin.enabled if enabled_override is None else enabled_override
+    failure_reason = failure_reason_override if failure_reason_override is not None else plugin.failure_reason
+    return {
+        "plugin_id": str(plugin.plugin_id),
+        "plugin_key": _normalize_text(plugin.plugin_key),
+        "name": _normalize_text(plugin.name),
+        "version": _normalize_text(plugin.version),
+        "status": status_value,
+        "enabled": bool(enabled_value),
+        "signature_status": "declared_unverified",
+        "dependency_status": "declared_unverified",
+        "sandbox_status": "not_executed",
+        "failure_reason": _normalize_text(failure_reason) or None,
+        "requested_by_user_id": requested_by_user_id,
+    }
+
+
+async def _publish(redis, *, event_type: str, payload: dict[str, Any], correlation_id: Any,
+                   event_id: str | None = None) -> str:
+    # ADR-028 C20: the shared request-id -> UUID mapping; the original id is kept.
+    correlation, extra = normalize_audit_correlation(correlation_id, None)
+    return await publish_event(redis=redis, event_type=event_type, source="plugin",
+                               payload={**payload, **extra}, correlation_id=str(correlation), event_id=event_id)
+
+
+async def republish_deferred_plugin_events(*, db: AsyncSession, redis, limit: int = 50,
+                                           grace_seconds: float = 30) -> int:
+    """Republish committed-but-unpublished lifecycle events (the ``deferred`` rows).
+
+    Rows are locked ``SKIP LOCKED`` and aged past ``grace_seconds`` so an in-flight
+    request's own publication is not raced. The event ID is derived from the same
+    committed transition, so a publication that actually reached Redis before its
+    acknowledgement was lost is deduplicated by consumers. The requesting actor is
+    not persisted on registry rows; republished payloads carry
+    ``requested_by_user_id=null`` and ``delivery="deferred_republish"``.
+    """
+    repo = PluginRepository(db)
+    published = 0
+    for plugin in await repo.claim_deferred(limit=limit, older_than_seconds=grace_seconds):
+        event_type = _STATUS_EVENTS.get(_normalize_status(plugin.status) or "")
+        if event_type is None:
+            continue
+        payload = {**plugin_event_payload(plugin, requested_by_user_id=None), "delivery": "deferred_republish"}
+        try:
+            stream_entry_id = await _publish(redis, event_type=event_type, payload=payload,
+                correlation_id=uuid.uuid5(plugin.plugin_id, "plugin-deferred-republish"),
+                event_id=lifecycle_event_id(plugin.plugin_id, event_type, plugin.updated_at))
+        except Exception as exc:  # noqa: BLE001 - stays deferred for the next sweep
+            logger.warning("plugin_deferred_event_republish_failed", plugin_id=str(plugin.plugin_id),
+                           event_type=event_type, error_type=type(exc).__name__)
+            break
+        plugin.queue_status, plugin.stream_entry_id, plugin.warning = "queued", stream_entry_id, None
+        published += 1
+    await db.commit()
+    return published
 
 
 class PluginService:
@@ -93,7 +173,15 @@ class PluginService:
                 claim_workspace_id, user_id=user_id, claim_org_id=claim_org_id,
             )
         elif claim_org_id is not None:
-            await OrgService(db=self._db, redis=self._redis).get_org(org_id=claim_org_id, user_id=user_id)
+            try:
+                await OrgService(db=self._db, redis=self._redis).get_org(org_id=claim_org_id, user_id=user_id)
+            except HTTPException as exc:
+                # C6 masks "absent" and "not a member" as 404; for this platform-wide
+                # registry a claimed org the caller cannot use is an authorization failure.
+                if exc.status_code == status.HTTP_404_NOT_FOUND:
+                    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+                                        detail="Insufficient permissions.") from exc
+                raise
         else:
             orgs = await OrgService(db=self._db, redis=self._redis).list_orgs(user_id=user_id, page=1, page_size=1)
             if not orgs.items:
@@ -196,68 +284,26 @@ class PluginService:
                     idempotent_replay=True,
                 )
 
-        signature_failure = self._validate_signature(signer=req.signer, signature=req.signature)
-        if signature_failure is not None:
+        failure = (self._check_declared_signature(signer=req.signer, signature=req.signature)
+                   or self._validate_dependencies(req.dependencies)
+                   or self._validate_sandbox(req.sandbox))
+        if failure is not None:
             await self._publish_plugin_failed_without_record(
                 plugin_key=plugin_key,
                 name=req.name,
                 version=req.version,
-                failure_code=signature_failure["code"],
-                failure_message=signature_failure["message"],
+                failure_code=failure["code"],
+                failure_message=failure["message"],
                 requested_by_user_id=requested_by_user_id,
                 correlation_id=correlation_id,
             )
             raise HTTPException(
-                status_code=signature_failure["status_code"],
-                detail={
-                    "code": signature_failure["code"],
-                    "message": signature_failure["message"],
-                },
-            )
-
-        dependency_failure = self._validate_dependencies(req.dependencies)
-        if dependency_failure is not None:
-            await self._publish_plugin_failed_without_record(
-                plugin_key=plugin_key,
-                name=req.name,
-                version=req.version,
-                failure_code=dependency_failure["code"],
-                failure_message=dependency_failure["message"],
-                requested_by_user_id=requested_by_user_id,
-                correlation_id=correlation_id,
-            )
-            raise HTTPException(
-                status_code=dependency_failure["status_code"],
-                detail={
-                    "code": dependency_failure["code"],
-                    "message": dependency_failure["message"],
-                },
-            )
-
-        sandbox_failure = self._validate_sandbox(req.sandbox)
-        if sandbox_failure is not None:
-            await self._publish_plugin_failed_without_record(
-                plugin_key=plugin_key,
-                name=req.name,
-                version=req.version,
-                failure_code=sandbox_failure["code"],
-                failure_message=sandbox_failure["message"],
-                requested_by_user_id=requested_by_user_id,
-                correlation_id=correlation_id,
-            )
-            raise HTTPException(
-                status_code=sandbox_failure["status_code"],
-                detail={
-                    "code": sandbox_failure["code"],
-                    "message": sandbox_failure["message"],
-                },
+                status_code=failure["status_code"],
+                detail={"code": failure["code"], "message": failure["message"]},
             )
 
         if existing is not None:
-            plugin = await self._repo.update_lifecycle(
-                existing, status="installed", enabled=False, failure_reason=None,
-                queue_status="pending", stream_entry_id=None, warning=None,
-            )
+            plugin = existing
         else:
             plugin = await self._repo.create(
                 plugin_id=uuid.uuid4(),
@@ -271,32 +317,16 @@ class PluginService:
                 status=_PLUGIN_STATUS_INSTALLED,
                 enabled=False,
                 failure_reason=None,
-                queue_status="pending",
+                queue_status=_DEFERRED,
                 stream_entry_id=None,
-                warning=None,
+                warning=_QUEUE_UNAVAILABLE,
             )
 
-        queue_status, stream_entry_id, warning = await self._publish_lifecycle_event(
-            event_type="plugin.installed",
-            correlation_id=correlation_id,
-            payload=self._build_plugin_event_payload(
-                plugin,
-                requested_by_user_id=requested_by_user_id,
-            ),
+        queue_status, stream_entry_id, warning = await self._transition_and_publish(
+            plugin, status_value=_PLUGIN_STATUS_INSTALLED, enabled=False, failure_reason=None,
+            event_type="plugin.installed", correlation_id=correlation_id,
+            requested_by_user_id=requested_by_user_id,
         )
-
-        await self._repo.update_lifecycle(
-            plugin,
-            status=_PLUGIN_STATUS_INSTALLED,
-            enabled=False,
-            failure_reason=None,
-            queue_status=queue_status,
-            stream_entry_id=stream_entry_id,
-            warning=warning,
-        )
-        await self._db.commit()
-        await self._db.refresh(plugin)
-
         return self._serialize_action_response(
             plugin,
             queue_status=queue_status,
@@ -342,7 +372,7 @@ class PluginService:
             schema_failure = {"status_code": 400, "code": "PLUGIN_MANIFEST_INVALID",
                               "message": "Stored declarations do not satisfy the registry schema."}
 
-        signature_failure = self._validate_signature(
+        signature_failure = self._check_declared_signature(
             signer=_normalize_text(manifest.get("signer")),
             signature=_normalize_text(manifest.get("signature")),
         )
@@ -351,30 +381,11 @@ class PluginService:
 
         failure = schema_failure or signature_failure or dependency_failure or sandbox_failure
         if failure is not None:
-            queue_status, stream_entry_id, warning = await self._publish_lifecycle_event(
-                event_type="plugin.failed",
-                correlation_id=correlation_id,
-                payload=self._build_plugin_event_payload(
-                    plugin,
-                    requested_by_user_id=requested_by_user_id,
-                    status_override=_PLUGIN_STATUS_FAILED,
-                    enabled_override=False,
-                    failure_reason_override=failure["code"],
-                ),
+            await self._transition_and_publish(
+                plugin, status_value=_PLUGIN_STATUS_FAILED, enabled=False, failure_reason=failure["code"],
+                event_type="plugin.failed", correlation_id=correlation_id,
+                requested_by_user_id=requested_by_user_id,
             )
-
-            await self._repo.update_lifecycle(
-                plugin,
-                status=_PLUGIN_STATUS_FAILED,
-                enabled=False,
-                failure_reason=failure["code"],
-                queue_status=queue_status,
-                stream_entry_id=stream_entry_id,
-                warning=warning,
-            )
-            await self._db.commit()
-            await self._db.refresh(plugin)
-
             raise HTTPException(
                 status_code=failure["status_code"],
                 detail={
@@ -383,37 +394,11 @@ class PluginService:
                 },
             )
 
-        await self._repo.update_lifecycle(
-            plugin,
-            status=_PLUGIN_STATUS_ENABLED,
-            enabled=True,
-            failure_reason=None,
-            queue_status=plugin.queue_status,
-            stream_entry_id=plugin.stream_entry_id,
-            warning=plugin.warning,
+        queue_status, stream_entry_id, warning = await self._transition_and_publish(
+            plugin, status_value=_PLUGIN_STATUS_ENABLED, enabled=True, failure_reason=None,
+            event_type="plugin.enabled", correlation_id=correlation_id,
+            requested_by_user_id=requested_by_user_id,
         )
-
-        queue_status, stream_entry_id, warning = await self._publish_lifecycle_event(
-            event_type="plugin.enabled",
-            correlation_id=correlation_id,
-            payload=self._build_plugin_event_payload(
-                plugin,
-                requested_by_user_id=requested_by_user_id,
-            ),
-        )
-
-        await self._repo.update_lifecycle(
-            plugin,
-            status=_PLUGIN_STATUS_ENABLED,
-            enabled=True,
-            failure_reason=None,
-            queue_status=queue_status,
-            stream_entry_id=stream_entry_id,
-            warning=warning,
-        )
-        await self._db.commit()
-        await self._db.refresh(plugin)
-
         return self._serialize_action_response(
             plugin,
             queue_status=queue_status,
@@ -451,36 +436,11 @@ class PluginService:
                 idempotent_replay=True,
             )
 
-        await self._repo.update_lifecycle(
-            plugin,
-            status=_PLUGIN_STATUS_DISABLED,
-            enabled=False,
-            failure_reason=None,
-            queue_status=plugin.queue_status,
-            stream_entry_id=plugin.stream_entry_id,
-            warning=plugin.warning,
+        queue_status, stream_entry_id, warning = await self._transition_and_publish(
+            plugin, status_value=_PLUGIN_STATUS_DISABLED, enabled=False, failure_reason=None,
+            event_type="plugin.disabled", correlation_id=correlation_id,
+            requested_by_user_id=requested_by_user_id,
         )
-        queue_status, stream_entry_id, warning = await self._publish_lifecycle_event(
-            event_type="plugin.disabled",
-            correlation_id=correlation_id,
-            payload=self._build_plugin_event_payload(
-                plugin,
-                requested_by_user_id=requested_by_user_id,
-            ),
-        )
-
-        await self._repo.update_lifecycle(
-            plugin,
-            status=_PLUGIN_STATUS_DISABLED,
-            enabled=False,
-            failure_reason=None,
-            queue_status=queue_status,
-            stream_entry_id=stream_entry_id,
-            warning=warning,
-        )
-        await self._db.commit()
-        await self._db.refresh(plugin)
-
         return self._serialize_action_response(
             plugin,
             queue_status=queue_status,
@@ -506,13 +466,52 @@ class PluginService:
             plugin, status="uninstalled", enabled=False, failure_reason=plugin.failure_reason,
             queue_status="not_applicable", stream_entry_id=None, warning=None,
         )
+        # The Identity boundary normalizes the request id (ADR-028 C20) and keeps
+        # the original client identifier in the audit metadata.
         await append_audit_log(
             db=self._db, event_type="plugin.registry.removed", actor_id=uuid.UUID(requested_by_user_id),
             resource_type="plugin", resource_id=plugin.plugin_id,
-            correlation_id=_coerce_correlation_uuid(correlation_id),
+            correlation_id=correlation_id,
             metadata={"registry_only": True, "previous_status": previous_status, "status": "uninstalled"},
         )
         await self._db.commit()
+
+    async def _transition_and_publish(
+        self,
+        plugin,
+        *,
+        status_value: str,
+        enabled: bool,
+        failure_reason: str | None,
+        event_type: str,
+        correlation_id: str,
+        requested_by_user_id: str,
+    ) -> tuple[str, str | None, str | None]:
+        """ADR-028: commit the transition (pessimistically ``deferred``), then publish.
+
+        Only a successful publication is recorded, and only if no later transition
+        has been committed meanwhile, so a slow publisher can never resurrect or
+        relabel a concurrently changed record.
+        """
+        await self._repo.update_lifecycle(
+            plugin, status=status_value, enabled=enabled, failure_reason=failure_reason,
+            queue_status=_DEFERRED, stream_entry_id=None, warning=_QUEUE_UNAVAILABLE,
+        )
+        await self._db.commit()
+        await self._db.refresh(plugin)
+        committed_at = plugin.updated_at
+        queue_status, stream_entry_id, warning = await self._publish_lifecycle_event(
+            event_type=event_type,
+            correlation_id=correlation_id,
+            payload=plugin_event_payload(plugin, requested_by_user_id=requested_by_user_id),
+            event_id=lifecycle_event_id(plugin.plugin_id, event_type, committed_at),
+        )
+        if queue_status == "queued":
+            await self._repo.mark_published(plugin.plugin_id, committed_at=committed_at,
+                                            stream_entry_id=stream_entry_id)
+            await self._db.commit()
+            await self._db.refresh(plugin)
+        return queue_status, stream_entry_id, warning
 
     @staticmethod
     def _assert_installed(plugin) -> None:
@@ -526,7 +525,7 @@ class PluginService:
         # JSON encoding preserves type distinctions (true != 1); only object order is ignored.
         try:
             normalized = PluginInstallRequest.model_validate(manifest).model_dump(mode="json")
-            return json.dumps(normalized, sort_keys=True, separators=(",", ":"), allow_nan=False)
+            return canonical_json_bytes(normalized).decode("ascii")
         except ValidationError:
             return None
 
@@ -534,7 +533,14 @@ class PluginService:
     def _parse_csv_settings(value: str) -> set[str]:
         return {item.strip().lower() for item in value.split(",") if item.strip()}
 
-    def _validate_signature(self, *, signer: str, signature: str) -> dict[str, Any] | None:
+    def _check_declared_signature(self, *, signer: str, signature: str) -> dict[str, Any] | None:
+        """Admission of a *declared* signer/signature (format + allowlist only).
+
+        Nothing is cryptographically verified: a prefix/length check proves nothing
+        about authenticity, which is why every record reports
+        ``signature_status="declared_unverified"``. The error code is unchanged for
+        compatibility; its messages state the declaration-only semantics.
+        """
         settings = get_settings()
         trusted_signers = self._parse_csv_settings(settings.PLUGIN_TRUSTED_SIGNERS)
         normalized_signer = signer.strip().lower()
@@ -542,7 +548,7 @@ class PluginService:
             return {
                 "status_code": status.HTTP_400_BAD_REQUEST,
                 "code": "PLUGIN_SIGNATURE_INVALID",
-                "message": "Declared signer is not on the registry admission allowlist (identity is unverified).",
+                "message": "Declared signer is not on the registry admission allowlist (signer identity is never verified).",
             }
 
         normalized_signature = signature.strip()
@@ -557,7 +563,7 @@ class PluginService:
             return {
                 "status_code": status.HTTP_400_BAD_REQUEST,
                 "code": "PLUGIN_SIGNATURE_INVALID",
-                "message": "Plugin signature is too short.",
+                "message": "Declared signature is shorter than the admission format minimum; it is not verified.",
             }
 
         return None
@@ -639,31 +645,28 @@ class PluginService:
 
         return None
 
-    def _build_plugin_event_payload(
-        self,
-        plugin,
-        *,
-        requested_by_user_id: str,
-        status_override: str | None = None,
-        enabled_override: bool | None = None,
-        failure_reason_override: str | None = None,
-    ) -> dict[str, Any]:
-        status_value = status_override or _normalize_text(plugin.status)
-        enabled_value = plugin.enabled if enabled_override is None else enabled_override
-        failure_reason = failure_reason_override if failure_reason_override is not None else plugin.failure_reason
-        return {
-            "plugin_id": str(plugin.plugin_id),
-            "plugin_key": _normalize_text(plugin.plugin_key),
-            "name": _normalize_text(plugin.name),
-            "version": _normalize_text(plugin.version),
-            "status": status_value,
-            "enabled": bool(enabled_value),
-            "signature_status": "declared_unverified",
-            "dependency_status": "declared_unverified",
-            "sandbox_status": "not_executed",
-            "failure_reason": _normalize_text(failure_reason) or None,
-            "requested_by_user_id": requested_by_user_id,
-        }
+    async def _admit_rejection_event(self, *, plugin_key: str, failure_code: str, requested_by_user_id: str) -> bool:
+        """Rate-limit ``plugin.failed`` events for rejected installs (no record exists).
+
+        An identical rejection (actor, key, code) is published at most once per
+        window, and each actor at most ``PLUGIN_FAILED_EVENT_MAX_PER_ACTOR`` times per
+        window, so repeated invalid submissions cannot flood the stream/audit log.
+        """
+        settings = get_settings()
+        window = max(1, int(getattr(settings, "PLUGIN_FAILED_EVENT_WINDOW_SECONDS", 60)))
+        per_actor = max(1, int(getattr(settings, "PLUGIN_FAILED_EVENT_MAX_PER_ACTOR", 10)))
+        fingerprint = canonical_sha256({"actor": requested_by_user_id, "code": failure_code, "key": plugin_key})
+        actor_key = f"plugin:failed-event:actor:{canonical_sha256(requested_by_user_id)[:32]}"
+        try:
+            if not await self._redis.set(f"plugin:failed-event:{fingerprint[:32]}", "1", nx=True, ex=window):
+                return False
+            await self._redis.set(actor_key, 0, nx=True, ex=window)
+            count = int(await self._redis.incr(actor_key))
+            if await self._redis.ttl(actor_key) == -1:
+                await self._redis.expire(actor_key, window)
+            return count <= per_actor
+        except Exception:  # noqa: BLE001 - without Redis the event cannot be published anyway
+            return False
 
     async def _publish_plugin_failed_without_record(
         self,
@@ -676,6 +679,11 @@ class PluginService:
         requested_by_user_id: str,
         correlation_id: str,
     ) -> None:
+        if self._redis is None or not await self._admit_rejection_event(
+            plugin_key=plugin_key, failure_code=failure_code, requested_by_user_id=requested_by_user_id,
+        ):
+            logger.info("plugin_rejection_event_suppressed", failure_code=failure_code)
+            return
         payload = {
             "plugin_id": None,
             "plugin_key": plugin_key,
@@ -702,29 +710,22 @@ class PluginService:
         event_type: str,
         correlation_id: str,
         payload: dict[str, Any],
+        event_id: str | None = None,
     ) -> tuple[str, str | None, str | None]:
+        """Best-effort publication after commit; never raises."""
         if self._redis is None:
-            return "deferred", None, "event_queue_unavailable"
-
-        normalized_correlation_id = _coerce_correlation_uuid(correlation_id)
-
+            return _DEFERRED, None, _QUEUE_UNAVAILABLE
         try:
-            stream_entry_id = await publish_event(
-                redis=self._redis,
-                event_type=event_type,
-                source="plugin",
-                payload=payload,
-                correlation_id=str(normalized_correlation_id),
-            )
+            stream_entry_id = await _publish(self._redis, event_type=event_type, payload=payload,
+                                             correlation_id=correlation_id, event_id=event_id)
             return "queued", stream_entry_id, None
         except Exception as exc:  # noqa: BLE001
             logger.warning(
                 "plugin_lifecycle_event_publish_failed",
                 event_type=event_type,
-                correlation_id=str(normalized_correlation_id),
                 error=str(exc),
             )
-            return "deferred", None, "event_queue_unavailable"
+            return _DEFERRED, None, _QUEUE_UNAVAILABLE
 
     @staticmethod
     def _serialize_action_response(

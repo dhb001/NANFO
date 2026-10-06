@@ -185,6 +185,13 @@ class EvidenceTests(unittest.TestCase):
         self.assertTrue(self.rules("source.py", b'receiver_token = "' + self.token + b'"\n'))
         self.assertEqual(self.rules("manifest.json", b'{"postgres:/run/secrets/admin_password":"' + self.token + b'"}'), set())
 
+    def test_python_lone_surrogate_literals_stay_inspectable_and_screened(self):
+        # "\ud800" is a valid str literal whose value cannot be UTF-8 encoded strictly.
+        surrogate = b'MALFORMED = "\\ud800"\n'
+        self.assertEqual(self.rules("test_codec.py", surrogate + b"receiver_token = request.receiver_token\n"), set())
+        self.assertEqual(self.rules("test_codec.py", surrogate + b'receiver_token = "' + self.token + b'"\n'),
+                         {"secret_assignment"})
+
     def test_known_token_in_export_filename_is_refused(self):
         allowed = self.allowlist({self.token.decode() + ".json": b"{}"})
         with self.assertRaises(hygiene.Error):
@@ -229,6 +236,159 @@ class EvidenceTests(unittest.TestCase):
             self.assertEqual(hygiene.main(args), 1)
         self.assertIn("new-extensionless", hygiene.tracked_names(self.source, include_untracked=True))
         self.assertNotIn("new-extensionless", hygiene.tracked_names(self.source))
+
+    def test_private_locations_are_forbidden_in_tracked_files_and_campaign_snapshots(self):
+        cases = {
+            "nanfo-experimental-campaign-014/source/deploy/state/adr023-private-evidence/relocation.json":
+                ["tracked_deploy_state"],
+            "deploy/state/secrets/jwt_secret": ["tracked_deploy_state", "tracked_secret_directory"],
+            "ai-engine/artifacts/adr024-qualified-001/model/checkpoint.ptz": ["tracked_private_artifact_store"],
+            "nanfo-experimental-campaign-014/source/ai-engine/artifacts/x.json": ["tracked_private_artifact_store"],
+            "backend/.env": ["tracked_env_file"],
+            ".env.local": ["tracked_env_file"],
+            "deploy/state-compose.env": ["tracked_env_file"],
+            "nanfo-experimental-campaign-014/source/backend/.env": ["tracked_env_file"],
+            "backend/.env.example": [],
+            "frontend/.env.example": [],
+            "deploy/state.py": [],
+            "deploy/secrets.py": [],
+            "docs/deploy/statements.md": [],
+            "nanfo-experimental-campaign-014/source/deploy/tests/test_verify.py": [],
+        }
+        for name, rules in cases.items():
+            with self.subTest(name=name):
+                self.assertEqual(hygiene.forbidden_tracked(name), rules)
+        with self.assertRaises(hygiene.Error):
+            hygiene.forbidden_tracked("../deploy/state/x")
+
+    def test_tracked_gate_fails_snapshot_deploy_state_unless_the_copy_is_being_deleted(self):
+        subprocess.run(["git", "init", "-q", str(self.source)], check=True, capture_output=True)
+        name = "nanfo-experimental-campaign-014/source/deploy/state/private/manifest.json"
+        path = self.source / name
+        path.parent.mkdir(parents=True)
+        # Benign content: the location alone is private evidence.
+        path.write_bytes(b'{"status": "ok"}')
+        subprocess.run(["git", "-C", str(self.source), "add", name], check=True, capture_output=True)
+        args = ["scan", "--root", str(self.source), "--tracked"]
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            self.assertEqual(hygiene.main(args), 1)
+        report = json.loads(output.getvalue())
+        self.assertEqual({row["rule"] for row in report["findings"]}, {"tracked_deploy_state"})
+        self.assertNotIn("deploy/state", output.getvalue())
+        # A pending working-tree deletion (copy moved to the private store) clears the gate.
+        path.unlink()
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(hygiene.main(args), 0)
+        # Directory scans of exports/private stores are not location-gated (export has its own rules).
+        path.write_bytes(b'{"status": "ok"}')
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(hygiene.main(["scan", "--root", str(self.source)]), 0)
+
+    def location_exception_repo(self):
+        """Temporary Git repository with one exempt deploy-state copy and its exact exception."""
+        subprocess.run(["git", "init", "-q", str(self.source)], check=True, capture_output=True)
+        name = "nanfo-experimental-campaign-014/source/deploy/state/adr023-private-evidence/relocation.json"
+        data = b'{"status": "verified"}\n'
+        (self.source / name).parent.mkdir(parents=True)
+        (self.source / name).write_bytes(data)
+        (self.source / "plan.json").write_text(json.dumps({"pins": {name: hygiene.safe.sha256(data)}}))
+        subprocess.run(["git", "-C", str(self.source), "add", "."], check=True, capture_output=True)
+        manifest = {"schema": hygiene.LOCATION_EXCEPTION_SCHEMA,
+                    "decision": "Owner decision recorded for this regression test only.",
+                    "files": {name: {"sha256": hygiene.safe.sha256(data), "rule": "tracked_deploy_state",
+                                     "pinned_by": ["plan.json"], "reason": "Pinned copy used by the regression test."}}}
+        path = self.root / "location-exceptions.json"
+        path.write_text(json.dumps(manifest))
+        return name, data, path
+
+    def scan_tracked(self, exceptions):
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            code = hygiene.main(["scan", "--root", str(self.source), "--tracked", "--include-untracked",
+                                 "--location-exceptions", str(exceptions)])
+        text = output.getvalue()
+        self.assertNotIn("verified", text)
+        self.assertNotIn("relocation", text)
+        return code, json.loads(text)
+
+    def test_location_exception_accepts_only_the_exact_path_and_bytes(self):
+        name, data, exceptions = self.location_exception_repo()
+        code, report = self.scan_tracked(exceptions)
+        self.assertEqual((code, report["location_exception_matches"], report["findings"]), (0, 1, []))
+        path = self.source / name
+        # A single changed byte fails.
+        path.write_bytes(data.replace(b"verified", b"verifies"))
+        code, report = self.scan_tracked(exceptions)
+        self.assertEqual((code, [row["rule"] for row in report["findings"]]), (1, ["tracked_deploy_state"]))
+        path.write_bytes(data)
+        # An additional file in the same private directory fails; the pinned copy still passes.
+        extra = path.with_name("relocation-extra.json")
+        extra.write_bytes(data)
+        code, report = self.scan_tracked(exceptions)
+        self.assertEqual((code, report["location_exception_matches"]), (1, 1))
+        self.assertEqual(report["findings"], [{"path_sha256": hygiene.safe.sha256(str(extra.relative_to(self.source)).encode()),
+                                               "rule": "tracked_deploy_state"}])
+        extra.unlink()
+        # Identical bytes under the same path pattern anywhere else fail: paths are exact.
+        for other in ("nanfo-experimental-campaign-015/source/deploy/state/adr023-private-evidence/relocation.json",
+                      "deploy/state/adr023-private-evidence/relocation.json"):
+            with self.subTest(other=other):
+                copy = self.source / other
+                copy.parent.mkdir(parents=True, exist_ok=True)
+                copy.write_bytes(data)
+                code, report = self.scan_tracked(exceptions)
+                self.assertEqual((code, [row["rule"] for row in report["findings"]]), (1, ["tracked_deploy_state"]))
+                copy.unlink()
+        # A rename fails twice: the new path is forbidden and the old exception is stale.
+        subprocess.run(["git", "-C", str(self.source), "mv", name, name.replace("relocation.json", "moved.json")],
+                       check=True, capture_output=True)
+        code, report = self.scan_tracked(exceptions)
+        self.assertEqual((code, sorted(row["rule"] for row in report["findings"])),
+                         (1, ["stale_location_exception", "tracked_deploy_state"]))
+
+    def test_location_exception_manifest_is_strict_and_needs_the_tracked_gate(self):
+        name, _, exceptions = self.location_exception_repo()
+        valid = json.loads(exceptions.read_text())
+        entry = valid["files"][name]
+        invalid_files = {
+            "other rule": {name: {**entry, "rule": "tracked_env_file"}},
+            "secret directory too": {"deploy/state/secrets/jwt_secret": entry},
+            "not a private location": {"docs/relocation.json": entry},
+            "digest": {name: {**entry, "sha256": "0" * 63}},
+            "unpinned": {name: {**entry, "pinned_by": []}},
+            "pinned by private file": {name: {**entry, "pinned_by": ["deploy/state/plan.json"]}},
+            "short reason": {name: {**entry, "reason": "short"}},
+            "pattern key": {name: {**entry, "glob": "*"}},
+            "traversal": {"../" + name: entry},
+        }
+        documents = [{**valid, "files": files} for files in invalid_files.values()]
+        documents += [{**valid, "schema": "v0"}, {**valid, "decision": "short"}, {**valid, "files": {}},
+                      {key: value for key, value in valid.items() if key != "decision"}]
+        for document in documents:
+            with self.subTest(document=sorted(document.get("files", {}))):
+                exceptions.write_text(json.dumps(document))
+                with self.assertRaises(hygiene.Error):
+                    hygiene.load_location_exceptions(exceptions)
+        exceptions.write_text(json.dumps(valid))
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(hygiene.main(["scan", "--root", str(self.source), "--location-exceptions", str(exceptions)]), 1)
+
+    def test_repository_location_exceptions_are_exactly_the_ten_pinned_campaign_014_copies(self):
+        repository = Path(__file__).resolve().parents[1]
+        exceptions = hygiene.load_location_exceptions(repository / "security/evidence-location-exceptions.v1.json")
+        prefix = "nanfo-experimental-campaign-014/source/deploy/state/adr023-private-evidence/"
+        self.assertEqual(len(exceptions), 10)
+        tracked = set(hygiene.tracked_names(repository))
+        for name, entry in exceptions.items():
+            # Hashes only: neither the private copies nor the pinning files are ever printed.
+            with self.subTest(path_sha256=hygiene.safe.sha256(name.encode())):
+                self.assertTrue(name.startswith(prefix) and name in tracked)
+                self.assertEqual(hygiene.safe.sha256(hygiene.read_file(repository, name, 1024**2)), entry["sha256"])
+                relative = name.removeprefix("nanfo-experimental-campaign-014/source/").encode()
+                for pin in entry["pinned_by"]:
+                    text = hygiene.read_file(repository, pin, 16 * 1024**2)
+                    self.assertTrue(entry["sha256"].encode() in text and relative in text, pin)
 
     def test_archive_traversal_links_duplicates_and_corruption_fail_closed(self):
         for data in (zip_bytes([("../escape", b"x")]),

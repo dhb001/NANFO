@@ -80,32 +80,25 @@ class ReportSources:
                 "time_field": "observed_at",
             }
         if "alerts" in selected:
+            # Alert's scoped SQL applies network/date/status/severity before its
+            # LIMIT and returns an exact total (ADR-028): no 500-row pre-filter cap.
             result = await AlertService(db=self.db, redis=self.redis).list_alerts(
                 status_filter=request.filters.alert_status,
                 severity_filter=request.filters.alert_severity,
                 source_filter=None,
                 correlation_id_filter=None,
                 search_filter=None,
-                limit=500,
+                limit=cap,
                 actor_user_id=user_id,
                 requested_workspace_id=request.workspace_id,
                 claim_org_id=None,
+                network_id_filter=request.network_id,
+                created_from=start,
+                created_before=end,
             )
             rows = []
             for item in result.items:
                 payload = item.payload
-                scope = (
-                    payload.get("scope")
-                    if isinstance(payload.get("scope"), dict)
-                    else {}
-                )
-                network = payload.get("network_id", scope.get("network_id"))
-                if request.network_id is not None and str(network) != str(
-                    request.network_id
-                ):
-                    continue
-                if not start <= item.created_at < end:
-                    continue
                 # Alert payload/title are free JSON; export lifecycle identity, not secrets.
                 row = item.model_dump(mode="json", exclude={"payload", "alert_key"})
                 row["measurement"] = {
@@ -126,15 +119,11 @@ class ReportSources:
                 )
                 rows.append(row)
             sections["alerts"] = {
-                "rows": rows[:cap],
-                "total": None,
-                "truncated": len(rows) > cap or len(result.items) >= 500,
-                "omissions": [
-                    "arbitrary_payload",
-                    "source_list_is_bounded_no_complete_history_guarantee",
-                ],
+                "rows": rows,
+                "total": result.total,
+                "truncated": result.total > len(rows),
+                "omissions": ["arbitrary_payload"],
                 "time_field": "created_at",
-                "source_limit": 500,
             }
         for section, ids in (
             ("simulation", request.scope.simulation_ids),

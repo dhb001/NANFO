@@ -50,6 +50,20 @@ def scenario(**overrides):
     return ScenarioConfig.model_validate({**value, **overrides})
 
 
+# Default server policy floors (ADR-028 C18). ``scenario()`` passes its own
+# max_loss_pct=100 limit with 45% loss, exactly what the floors exist to reject.
+POLICY_LIMITS = {"max_loss_pct": 1.0, "max_latency_ms": 1000.0, "min_throughput_mbps": 0.1}
+
+
+def policy_scenario(**overrides):
+    """An under-capacity flow that passes the default execution policy floors."""
+    return scenario(**{
+        "flows": [{"flow_id": "f", "source": "a", "target": "b", "path": ["ab"], "demand_mbps": [0.5]}],
+        "limits": POLICY_LIMITS,
+        **overrides,
+    })
+
+
 def completed(config):
     checkpoint = initial_checkpoint(config)
     while checkpoint["state"]["tick"] < config.duration_ticks:

@@ -25,17 +25,31 @@ The authoritative channel list lives in `docs/features/Telemetry.md` §4. The cu
 
 ---
 
-## 2. Authentication
+## 2. Authentication (ADR-028 C1)
 
-- The JWT access token must be provided as a query parameter on connection upgrade: `wss://<host>/ws/topology?token=<access_token>`.
-- The server validates the token on connection. An invalid or missing token must reject the upgrade with HTTP `401 Unauthorized`.
-- The server must re-validate the token's expiry before every delta push. On expiry, the server pushes a `WS_UNAUTHORIZED` error frame and closes the connection. The client must reconnect using a refreshed token.
+- Connect to `/ws/<channel>` **without** a query string. Offer the subprotocols
+  `["nanfo.v1", "nanfo.bearer.<access_token>"]`. The server selects exactly `nanfo.v1` and
+  never echoes the bearer entry. A bearer entry is valid only alongside `nanfo.v1`, and
+  only one may be offered.
+- The legacy form `wss://<host>/ws/<channel>?token=<access_token>` is still accepted for
+  one compatibility release. New clients must not use it; the server redacts the query
+  string from every log line.
+- A missing, invalid, expired or unauthorized token is refused **before accept** with close
+  1008 (the upgrade fails with HTTP 403; browsers may report 1006).
+- Authentication runs once per connection. Its decision seeds a per-connection
+  authorization cache that lasts at most `WS_AUTH_CACHE_SECONDS` (15 s) and never outlives
+  the token `exp`.
+- At token expiry the server sends `WS_UNAUTHORIZED` and closes 1008, even on an idle
+  channel. The client refreshes once and reconnects with the new token.
+- A backing-service outage during authentication, subscription or revalidation is never
+  reported as an authentication failure: the server accepts, sends `WS_UNAVAILABLE` and
+  closes 1013. Clients retry with jittered backoff and do not rotate the token.
 - Credentials must never appear in WebSocket message payloads.
 - Only access tokens with a live Redis session are accepted; refresh tokens are
-  rejected. Every delivery checks current identity, capability, and organization
-  membership, not only token expiry. Alerts subscriptions enumerate authorized
-  workspaces even when the login token has no tenant claim. Missing event scope
-  never grants global delivery.
+  rejected. After the cache window, every delivery checks current identity, capability
+  and organization membership, not only token expiry. Alerts subscriptions enumerate
+  authorized workspaces even when the login token has no tenant claim. Missing event
+  scope never grants global delivery.
 - Browser upgrade rejection can appear as close 1006. Clients use a bounded
   authenticated REST probe with cooldown after inconclusive transport failures;
   only a confirmed authentication failure triggers token rotation.
@@ -72,9 +86,17 @@ Clients must not send subscribe frames for channels not in the canonical registr
 ```json
 {
   "event": "error",
-  "data": { "code": "WS_UNKNOWN_CHANNEL", "message": "Channel not registered." }
+  "data": { "code": "WS_UNKNOWN_CHANNEL", "message": "Subscription denied." }
 }
 ```
+
+The frame is strict: exactly `action`, `channel` and `filters`, with string values.
+`channel` must match the connected `/ws/<channel>`. `/ws/topology`, `/ws/telemetry` and
+`/ws/digital-twin` require exactly `filters.network_id` (a UUID); `/ws/alerts` accepts no
+filters. The frame must arrive within `WS_SUBSCRIBE_TIMEOUT_SECONDS` (10 s), otherwise
+the server sends `WS_SUBSCRIBE_TIMEOUT` and closes 1013. Inbound frames larger than
+`WS_MAX_FRAME_BYTES` (64 KiB) close the socket with 1009. A user may hold at most
+`WS_MAX_CONNECTIONS_PER_USER` (16) sockets.
 
 ---
 
@@ -170,7 +192,7 @@ For `remove` deltas:
 
 ## 5. Backpressure and Error Signaling
 
-When the server cannot keep up with delta volume (e.g., subscriber queue depth exceeds threshold), it sends a backpressure frame and may drop subsequent deltas until the client acknowledges:
+When the server cannot keep up with delta volume (e.g., subscriber queue depth exceeds threshold), it sends a backpressure frame and closes the socket with 1013:
 
 ```json
 {
@@ -182,11 +204,20 @@ When the server cannot keep up with delta volume (e.g., subscriber queue depth e
 }
 ```
 
-| Error Code | Cause |
-|:--|:--|
-| `WS_UNAUTHORIZED` | JWT expired or invalid during an active connection |
-| `WS_UNKNOWN_CHANNEL` | Subscribe request for unregistered channel |
-| `WS_BACKPRESSURE` | Server-side queue overflow |
-| `WS_INVALID_FILTER` | Malformed or unauthorized filter parameters |
+Every error frame is followed by a close. Close codes and client behaviour (ADR-028 C1):
 
-On any error code that signals session invalidity (`WS_UNAUTHORIZED`), the server closes the connection immediately after sending the error frame. The client is responsible for reconnect and re-fetch of full state.
+| Error Code | Close | Cause | Client action |
+|:--|:--|:--|:--|
+| `WS_UNAUTHORIZED` | 1008 | Token expired, revoked or no longer authorized during an active connection | Refresh once, then reconnect with the new token |
+| `WS_UNAVAILABLE` | 1013 (1011 for an unexpected server error) | Backing-service outage during authentication, subscription or revalidation | Retry with jittered backoff; not an authentication or filter error |
+| `WS_SUBSCRIBE_TIMEOUT` | 1013 | No subscribe frame within 10 s | Retry with jittered backoff |
+| `WS_CONNECTION_LIMIT` | 1008 | The user already holds `WS_MAX_CONNECTIONS_PER_USER` sockets | Stop retrying; show a visible *Retry realtime* control |
+| `WS_BACKPRESSURE` | 1013 | Server-side queue overflow | Reconnect and re-fetch full state from REST |
+| `WS_UNKNOWN_CHANNEL` | 1008 | Subscribe request for an unregistered or different channel | Terminal |
+| `WS_INVALID_FILTER` | 1008 | Malformed frame, or filters that are invalid or not authorized | Terminal |
+| `WS_FORBIDDEN` | 1008 | Reserved terminal code; the current server reports a denied subscription as `WS_INVALID_FILTER` | Terminal |
+| (no frame) | 1008 | Credentials refused before accept | Refresh or log in, then reconnect |
+| (no frame) | 1009 | Inbound frame larger than `WS_MAX_FRAME_BYTES` | Terminal (client defect) |
+
+Terminal codes are never retried automatically. After reconnecting, the client re-fetches
+full state from REST.

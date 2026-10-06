@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SimulationPage } from "./SimulationPage";
 import { IntentPage } from "@/features/intent/IntentPage";
@@ -35,7 +36,8 @@ describe("durable operator histories", () => {
         confidence: { score: 0, band: "unavailable", approval_required: true } });
     });
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    const page = <QueryClientProvider client={client}>{kind === "simulation" ? <SimulationPage /> : <IntentPage />}</QueryClientProvider>;
+    // Pages render inside the app router (the Intent page reads router-state handoffs).
+    const page = <MemoryRouter><QueryClientProvider client={client}>{kind === "simulation" ? <SimulationPage /> : <IntentPage />}</QueryClientProvider></MemoryRouter>;
     const view = render(page);
     await screen.findByText(`Page 1 | 41 ${kind === "simulation" ? "runs" : "intents"}`);
     fireEvent.click(screen.getByRole("button", { name: `Next ${resource}` }));

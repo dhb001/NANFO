@@ -1,5 +1,40 @@
 # Package Validation
 
+## ADR-028 deployment runtime — 2026-09-24 (source and unit level only)
+
+Scope: supervised `stream-retention`/`telemetry-retention`/`asset-gc`, explicit
+`APP_ENV`/`NANFO_SERVICE_ROLE`, per-role secret volumes and Redis ACL (C24), baked
+Redis/Neo4j/gateway runtime files, current store digests, gateway CSP/headers/edge limit
+and R06 trusted-hop realip, C23 successor/frozen lab overlays, C15/C21 key provisioning,
+fleet SNMP runtime tmpfs and pinned egress subnet, `max_connections=200`, credential
+rotation (C19), backup format 2, state location, autoheal, backend image allowlist and the
+verifier updates (private `/ready` via container exec, live Redis ACL case, header and
+policy checks, format-2 backup check). Schema contract 0030.
+
+```bash
+# From the repository root (portable-lane interpreter = backend Poetry environment):
+PY=$(cd backend && poetry env info -p)/bin/python
+PYTHONPATH=.:backend:scripts PYTHONNOUSERSITE=1 $PY -m pytest deploy -q -p no:cacheprovider \
+  -k "not resolved_compose_contract_without_daemon"
+# From backend/, real nginx 1.30.5 on loopback (opt-in):
+NANFO_TEST_NGINX=1 poetry run pytest tests/integration/test_gateway_headers.py \
+  tests/unit/test_proxy_boundary.py -q --no-cov -p no:cacheprovider -k "not resolved_proxy_network"
+```
+
+**417 deployment tests passed, 9 deselected** (the Compose-CLI render cases
+`test_resolved_compose_contract_without_daemon`, run by CI/the integrator where the CLI
+is available). **25 gateway tests passed, 6 deselected** (same reason). The shipped
+`nginx.conf` rendered through `deploy/gateway_config.py` (real `gateway-entrypoint.sh
+--render`, stub upstream) passed `nginx -t` for single+trusted hop, distributed and
+no-hop modes. All deploy Python compiled, all 11 Compose files parse, the three shell
+entrypoints pass `sh -n`, Ruff is clean, and host `python3 deploy/{manage,verify,
+backup_restore,release_manifest}.py --help` import without backend dependencies. The
+three store digests were re-read from Docker Hub (index digest, latest patch of each line).
+
+Not performed (rules/owner decision): Docker builds, `docker compose config`, any
+service start, the live `verify.py` campaign, backup/restore on real volumes, lab start or
+successor qualification. A new release still requires those before any acceptance claim.
+
 ## Integrated0029 verification — 2026-09-20,21:02 UTC
 
 User-approved current-source contract advances to0029, preserving the external

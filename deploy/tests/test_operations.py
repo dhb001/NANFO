@@ -278,6 +278,7 @@ def fake_deployment():
     )
     dep.binds.return_value = {}
     dep.mount_contract.return_value = {}
+    dep.volume_usage.return_value = {"bytes": 512, "entries": 1}
     dep.maintenance.return_value = {"safe": True, "schema": "0019", "neo4j_graph": copy.deepcopy(GRAPH)}
     return dep
 
@@ -663,13 +664,18 @@ def test_cold_backup_complete_and_fresh_restore_lifecycle(
     target.external_fingerprints.return_value = {}
     restored_bytes = []
 
-    def run(*args, **kwargs):
-        if "stdin" in kwargs:
-            with tarfile.open(fileobj=kwargs["stdin"], mode="r:") as stream:
-                restored_bytes.append(stream.extractfile("data").read())
-        return b""
+    def stream_into(args, reader):
+        # Format 2 restore decrypts straight into the extraction helper's stdin.
+        assert args == ["helper-restore"]
+        with tarfile.open(fileobj=reader, mode="r|") as stream:
+            for member in stream:
+                if member.name == "data":
+                    restored_bytes.append(stream.extractfile(member).read())
+        reader.drain()
+        return 0
 
-    target.run.side_effect = run
+    target.run.return_value = b""
+    target.stream_into.side_effect = stream_into
     target.volume_name.return_value = "nanfo-deploy-target_postgresdata"
     target.helper_args.return_value = ["helper-restore"]
     if graph_change:

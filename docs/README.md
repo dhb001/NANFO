@@ -57,6 +57,7 @@
 - `api/EventAPI.md`
 - `api/Authentication.md`
 - `api/OpenAPI.md`
+- `api/ADR028-ContractChanges.md` (ADR-028 C1–C26 contract changes)
 
 ## Architecture Documents
 - `architecture/Vision.md`

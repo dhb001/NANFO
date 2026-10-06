@@ -177,7 +177,8 @@ async def test_telemetry_consumer_sql_error_is_raised_for_retry():
 
 
 @pytest.mark.asyncio
-async def test_telemetry_consumer_fanout_failure_increments_dropped_and_raises():
+async def test_telemetry_consumer_fanout_failure_after_commit_is_acknowledged():
+    """Regression: a WS fanout failure after commit retried/dead-lettered durable telemetry."""
     db = AsyncMock()
     db.add = MagicMock()
     db.flush = AsyncMock()
@@ -196,16 +197,50 @@ async def test_telemetry_consumer_fanout_failure_increments_dropped_and_raises()
         patch("app.events.consumers.telemetry_consumer.AsyncSessionLocal", return_value=session_cm),
         patch("app.events.consumers.telemetry_consumer.get_redis_client") as mock_get_redis,
         patch("app.events.consumers.telemetry_consumer.telemetry_ws_manager") as mock_ws_manager,
+        patch("app.events.consumers.telemetry_consumer.logger") as mock_logger,
     ):
         fake_redis = AsyncMock()
         fake_redis.incr = AsyncMock(side_effect=[1, 1])
         mock_get_redis.return_value = fake_redis
-        mock_ws_manager.push_delta = AsyncMock(side_effect=RuntimeError("ws down"))
-        with pytest.raises(RuntimeError, match="ws down"):
-            await handle_telemetry_event(_telemetry_event())
+        mock_ws_manager.push_delta = AsyncMock(side_effect=RuntimeError("ws down secret-token"))
+        await handle_telemetry_event(_telemetry_event())  # returns -> the bus acknowledges
 
     db.commit.assert_awaited_once()
-    assert fake_redis.incr.await_count == 2
+    assert fake_redis.incr.await_count == 2  # persisted + dropped (never fanout)
+    incremented = [call.args[0] for call in fake_redis.incr.await_args_list]
+    assert incremented == ["telemetry:health:persisted_events", "telemetry:health:dropped_events"]
+    failure = next(call for call in mock_logger.warning.call_args_list if call.args[0] == "telemetry_ws_fanout_failed")
+    assert failure.kwargs["error_code"] == "TELEMETRY_FANOUT_FAILED"
+    assert failure.kwargs["error_type"] == "RuntimeError"
+    assert "secret-token" not in str(failure)
+
+
+@pytest.mark.asyncio
+async def test_duplicate_replay_fanout_failure_is_best_effort():
+    db = AsyncMock()
+    db.scalar = AsyncMock(return_value=None)
+    event = _telemetry_event()
+    record = {**event["payload"], "event_id": event["event_id"], "correlation_id": event["correlation_id"]}
+    for name in ("event_id", "correlation_id", "device_id", "network_id", "workspace_id"):
+        record[name] = uuid.UUID(record[name])
+    record["observed_at"] = datetime.fromisoformat(record["observed_at"])
+    query_result = MagicMock()
+    query_result.scalar_one_or_none.return_value = SimpleNamespace(**record)
+    db.execute = AsyncMock(return_value=query_result)
+    session_cm = AsyncMock()
+    session_cm.__aenter__.return_value = db
+    session_cm.__aexit__.return_value = None
+    with (
+        patch("app.events.consumers.telemetry_consumer.AsyncSessionLocal", return_value=session_cm),
+        patch("app.events.consumers.telemetry_consumer.get_redis_client") as mock_get_redis,
+        patch("app.events.consumers.telemetry_consumer.telemetry_ws_manager") as mock_ws_manager,
+    ):
+        fake_redis = AsyncMock()
+        fake_redis.incr = AsyncMock(return_value=1)
+        mock_get_redis.return_value = fake_redis
+        mock_ws_manager.push_delta = AsyncMock(side_effect=ConnectionError("ws down"))
+        await handle_telemetry_event(event)
+    fake_redis.incr.assert_awaited_once_with("telemetry:health:dropped_events")
 
 
 @pytest.mark.asyncio
@@ -287,7 +322,9 @@ async def test_runtime_transition_client_unavailable_propagates():
 
 
 @pytest.mark.asyncio
-async def test_runtime_transition_invalid_correlation_id_falls_back_to_generated_uuid():
+async def test_runtime_transition_opaque_correlation_id_maps_deterministically():
+    from app.core.correlation import correlation_uuid
+
     event = _runtime_transition_event("telemetry.collector.sustained_failure_activated")
     event["correlation_id"] = "invalid-correlation-id"
 
@@ -299,9 +336,26 @@ async def test_runtime_transition_invalid_correlation_id_falls_back_to_generated
         mock_publish.return_value = "503-0"
 
         await handle_telemetry_runtime_transition_event(event)
+        await handle_telemetry_runtime_transition_event(event)
 
-    correlation_id = mock_publish.await_args.kwargs["correlation_id"]
-    assert isinstance(uuid.UUID(correlation_id), uuid.UUID)
+    first, second = (call.kwargs["correlation_id"] for call in mock_publish.await_args_list)
+    # The shared ADR-028 mapping, identical on every retry (was a random uuid4).
+    assert first == second == str(correlation_uuid("invalid-correlation-id"))
+
+
+@pytest.mark.asyncio
+async def test_runtime_transition_missing_correlation_derives_from_event_identity():
+    event = _runtime_transition_event("telemetry.collector.sustained_failure_recovered")
+    event.pop("correlation_id")
+    with (
+        patch("app.events.consumers.telemetry_consumer.get_redis_client") as mock_get_redis,
+        patch("app.events.consumers.telemetry_consumer.publish_event", new_callable=AsyncMock) as mock_publish,
+    ):
+        mock_get_redis.return_value = AsyncMock()
+        await handle_telemetry_runtime_transition_event(event)
+        await handle_telemetry_runtime_transition_event(event)
+    first, second = (call.kwargs["correlation_id"] for call in mock_publish.await_args_list)
+    assert first == second and uuid.UUID(first)
 
 
 @pytest.mark.asyncio

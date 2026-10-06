@@ -1,4 +1,5 @@
 import { ReportRecord } from "@/shared/types/reporting";
+import { reportQueueStatusTone, reportStatusTone, type StatusTone } from "@/shared/lib/statusTones";
 
 const TERMINAL_REPORT_STATUSES = new Set(["generated", "failed"]);
 
@@ -14,14 +15,14 @@ export function isReportTerminal(status: string | null | undefined): boolean {
   return TERMINAL_REPORT_STATUSES.has(normalizeReportStatus(status));
 }
 
-export function mapReportStatusTone(status: string | null | undefined): "ok" | "warn" | "danger" | "info" {
-  const normalized = normalizeReportStatus(status);
-  return normalized === "generated" ? "ok" : normalized === "failed" ? "danger" : normalized === "requested" ? "info" : "warn";
+/** Explicit backend `reports.status` map; unknown values are neutral (ADR-028). */
+export function mapReportStatusTone(status: string | null | undefined): StatusTone {
+  return reportStatusTone(status);
 }
 
-export function mapQueueTone(queueStatus: string | null | undefined): "ok" | "warn" | "info" {
-  const normalized = normalizeReportStatus(queueStatus);
-  return normalized === "queued" || normalized === "replayed" ? "ok" : normalized === "deferred" ? "warn" : "info";
+/** Explicit backend `reports.queue_status` map; unknown values are neutral (ADR-028). */
+export function mapQueueTone(queueStatus: string | null | undefined): StatusTone {
+  return reportQueueStatusTone(queueStatus);
 }
 
 export function inferReportErrorMessage(report: ReportRecord | null | undefined): string | null {

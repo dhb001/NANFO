@@ -6,9 +6,9 @@ Persistence operations for plugin lifecycle records.
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import String, cast, desc, or_, select, text
+from sqlalchemy import String, cast, desc, func, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.plugin.models import PluginRecord
@@ -162,3 +162,31 @@ class PluginRepository:
             plugin.version = version
         await self._db.flush()
         return plugin
+
+    async def mark_published(self, plugin_id: uuid.UUID, *, committed_at: datetime,
+                             stream_entry_id: str | None) -> bool:
+        """Record a publication only for the exact committed transition it describes.
+
+        A concurrent later transition (for example uninstall) changes ``updated_at``;
+        the late publisher then leaves that newer state untouched.
+        """
+        marked = await self._db.scalar(
+            update(PluginRecord)
+            .where(PluginRecord.plugin_id == plugin_id, PluginRecord.updated_at == committed_at,
+                   PluginRecord.queue_status == "deferred")
+            .values(queue_status="queued", stream_entry_id=stream_entry_id, warning=None)
+            .returning(PluginRecord.plugin_id)
+        )
+        return marked is not None
+
+    async def claim_deferred(self, *, limit: int, older_than_seconds: float) -> list[PluginRecord]:
+        """Deferred lifecycle rows past the in-flight grace period, locked for the sweep."""
+        result = await self._db.execute(
+            select(PluginRecord)
+            .where(PluginRecord.queue_status == "deferred", PluginRecord.stream_entry_id.is_(None),
+                   PluginRecord.updated_at < func.now() - timedelta(seconds=older_than_seconds))
+            .order_by(PluginRecord.updated_at, PluginRecord.plugin_id)
+            .with_for_update(skip_locked=True)
+            .limit(limit)
+        )
+        return list(result.scalars().all())

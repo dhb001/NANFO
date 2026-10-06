@@ -1,53 +1,30 @@
-import { useEffect, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useAuthStore } from "@/shared/state/auth-store";
+import { useSessionScope } from "@/features/auth/sessionScope";
 import { ApiClientError } from "@/shared/lib/errors";
-import type { OrgMemberList } from "@/shared/types/organization";
-import { listOrgMembers } from "./api";
+import { scopedKey } from "@/shared/lib/queryKeys";
+import { getOrganization } from "./api";
 
-const PAGE_SIZE = 20;
-
-export function useOrgAuthority(token: string | null, orgId: string | null, members?: OrgMemberList) {
+/**
+ * The caller's organization role from `GET /organizations/{id}` `caller_role`
+ * (ADR-028 C6) — one bounded read instead of crawling member pages. Absent and
+ * non-member organizations answer the same 404, shown as "denied". A missing
+ * role (older backend) fails closed. Presentation only: the backend authorizes.
+ */
+export function useOrgAuthority(token: string | null, orgId: string | null) {
+  const scope = useSessionScope();
   const userId = useAuthStore((state) => state.userId);
-  const generation = useAuthStore((state) => state.generation);
   const profile = useAuthStore((state) => state.profile);
-  // A location hint, never an authorization grant. Rotation revalidates this page.
-  const foundPage = useRef<{ scope: string; page: number } | null>(null);
-  const scope = JSON.stringify([generation, orgId, userId]);
-  const current = members?.items.find((member) => member.user_id === userId && member.org_id === orgId);
-  const hintedPage = current && (members?.page_size ?? PAGE_SIZE) === PAGE_SIZE ? members?.page ?? 1 : undefined;
   const query = useQuery({
-    queryKey: ["org-members", "authority", generation, orgId, userId, token],
+    queryKey: scopedKey(scope, "org-authority", orgId),
     enabled: Boolean(token && orgId && userId),
-    initialData: current ? { role: current.org_role as string | null, page: hintedPage ?? 1 } : undefined,
     staleTime: 30_000,
     retry: false,
     queryFn: async ({ signal }) => {
-      const firstPage = hintedPage ?? (foundPage.current?.scope === scope ? foundPage.current.page : 1);
-      const read = async (page: number) => {
-        signal.throwIfAborted();
-        const result = (await listOrgMembers(token!, orgId!, page, PAGE_SIZE, signal)).data;
-        signal.throwIfAborted();
-        return result;
-      };
-      const first = await read(firstPage);
-      let actor = first.items.find((member) => member.user_id === userId && member.org_id === orgId);
-      if (actor) return { role: actor.org_role, page: firstPage };
-      // Snapshot the count: concurrent inserts cannot extend this lookup forever.
-      // Only one page is held at a time; retain only the actor's role/page result.
-      const pages = Math.max(1, Math.ceil(first.total / PAGE_SIZE));
-      for (let page = 1; page <= pages; page++) {
-        if (page === firstPage) continue;
-        const batch = await read(page);
-        actor = batch.items.find((member) => member.user_id === userId && member.org_id === orgId);
-        if (actor) return { role: actor.org_role, page };
-      }
-      return { role: null, page: 1 };
+      const organization = (await scope.read((credential) => getOrganization(credential, orgId as string, signal), signal)).data;
+      return { role: organization.org_id === orgId ? organization.caller_role ?? null : null };
     },
   });
-  useEffect(() => {
-    if (query.data?.role) foundPage.current = { scope, page: query.data.page };
-  }, [query.data, scope]);
   const denied = query.error instanceof ApiClientError && [401, 403, 404].includes(query.error.status ?? 0);
   const status = !token || !orgId || !userId ? "unknown"
     : query.isError ? denied ? "denied" : "error"

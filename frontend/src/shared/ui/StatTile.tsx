@@ -1,12 +1,16 @@
+import type { StatusTone } from "@/shared/lib/statusTones";
+
 interface StatTileProps {
   label: string;
   value: string;
-  caption?: string;
-  tone?: "normal" | "ok" | "warn" | "danger";
+  caption?: string | undefined;
+  tone?: "normal" | StatusTone | undefined;
 }
 
 const toneColor: Record<NonNullable<StatTileProps["tone"]>, string> = {
   normal: "var(--ink-1)",
+  neutral: "var(--ink-1)",
+  info: "var(--info)",
   ok: "var(--ok)",
   warn: "var(--warn)",
   danger: "var(--danger)",

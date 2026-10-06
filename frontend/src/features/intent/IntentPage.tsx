@@ -1,4 +1,5 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { useLocation } from "react-router-dom";
 import { useExecuteIntent, useIntentDetail, useValidateIntent, useIntentHistory } from "@/features/intent/hooks";
 import { useAuthStore } from "@/shared/state/auth-store";
 import { useWorkspaceStore } from "@/shared/state/workspace-store";
@@ -12,17 +13,17 @@ import {
   isIntentTerminalStatus,
   mapExecutionDiagnostics,
   mapIntentLifecycle,
-  resolveConfidenceTone,
   shouldRefetchIntentFromRealtime,
   canCancelIntent,
 } from "@/features/intent/logic";
-import { formatTimestamp } from "@/shared/lib/format";
+import { displayValue, formatTimestamp } from "@/shared/lib/format";
 import { useLiveStore } from "@/features/realtime/store";
 import { AsyncState } from "@/shared/ui/AsyncState";
 import { useUiStore } from "@/shared/state/ui-store";
-import { ApiClientError, toErrorMessage } from "@/shared/lib/errors";
+import { describeApiError, toErrorMessage } from "@/shared/lib/errors";
 import { useIsNarrowViewport } from "@/shared/lib/viewport";
-import { canExecuteIntent, normalizeIntentStatus } from "@/shared/lib/intent";
+import { canExecuteIntent } from "@/shared/lib/intent";
+import { intentConfidenceBandTone, intentQueueStatusTone, intentStatusTone, statusLabel } from "@/shared/lib/statusTones";
 import { hasPermission } from "@/features/auth/permissions";
 import { useExecutionModeStore } from "@/shared/state/execution-mode-store";
 import { LabActionFields } from "@/features/intent/LabActionFields";
@@ -31,13 +32,28 @@ import { PathEvidencePanel } from "./PathEvidencePanel";
 import { SceneReconciliationStatus } from "@/features/realtime/SceneReconciliationStatus";
 import { useSessionScope } from "@/features/auth/sessionScope";
 import { useUrlSelection } from "@/shared/lib/urlSelection";
+import { randomId } from "@/shared/lib/uid";
+import { HANDOFF_QUERY_PARAMS, INTENT_FORM_ACTIONS, readIntentHandoffState, readUntrustedIntentQuery, type IntentPrefillReading } from "./handoff";
+import { intentConflictGuidance, isUnknownOutcome, type IntentConflictGuidance } from "./conflicts";
+import { ApprovalBindingSummary, ValidationDisclosure } from "./IntentEvidence";
+
+/** One validate submission: its key is reused only to retry the same draft after an unknown outcome (C3). */
+interface ValidationAttempt {
+  key: string;
+  draft: string;
+  outcome: "pending" | "unknown" | "done";
+}
 
 export function IntentPage() {
   const { key } = useSessionScope();
-  return <IntentPageContent key={key} />;
+  const location = useLocation();
+  // A router-state handoff is applied once per navigation, not again after a scope remount.
+  const [consumedHandoff, setConsumedHandoff] = useState<string | null>(null);
+  const routedHandoff = consumedHandoff === location.key ? null : readIntentHandoffState(location.state);
+  return <IntentPageContent key={key} routedHandoff={routedHandoff} onHandoffApplied={() => setConsumedHandoff(location.key)} />;
 }
 
-function IntentPageContent() {
+function IntentPageContent({ routedHandoff, onHandoffApplied }: { routedHandoff: IntentPrefillReading | null; onHandoffApplied: () => void }) {
   const session = useSessionScope();
   const token = useAuthStore((state) => state.accessToken);
   const profile = useAuthStore((state) => state.profile);
@@ -51,9 +67,12 @@ function IntentPageContent() {
   const [intentId, setIntentId] = useUrlSelection("intent_id", session.urlScope);
   const [historyPage, setHistoryPage] = useState(1);
   const history = useIntentHistory(token, workspaceId, networkId, historyPage);
-  const [idempotencyKey, setIdempotencyKey] = useState(`intent-${Date.now()}`);
+  const [validationAttempt, setValidationAttempt] = useState<ValidationAttempt | null>(null);
+  // Used only for a legacy intent without a stored key; that key then becomes its identity.
+  const [fallbackExecutionKey, setFallbackExecutionKey] = useState(() => randomId("intent-exec"));
+  const [conflict, setConflict] = useState<IntentConflictGuidance | null>(null);
   const [validationError, setValidationError] = useState<string | null>(null);
-  const [handoffSummary, setHandoffSummary] = useState<string | null>(null);
+  const [handoff, setHandoff] = useState<{ summary: string; untrusted: boolean } | null>(null);
   const [guided, setGuided] = useState(false);
   const [manualApproval, setManualApproval] = useState(false);
   const [simulationId, setSimulationId] = useState("");
@@ -73,6 +92,22 @@ function IntentPageContent() {
   const available = mode === "emulation" && permitted;
   const selectedDetail = !detailQuery.isError && detailQuery.data?.intent_id === intentId && detailQuery.data?.workspace_id === workspaceId && (!networkId || !detailQuery.data?.network_id || detailQuery.data.network_id === networkId);
   const labAction = detailQuery.data?.intent_payload?.action === "reroute_path" || detailQuery.data?.intent_payload?.action === "throttle_qos";
+  const draft = JSON.stringify([action, scopeJson, constraintsJson]);
+  const retryValidationKey = validationAttempt?.outcome === "unknown" && validationAttempt.draft === draft ? validationAttempt.key : null;
+  const storedExecutionKey = selectedDetail ? detailQuery.data?.idempotency_key ?? null : null;
+  const executionKey = executionRequest?.idempotency_key ?? storedExecutionKey ?? fallbackExecutionKey;
+
+  /** Selecting another intent starts a new identity for both validation and execution (C3). */
+  function selectIntent(next: string | null) {
+    setIntentId(next);
+    setManualApproval(false);
+    setSimulationId("");
+    setExecutionRequest(null);
+    setExecutionNotice(null);
+    setConflict(null);
+    setValidationAttempt(null);
+    setFallbackExecutionKey(randomId("intent-exec"));
+  }
 
   const sceneObjects = useLiveStore((state) => state.sceneObjects);
   const sceneObjectIdsNewestFirst = useLiveStore((state) => state.sceneObjectIdsNewestFirst);
@@ -134,6 +169,10 @@ function IntentPageContent() {
       return;
     }
 
+    // Fresh key per submission; only an unconfirmed submission of the same draft is retried with its key.
+    const key = retryValidationKey ?? randomId("intent");
+    setValidationAttempt({ key, draft, outcome: "pending" });
+    setConflict(null);
     try {
       const response = await validateMutation.mutateAsync({
         request: {
@@ -145,19 +184,20 @@ function IntentPageContent() {
             constraints,
           },
         },
-        idempotencyKey,
+        idempotencyKey: key,
       });
       session.assertCurrent();
-      setIntentId(response.intent_id);
-      setSimulationId("");
-      setExecutionRequest(null);
-      setExecutionNotice(null);
+      selectIntent(response.intent_id);
+      const coverage = response.validation?.validation_kind === "manual_lab_plan" ? "manual lab plan" : "schema-only validation";
       pushToast({
-        title: response.status === "validated" ? "Intent validated" : "Intent validation response",
-        description: `Status: ${response.status} | confidence ${response.confidence.band}`,
+        title: response.idempotent_replay ? "Existing intent returned" : response.status === "validated" ? "Intent validated" : "Intent validation response",
+        description: `Status: ${response.status} | ${coverage} | confidence ${response.confidence.band}${response.idempotent_replay ? " | replay of the same submission" : ""}`,
         tone: response.status === "validated" ? "ok" : "warn",
       });
-    } catch {
+    } catch (error) {
+      try { session.assertCurrent(); } catch { return; }
+      setValidationAttempt({ key, draft, outcome: isUnknownOutcome(error) ? "unknown" : "done" });
+      setConflict(intentConflictGuidance(error));
       // The mutation error is rendered below; never leave a rejected form promise.
     }
   }
@@ -175,15 +215,19 @@ function IntentPageContent() {
       });
       return;
     }
+    // Execute and cancel reuse the selected intent's stored key (C3) and echo its current approval binding.
+    const approvalBinding = executionRequest?.approval_binding ?? detailQuery.data?.approval_binding ?? null;
     const request: ExecuteIntentRequest = {
       workspace_id: workspaceId,
       intent_id: intentId,
-      idempotency_key: executionRequest?.idempotency_key ?? (cancel || detailQuery.data?.status === "execution_started" ? detailQuery.data?.idempotency_key ?? idempotencyKey : idempotencyKey),
+      idempotency_key: executionKey,
       manual_approval: cancel ? executionRequest?.manual_approval ?? manualApproval : true,
       cancel,
       ...(!cancel && (executionRequest?.simulation_id ?? simulationId) ? { simulation_id: executionRequest?.simulation_id ?? simulationId } : {}),
+      ...(!cancel && approvalBinding ? { approval_binding: approvalBinding } : {}),
     };
     executionPending.current = true;
+    setConflict(null);
     if (!cancel) setExecutionRequest(request);
     try {
       const response = await executeMutation.mutateAsync({
@@ -203,13 +247,15 @@ function IntentPageContent() {
       await detailQuery.refetch();
     } catch (error) {
       try { session.assertCurrent(); } catch { return; }
-      if (error instanceof ApiClientError && error.code === "INTENT_IDEMPOTENCY_CONFLICT") {
+      const guidance = intentConflictGuidance(error);
+      if (guidance || !isUnknownOutcome(error)) {
+        // Refused by the server: nothing ran, so the next attempt may change its inputs.
         if (!cancel) setExecutionRequest(null);
-        pushToast({
-          title: "Idempotency conflict",
-          description: "This key is bound to another intent. Use a new idempotency key.",
-          tone: "danger",
-        });
+        if (!guidance || guidance.revokeApproval) setManualApproval(false);
+        if (guidance?.refetchDetail) void detailQuery.refetch();
+        setConflict(guidance);
+        setExecutionNotice(guidance ? null : "The server refused the request; nothing was executed.");
+        pushToast({ title: guidance?.title ?? "Execution request refused", description: guidance?.description ?? describeApiError(error), tone: "danger" });
         return;
       }
       setExecutionNotice("Request outcome unknown. A lost response does not mean the action did not run. Refresh detail or retry with the same identity.");
@@ -229,49 +275,27 @@ function IntentPageContent() {
   const executionInFlight = !terminalState && (detailQuery.data?.status === "execution_started" || Boolean(executionRequest));
 
   useEffect(() => {
-    if (appliedHandoffRef.current) {
+    if (appliedHandoffRef.current || typeof window === "undefined") {
       return;
     }
-
-    if (typeof window === "undefined") {
+    const fromUrl = readUntrustedIntentQuery(window.location.search);
+    if (fromUrl) {
+      // Legacy links: strip the prefill from the address so it is not replayed or shared.
+      const url = new URL(window.location.href);
+      for (const name of HANDOFF_QUERY_PARAMS) url.searchParams.delete(name);
+      window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
+    }
+    const prefill = routedHandoff ?? fromUrl;
+    if (!prefill) {
       return;
     }
-
-    const searchParams = new URLSearchParams(window.location.search);
-    if (searchParams.get("source") !== "digital-twin") {
-      return;
-    }
-
     appliedHandoffRef.current = true;
-
-    const actionParam = searchParams.get("action");
-    const scopeParam = searchParams.get("scope");
-    const constraintsParam = searchParams.get("constraints");
-    const contextSummaryParam = searchParams.get("context_summary");
-
-    if (actionParam?.trim()) {
-      setAction(actionParam.trim());
-    }
-    if (scopeParam?.trim()) {
-      setScopeJson(scopeParam);
-    }
-    if (constraintsParam?.trim()) {
-      setConstraintsJson(constraintsParam);
-    }
-    if (contextSummaryParam?.trim()) {
-      setHandoffSummary(contextSummaryParam.trim());
-    }
-
-    const nextParams = new URLSearchParams(searchParams);
-    nextParams.delete("source");
-    nextParams.delete("action");
-    nextParams.delete("scope");
-    nextParams.delete("constraints");
-    nextParams.delete("context_summary");
-    const nextQuery = nextParams.toString();
-    const nextUrl = nextQuery ? `${window.location.pathname}?${nextQuery}` : window.location.pathname;
-    window.history.replaceState(null, "", nextUrl);
-  }, []);
+    if (prefill.action) setAction(prefill.action);
+    if (prefill.scopeJson.trim()) setScopeJson(prefill.scopeJson);
+    if (prefill.constraintsJson.trim()) setConstraintsJson(prefill.constraintsJson);
+    setHandoff({ summary: prefill.contextSummary, untrusted: prefill.untrusted });
+    if (!prefill.untrusted) onHandoffApplied();
+  }, [routedHandoff, onHandoffApplied]);
 
   return (
     <div style={{ display: "grid", gap: "1rem" }}>
@@ -279,21 +303,20 @@ function IntentPageContent() {
         <Button tone="ghost" disabled={!workspaceId || history.isFetching} onClick={() => void history.refetch()}>Refresh intent history</Button>
         <QueryState query={history} hasData={(data) => data.items.length > 0} emptyTitle="No intent history" emptyDescription="No persisted intents on this page.">
           {(data) => <ul>{data.items.map((item) => <li key={item.intent_id}>
-            <Button tone="ghost" disabled={executionInFlight || executeMutation.isPending || validateMutation.isPending} onClick={() => {
-              setIntentId(item.intent_id); setManualApproval(false); setSimulationId(""); setExecutionRequest(null); setExecutionNotice(null);
-            }}>{item.action ?? "Intent"} — {item.status}</Button>
+            <Button tone="ghost" disabled={executionInFlight || executeMutation.isPending || validateMutation.isPending} onClick={() => selectIntent(item.intent_id)}>{item.action ?? "Intent"} — {item.status}</Button>
             <span className="mono"> {item.intent_id} | {item.created_at}</span>
           </li>)}</ul>}
         </QueryState>
         <nav aria-label="Intent history pagination">
           <Button disabled={historyPage <= 1 || history.isFetching} onClick={() => setHistoryPage(historyPage - 1)}>Previous intents</Button>
-          <span> Page {historyPage} | {history.data?.total ?? "Unknown"} intents </span>
+          <span aria-live="polite"> Page {historyPage}{history.isPlaceholderData ? " (loading…)" : ""} | {history.data?.total ?? "Unknown"} intents </span>
           <Button disabled={!history.data || historyPage * history.data.page_size >= history.data.total || history.isFetching} onClick={() => setHistoryPage(historyPage + 1)}>Next intents</Button>
         </nav>
       </Panel>
       <Panel title="Intent Validate and Execute" subtitle="Define an outcome, review the evidence and validate before execution">
-        {handoffSummary ? (
+        {handoff ? (
           <div
+            role={handoff.untrusted ? "alert" : "status"}
             style={{
               border: "1px solid var(--line-soft)",
               borderRadius: "9px",
@@ -303,7 +326,9 @@ function IntentPageContent() {
               fontSize: "0.85rem",
             }}
           >
-            Prefilled from Digital Twin: {handoffSummary}
+            {handoff.untrusted
+              ? <>Prefilled from a link (untrusted): the page address supplied these fields, not the Digital Twin view. Review every field before validating. Link summary (unverified): {handoff.summary || "none"}</>
+              : <>Prefilled from Digital Twin: {handoff.summary || "no summary"}. Review every field before validating.</>}
           </div>
         ) : null}
         <form onSubmit={validate} style={{ display: "grid", gap: "0.7rem" }}>
@@ -340,23 +365,25 @@ function IntentPageContent() {
                 onChange={(event) => { setAction(event.target.value); setManualApproval(false); }}
                 style={{ border: "1px solid var(--line-soft)", borderRadius: "10px", padding: "0.45rem 0.5rem" }}
               >
-                <option value="reroute_path">reroute_path</option>
-                <option value="isolate_vlan">isolate_vlan</option>
-                <option value="optimize_wireless_capacity">optimize_wireless_capacity</option>
-                <option value="throttle_qos">throttle_qos</option>
+                {INTENT_FORM_ACTIONS.map((value) => <option key={value} value={value}>{value}</option>)}
               </select>
             </label>
 
             <label style={{ display: "grid", gap: "0.3rem" }}>
               <span className="mono" style={{ fontSize: "0.8rem", color: "var(--ink-3)" }}>
-                Idempotency Key
+                Execution idempotency key
               </span>
               <input
-                disabled={Boolean(executionRequest) || executeMutation.isPending}
-                value={idempotencyKey}
-                onChange={(event) => setIdempotencyKey(event.target.value)}
+                readOnly
+                aria-label="Execution idempotency key"
+                value={selectedDetail ? executionKey : ""}
+                placeholder={intentId ? "Loading the selected intent's stored key" : "Select or validate an intent"}
                 style={{ border: "1px solid var(--line-soft)", borderRadius: "10px", padding: "0.45rem 0.5rem" }}
               />
+              <span style={{ fontSize: "0.75rem", color: "var(--ink-3)" }}>
+                {storedExecutionKey ? "The selected intent's stored key; execute and cancel always reuse it."
+                  : selectedDetail ? "No stored key yet: this key becomes the intent's execution identity." : "Assigned by the selected intent."}
+              </span>
             </label>
           </div>
 
@@ -412,7 +439,7 @@ function IntentPageContent() {
               permission="write:config"
               tone="ghost"
               type="button"
-              disabled={!intentId || !selectedDetail || !labAction || !available || !manualApproval || !simulationIdValid || !idempotencyKey.trim() || executeMutation.isPending || validateMutation.isPending || terminalState || !canExecute}
+              disabled={!intentId || !selectedDetail || !labAction || !available || !manualApproval || !simulationIdValid || executeMutation.isPending || validateMutation.isPending || terminalState || !canExecute}
               onClick={() => void execute()}
             >
               {executeMutation.isPending ? "Executing..." : "Execute"}
@@ -425,13 +452,7 @@ function IntentPageContent() {
               aria-label="Intent ID"
               disabled={executeMutation.isPending || validateMutation.isPending || Boolean(executionRequest)}
               value={intentId ?? ""}
-              onChange={(event) => {
-                setIntentId(event.target.value || null);
-                setSimulationId("");
-                setManualApproval(false);
-                setExecutionRequest(null);
-                setExecutionNotice(null);
-              }}
+              onChange={(event) => selectIntent(event.target.value || null)}
               placeholder="Intent ID"
               style={{
                 border: "1px solid var(--line-soft)",
@@ -442,13 +463,19 @@ function IntentPageContent() {
               }}
               />
             </div>
+          <p role="status" aria-label="Validation request key">
+            {retryValidationKey
+              ? `Validation outcome unknown: validating this unchanged draft again retries with key ${retryValidationKey}; the server returns the stored intent if it was recorded.`
+              : "Each Validate submission uses a new request key."}
+          </p>
           {executionNotice ? <p role="status">{executionNotice}</p> : null}
+          {conflict ? <div role="alert"><strong>{conflict.title}</strong> ({conflict.code}): {conflict.description}</div> : null}
           {validationError ? <AsyncState title="Invalid request body" description={validationError} /> : null}
           {validateMutation.isError ? (
-            <AsyncState title="Validation request failed" description={toErrorMessage(validateMutation.error)} />
+            <AsyncState title="Validation request failed" description={describeApiError(validateMutation.error)} />
           ) : null}
           {executeMutation.isError ? (
-            <AsyncState title="Execution request failed" description={toErrorMessage(executeMutation.error)} />
+            <AsyncState title="Execution request failed" description={describeApiError(executeMutation.error)} />
           ) : null}
         </form>
       </Panel>
@@ -471,14 +498,13 @@ function IntentPageContent() {
               return (
                 <div style={{ display: "grid", gap: "0.56rem" }}>
                   <div style={{ display: "flex", gap: "0.4rem", flexWrap: "wrap" }}>
-                    <Badge
-                      text={normalizeIntentStatus(detail.status)}
-                      tone={detail.status === "execution_failed" ? "danger" : detail.status === "execution_completed" ? "ok" : "warn"}
-                    />
-                    <Badge text={`confidence ${detail.confidence.band}`} tone={resolveConfidenceTone(detail.confidence.score)} />
-                    <Badge text={detail.queue_status} tone={detail.queue_status === "queued" ? "ok" : "warn"} />
+                    <Badge text={statusLabel(detail.status)} tone={intentStatusTone(detail.status)} />
+                    <Badge text={`confidence ${detail.confidence.band}`} tone={intentConfidenceBandTone(detail.confidence.band)} />
+                    <Badge text={statusLabel(detail.queue_status)} tone={intentQueueStatusTone(detail.queue_status)} />
                   </div>
                   <div style={{ color: "var(--ink-2)", fontSize: "0.9rem" }}>{explainabilitySummary(detail)}</div>
+                  <ValidationDisclosure detail={detail} />
+                  <ApprovalBindingSummary detail={detail} labAction={detail.intent_payload?.action === "reroute_path" || detail.intent_payload?.action === "throttle_qos"} />
                   {detail.status === "execution_started" ? <p role="status">Execution in progress, not completed. Awaiting verification and reconciliation.</p> : null}
                   {uncertain ? <AsyncState title="Execution outcome uncertain" description="Do not assume changes were undone. Reconciliation and verified rollback are required before further lab mutations." /> : null}
                   {diagnostics.noMutationVerified ? <p role="status">No mutation verified by the backend. This is not successful execution or rollback.</p> : null}
@@ -569,11 +595,11 @@ function IntentPageContent() {
                 const changedFields = item.changed_fields;
                 const verificationStatus =
                   changedFields && typeof changedFields === "object" && "verification_status" in changedFields
-                    ? String((changedFields as { verification_status?: unknown }).verification_status ?? "").trim()
+                    ? displayValue((changedFields as { verification_status?: unknown }).verification_status, "").trim()
                     : "";
                 const rollbackStatus =
                   changedFields && typeof changedFields === "object" && "rollback_status" in changedFields
-                    ? String((changedFields as { rollback_status?: unknown }).rollback_status ?? "").trim()
+                    ? displayValue((changedFields as { rollback_status?: unknown }).rollback_status, "").trim()
                     : "";
 
                 return (
@@ -583,16 +609,7 @@ function IntentPageContent() {
                   >
                     <div style={{ display: "flex", justifyContent: "space-between" }}>
                       <strong>{item.id}</strong>
-                      <Badge
-                        text={String(item.status ?? "unknown")}
-                        tone={
-                          item.status === "execution_failed"
-                            ? "danger"
-                            : item.status === "execution_completed" || item.status === "validated"
-                              ? "ok"
-                              : "warn"
-                        }
-                      />
+                      <Badge text={statusLabel(item.status)} tone={intentStatusTone(item.status)} />
                     </div>
                     {verificationStatus || rollbackStatus ? (
                       <div style={{ display: "flex", gap: "0.35rem", marginTop: "0.2rem" }}>

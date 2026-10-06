@@ -120,6 +120,17 @@ class PreservationTests(unittest.TestCase):
                 preservation.finalize(artifacts, documents)
             self.assertEqual((artifacts / "preservation-complete.json").read_bytes(), b"changed")
 
+    def test_acquisition_roots_are_parameterized_but_repository_is_fixed(self):
+        roots = preservation.source_roots([f"evaluation={self.root}", f"review={self.root / 'reviews'}"])
+        self.assertEqual((roots["evaluation"], roots["review"]), (self.root, self.root / "reviews"))
+        self.assertEqual(roots["repository"], preservation.ROOT)
+        self.assertEqual(roots["live"], preservation.SOURCES["live"])
+        self.assertEqual(preservation.source_roots(None), preservation.SOURCES)
+        for value in ("repository=/tmp/x", "unknown=/tmp/x", "evaluation", "evaluation=relative",
+                      "evaluation=/tmp/../etc"):
+            with self.subTest(value=value), self.assertRaises(preservation.safe.EvidenceError):
+                preservation.source_roots([value])
+
 
 if __name__ == "__main__":
     unittest.main()

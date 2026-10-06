@@ -111,8 +111,20 @@ def detector_identity(observation: MeasuredObservation, org_id: uuid.UUID, rule:
     }
 
 
+def nan_tolerant_identity_sha256(value) -> str:
+    """Historical Alert identity digest; deliberately NOT ``app.core.canonical``.
+
+    Sorted, compact, ASCII JSON that *permits* NaN/Infinity (``json`` default
+    ``allow_nan=True``). Persisted detector keys, legacy identity advisory locks and
+    first-delivery payload hashes (``alert_consumed_events``) depend on these exact
+    bytes, and legacy event payloads may carry non-finite numbers that the strict
+    canonical encoder rejects (ADR-028 C20).
+    """
+    return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+
 def identity_key(identity: dict) -> str:
-    return hashlib.sha256(json.dumps(identity, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    return nan_tolerant_identity_sha256(identity)
 
 
 def advance_window(state, observation: MeasuredObservation, rule: DetectorRule, *, now: datetime) -> bool:

@@ -16,7 +16,7 @@ from app.modules.network.spatial_schemas import (
     ReplaceSpatialSceneRequest,
     SpatialSceneInput,
 )
-from app.modules.network.spatial_service import SpatialSceneService, _correlation_uuid
+from app.modules.network.spatial_service import SpatialSceneService
 from app.modules.network.spatial_transforms import world_matrices
 from tests.spatial_support import ACTOR_ID, DEVICE_ID, NETWORK_ID, WORKSPACE_ID, replace_payload, scene_payload, spatial_object
 
@@ -160,11 +160,19 @@ def test_transform_revalidates_internal_mutation():
         world_matrices(scene)
 
 
+ORG_ID = uuid.UUID(int=305)
+
+
+def grant():
+    return SimpleNamespace(workspace_id=WORKSPACE_ID, org_id=ORG_ID, network_id=NETWORK_ID,
+                           network=SimpleNamespace(network_id=NETWORK_ID, workspace_id=WORKSPACE_ID))
+
+
 @pytest.fixture
 def service(mock_db, monkeypatch):
     mock_db.expire_all = MagicMock()
     svc = SpatialSceneService(mock_db, None)
-    svc._network.assert_network_workspace_access = AsyncMock(return_value=SimpleNamespace(workspace_id=WORKSPACE_ID))
+    svc._network.authorize_network = AsyncMock(return_value=grant())
     svc._repo = AsyncMock()
     svc._repo.lock_active_network.return_value = True
     svc._repo.active_device_ids.return_value = {DEVICE_ID}
@@ -193,16 +201,19 @@ async def test_service_audits_assigned_revision_and_commits_after_audit(service,
     svc._repo.append_revision.assert_awaited_once_with(
         NETWORK_ID, 1, result.model_dump(mode="json", exclude={"revision"}), ACTOR_ID,
     )
+    # Authorized without any lock first, then re-authorized after every owner lock.
     access = call(
         network_id=NETWORK_ID, actor_user_id=str(ACTOR_ID), require_write=True,
         requested_workspace_id=None, claim_org_id=None,
     )
-    assert svc._network.assert_network_workspace_access.await_args_list == [access, access]
+    assert svc._network.authorize_network.await_args_list == [access, access]
     mock_db.expire_all.assert_called_once_with()
     metadata = audit.call_args.kwargs["metadata"]
     assert metadata["previous_revision"] == 0 and metadata["revision"] == 1
     assert metadata["object_count"] == 1 and len(metadata["scene_sha256"]) == 64
     assert audit.call_args.kwargs["db"] is mock_db
+    # ADR-028: tenant-scoped audit with the shared correlation normalization.
+    assert audit.call_args.kwargs["org_id"] == ORG_ID
     mock_db.commit.assert_awaited_once()
 
 
@@ -226,7 +237,7 @@ async def test_failed_writes_never_audit_or_commit(service, mock_db, case, statu
     elif case == "deleted":
         svc._repo.lock_active_network.return_value = False
     else:
-        svc._network.assert_network_workspace_access.side_effect = HTTPException(403)
+        svc._network.authorize_network.side_effect = HTTPException(403)
     with pytest.raises(HTTPException) as error:
         await replace(svc)
     assert error.value.status_code == status
@@ -259,9 +270,21 @@ async def test_numerical_geometry_failure_is_handled_before_storage(service, mon
     audit.assert_not_awaited()
 
 
-def test_correlation_mapping_is_stable_and_preserves_uuid():
-    assert _correlation_uuid(str(ACTOR_ID)) == ACTOR_ID
-    assert _correlation_uuid("human-request-id") == uuid.uuid5(uuid.NAMESPACE_URL, "human-request-id")
+async def test_audit_correlation_uses_shared_normalization(service, mock_db):
+    svc, audit = service
+    await replace(svc)
+    kwargs = audit.call_args.kwargs
+    # Opaque request ids map through app.core.correlation and stay searchable.
+    assert kwargs["correlation_id"] == uuid.uuid5(uuid.NAMESPACE_URL, "nanfo:audit-correlation:human-request-id")
+    assert kwargs["metadata"]["request_id"] == "human-request-id"
+    audit.reset_mock()
+    svc._repo.replace.return_value = True
+    await svc.replace_scene(
+        network_id=NETWORK_ID, actor_user_id=str(ACTOR_ID), correlation_id=str(ACTOR_ID),
+        req=ReplaceSpatialSceneRequest.model_validate(replace_payload(1, [spatial_object(device_id=str(DEVICE_ID))])),
+    )
+    assert audit.call_args.kwargs["correlation_id"] == ACTOR_ID
+    assert "request_id" not in audit.call_args.kwargs["metadata"]
 
 
 async def test_post_lock_authority_check_precedes_mutation_and_rolls_back_placeholder(service, mock_db):
@@ -274,9 +297,11 @@ async def test_post_lock_authority_check_precedes_mutation_and_rolls_back_placeh
             mock_db.expire_all.assert_called_once_with()
             svc._repo.replace.assert_not_awaited()
             raise HTTPException(403, "Insufficient permissions.")
-        return SimpleNamespace(workspace_id=WORKSPACE_ID)
+        # The first authorization precedes every owner lock (ADR-028).
+        svc._repo.lock_active_network.assert_not_awaited()
+        return grant()
 
-    svc._network.assert_network_workspace_access.side_effect = check
+    svc._network.authorize_network.side_effect = check
     with pytest.raises(HTTPException) as error:
         await replace(svc)
     assert error.value.status_code == 403

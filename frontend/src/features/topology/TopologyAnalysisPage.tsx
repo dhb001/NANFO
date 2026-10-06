@@ -10,6 +10,7 @@ import { useLiveStore } from "@/features/realtime/store";
 import { useIsNarrowViewport } from "@/shared/lib/viewport";
 import { formatTimestamp } from "@/shared/lib/format";
 import { toErrorMessage } from "@/shared/lib/errors";
+import { deviceStatusTone, statusLabel } from "@/shared/lib/statusTones";
 import {
   useTopologyGraph,
   useReconcileTopology,
@@ -23,19 +24,6 @@ import {
 } from "@/features/topology/logic";
 
 type TopologyTab = "neighbours" | "impact";
-
-function statusTone(status: string): "neutral" | "ok" | "warn" | "danger" | "info" {
-  if (status === "active") {
-    return "ok";
-  }
-  if (status === "offline") {
-    return "warn";
-  }
-  if (status === "deleted") {
-    return "danger";
-  }
-  return "neutral";
-}
 
 export function TopologyAnalysisPage() {
   const token = useAuthStore((state) => state.accessToken);
@@ -89,8 +77,8 @@ export function TopologyAnalysisPage() {
 
     lastLiveDeltaFingerprintRef.current = liveDeltaFingerprint;
 
-    refetchNeighbours();
-    refetchImpact();
+    void refetchNeighbours();
+    void refetchImpact();
     setLastRealtimeInvalidationAt(new Date().toISOString());
   }, [
     liveDeltaFingerprint,
@@ -214,12 +202,17 @@ export function TopologyAnalysisPage() {
                   }}
                 >
                   <div style={{ display: "flex", gap: "0.35rem", flexWrap: "wrap" }}>
-                    <Badge text={`reconcile ${reconcileMutation.data.status}`} tone="ok" />
+                    <Badge text={`reconcile ${reconcileMutation.data.status}`} tone={reconcileMutation.data.status === "completed" ? "ok" : "neutral"} />
                     <Badge text={`nodes ${reconcileMutation.data.checked_nodes}`} tone="info" />
                     <Badge text={`edges ${reconcileMutation.data.checked_edges}`} tone="info" />
                     <Badge text={`backfilled ${reconcileMutation.data.workspace_backfilled_nodes}`} tone="warn" />
                     {reconcileMutation.data.warning ? <Badge text={reconcileMutation.data.warning} tone="warn" /> : null}
                   </div>
+                  {reconcileMutation.data.active_devices !== undefined ? <p>
+                    Inventory repair: {reconcileMutation.data.active_devices} active devices; {reconcileMutation.data.upserted_nodes ?? 0} nodes upserted;
+                    {" "}{reconcileMutation.data.tombstoned_nodes ?? 0} tombstoned; {reconcileMutation.data.skipped_newer_nodes ?? 0} skipped (newer graph state kept).
+                    {reconcileMutation.data.watermark_sequence !== undefined ? ` Inventory sequence reached: ${reconcileMutation.data.watermark_sequence}.` : ""}
+                  </p> : null}
                   <div className="mono" style={{ color: "var(--ink-3)", fontSize: "0.75rem" }}>
                     reconcile_id: {reconcileMutation.data.reconcile_id}
                   </div>
@@ -275,7 +268,7 @@ export function TopologyAnalysisPage() {
                   >
                     <div style={{ display: "flex", justifyContent: "space-between", gap: "0.4rem", alignItems: "center" }}>
                       <strong>{item.hostname}</strong>
-                      <Badge text={item.status} tone={statusTone(item.status)} />
+                      <Badge text={statusLabel(item.status)} tone={deviceStatusTone(item.status)} />
                     </div>
                     <div style={{ display: "flex", gap: "0.32rem", flexWrap: "wrap" }}>
                       <Badge text={`${item.direction} ${item.edge_type}`} tone="warn" />
@@ -326,7 +319,7 @@ export function TopologyAnalysisPage() {
                   >
                     <div style={{ display: "flex", justifyContent: "space-between", gap: "0.4rem", alignItems: "center" }}>
                       <strong>{item.hostname}</strong>
-                      <Badge text={item.status} tone={statusTone(item.status)} />
+                      <Badge text={statusLabel(item.status)} tone={deviceStatusTone(item.status)} />
                     </div>
                     <div style={{ display: "flex", gap: "0.32rem", flexWrap: "wrap" }}>
                       <Badge text={`hop ${item.hop_depth}`} tone="warn" />

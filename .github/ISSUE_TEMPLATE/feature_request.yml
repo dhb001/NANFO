@@ -1,0 +1,46 @@
+name: Feature request
+description: New behaviour or a change to an existing contract.
+labels: ["enhancement"]
+assignees: ["dhb001"]
+body:
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      description: Add the matching `area:` label after creating the issue.
+      multiple: true
+      options: [backend, db, frontend, twin, ai, emulation, deploy, ci, evidence, docs]
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What can't users or operators do today, and why does it matter?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed change
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      placeholder: |
+        - [ ] Operators can ...
+        - [ ] Tests cover ...
+    validations:
+      required: true
+  - type: checkboxes
+    id: contracts
+    attributes:
+      label: Contracts affected
+      description: Changes to these need an ADR or a documented contract change (CONTRIBUTING.md).
+      options:
+        - label: REST API (keeps the `{success, data, meta, errors}` envelope)
+        - label: WebSocket channels or events
+        - label: Database schema (Alembic migration)
+        - label: Frozen runtimes or historical evidence (successor + requalification only)

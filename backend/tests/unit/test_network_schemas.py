@@ -61,19 +61,43 @@ def test_upsert_campus_model_asset_request_validates_integrity() -> None:
     assert req.model_size_bytes == len(model_bytes)
 
 
-def test_upsert_campus_model_asset_request_rejects_sha_mismatch() -> None:
+def test_upsert_campus_model_asset_request_rejects_size_length_mismatch_without_decoding() -> None:
     model_bytes = b"nanfo-campus-model"
+    payload = {
+        "model_file_name": "campus.glb",
+        "model_mime_type": "model/gltf-binary",
+        "model_data_base64": base64.b64encode(model_bytes).decode("ascii"),
+        "model_sha256": "0" * 64,
+        "model_size_bytes": len(model_bytes) + 3,
+        "mapping_by_device_id": {},
+    }
     with pytest.raises(ValidationError):
-        UpsertCampusModelAssetRequest.model_validate(
-            {
-                "model_file_name": "campus.glb",
-                "model_mime_type": "model/gltf-binary",
-                "model_data_base64": base64.b64encode(model_bytes).decode("ascii"),
-                "model_sha256": "0" * 64,
-                "model_size_bytes": len(model_bytes),
-                "mapping_by_device_id": {},
-            }
-        )
+        UpsertCampusModelAssetRequest.model_validate(payload)
+
+
+def test_upsert_campus_model_asset_digest_is_verified_once_by_the_service_not_the_schema(monkeypatch) -> None:
+    # ADR-028: request validation runs on the event loop, so it never decodes or hashes.
+    model_bytes = b"nanfo-campus-model"
+    monkeypatch.setattr(base64, "b64decode", lambda *a, **k: pytest.fail("schema must not decode"))
+    monkeypatch.setattr(hashlib, "sha256", lambda *a, **k: pytest.fail("schema must not hash"))
+    req = UpsertCampusModelAssetRequest.model_validate({
+        "model_file_name": "campus.glb",
+        "model_mime_type": "model/gltf-binary",
+        "model_data_base64": "A" * (4 * ((len(model_bytes) + 2) // 3)),
+        "model_sha256": "0" * 64,
+        "model_size_bytes": len(model_bytes),
+        "mapping_by_device_id": {},
+    })
+    assert req.model_sha256 == "0" * 64
+
+
+def test_device_group_expected_updated_at_requires_offset() -> None:
+    base = {"group_key": "g", "name": "G", "group_type": "custom", "device_ids": [str(uuid.uuid4())]}
+    parsed = UpsertDeviceGroupInput.model_validate({**base, "expected_updated_at": "2026-09-23T12:00:00.000001Z"})
+    assert parsed.expected_updated_at.utcoffset() is not None
+    assert UpsertDeviceGroupInput.model_validate(base).expected_updated_at is None
+    with pytest.raises(ValidationError):
+        UpsertDeviceGroupInput.model_validate({**base, "expected_updated_at": "2026-09-23T12:00:00"})
 
 
 def test_upsert_device_group_input_normalizes_and_deduplicates_device_ids() -> None:

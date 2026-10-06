@@ -159,8 +159,16 @@ async def test_real_adapter_observe_prepare_recover_raw_hashes_and_episode(tmp_p
     from emulation.experimental_lab_contract import IMAGE, MODEL, SOURCE
     from tests.experimental_lab_support import case
 
-    source = Path(__file__).resolve().parents[3] / "ai-engine/artifacts/adr024-qualified-001/live/path0/snapshot-0.json"
-    snapshot = json.loads(source.read_bytes())
+    import hashlib
+
+    # Tracked byte-identical copy (ai-engine/qualified, ADR-028), pinned by its SHA256SUMS.
+    qualified = Path(__file__).resolve().parents[3] / "ai-engine/qualified/adr024-qualified-001"
+    source = qualified / "live/path0/snapshot-0.json"
+    content = source.read_bytes()
+    sums = dict(reversed(line.split()) for line in (qualified / "SHA256SUMS").read_text().splitlines())
+    assert hashlib.sha256(content).hexdigest() == sums["live/path0/snapshot-0.json"] == (
+        "3c35103deee0224fe1d79e95855fbb9c2bd4ffb15d31c03e7f3b3b66c850498f")
+    snapshot = json.loads(content)
     raw = copy.deepcopy(snapshot["history"]["frames"][0])
     data = raw["response"]["data"]
     c = case()
@@ -172,7 +180,7 @@ async def test_real_adapter_observe_prepare_recover_raw_hashes_and_episode(tmp_p
         "runtime": runtime, "checkpoint_sha256": MODEL, "routes": (route,)})
     receiver_policy = {"controller_policy_sha256": None, "image_id": IMAGE, "source_sha256": SOURCE,
         "model_sha256": MODEL, "wrapper_sha256": runtime.wrapper_sha256, "container_id": runtime.container_id,
-        "heartbeat_seconds": 5}
+        "heartbeat_seconds": 5, **policy.verification.model_dump()}
     token = tmp_path / "token"
     token.write_text("b" * 64)
     token.chmod(0o600)
@@ -227,3 +235,34 @@ async def test_real_adapter_observe_prepare_recover_raw_hashes_and_episode(tmp_p
         assert operations[-2:] == ["status", "recover"]
     finally:
         await adapter.close()
+
+
+def test_adapter_refuses_receiver_thresholds_that_differ_from_controller_verification(tmp_path):
+    """ADR-028: probe loss, UDP loss, probe count and traffic bytes must match exactly."""
+    from emulation.experimental_lab_contract import IMAGE, MODEL, SOURCE, THRESHOLD_FIELDS
+    from tests.experimental_lab_support import case
+
+    c = case()
+    runtime = c.policy.runtime.model_copy(update={"container_id": "c" * 64,
+        "image_sha256": IMAGE.removeprefix("sha256:"), "source_sha256": SOURCE})
+    route = c.policy.routes[0].model_copy(update={"path": ("access1", "dist1", "access2"),
+                                                "device_ids": ("access1", "dist1", "access2")})
+    policy = c.policy.model_copy(update={"runtime": runtime, "checkpoint_sha256": MODEL, "routes": (route,)})
+    token = tmp_path / "token"
+    token.write_text("b" * 64)
+    token.chmod(0o600)
+    base = {"controller_policy_sha256": None, "image_id": IMAGE, "source_sha256": SOURCE,
+            "model_sha256": MODEL, "wrapper_sha256": runtime.wrapper_sha256, "container_id": runtime.container_id,
+            "heartbeat_seconds": 5, **policy.verification.model_dump()}
+    assert set(THRESHOLD_FIELDS) <= set(base)
+    ExperimentalLabAdapter(policy=policy, receiver_policy=base, receiver_policy_sha256="a" * 64,
+                           token_path=token, transport=None)
+    missing = dict(base)
+    del missing["max_probe_loss_fraction"]
+    for receiver_policy in ({**base, "max_probe_loss_fraction": base["max_probe_loss_fraction"] + .1},
+                            {**base, "max_loss_fraction": base["max_loss_fraction"] + .1},
+                            {**base, "min_probe_sent": base["min_probe_sent"] + 1},
+                            {**base, "min_traffic_bytes": base["min_traffic_bytes"] + 1}, missing):
+        with pytest.raises(ValueError, match="experimental_adapter_threshold_mismatch"):
+            ExperimentalLabAdapter(policy=policy, receiver_policy=receiver_policy, receiver_policy_sha256="a" * 64,
+                                   token_path=token, transport=None)

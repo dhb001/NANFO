@@ -30,6 +30,7 @@ from app.modules.telemetry.pins import EvidenceOwnerScope, EvidenceReference, Pr
 from app.modules.telemetry.reconciliation import TelemetryReconciliationService, owner_contracts
 from app.modules.telemetry.retention import ArchivalAssessmentRequest, TelemetryRetentionService
 from app.modules.telemetry.service import TelemetryPersistenceService
+from tests.report_support import authorized_workspace, stub_org_admission
 
 pytestmark = pytest.mark.skipif(not os.environ.get("RETENTION_TEST_DSN"), reason="disposable RETENTION_TEST_DSN required")
 
@@ -49,9 +50,12 @@ async def sessions():
         scripts = ScriptDirectory.from_config(config)
         with sync.begin() as conn:
             conn.execute(text(f'SET LOCAL search_path TO "{schema}"'))
-            with EnvironmentContext(config, scripts, fn=lambda rev, _: scripts._upgrade_revs("0025", rev)) as context:
+            # Head, not 0025: the owner ORM models map ADR-028 0030 columns (alert tenancy,
+            # report claim_attempts); the retention contracts under test are unchanged.
+            with EnvironmentContext(config, scripts, fn=lambda rev, _: scripts._upgrade_revs("head", rev)) as context:
                 context.configure(connection=conn)
                 context.run_migrations()
+            assert conn.scalar(text("SELECT version_num FROM alembic_version")) == scripts.get_current_head()
         engine = create_async_engine(url.set(drivername="postgresql+asyncpg"),
                                     connect_args={"server_settings": {"search_path": schema}})
         yield async_sessionmaker(engine, expire_on_commit=False)
@@ -297,8 +301,10 @@ async def test_report_service_source_capture_crash_and_idempotent_replay(session
         await db.commit()
     async with sessions() as db:
         svc = ReportService(db=db, redis=None)
-        # Authority is a separate owner-service dependency, data capture is real.
-        svc.authorize_generation = AsyncMock()
+        # Authority is a separate owner-service dependency, data capture is real. The
+        # C26 organisation admission needs the authorized workspace's org (ADR-028).
+        svc.authorize_generation = AsyncMock(return_value=authorized_workspace())
+        stub_org_admission(svc, workspaces=[workspace])
 
         async def crash():
             await db.flush()
@@ -312,7 +318,8 @@ async def test_report_service_source_capture_crash_and_idempotent_replay(session
         assert await db.scalar(select(func.count()).select_from(ReportRecord)) == 0
         assert await db.scalar(select(func.count()).select_from(TelemetryEvidencePin)) == 0
         svc = ReportService(db=db, redis=None)
-        svc.authorize_generation = AsyncMock()
+        svc.authorize_generation = AsyncMock(return_value=authorized_workspace())
+        stub_org_admission(svc, workspaces=[workspace])
         result = await svc.generate_report(**args)
         replay = await svc.generate_report(**args)
         assert replay["idempotent_replay"] and replay["report_id"] == result["report_id"]
@@ -407,12 +414,13 @@ async def test_archive_failure_rolls_back_deletion_and_tombstone(sessions, store
         await db.commit()
 
     def interrupted(data):
-        store.write(data)  # durable orphan is safe; DB deletion has not happened
+        store.write_segment(data)  # durable orphan segment is safe; DB deletion has not happened
         raise OSError("archive acknowledgement lost")
 
     async with sessions() as db:
         with pytest.raises(OSError):
-            await TelemetryRetentionService(db).apply(request(workspace), store=SimpleNamespace(write=interrupted))
+            await TelemetryRetentionService(db).apply(request(workspace),
+                                                      store=SimpleNamespace(write_segment=interrupted))
         await db.rollback()
     async with sessions() as db:
         assert await db.get(TelemetryRecord, row.record_id)
@@ -479,7 +487,7 @@ async def test_archive_path_replacement_never_deletes_source(
 
     with monkeypatch.context() as patch:
         deletion = AsyncMock()
-        patch.setattr(TelemetryArchiveRepository, "archive_and_delete", deletion)
+        patch.setattr(TelemetryArchiveRepository, "archive_and_delete_batch", deletion)
         if timing == "before":
             replace()
         elif timing == "publication":
@@ -529,3 +537,55 @@ async def test_archive_path_replacement_never_deletes_source(
                                                            store=TelemetryArchiveStore(root))
         await db.commit()
         assert (await db.get(TelemetryRecord, row.record_id)).event_id == row.event_id
+
+
+async def test_fully_reconciled_history_is_not_stranded_by_reregistration(sessions, store):
+    """ADR-028 regression: rows created before the latest registration were stranded."""
+    from app.modules.telemetry.reconciliation import invalidate_owner_enumeration
+
+    workspace, network = uuid.uuid4(), uuid.uuid4()
+    old = metric(workspace, network)
+    async with sessions() as db:
+        db.add(old)
+        await db.commit()
+    await reconcile(sessions, workspace)
+    async with sessions() as db:
+        await invalidate_owner_enumeration(db, workspace_id=workspace, owner="autonomy")
+        await db.commit()
+        blocked = await TelemetryRetentionService(db).assess(request(workspace))
+        assert blocked.coverage_basis == "blocked" and blocked.missing_owners == ["autonomy"]
+    await reconcile(sessions, workspace)
+    async with sessions() as db:
+        result = await TelemetryRetentionService(db).apply(request(workspace), store=store)
+        assert result.coverage_basis == "reconciled" and result.deleted == 1
+        await db.commit()
+
+
+async def test_enumeration_invalidation_preserves_the_coverage_start(sessions, store):
+    from app.modules.telemetry.pin_models import TelemetryReferenceCoverage
+    from app.modules.telemetry.reconciliation import invalidate_owner_enumeration
+
+    workspace, network = uuid.uuid4(), uuid.uuid4()
+    async with sessions() as db:  # legacy report without enumerable identity -> unknown history
+        await db.execute(text("INSERT INTO reports (report_id, workspace_id, report_type, output_format, status, "
+            "correlation_id, requested_by_user_id, requested_at, queue_status, date_range, scope, filters, artifact_refs, error_context) "
+            "VALUES (:id, :ws, 'telemetry', 'csv', 'failed', :corr, 'fixture', now(), 'failed', '{}', '{}', '{}', '[]', '{}')"),
+            {"id": uuid.uuid4(), "ws": workspace, "corr": uuid.uuid4()})
+        await db.commit()
+    await reconcile(sessions, workspace)
+    async with sessions() as db:
+        first = await db.get(TelemetryReferenceCoverage, (workspace, "report"))
+        registered = first.registered_at
+    row = metric(workspace, network)
+    async with sessions() as db:
+        db.add(row)
+        await db.commit()
+        await invalidate_owner_enumeration(db, workspace_id=workspace, owner="report")
+        await db.commit()
+    await reconcile(sessions, workspace)
+    async with sessions() as db:
+        again = await db.get(TelemetryReferenceCoverage, (workspace, "report"))
+        assert again.revoked_at is None and again.registered_at == registered
+        result = await TelemetryRetentionService(db).apply(request(workspace), store=store)
+        assert result.coverage_basis == "prospective" and result.deleted == 1
+        await db.commit()

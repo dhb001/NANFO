@@ -9,11 +9,15 @@ describe("ADR018 frozen model API", () => {
   it("uses scoped registry reads and explicit history IDs only", async () => {
     const fetch = vi.fn().mockResolvedValueOnce(Response.json(envelope(data))).mockResolvedValueOnce(Response.json(envelope(modelRecordFixture())));
     vi.stubGlobal("fetch", fetch);
-    const signal = new AbortController().signal;
-    await getModelDiagnostics("token", data.network_id, data.workspace_id, signal);
+    const controller = new AbortController();
+    await getModelDiagnostics("token", data.network_id, data.workspace_id, controller.signal);
     await diagnoseModel("token", data.network_id, data.workspace_id, "measured-history-1");
     expect(fetch.mock.calls[0][0]).toMatch(/\/autonomy\/model\?network_id=/);
-    expect(fetch.mock.calls[0][1].signal).toBe(signal);
+    // The caller's signal is composed with the default request timeout: aborting it aborts the fetch.
+    const passed = fetch.mock.calls[0][1].signal as AbortSignal;
+    expect(passed.aborted).toBe(false);
+    controller.abort();
+    expect(passed.aborted).toBe(true);
     expect(fetch.mock.calls[1][1]).toMatchObject({ method: "POST", headers: { Authorization: "Bearer token" },
       body: JSON.stringify({ network_id: data.network_id, history_reference: "measured-history-1" }) });
   });

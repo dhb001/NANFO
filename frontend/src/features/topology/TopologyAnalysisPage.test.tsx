@@ -175,6 +175,21 @@ describe("TopologyAnalysisPage", () => {
 
     expect(mutate).toHaveBeenCalled();
     expect(screen.getByText("reconcile_id: rec-1")).toBeInTheDocument();
+    expect(screen.queryByText(/Inventory repair/)).not.toBeInTheDocument();
+  });
+
+  it("shows the inventory-driven repair counts and watermark when the backend reports them (C13)", () => {
+    mockUseReconcileTopology.mockReturnValue({
+      mutate: vi.fn(), isPending: false, isError: false, error: null,
+      data: {
+        reconcile_id: "rec-2", network_id: "00000000-0000-0000-0000-000000000333", status: "completed", checked_nodes: 4, checked_edges: 3,
+        missing_workspace_nodes: 0, workspace_backfilled_nodes: 0, active_devices: 5, upserted_nodes: 2, tombstoned_nodes: 1,
+        skipped_newer_nodes: 3, watermark_sequence: 42,
+      },
+    });
+    render(<TopologyAnalysisPage />);
+    expect(screen.getByText(/Inventory repair: 5 active devices; 2 nodes upserted;\s+1 tombstoned; 3 skipped \(newer graph state kept\)\. Inventory sequence reached: 42\./)).toBeInTheDocument();
+    expect(screen.getByText("reconcile completed")).toHaveClass("badge--ok");
   });
 
   it("refetches topology analyses when live topology delta fingerprint changes", async () => {

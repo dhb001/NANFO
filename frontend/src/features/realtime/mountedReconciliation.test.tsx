@@ -12,6 +12,13 @@ import { useAlertsQuery } from "@/features/reliability/hooks";
 import { useLiveStore } from "./store";
 import { operatorProfile } from "@/test/profile";
 import type { WebSocketEnvelope } from "@/shared/types/ws";
+import { authorityKey } from "@/features/auth/sessionScope";
+
+function sessionKey() {
+  const auth = useAuthStore.getState();
+  const scope = useWorkspaceStore.getState();
+  return JSON.stringify([auth.generation, auth.userId, scope.organizationId, scope.workspaceId, scope.networkId]);
+}
 
 type Socket = { path: string; onSubscribed(): void; onError(error: { code: string; message: string }): void; onFrame(frame: WebSocketEnvelope<unknown>): void };
 const sockets = new Map<string, Socket>();
@@ -69,9 +76,11 @@ describe("realtime reconciliation with actual mounted owner hooks", () => {
       client.setQueryData(key, { private: true });
       return key;
     });
-    const foreignAlerts = ["alerts", "new", { workspaceId: "workspace", networkId: "other" }];
-    const foreignDevices = ["devices", "new", "other", 3, 20];
-    client.setQueryData(foreignAlerts, { items: [] }); client.setQueryData(foreignDevices, { items: [] });
+    // Same session, another network; and another session/tenant for the same network (ADR-028 key layout).
+    const foreignAlerts = ["alerts", sessionKey(), authorityKey(), { workspaceId: "workspace", networkId: "other" }];
+    const foreignDevices = ["devices", sessionKey(), authorityKey(), "other", 3, 20];
+    const foreignSessionDevices = ["devices", "foreign-session-tenant", authorityKey(), "network", 3, 20];
+    for (const key of [foreignAlerts, foreignDevices, foreignSessionDevices]) client.setQueryData(key, { items: [] });
     // Queue lifecycle reconciliation, then rotate before its debounce expires.
     sockets.get("/ws/digital-twin")!.onSubscribed();
     act(() => useAuthStore.setState({ accessToken: "new" }));
@@ -89,7 +98,7 @@ describe("realtime reconciliation with actual mounted owner hooks", () => {
     }
     expect(urls().some((url) => url.pathname.endsWith("/devices") && url.searchParams.get("page") === "3")).toBe(true);
     expect(stable.every((query) => client.getQueryCache().find({ queryKey: query.queryKey }) === query)).toBe(true);
-    for (const key of [...foreignKeys, foreignAlerts, foreignDevices]) expect(client.getQueryState(key)?.isInvalidated).toBe(false);
+    for (const key of [...foreignKeys, foreignAlerts, foreignDevices, foreignSessionDevices]) expect(client.getQueryState(key)?.isInvalidated).toBe(false);
     // A lifecycle event after rotation must invalidate the same stable queries.
     const before = count("/simulations?");
     act(() => sockets.get("/ws/digital-twin")!.onFrame({ event: "simulation.paused", data: { scene_object: { id: "event", object_type: "simulation_state", simulation_id: "selected", status: "paused" } } }));
@@ -105,7 +114,8 @@ describe("realtime reconciliation with actual mounted owner hooks", () => {
     }));
     render(<QueryClientProvider client={client}><MountedOwners /></QueryClientProvider>);
     await tick(1);
-    expect(pending).toHaveLength(7);
+    // Every mounted read (history/detail/compare, telemetry, inventory, alerts) passes its abort signal.
+    expect(pending).toHaveLength(10);
     const previous = [...pending];
     fetchMock.mockImplementation(async () => reply({ status: "paused", items: [], total: 0, marker: "new-authority" }));
     act(() => useAuthStore.getState().setProfile({ ...operatorProfile, roles: ["Read-Only"], permissions: ["read:topology", "read:telemetry"] }));

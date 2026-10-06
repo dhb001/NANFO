@@ -10,6 +10,7 @@ from typing import Any, Literal
 
 from pydantic import Field
 
+from app.core.config import get_settings
 from app.modules.autonomy.artifact_io import ArtifactStore, parse_json
 from app.modules.autonomy.registry import protected_path
 from app.modules.autonomy.schemas import SHA256
@@ -57,7 +58,19 @@ class Installation(Record):
         return ports
 
 
-def load_installation(path=None, expected_sha256=None):
+def experimental_lab_enabled(settings=None):
+    """ADR-028: all experimental wiring is off unless NANFO_EXPERIMENTAL_LAB_ENABLED=true."""
+    settings = get_settings() if settings is None else settings
+    return getattr(settings, "NANFO_EXPERIMENTAL_LAB_ENABLED", False) is True
+
+
+# STOP/status/recovery of an already owned run stay available when the lab is disabled.
+SAFETY_OPERATIONS = frozenset({"status", "stop", "recover"})
+
+
+def load_installation(path=None, expected_sha256=None, *, settings=None, operation="run"):
+    if not experimental_lab_enabled(settings) and operation not in SAFETY_OPERATIONS:
+        raise ValueError("experimental_lab_disabled")
     path = path or os.environ.get("NANFO_EXPERIMENTAL_CONFIG")
     expected_sha256 = expected_sha256 or os.environ.get("NANFO_EXPERIMENTAL_CONFIG_SHA256")
     if not path or not expected_sha256 or not Path(path).is_absolute():

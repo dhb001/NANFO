@@ -66,7 +66,7 @@ export function HotkeyLayer() {
       if (result.path) {
         event.preventDefault();
         resetPrefix();
-        if (canAccessRoute(useAuthStore.getState().profile, result.path)) navigate(result.path);
+        if (canAccessRoute(useAuthStore.getState().profile, result.path)) void navigate(result.path);
       }
     };
 

@@ -86,6 +86,7 @@ class AutonomyDecision(Base):
 
 class ConfigurationRevision(Base):
     __tablename__ = "autonomy_configuration_revisions"
+    __table_args__ = (CheckConstraint("revision > 0", name="ck_autonomy_configuration_revision"),)
 
     network_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
     revision: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -106,6 +107,13 @@ class TimedOverride(Base):
         Index("uq_autonomy_override_execution", "execution_id", unique=True),
         Index("ix_autonomy_override_due", "next_check_at", "lease_expires_at",
               postgresql_where=text("status IN ('holding', 'restoring', 'restored')")),
+        CheckConstraint("status IN ('holding', 'restoring', 'restored', 'return_blocked', 'returned')",
+                        name="ck_autonomy_override_status"),
+        CheckConstraint("duration_seconds BETWEEN 1 AND 3600", name="ck_autonomy_override_duration"),
+        CheckConstraint("return_mode IN ('monitor', 'recommend', 'autonomous') "
+                        "AND prior_mode IN ('monitor', 'recommend', 'autonomous')", name="ck_autonomy_override_modes"),
+        CheckConstraint("restoration_attempts >= 0 AND hold_revision > prior_revision",
+                        name="ck_autonomy_override_revision"),
     )
 
     override_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)

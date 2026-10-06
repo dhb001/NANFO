@@ -7,13 +7,13 @@ See docs/architecture/SafetyModel.md for the model and trust obligations.
 
 from __future__ import annotations
 
-import hashlib
-import json
 import math
 from fractions import Fraction
 from typing import Annotated, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+
+from app.core.canonical import canonical_sha256
 
 Nonnegative = Annotated[float, Field(strict=True, ge=0, allow_inf_nan=False)]
 Positive = Annotated[float, Field(strict=True, gt=0, allow_inf_nan=False)]
@@ -202,11 +202,7 @@ def safety_input_digest(
             for route in sorted(assignments, key=lambda r: (r.demand_id, r.route_id))
         ],
     }
-    return hashlib.sha256(
-        json.dumps(
-            payload, sort_keys=True, separators=(",", ":"), allow_nan=False
-        ).encode("utf-8")
-    ).hexdigest()
+    return canonical_sha256(payload)
 
 
 def _upper_float(value: Fraction) -> float:

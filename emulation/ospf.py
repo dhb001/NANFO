@@ -19,7 +19,6 @@ import fcntl
 import json
 import math
 import os
-import pwd
 import shutil
 import subprocess
 import sys
@@ -28,14 +27,18 @@ import time
 from pathlib import Path
 
 from emulation.actions import parseTc
+from emulation.lab_contracts import ACTION_PATHS
 from emulation.measurements import parsePing, parseQueue, utcNow
 from emulation.runner import requireContainer, stopProcess
 from emulation.topology import HOSTS, LINKS, SWITCHES, TOPOLOGY_ID
 from emulation.workloads import MATCHED_CAPACITIES
 
 ROUTERS = tuple(row["name"] for row in SWITCHES)
+# Root is a build-time member of frrvty (successor Dockerfile), so FRR's privs_init
+# finds its VTY group without setgroups(); ospfd additionally needs NET_BIND_SERVICE.
+FRR_PRIVILEGES = ("-u", "root", "-g", "root")
 ROUTER_IDS = {name: f"10.255.0.{i}" for i, name in enumerate(ROUTERS, 1)}
-PATHS = (("access1", "dist1", "access2"), ("access1", "dist2", "access2"))
+PATHS = ACTION_PATHS
 POLICY = {
     "protocol": "FRRouting OSPFv2 (IP protocol 89)",
     "area": "0.0.0.0",
@@ -213,7 +216,7 @@ class OSPFNetwork:
     def start(self):
         if self.net is not None:
             raise RuntimeError("OSPF network already started")
-        requireContainer()
+        requireContainer(frr=True)
         if os.environ.get("EMULATION_CONTROL_ENABLED", "false").lower() == "true":
             raise RuntimeError("OSPF cannot run with manual mailbox control")
         from mininet.link import TCLink
@@ -275,12 +278,10 @@ class OSPFNetwork:
                 self.command(name, ["sysctl", "-qw", *settings])
             for name, host in self.hosts.items():
                 self.command(name, ["ip", "route", "replace", "default", "via", host["gateway"]])
-            user = pwd.getpwnam("frr")
             for name in ROUTERS:
                 directory = self.directory / name
                 directory.mkdir()
                 directory.chmod(0o750)
-                os.chown(directory, user.pw_uid, user.pw_gid)
                 for daemon in ("zebra", "ospfd"):
                     config = directory / f"{daemon}.conf"
                     config.write_text(
@@ -293,6 +294,9 @@ class OSPFNetwork:
                     process = self.get(name).popen(
                         [
                             f"/usr/lib/frr/{daemon}",
+                            # C23 successor: no SETUID/SETGID/CHOWN capability, so FRR
+                            # keeps uid 0 (no uid switch) and only narrows capabilities.
+                            *FRR_PRIVILEGES,
                             "-f",
                             str(config),
                             "-i",

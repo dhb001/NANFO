@@ -73,7 +73,7 @@ Applies to all UI work across Vertical Slices, including application shell, dash
 
 ## Implementation Safety Checklist
 Before marking a frontend step complete:
-1. Contract verification against docs/api and docs/features completed.
+1. Contract verification against docs/api and docs/features completed; `npm run api:check` shows the committed generated OpenAPI types match the backend schema (ADR-028).
 2. Scoped lint/type checks pass.
 3. Targeted unit/component/integration tests pass.
 4. Realtime failure paths covered (malformed payload, disconnect, unauthorized).

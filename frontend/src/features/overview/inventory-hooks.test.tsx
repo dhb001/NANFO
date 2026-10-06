@@ -1,18 +1,22 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
 import { useCreateDevice, useDevices, useNetworks } from "@/features/networks/hooks";
 import { useOrganizations, useOrgMembers, useWorkspaces } from "@/features/organizations/hooks";
+import { useAuthStore } from "@/shared/state/auth-store";
+import { operatorProfile } from "@/test/profile";
 
-afterEach(() => vi.unstubAllGlobals());
+// Queries read the session's current credential (ADR-028), as the app does.
+beforeEach(() => useAuthStore.getState().setSession({ accessToken: "fixture-token", refreshToken: "refresh", userId: operatorProfile.user_id, profile: operatorProfile }));
+afterEach(() => { vi.unstubAllGlobals(); useAuthStore.getState().clearSession(); });
 function wrapper() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   return ({ children }: { children: ReactNode }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>;
 }
 
 describe("bounded inventory and tenancy hooks", () => {
-  it("fetches one requested page per list, exposes total and normalized tenancy pagination", async () => {
+  it("fetches one requested page per list and exposes the backend {items,total} envelope unchanged", async () => {
     const fetcher = vi.fn(async () => new Response(JSON.stringify({ success: true, data: { items: [], total: 41 }, meta: {}, errors: null }), { status: 200 }));
     vi.stubGlobal("fetch", fetcher);
     const { result, rerender } = renderHook(({ page }: { page: number | undefined }) => ({
@@ -26,9 +30,13 @@ describe("bounded inventory and tenancy hooks", () => {
     expect(fetcher).toHaveBeenCalledTimes(5);
     expect(fetcher.mock.calls.every((args) => String((args as unknown[])[0]).includes("page=1&page_size=20"))).toBe(true);
     rerender({ page: 3 });
-    await waitFor(() => expect(result.current.orgs.data?.page).toBe(3));
-    expect(result.current.workspaces.data).toMatchObject({ total: 41, page: 3, page_size: 20 });
-    expect(fetcher).toHaveBeenCalledTimes(10);
+    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(10));
+    expect(fetcher.mock.calls.slice(5).every((args) => String((args as unknown[])[0]).includes("page=3&page_size=20"))).toBe(true);
+    await waitFor(() => expect(result.current.orgs.isPlaceholderData).toBe(false));
+    // Tenancy lists carry no page/page_size (C6 contract): nothing is invented client-side.
+    expect(result.current.workspaces.data).toEqual({ items: [], total: 41 });
+    expect(result.current.orgs.data).toEqual({ items: [], total: 41 });
+    expect(result.current.members.data).toEqual({ items: [], total: 41 });
   });
 
   it("submits every documented device field and retains nulls", async () => {

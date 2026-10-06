@@ -34,6 +34,7 @@ os.environ.update({
 # ── Standard imports (after env vars are set) ─────────────────────────────────
 import uuid
 from datetime import UTC, datetime
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import fakeredis
@@ -47,6 +48,45 @@ from tests.auth_support import SessionIdentities, _current_identities
 # Must run before any logger is first used to avoid the 'PrintLogger has no .name'
 # AttributeError raised by structlog.stdlib.add_logger_name.
 configure_logging("WARNING")
+
+
+# ── Private evidence gating (ADR-028) ────────────────────────────────────────
+# Tests listed in tests/private_artifacts.txt read the ignored local evidence
+# store. They are marked `private_artifacts`; when the store is absent they are
+# skipped with an explicit reason instead of failing with FileNotFoundError.
+_PRIVATE_ARTIFACT_ROOT = Path(__file__).resolve().parents[2] / "ai-engine" / "artifacts"
+_PRIVATE_ARTIFACT_SENTINELS = (
+    "adr014-001/train-06/checkpoint.ptz",
+    "adr024-qualified-001/model",
+)
+_PRIVATE_ARTIFACT_REGISTRY = Path(__file__).with_name("private_artifacts.txt")
+
+
+def _private_artifact_prefixes() -> tuple[str, ...]:
+    lines = _PRIVATE_ARTIFACT_REGISTRY.read_text(encoding="utf-8").splitlines()
+    return tuple(line.strip() for line in lines if line.strip() and not line.lstrip().startswith("#"))
+
+
+def _private_artifacts_available() -> bool:
+    return all((_PRIVATE_ARTIFACT_ROOT / sentinel).exists() for sentinel in _PRIVATE_ARTIFACT_SENTINELS)
+
+
+def _matches_prefix(nodeid: str, prefix: str) -> bool:
+    return nodeid == prefix or nodeid.startswith(prefix + "::") or nodeid.startswith(prefix + "[")
+
+
+def pytest_collection_modifyitems(config, items):
+    prefixes = _private_artifact_prefixes()
+    available = _private_artifacts_available()
+    skip = pytest.mark.skip(reason=f"private evidence store absent: {_PRIVATE_ARTIFACT_ROOT} (ADR-028)")
+    for item in items:
+        nodeid = item.nodeid
+        index = nodeid.find("tests/")
+        relative = nodeid[index:] if index >= 0 else nodeid
+        if any(_matches_prefix(relative, prefix) for prefix in prefixes):
+            item.add_marker(pytest.mark.private_artifacts)
+            if not available:
+                item.add_marker(skip)
 
 
 @pytest.fixture(scope="session")

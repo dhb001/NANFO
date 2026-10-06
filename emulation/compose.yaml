@@ -1,16 +1,28 @@
 name: nanfo-emulation
+# ADR-028 C23 successor lab (default). Not privileged: only the namespace capabilities a
+# Mininet/OVS lab needs, no network, no new privileges, read-only root with nosuid/nodev
+# scratch. emulation.runner refuses to start under any other capability profile. The
+# frozen privileged EOL image is reachable only via compose.frozen.yaml with
+# NANFO_LAB_FROZEN=1 (python3 emulation/control.py enforces this).
+# Without DAC_OVERRIDE the lab must OWN output/ and results/ (root:<reader gid> 0750) and
+# reads the writer's 0640 command files through NANFO_LAB_READER_GID (control.py checks).
 services:
   lab:
-    image: ${NANFO_EMULATION_IMAGE:-nanfo-emulation:campus-small-v1}
+    image: ${NANFO_EMULATION_IMAGE:-nanfo-emulation:successor}
     build:
       context: .
-    privileged: true
-    # Privilege is only for this disposable namespace/OVS lab. Never add host PID,
-    # host networking, a Docker socket, a physical interface, or credential mounts.
+      dockerfile: Dockerfile
     network_mode: none
+    cap_drop: [ALL]
+    cap_add: [NET_ADMIN, NET_RAW, SYS_ADMIN]
+    security_opt: [no-new-privileges:true]
+    read_only: true
+    group_add: ["${NANFO_LAB_READER_GID:?Set the backend reader/writer group id (control.py derives it)}"]
     environment:
       EMULATION_CONTROL_ENABLED: ${EMULATION_CONTROL_ENABLED:-false}
       EMULATION_BINDING_DIGEST: ${EMULATION_BINDING_DIGEST:-}
+      # C15: command MAC key; mounted by compose.control.yaml only when controls are on.
+      NANFO_LAB_COMMAND_KEY_FILE: /run/nanfo-lab-key/lab_command_key
     volumes:
       - type: bind
         source: ./output
@@ -29,13 +41,19 @@ services:
         bind:
           create_host_path: false
     tmpfs:
-      - /run:exec,size=64m
-      - /tmp:exec,size=64m
+      - /run:rw,exec,nosuid,nodev,size=64m,mode=0755
+      - /tmp:rw,exec,nosuid,nodev,size=64m,mode=1777
+      - /var/run/openvswitch:rw,nosuid,nodev,size=16m,mode=0750
+      - /var/lib/openvswitch:rw,nosuid,nodev,size=32m,mode=0750
+      - /etc/openvswitch:rw,nosuid,nodev,size=8m,mode=0750
+      - /var/log:rw,noexec,nosuid,nodev,size=32m,mode=0755
+      - /var/tmp:rw,noexec,nosuid,nodev,size=16m,mode=1777
     pids_limit: 256
     mem_limit: 768m
+    memswap_limit: 768m
     cpus: 2
     # experiment-start uses this isolated service as a one-off owner with its own
-    # Unix socket. It never enables the manual mailbox or exposes network ports.
+    # Unix socket (FRR modes add NET_BIND_SERVICE). It never enables the manual mailbox.
     stop_grace_period: 20s
     healthcheck:
       test: ["CMD", "python", "-c", "from pathlib import Path; import subprocess,sys; sys.exit(0 if Path('/run/nanfo/experiment.sock').is_socket() else subprocess.call(['python','-m','emulation.runner','--request','status']))"]

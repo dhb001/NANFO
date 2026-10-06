@@ -14,7 +14,8 @@ from app.modules.autonomy.experimental.settings import load_installation
 
 
 async def operate(args):
-    installation = load_installation(args.config, args.config_sha256)
+    # ADR-028: `run` requires NANFO_EXPERIMENTAL_LAB_ENABLED=true; status/stop/recover never do.
+    installation = load_installation(args.config, args.config_sha256, operation=args.operation)
     redis = Redis.from_url(get_settings().REDIS_URL, decode_responses=True)
     try:
         # status/STOP must work even if an adapter is broken or unavailable.

@@ -3,7 +3,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import TIMESTAMP, CheckConstraint, ForeignKey, Integer, Text, func
+from sqlalchemy import TIMESTAMP, CheckConstraint, ForeignKey, Index, Integer, Text, func, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -14,6 +14,9 @@ class TelemetryEvidencePin(Base):
     __tablename__ = "telemetry_evidence_pins"
     __table_args__ = (
         CheckConstraint("owner IN ('report','intent','alert','simulation','autonomy')", name="ck_telemetry_pin_owner"),
+        # Includes released records: the FK intentionally retains their audit linkage.
+        Index("ix_telemetry_pins_record", "record_id"),
+        Index("ix_telemetry_pins_active", "workspace_id", "record_id", postgresql_where=text("released_at IS NULL")),
     )
 
     workspace_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)

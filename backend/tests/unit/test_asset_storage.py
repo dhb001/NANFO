@@ -199,3 +199,123 @@ def test_recovery_preserves_unpublished_upload_and_unrelated_regular_file(store)
     digest = put(restarted)
     assert restarted.read(digest, 5) == b"model"
     assert temporary.read_bytes() == b"unpublished" and unrelated.read_bytes() == b"keep"
+
+
+def test_put_reports_new_publication_and_verified_put_skips_rehash(store, monkeypatch):
+    from app.modules.network import asset_storage
+
+    digest = hashlib.sha256(b"model").hexdigest()
+    hashed = []
+    original = asset_storage.verify_body
+    monkeypatch.setattr(asset_storage, "verify_body", lambda *a, **k: hashed.append(1) or original(*a, **k))
+    assert store.put(b"model", digest, 5, verified=True) is True
+    assert hashed == []
+    # Dedup still verifies the stored object before trusting it.
+    assert store.put(b"model", digest, 5, verified=True) is False
+    assert hashed == [1]
+    with pytest.raises(AssetIntegrityError):
+        store.put(b"model", digest, 4, verified=True)
+    with pytest.raises(AssetIntegrityError):
+        store.put(b"model", "not-a-digest", 5, verified=True)
+
+
+def test_reads_take_a_shared_lock_and_recover_only_once_per_process(store, monkeypatch):
+    import fcntl
+
+    digest = put(store)
+    recoveries, modes = [], []
+    original_recover = LocalAssetStore._recover_publications
+    original_flock = fcntl.flock
+    monkeypatch.setattr(LocalAssetStore, "_recover_publications",
+                        lambda self, root: recoveries.append(1) or original_recover(self, root))
+    monkeypatch.setattr(fcntl, "flock", lambda fd, mode: modes.append(mode) or original_flock(fd, mode))
+    for _ in range(3):
+        assert LocalAssetStore(store.settings).read(digest, 5) == b"model"
+    # Startup recovery already ran during the upload; reads never scan or serialize.
+    assert recoveries == []
+    assert fcntl.LOCK_EX not in modes and modes.count(fcntl.LOCK_SH) == 3
+
+
+def test_parallel_reads_are_not_serialized(store):
+    digest = put(store)
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        assert set(pool.map(lambda _: store.read(digest, 5), range(32))) == {b"model"}
+
+
+def test_stale_single_link_uploads_are_collected_fresh_ones_kept(store):
+    stale = store.settings.root / (".upload-" + "c" * 32)
+    fresh = store.settings.root / (".upload-" + "d" * 32)
+    for path in (stale, fresh):
+        path.write_bytes(b"partial")
+        path.chmod(0o600)
+    old = stale.stat().st_mtime - store.settings.stale_upload_seconds - 5
+    os.utime(stale, (old, old))
+    assert store.remove_stale_uploads() == 1
+    assert not stale.exists() and fresh.read_bytes() == b"partial"
+    # Uploads also collect abandoned temporaries before admission.
+    os.utime(fresh, (old, old))
+    put(store)
+    assert not fresh.exists()
+
+
+def test_remove_unreferenced_only_removes_private_single_link_objects(store, tmp_path):
+    digest = put(store)
+    other = put(store, b"second")
+    assert store.list_objects() == sorted([digest, other])
+    assert store.remove_unreferenced(digest) is True
+    assert store.remove_unreferenced(digest) is False
+    os.link(store.settings.root / other, tmp_path / "alias")
+    with pytest.raises(AssetStorageError):
+        store.remove_unreferenced(other)
+    assert (store.settings.root / other).exists()
+    for bad in ("../escape", "A" * 64, ".upload-" + "a" * 32):
+        with pytest.raises(AssetIntegrityError):
+            store.remove_unreferenced(bad)
+
+
+def test_list_objects_excludes_temporaries(store):
+    digest = put(store)
+    temporary = store.settings.root / (".upload-" + "e" * 32)
+    temporary.write_bytes(b"x")
+    temporary.chmod(0o600)
+    assert store.list_objects() == [digest]
+
+
+async def test_collector_rechecks_each_candidate_under_its_digest_lock(store, monkeypatch):
+    from contextlib import asynccontextmanager
+    from unittest.mock import AsyncMock
+
+    from app.modules.network import asset_gc
+
+    store = LocalAssetStore(store.settings.model_copy(update={"max_objects": 10}))
+    referenced, orphan, raced = put(store, b"referenced"), put(store, b"orphan"), put(store, b"raced")
+    events = []
+
+    class Repository:
+        def __init__(self, db):
+            self.db = db
+
+        async def referenced_digests(self, digests):
+            return {referenced}
+
+        async def lock_digest(self, digest):
+            events.append(("lock", digest))
+
+        async def digest_referenced(self, digest):
+            # A concurrent upload committed a row for `raced` before the lock was granted.
+            return digest == raced
+
+    db = AsyncMock()
+
+    @asynccontextmanager
+    async def sessions():
+        yield db
+
+    monkeypatch.setattr(asset_gc, "CampusModelAssetRepository", Repository)
+    dry = await asset_gc.collect_garbage(sessions, store, dry_run=True)
+    assert dry["unreferenced"] == 2 and dry["removed"] == 0 and events == []
+    report = await asset_gc.collect_garbage(sessions, store)
+    assert report["removed"] == 1 and report["retained"] == 2
+    assert set(store.list_objects()) == {referenced, raced}
+    assert sorted(digest for _, digest in events) == sorted([orphan, raced])
+    assert db.commit.await_count == 2

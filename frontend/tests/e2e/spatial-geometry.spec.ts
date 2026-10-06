@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import type { PutSpatialScene, SpatialSceneSnapshot, SpatialObject } from "../../src/shared/types/spatial";
 import { createDefaultSessionState, installSessionMocks, loginFromUi } from "./support/session";
+import { expectInspectedNode } from "./support/twin";
 
 const device = "00000000-0000-0000-0000-000000000444";
 const envelope = (data: unknown) => ({ success: true, data, meta: { next_cursor: null }, errors: null });
@@ -39,15 +40,33 @@ async function rendered(page: Page) {
     }
     if (!root) throw new Error("The loaded R3F module does not own the visible Canvas.");
     const state = root.store.getState();
-    const shapes: { id: string; size: number[]; world: number[]; opacity: number; clipping: number }[] = [];
-    state.scene.traverse((mesh: { name: string; geometry?: { parameters: { width: number; height: number; depth: number } }; matrixWorld: { elements: number[] }; material: { opacity: number; clippingPlanes: unknown[] } }) => {
-      if (!mesh.name.startsWith("canonical:")) return;
-      const p = mesh.geometry!.parameters;
-      shapes.push({ id: mesh.name.slice(10), size: [p.width, p.height, p.depth], world: mesh.matrixWorld.elements.slice(12, 15), opacity: mesh.material.opacity, clipping: mesh.material.clippingPlanes.length });
+    // Canonical geometry is one InstancedMesh per floor and material class (FE-Twin fix 3):
+    // each instance is a unit box scaled to the object's size, so decompose instance matrices.
+    const instances: { size: number[]; world: number[]; opacity: number; clipping: number }[] = [];
+    const round = (value: number) => Math.round(value * 1000) / 1000;
+    state.scene.traverseVisible((object: any) => {
+      if (!object.isInstancedMesh || !String(object.name).startsWith("canonical:")) return;
+      const local = object.matrixWorld.clone(); const world = object.matrixWorld.clone();
+      const position = object.position.clone(); const quaternion = object.quaternion.clone(); const scale = object.scale.clone();
+      for (let index = 0; index < object.count; index++) {
+        object.getMatrixAt(index, local);
+        world.multiplyMatrices(object.matrixWorld, local).decompose(position, quaternion, scale);
+        instances.push({ size: scale.toArray().map(round), world: position.toArray().map(round), opacity: object.material.opacity, clipping: object.material.clippingPlanes?.length ?? 0 });
+      }
     });
     const point = state.camera.position.clone().set(100, 1, 40).project(state.camera);
-    return { shapes, deviceScreen: [(point.x + 1) / 2, (1 - point.y) / 2], camera: state.camera.position.toArray() };
-  });
+    return { instances, deviceScreen: [(point.x + 1) / 2, (1 - point.y) / 2], camera: state.camera.position.toArray() as number[] };
+  }).then(({ instances, ...view }) => ({ ...view, shapes: instances.map((shape) => ({ ...shape, id: fixtureObjectId(shape) })).sort((a, b) => a.id.localeCompare(b.id)) }));
+}
+
+// Instances carry no object ids: identify the fixture's objects by their exact canonical size (and floor height).
+function fixtureObjectId(shape: { size: number[]; world: number[] }): string {
+  const [x, y, z] = shape.size;
+  if (x === 20 && y === 8 && z === 12) return "building";
+  if (x === 20 && y === 0.2 && z === 12) return shape.world[1] > 2 ? "upper" : "lower";
+  if (x === 12 && y === 3 && z === 10) return "room";
+  if (y === 3 && z === 0.2) return "wall";
+  return `unknown:${shape.size.join("x")}`;
 }
 
 test("dimension JSON saves real rotated geometry, clips/selects floors, picks instanced devices and restores omitted shapes", async ({ page }, testInfo) => {
@@ -84,7 +103,7 @@ test("dimension JSON saves real rotated geometry, clips/selects floors, picks in
   expect(view.shapes.find((shape) => shape.id === "wall")).toMatchObject({ size: [8, 3, 0.2], world: [100, 1.5, 36] });
   expect(view.shapes.find((shape) => shape.id === "room")!.opacity).toBeLessThan(0.2);
   expect(view.shapes.some((shape) => shape.id === "unknown-rack")).toBe(false);
-  await expect(page.locator('[data-geometry-label="wall"]')).toContainText("brick · attenuation unknown · operator-survey");
+  await expect(page.locator(".twin-label--geometry", { hasText: /^wall · / })).toContainText("brick · attenuation unknown · operator-survey");
   await page.locator("canvas").scrollIntoViewIfNeeded();
   await expect.poll(async () => (await rendered(page)).camera[0]).toBeGreaterThan(100);
   await page.screenshot({ path: testInfo.outputPath("canonical-geometry.png") });
@@ -104,12 +123,12 @@ test("dimension JSON saves real rotated geometry, clips/selects floors, picks in
   await expect.poll(async () => (await rendered(page)).shapes.map((shape) => shape.id)).toEqual(["lower", "room", "wall"]);
   await page.getByLabel("Clip above floor (m)", { exact: true }).fill("2");
   await expect.poll(async () => (await rendered(page)).shapes.every((shape) => shape.clipping === 1)).toBe(true);
-  await expect(page.locator('[data-geometry-label="wall"]')).toHaveCount(0);
+  await expect(page.locator(".twin-label--geometry", { hasText: /^wall · / })).toHaveCount(0);
   await page.locator("canvas").scrollIntoViewIfNeeded();
   view = await rendered(page);
   const box = (await page.locator("canvas").boundingBox())!;
   await page.locator("canvas").click({ position: { x: view.deviceScreen[0] * box.width, y: view.deviceScreen[1] * box.height } });
-  await expect(page.getByLabel("Inspect node")).toHaveValue(device);
+  await expectInspectedNode(page, device);
   await page.getByLabel("Canonical floor", { exact: true }).selectOption("upper");
   await expect.poll(async () => (await rendered(page)).shapes.map((shape) => shape.id)).toEqual(["upper"]);
   await page.getByRole("button", { name: "Browse spatial history" }).click();

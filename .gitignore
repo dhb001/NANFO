@@ -23,6 +23,8 @@ ENV/
 
 # --- Build / packaging artifacts ---
 build/
+# Source code, not build output: the frontend build guards imported by vite.config.ts.
+!frontend/src/scripts/build/
 dist/
 *.egg-info/
 .eggs/
@@ -42,6 +44,29 @@ receiver-token.*
 receiver_token
 receiver_token.*
 nanfo-experimental-campaign-*/**/*private-admission*
+
+# --- Research campaigns / private evidence (ADR-028 §1) ---
+# New campaign output directories at the repository root stay local; only the
+# already-published historical campaign 014 remains tracked. Rules above still
+# apply inside it. Private evidence belongs in the ignored ai-engine/artifacts store.
+/nanfo-experimental-campaign-*/
+!/nanfo-experimental-campaign-014/
+# Deployment state (secrets, backups, private verification evidence) is never
+# tracked, including copies inside campaign source snapshots. The historical
+# tracked copies under nanfo-experimental-campaign-014/source/deploy/state are
+# handled separately (ADR-028 §5); ignore rules never untrack existing files.
+**/deploy/state/
+backend/artifacts/
+
+# --- Test, coverage and CI outputs ---
+frontend/test-results/
+frontend/playwright-report/
+frontend/blob-report/
+frontend/npm-audit.json
+backend/*-results.xml
+backend/coverage.xml
+ai-engine/*-results.xml
+/audit-results/
 
 # --- Jupyter ---
 .ipynb_checkpoints/

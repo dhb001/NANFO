@@ -8,6 +8,7 @@ import { Panel } from "@/shared/ui/Panel";
 import { Badge } from "@/shared/ui/Badge";
 import { Button } from "@/shared/ui/Button";
 import { formatTimestamp } from "@/shared/lib/format";
+import type { AuditScope } from "@/shared/types/audit";
 import "./audit.css";
 
 const PAGE_SIZE = 50;
@@ -16,19 +17,28 @@ const emptyFilters = { search: "", actorId: "", resourceType: "" };
 export function AuditPage() {
   const orgId = useWorkspaceStore((state) => state.organizationId);
   const userId = useAuthStore((state) => state.userId);
-  return <AuditTimeline key={`${userId}:${orgId}`} orgId={orgId} />;
+  const [scope, setScope] = useState<AuditScope>("org");
+  return <AuditTimeline key={`${userId}:${orgId}:${scope}`} orgId={orgId} scope={scope} onScopeChange={setScope} />;
 }
 
-function AuditTimeline({ orgId }: { orgId: string | null }) {
+function AuditTimeline({ orgId, scope, onScopeChange }: { orgId: string | null; scope: AuditScope; onScopeChange: (scope: AuditScope) => void }) {
   const token = useAuthStore((state) => state.accessToken);
   const [draft, setDraft] = useState(emptyFilters);
   const [filters, setFilters] = useState(emptyFilters);
   const [page, setPage] = useState(1);
-  const auditQuery = useAuditLogs(token, orgId, { ...filters, page, pageSize: PAGE_SIZE });
+  const auditQuery = useAuditLogs(token, orgId, { ...filters, page, pageSize: PAGE_SIZE }, scope);
+  const ready = scope === "platform" || Boolean(orgId);
 
   return <Panel title="Audit Timeline" subtitle="Search the recorded actions and inspect who changed what">
     <div className="audit-timeline">
-      <p>Organization: {orgId ?? "None selected"}. Audit records cover this organization.</p>
+      <fieldset className="audit-scope">
+        <legend>Audit scope</legend>
+        <label><input type="radio" name="audit-scope" value="org" checked={scope === "org"} onChange={() => onScopeChange("org")} /> This organization</label>
+        <label><input type="radio" name="audit-scope" value="platform" checked={scope === "platform"} onChange={() => onScopeChange("platform")} /> Platform events (sign-in and account activity without an organization)</label>
+      </fieldset>
+      <p>{scope === "platform"
+        ? "Platform scope lists events recorded without an organization. It requires global Admin with an unscoped session."
+        : `Organization: ${orgId ?? "None selected"}. Audit records cover this organization.`}</p>
       <form className="audit-filters" onSubmit={(event) => {
         event.preventDefault();
         setFilters({ search: draft.search.trim(), actorId: draft.actorId.trim(), resourceType: draft.resourceType.trim() });
@@ -47,12 +57,12 @@ function AuditTimeline({ orgId }: { orgId: string | null }) {
             onChange={(event) => setDraft({ ...draft, resourceType: event.target.value })} />
         </label>
         <div className="audit-actions">
-          <Button type="submit" disabled={!orgId}>Apply filters</Button>
+          <Button type="submit" disabled={!ready}>Apply filters</Button>
           <Button type="button" tone="ghost" onClick={() => { setDraft(emptyFilters); setFilters(emptyFilters); setPage(1); }}>Clear filters</Button>
-          <Button type="button" tone="ghost" disabled={!orgId || auditQuery.isFetching} onClick={() => auditQuery.refetch()}>Refresh audit</Button>
+          <Button type="button" tone="ghost" disabled={!ready || auditQuery.isFetching} onClick={() => void auditQuery.refetch()}>Refresh audit</Button>
         </div>
       </form>
-      {!orgId ? <AsyncState title="Select an organization" description="Choose an organization to view its audit records." /> :
+      {!ready ? <AsyncState title="Select an organization" description="Choose an organization to view its audit records, or switch to platform scope." /> :
         <QueryState query={auditQuery}>
           {(data) => <>
             <nav aria-label="Audit pagination" className="audit-actions">

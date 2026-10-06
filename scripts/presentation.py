@@ -25,8 +25,19 @@ PINS = {
     "selection.json": "654a411f16b7607c9ddd40d6a4d0c8dcdb9ec8b2c6b1f20eac5a5070808ca180",
 }
 POLICIES = ("ppo", "ospf", "heuristic", "constant0", "constant1")
+# Exact per-session files copied into a pack; never a directory sweep (ADR-028).
+SESSION_FILES = ("summary.json", "evidence.jsonl", "last-history.json", "progress.json")
 LABELS = {"ppo": "PPO", "ospf": "Actual OSPF", "heuristic": "Heuristic",
           "constant0": "Constant route 0", "constant1": "Constant route 1"}
+
+
+def copyAllowlisted(source, target, names):
+    """Copy only the named regular files; links, other names and subdirectories never travel."""
+    target.mkdir()
+    for name in names:
+        path = source / name
+        require(path.is_file() and not path.is_symlink(), f"Allowlisted evidence missing: {name}")
+        shutil.copy2(path, target / name)
 
 
 def digest(path):
@@ -396,8 +407,7 @@ def main():
         for name in PINS:
             shutil.copy2(HOLDOUT / name, archive / name)
         for policy in POLICIES:
-            shutil.copytree(HOLDOUT / f"test-{policy}", archive / f"test-{policy}",
-                            ignore=shutil.ignore_patterns("*.log"))
+            copyAllowlisted(HOLDOUT / f"test-{policy}", archive / f"test-{policy}", SESSION_FILES)
         for suffix in ("02", "04", "06"):
             shutil.copy2(TRAIN / f"qualification-{suffix}.json", archive)
         shutil.copy2(CHECKPOINT, archive / "checkpoint.ptz")

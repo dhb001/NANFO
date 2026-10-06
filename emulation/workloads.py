@@ -8,6 +8,8 @@ import socket
 import struct
 import time
 
+from emulation.lab_contracts import UDP_DATAGRAM_BYTES
+
 SCENARIOS = ("low", "path0", "path1", "alternating", "burst", "overload")
 SCHEDULE_VERSION = "seeded-stationary-profiles-v5"
 # Explicit arrays are also exported in the hashed environment spec for independent replay.
@@ -72,7 +74,7 @@ MATCHED_CAPACITIES = tuple(
     sorted({v for p in MATCHED_PROFILES.values() for c in p["path_capacity_mbps"] for v in c})
 )
 PORT = 19110
-PACKET_BYTES = 1200
+PACKET_BYTES = UDP_DATAGRAM_BYTES
 
 
 def schedule(seed, scenario, decisions, mode="sdn"):

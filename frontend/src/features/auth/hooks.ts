@@ -1,28 +1,10 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
-import { getProfile, login, logout, refresh } from "@/features/auth/api";
+import { useMutation } from "@tanstack/react-query";
+import { login } from "@/features/auth/api";
 
+// Refresh, logout and profile reads go through features/auth/session.ts only:
+// separate mutations would bypass its single-flight rotation and revocation.
 export function useLogin() {
   return useMutation({
     mutationFn: login,
-  });
-}
-
-export function useLogout() {
-  return useMutation({
-    mutationFn: logout,
-  });
-}
-
-export function useRefreshToken() {
-  return useMutation({
-    mutationFn: refresh,
-  });
-}
-
-export function useProfile(token: string | null) {
-  return useQuery({
-    queryKey: ["auth", "me", token],
-    queryFn: () => getProfile(token as string),
-    enabled: Boolean(token),
   });
 }

@@ -1,4 +1,5 @@
 import { apiRequest } from "@/shared/lib/api";
+import type { CursorMeta } from "@/shared/types/api";
 import { topologyEdgeIdentity } from "@/features/topology/edgeIdentity";
 import {
   TopologyEdge,
@@ -10,7 +11,8 @@ import {
   TopologyReconcileResult,
 } from "@/shared/types/network";
 
-export const DEFAULT_TOPOLOGY_GRAPH_LIMIT = 200;
+// Backend maximum page size (topology.py: limit <= 500): fewer round trips per crawl.
+export const DEFAULT_TOPOLOGY_GRAPH_LIMIT = 500;
 export const DEFAULT_MAX_TOPOLOGY_GRAPH_PAGES = 64;
 
 interface TopologyGraphPage {
@@ -21,6 +23,7 @@ interface TopologyGraphPage {
 interface TopologyGraphAllOptions {
   pageLimit?: number;
   maxPages?: number;
+  signal?: AbortSignal;
 }
 
 export function getTopologyGraph(
@@ -28,13 +31,14 @@ export function getTopologyGraph(
   networkId: string,
   limit = DEFAULT_TOPOLOGY_GRAPH_LIMIT,
   cursor?: string,
+  signal?: AbortSignal,
 ): Promise<{ data: TopologyGraph; nextCursor: string | null }> {
   const params = new URLSearchParams({ network_id: networkId, limit: String(limit) });
   if (cursor) {
     params.set("cursor", cursor);
   }
 
-  return apiRequest<TopologyGraph>(`/api/v1/topology/graph?${params.toString()}`, { token }).then((response) => ({
+  return apiRequest<TopologyGraph, CursorMeta>(`/api/v1/topology/graph?${params.toString()}`, { token, signal }).then((response) => ({
     data: response.data,
     nextCursor: response.meta.next_cursor ?? null,
   }));
@@ -113,7 +117,8 @@ export async function getTopologyGraphAll(
   const seenCursors = new Set<string>();
 
   for (let page = 0; page < maxPages; page += 1) {
-    const response = await getTopologyGraph(token, networkId, pageLimit, cursor);
+    options.signal?.throwIfAborted();
+    const response = await getTopologyGraph(token, networkId, pageLimit, cursor, options.signal);
     pages.push(response);
     nextCursor = response.nextCursor;
     if (!nextCursor || seenCursors.has(nextCursor)) {
@@ -129,23 +134,23 @@ export async function getTopologyGraphAll(
   };
 }
 
-export function getTopologyNode(token: string, deviceId: string, depth = 1) {
-  return apiRequest<TopologyNodeWithNeighbours>(`/api/v1/topology/nodes/${deviceId}?depth=${depth}`, {
-    token,
+export function getTopologyNode(token: string, deviceId: string, depth = 1, signal?: AbortSignal) {
+  return apiRequest<TopologyNodeWithNeighbours>(`/api/v1/topology/nodes/${encodeURIComponent(deviceId)}?depth=${depth}`, {
+    token, signal,
   });
 }
 
-export function getTopologyDeviceNeighbours(token: string, deviceId: string, depth = 1, limit = 200) {
+export function getTopologyDeviceNeighbours(token: string, deviceId: string, depth = 1, limit = 200, signal?: AbortSignal) {
   const params = new URLSearchParams({ depth: String(depth), limit: String(limit) });
-  return apiRequest<TopologyDeviceNeighbours>(`/api/v1/topology/device/${deviceId}/neighbors?${params.toString()}`, {
-    token,
+  return apiRequest<TopologyDeviceNeighbours>(`/api/v1/topology/device/${encodeURIComponent(deviceId)}/neighbors?${params.toString()}`, {
+    token, signal,
   });
 }
 
-export function getTopologyImpact(token: string, deviceId: string, maxHops = 3, limit = 500) {
+export function getTopologyImpact(token: string, deviceId: string, maxHops = 3, limit = 500, signal?: AbortSignal) {
   const params = new URLSearchParams({ max_hops: String(maxHops), limit: String(limit) });
-  return apiRequest<TopologyImpact>(`/api/v1/topology/impact/${deviceId}?${params.toString()}`, {
-    token,
+  return apiRequest<TopologyImpact>(`/api/v1/topology/impact/${encodeURIComponent(deviceId)}?${params.toString()}`, {
+    token, signal,
   });
 }
 

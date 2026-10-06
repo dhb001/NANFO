@@ -54,7 +54,7 @@ describe("guided spatial replacement", () => {
     change("width", "12"); change("depth", "8"); change("thickness", "-1");
     expect(screen.getByText("Save scene replacement")).toBeDisabled();
     fireEvent.click(screen.getByText("Stage object in draft"));
-    expect((screen.getByLabelText("Spatial scene JSON") as HTMLTextAreaElement).value).not.toContain('"slab"');
+    expect(screen.getByLabelText<HTMLTextAreaElement>("Spatial scene JSON").value).not.toContain('"slab"');
     change("thickness", "0.2"); change("Parent object", "wall");
     fireEvent.click(screen.getByText("Stage object in draft"));
     expect(screen.getByText("Invalid parent hierarchy or cycle.")).toBeInTheDocument();
@@ -63,7 +63,7 @@ describe("guided spatial replacement", () => {
     await waitFor(() => expect(screen.getByText("Stage object in draft")).toBeEnabled());
     expect(screen.getByLabelText("thickness")).toHaveValue(0.2);
     fireEvent.click(screen.getByText("Stage object in draft"));
-    const draft = (screen.getByLabelText("Spatial scene JSON") as HTMLTextAreaElement).value;
+    const draft = screen.getByLabelText<HTMLTextAreaElement>("Spatial scene JSON").value;
     const scene = JSON.parse(draft);
     expect(scene.objects[0]).not.toHaveProperty("geometry");
     expect(scene.objects[1].geometry).toEqual({ kind: "slab", width: 12, depth: 8, thickness: 0.2 });
@@ -91,7 +91,7 @@ describe("guided spatial replacement", () => {
     change("length", "8"); change("height", "3"); change("thickness", "0.1");
     change("Material name", "survey material"); change("Material source", "site record");
     fireEvent.click(screen.getByText("Stage object in draft"));
-    const scene = JSON.parse((screen.getByLabelText("Spatial scene JSON") as HTMLTextAreaElement).value);
+    const scene = JSON.parse(screen.getByLabelText<HTMLTextAreaElement>("Spatial scene JSON").value);
     expect(scene.objects[0].geometry).toEqual({ kind: "box", width: 20, depth: 10, height: 5 });
     expect(scene.objects[2].geometry.material).toEqual({ name: "survey material", source: "site record", attenuation_db: null });
     fireEvent.click(screen.getByText("Validate JSON"));
@@ -108,7 +108,7 @@ describe("guided spatial replacement", () => {
     fireEvent.click(screen.getByText("Next inventory page"));
     fireEvent.click(await screen.findByLabelText(/device-21 ·/));
     fireEvent.click(screen.getByText("Stage object in draft"));
-    expect(JSON.parse((screen.getByLabelText("Spatial scene JSON") as HTMLTextAreaElement).value).objects.at(-1)).toMatchObject({ object_id: "device-object", device_id: deviceId(21), provenance: { accuracy_m: null } });
+    expect(JSON.parse(screen.getByLabelText<HTMLTextAreaElement>("Spatial scene JSON").value).objects.at(-1)).toMatchObject({ object_id: "device-object", device_id: deviceId(21), provenance: { accuracy_m: null } });
     expect(putSpatialScene).not.toHaveBeenCalled();
   });
 });
@@ -120,7 +120,7 @@ describe("custom group membership", () => {
     fireEvent.click(await screen.findByLabelText(/device-1 ·/));
     fireEvent.click(screen.getByText("Next inventory page"));
     fireEvent.click(await screen.findByLabelText(/device-21 ·/));
-    expect(listDevices).toHaveBeenCalledWith("token", "network", 2, 20);
+    expect(listDevices).toHaveBeenCalledWith("token", "network", 2, 20, expect.any(AbortSignal));
     expect(upsertDeviceGroups).not.toHaveBeenCalled();
     vi.mocked(window.confirm).mockReturnValue(false);
     fireEvent.click(screen.getByText("Save custom group"));
@@ -142,12 +142,37 @@ describe("custom group membership", () => {
     change("Group name", "Edited"); fireEvent.click(await screen.findByLabelText(/device-1 ·/));
     fireEvent.click(screen.getByText("Save custom group"));
     await screen.findByText(/Denied Draft retained/);
-    expect(upsertDeviceGroups).toHaveBeenCalledWith("token", "network", { replaceExisting: false, groups: [{ ...group, name: "Edited", device_ids: [deviceId(21), deviceId(1)] }] });
+    // C8: edits of a loaded group are pinned to the updated_at they were read at.
+    const pinned = { expected_updated_at: "2026-09-20" };
+    expect(upsertDeviceGroups).toHaveBeenCalledWith("token", "network", { replaceExisting: false, groups: [{ ...group, name: "Edited", device_ids: [deviceId(21), deviceId(1)], ...pinned }] });
     fireEvent.click(screen.getByText(`Remove ${deviceId(21)}`));
     fireEvent.click(screen.getByText("Save custom group"));
-    await waitFor(() => expect(upsertDeviceGroups).toHaveBeenLastCalledWith("token", "network", { replaceExisting: false, groups: [{ ...group, name: "Edited", device_ids: [deviceId(1)] }] }));
+    await waitFor(() => expect(upsertDeviceGroups).toHaveBeenLastCalledWith("token", "network", { replaceExisting: false, groups: [{ ...group, name: "Edited", device_ids: [deviceId(1)], ...pinned }] }));
     fireEvent.click(screen.getByText("Use explicit membership only"));
     fireEvent.click(screen.getByText("Save custom group"));
-    await waitFor(() => expect(upsertDeviceGroups).toHaveBeenLastCalledWith("token", "network", { replaceExisting: false, groups: [{ ...group, name: "Edited", selector: {}, device_ids: [deviceId(1)] }] }));
+    await waitFor(() => expect(upsertDeviceGroups).toHaveBeenLastCalledWith("token", "network", { replaceExisting: false, groups: [{ ...group, name: "Edited", selector: {}, device_ids: [deviceId(1)], ...pinned }] }));
+  });
+
+  it("reports DEVICE_GROUP_CONFLICT, keeps the draft and re-pins to the saved revision", async () => {
+    const group = { group_key: "stable", name: "Original", group_type: "custom" as const, description: null, selector: {}, device_ids: [deviceId(21)] };
+    const record: DeviceGroupRecord = { ...group, device_group_id: "group", network_id: "network", created_at: "2026-09-20T00:00:00Z", updated_at: "2026-09-20T00:00:00Z" };
+    vi.mocked(listDeviceGroups).mockResolvedValue(envelope({ items: [record], total: 1 }));
+    vi.mocked(upsertDeviceGroups)
+      .mockRejectedValueOnce(new ApiClientError("changed", "DEVICE_GROUP_CONFLICT", 409))
+      .mockResolvedValueOnce(envelope({ items: [{ ...record, name: "Edited", updated_at: "2026-09-21T00:00:00Z" }], total: 1 }))
+      .mockResolvedValueOnce(envelope({ items: [{ ...record, name: "Edited again", updated_at: "2026-09-22T00:00:00Z" }], total: 1 }));
+    mount(<CustomGroupEditor token="token" networkId="network" canWrite />);
+    await screen.findByText("Original (stable)"); change("Edit custom group", "stable");
+    change("Group name", "Edited");
+    fireEvent.click(screen.getByText("Save custom group"));
+    expect(await screen.findByText(/DEVICE_GROUP_CONFLICT\). Nothing was changed/)).toHaveTextContent("Draft retained.");
+    expect(screen.getByLabelText("Group name")).toHaveValue("Edited");
+    fireEvent.click(screen.getByText("Save custom group"));
+    await screen.findByText("Custom group saved.");
+    change("Group name", "Edited again");
+    fireEvent.click(screen.getByText("Save custom group"));
+    await waitFor(() => expect(upsertDeviceGroups).toHaveBeenCalledTimes(3));
+    expect(vi.mocked(upsertDeviceGroups).mock.calls.map((call) => call[2].groups[0].expected_updated_at))
+      .toEqual(["2026-09-20T00:00:00Z", "2026-09-20T00:00:00Z", "2026-09-21T00:00:00Z"]);
   });
 });

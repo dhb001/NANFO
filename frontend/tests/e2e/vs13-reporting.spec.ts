@@ -18,7 +18,7 @@ test.describe("ADR019 report browser contracts (mocked bytes, not worker evidenc
     expect(download.suggestedFilename()).toBe(`fixture-report.${format}`);
     const stream = await download.createReadStream();
     const chunks: Buffer[] = [];
-    for await (const chunk of stream!) chunks.push(Buffer.from(chunk));
+    for await (const chunk of stream) chunks.push(Buffer.from(chunk));
     const actual = Buffer.concat(chunks);
     expect(actual).toEqual(reportBytes(format));
     expect(reportHash(actual)).toBe(state.reports[0].artifacts[0].checksum_sha256);

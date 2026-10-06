@@ -14,8 +14,9 @@ import pytest
 from fastapi import HTTPException
 from redis.exceptions import ConnectionError as RedisConnectionError
 
+from app.core.errors import DependencyUnavailableError
 from app.modules.identity.models import Role, User, UserRole
-from app.modules.identity.service import AuthService
+from app.modules.identity.service import AuthService, login_email_bucket_key, login_ip_bucket_key
 
 
 def _make_user(roles: list[str] | None = None) -> User:
@@ -229,9 +230,14 @@ class TestLoginHardening:
         assert int(_DUMMY_PASSWORD_HASH.split("$")[2]) == _BCRYPT_ROUNDS
         assert not await asyncio.to_thread(verify_password, "wrong", _DUMMY_PASSWORD_HASH)
 
-    @pytest.mark.parametrize("limited_by", ["ip", "email"])
-    async def test_concurrent_attempts_keep_both_fixed_windows(self, auth_svc, fake_redis, limited_by):
-        """Changing the other identity cannot bypass either five-attempt limit."""
+    @pytest.mark.parametrize(("limited_by", "bucket_keys"), [("ip", 6), ("email", 13)])
+    async def test_concurrent_attempts_keep_both_fixed_windows(self, auth_svc, fake_redis, mock_db, limited_by,
+                                                              bucket_keys):
+        """Changing the other identity cannot bypass either five-attempt limit.
+
+        ADR-028 C11: attempts rejected by the per-IP bucket never reach (or count
+        against) a per-email bucket, so the IP case leaves 1 IP + 5 email buckets.
+        """
         async def login(index):
             ip = "127.0.0.1" if limited_by == "ip" else f"127.0.0.{index + 1}"
             email = "test@example.com" if limited_by == "email" else f"user{index}@example.com"
@@ -249,24 +255,34 @@ class TestLoginHardening:
         assert statuses.count(429) == 7
         assert verify.call_count == 5
         keys = await fake_redis.keys("ratelimit:login:*")
-        assert len(keys) == 13
+        assert len(keys) == bucket_keys
         for key in keys:
             assert 0 < await fake_redis.ttl(key) <= 60
+        # Only the first throttled attempt of the window is audited.
+        throttle_audits = [call.args[0] for call in mock_db.add.call_args_list
+                           if (call.args[0].metadata_ or {}).get("reason") == "rate_limited"]
+        assert len(throttle_audits) == 1
 
     @pytest.mark.parametrize("ttl", [None, 15])
-    async def test_preserves_existing_expiry_and_repairs_legacy_counter(self, auth_svc, fake_redis, ttl):
-        keys = ["ratelimit:login:127.0.0.1", "ratelimit:login:email:test@example.com"]
-        for key in keys:
-            await fake_redis.set(key, "5", ex=ttl)
+    @pytest.mark.parametrize("bucket", ["ip", "email"])
+    async def test_preserves_existing_expiry_and_repairs_legacy_counter(self, auth_svc, fake_redis, ttl, bucket):
+        ip_key, email_key = login_ip_bucket_key("127.0.0.1"), login_email_bucket_key("test@example.com")
+        limited = ip_key if bucket == "ip" else email_key
+        await fake_redis.set(limited, "5", ex=ttl)
         with pytest.raises(HTTPException) as error:
             await auth_svc.login("test@example.com", "wrong", "127.0.0.1", str(uuid.uuid4()))
         assert error.value.status_code == 429
-        for key in keys:
-            assert await fake_redis.get(key) == "6"
-            assert 0 < await fake_redis.ttl(key) <= (ttl or 60)
+        assert await fake_redis.get(limited) == "6"
+        assert 0 < await fake_redis.ttl(limited) <= (ttl or 60)
+        if bucket == "ip":
+            # Rejected by the IP bucket: the email failure bucket is never touched.
+            assert await fake_redis.exists(email_key) == 0
+        else:
+            assert await fake_redis.get(ip_key) == "1"
+            assert 0 < await fake_redis.ttl(ip_key) <= 60
 
     async def test_expired_windows_admit_new_attempt(self, auth_svc, fake_redis):
-        keys = ["ratelimit:login:127.0.0.1", "ratelimit:login:email:test@example.com"]
+        keys = [login_ip_bucket_key("127.0.0.1"), login_email_bucket_key("test@example.com")]
         for key in keys:
             await fake_redis.set(key, "5")
             await fake_redis.pexpireat(key, 1)
@@ -284,14 +300,15 @@ class TestLoginHardening:
 
     @pytest.mark.parametrize("failure", [RedisConnectionError("offline"), RuntimeError("closed")])
     async def test_transaction_failure_denies_before_credentials(self, auth_svc, fake_redis, failure):
+        """ADR-028 C2: a throttle-store outage is a 503 dependency failure, never 401."""
         with (
             patch.object(type(fake_redis.pipeline()), "execute", side_effect=failure),
             patch.object(auth_svc._user_repo, "get_by_email") as lookup,
             patch("app.modules.identity.service.verify_password") as verify,
-            pytest.raises(HTTPException) as error,
+            pytest.raises(DependencyUnavailableError) as error,
         ):
             await auth_svc.login("test@example.com", "wrong", "127.0.0.1", str(uuid.uuid4()))
-        assert (error.value.status_code, error.value.detail) == (401, "Invalid or expired token.")
+        assert error.value.dependency == "redis"
         lookup.assert_not_called()
         verify.assert_not_called()
         assert await fake_redis.keys("ratelimit:login:*") == []

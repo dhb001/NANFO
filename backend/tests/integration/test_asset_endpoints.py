@@ -30,8 +30,20 @@ def assets(tenant_auth, monkeypatch, tmp_path):
         and identity == asset.campus_model_asset_id and asset.deleted_at is None else None,
     ))
     monkeypatch.setattr(CampusModelAssetRepository, "list_for_network", AsyncMock(return_value=[asset]))
+
+    def metadata_page(network, *, page, page_size):
+        rows = [] if asset.deleted_at is not None else [{
+            column.name: getattr(asset, column.name) for column in asset.__table__.c
+            if column.name != "model_data_base64"}]
+        return rows, len(rows)
+
+    monkeypatch.setattr(CampusModelAssetRepository, "list_metadata_for_network", AsyncMock(side_effect=metadata_page))
+    monkeypatch.setattr(CampusModelAssetRepository, "list_page_for_network", AsyncMock(
+        side_effect=lambda network, *, page, page_size: ([asset], 1)))
+    monkeypatch.setattr("app.modules.network.service.append_audit_log", AsyncMock())
     db = AsyncMock()
     db.expire_all = MagicMock()
+    db.add = MagicMock()
 
     async def database():
         yield db
@@ -51,18 +63,55 @@ def assets(tenant_auth, monkeypatch, tmp_path):
 
 def test_verified_download_headers_and_legacy_list(assets):
     client, headers, asset, _ = assets
+    # C4 (BREAKING default): listings are metadata pages unless include_data=true.
     listed = client.get(f"/api/v1/networks/{NETWORK_ID}/campus/model-assets", headers=headers)
     assert listed.status_code == 200
     item = listed.json()["data"]["items"][0]
     assert item["registration"] is None and item["storage_backend"] == "inline"
-    assert item["model_data_base64"] == asset.model_data_base64
+    assert "model_data_base64" not in item
+    assert set(listed.json()["data"]) == {"items", "total", "page", "page_size"}
+    inline = client.get(f"/api/v1/networks/{NETWORK_ID}/campus/model-assets?include_data=true&page_size=10",
+                        headers=headers)
+    assert inline.status_code == 200
+    assert inline.json()["data"]["items"][0]["model_data_base64"] == asset.model_data_base64
     response = client.get(item["download_path"], headers=headers)
     assert response.status_code == 200 and response.content == b"campus-model"
     assert response.headers["etag"] == f'"sha256:{asset.model_sha256}"'
     assert response.headers["cache-control"] == "private, no-store"
     assert response.headers["x-content-type-options"] == "nosniff"
     assert response.headers["content-type"] == "application/octet-stream"
-    assert set(listed.json()["data"]) == {"items", "total"}
+    assert response.headers["content-length"] == str(len(b"campus-model"))
+
+
+def test_include_data_requires_small_pages(assets):
+    client, headers, _, _ = assets
+    response = client.get(f"/api/v1/networks/{NETWORK_ID}/campus/model-assets?include_data=true", headers=headers)
+    assert response.status_code == 400
+    assert response.json()["errors"]["code"] == "CAMPUS_MODEL_ASSET_INLINE_PAGE_TOO_LARGE"
+
+
+@pytest.mark.parametrize("header", ['"sha256:{digest}"', 'W/"sha256:{digest}"', '"other", "sha256:{digest}"', "*"])
+def test_download_if_none_match_returns_304_without_body(assets, header):
+    from unittest.mock import patch
+
+    client, headers, asset, _ = assets
+    read = MagicMock(side_effect=AssertionError("304 must not read the body"))
+    path = f"/api/v1/networks/{NETWORK_ID}/campus-model-assets/{asset.campus_model_asset_id}/download"
+    with patch("app.modules.network.asset_io.read_body", read):
+        response = client.get(path, headers={**headers, "If-None-Match": header.format(digest=asset.model_sha256)})
+    assert response.status_code == 304 and response.content == b""
+    assert response.headers["etag"] == f'"sha256:{asset.model_sha256}"'
+    read.assert_not_called()
+    mismatch = client.get(path, headers={**headers, "If-None-Match": '"sha256:' + "0" * 64 + '"'})
+    assert mismatch.status_code == 200 and mismatch.content == b"campus-model"
+
+
+def test_download_is_streamed_in_bounded_chunks(assets):
+    from app.api.v1.networks import _chunks
+
+    body = bytes(range(256)) * 1024
+    parts = list(_chunks(body))
+    assert b"".join(parts) == body and max(len(part) for part in parts) <= 64 * 1024 and len(parts) == 4
 
 
 def test_real_download_matches_shared_frontend_contract_fixture(assets):

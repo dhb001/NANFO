@@ -2,7 +2,7 @@
 name = "nanfo-routing"
 version = "0.1.0"
 description = "Operator-only ADR011 measured routing experiment"
-requires-python = ">=3.12,<3.13"
+requires-python = "==3.12.14"
 dependencies = [
   "torch==2.8.0+cpu",
   "gymnasium==1.2.0",
@@ -33,10 +33,15 @@ torch = { index = "pytorch-cpu" }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+  "private_artifacts: replays ignored private evidence under ai-engine/artifacts/ (tests/private_artifacts.txt)",
+]
 
 [tool.ruff]
 target-version = "py312"
 line-length = 100
+# Byte-identical frozen client copies are evidence, never reformatted or linted.
+extend-exclude = ["qualified"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B"]

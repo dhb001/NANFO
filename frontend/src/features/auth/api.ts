@@ -1,5 +1,5 @@
 import { apiRequest } from "@/shared/lib/api";
-import { LoginRequest, TokenPair, UserProfile } from "@/shared/types/auth";
+import type { LoginRequest, RefreshRequest, TokenPair, UserProfile } from "@/shared/types/auth";
 
 export async function login(request: LoginRequest) {
   const response = await apiRequest<TokenPair>("/api/v1/auth/login", {
@@ -12,7 +12,7 @@ export async function login(request: LoginRequest) {
 export async function refresh(refreshToken: string) {
   const response = await apiRequest<TokenPair>("/api/v1/auth/refresh", {
     method: "POST",
-    body: { refresh_token: refreshToken },
+    body: { refresh_token: refreshToken } satisfies RefreshRequest,
     signal: AbortSignal.timeout(10_000),
   });
   return response.data;

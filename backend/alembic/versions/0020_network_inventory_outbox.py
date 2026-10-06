@@ -1,14 +1,13 @@
 """ADR021 transactional Network inventory outbox.
 
-Import the separate owning model so migration loading also registers its metadata.
-DDL is explicit and frozen rather than derived from the evolving model.
+DDL is explicit and frozen rather than derived from the evolving model (alembic/env.py
+registers every model's metadata).
 """
 
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 from alembic import op
-from app.modules.network.outbox_models import NetworkOutbox  # noqa: F401
 
 revision = "0020"
 down_revision = "0019"

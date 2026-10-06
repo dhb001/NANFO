@@ -10,7 +10,7 @@ test.describe("VS10 topology analysis", () => {
     const state = createDefaultSessionState();
     await installSessionMocks(page, state);
 
-    await page.route("**/api/v1/topology/graph?network_id=00000000-0000-0000-0000-000000000333&limit=200", async (route) => {
+    await page.route("**/api/v1/topology/graph?network_id=00000000-0000-0000-0000-000000000333&limit=500", async (route) => {
       await route.fulfill({
         status: 200,
         contentType: "application/json",
@@ -164,7 +164,7 @@ test.describe("VS10 topology analysis", () => {
     const state = createDefaultSessionState();
     await installSessionMocks(page, state);
 
-    await page.route("**/api/v1/topology/graph?network_id=00000000-0000-0000-0000-000000000333&limit=200", async (route) => {
+    await page.route("**/api/v1/topology/graph?network_id=00000000-0000-0000-0000-000000000333&limit=500", async (route) => {
       await route.fulfill({
         status: 200,
         contentType: "application/json",

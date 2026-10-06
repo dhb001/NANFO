@@ -2,10 +2,12 @@
 
 import json
 
+from emulation.lab_contracts import RESERVED_TABLES, ROUTE_PAIRS
 from emulation.ospf import PATHS, ROUTERS
 
-TABLES = (19110, 19111)
-PAIRS = (("h1", "h3"), ("h3", "h1"), ("h2", "h4"), ("h4", "h2"))
+# Shared versioned lab contract (drift-tested against the frozen v4 files).
+TABLES = RESERVED_TABLES
+PAIRS = ROUTE_PAIRS
 
 
 class MatchedRouting:

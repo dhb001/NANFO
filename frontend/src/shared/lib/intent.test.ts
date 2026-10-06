@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canExecuteIntent, normalizeIntentStatus } from "@/shared/lib/intent";
+import { canExecuteIntent } from "@/shared/lib/intent";
 import { IntentDetailResult } from "@/shared/types/intent";
 
 function createDetail(status: string): IntentDetailResult {
@@ -35,9 +35,9 @@ describe("intent helpers", () => {
     expect(canExecuteIntent(undefined)).toBe(false);
   });
 
-  it("normalizes shorthand statuses", () => {
-    expect(normalizeIntentStatus("completed")).toBe("execution_completed");
-    expect(normalizeIntentStatus("failed")).toBe("execution_failed");
-    expect(normalizeIntentStatus("execution_started")).toBe("execution_started");
+  it("uses the exact backend statuses: invented shorthand aliases are not executable (ADR-028)", () => {
+    for (const status of ["completed", "failed", "started", "VALIDATED", " validated"]) {
+      expect(canExecuteIntent(createDetail(status))).toBe(false);
+    }
   });
 });

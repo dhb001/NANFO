@@ -57,14 +57,19 @@ export async function removeOrgMember(token: string, orgId: string, userId: stri
   return { removed: true };
 }
 
-export function listOrganizations(token: string, page = 1, pageSize = 20) {
-  return apiRequest<OrganizationList>(`/api/v1/organizations?page=${page}&page_size=${pageSize}`, { token });
+export function listOrganizations(token: string, page = 1, pageSize = 20, signal?: AbortSignal) {
+  return apiRequest<OrganizationList>(`/api/v1/organizations?page=${page}&page_size=${pageSize}`, { token, signal });
 }
 
-export function listWorkspaces(token: string, orgId: string, page = 1, pageSize = 20) {
+/** One organization including `caller_role`; absent and non-member answer the same 404 (C6). */
+export function getOrganization(token: string, orgId: string, signal?: AbortSignal) {
+  return apiRequest<Organization>(`/api/v1/organizations/${encodeURIComponent(orgId)}`, { token, signal });
+}
+
+export function listWorkspaces(token: string, orgId: string, page = 1, pageSize = 20, signal?: AbortSignal) {
   return apiRequest<WorkspaceList>(
     `/api/v1/organizations/${orgId}/workspaces?page=${page}&page_size=${pageSize}`,
-    { token },
+    { token, signal },
   );
 }
 

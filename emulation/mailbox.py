@@ -1,4 +1,9 @@
-"""ADR-010 v1 file transport and crash-conservative serialized state machine."""
+"""ADR-010 v1 file transport and crash-conservative serialized state machine.
+
+ADR-028 C15: every command file carries ``hmac_sha256`` over its canonical envelope,
+keyed by ``NANFO_LAB_COMMAND_KEY_FILE``; unauthenticated or foreign-owned files are
+rejected without a result (they have no trustworthy identity).
+"""
 
 import fcntl
 import hashlib
@@ -13,6 +18,7 @@ from datetime import datetime
 from pathlib import Path
 
 from emulation.actions import HOST_MAP, NAMES, PORTS
+from emulation.lab_contracts import MAX_KEY_BYTES, MIN_KEY_BYTES, load_command_key, verify_command
 from emulation.measurements import atomicJson, utcNow
 
 MAX_COMMAND = 8192
@@ -57,7 +63,8 @@ def uniqueObject(pairs):
     return result
 
 
-def safeRead(path, limit=MAX_COMMAND):
+def boundedRead(path, limit=MAX_COMMAND):
+    """No-follow single-link regular file read; returns (fstat, bytes)."""
     fd = os.open(str(path), os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     with os.fdopen(fd, "rb") as stream:
         info = os.fstat(stream.fileno())
@@ -66,11 +73,19 @@ def safeRead(path, limit=MAX_COMMAND):
         data = stream.read(limit + 1)
     if len(data) > limit:
         raise ValueError("JSON too large")
+    return info, data
+
+
+def parseJson(data):
     return json.loads(
         data,
         object_pairs_hook=uniqueObject,
         parse_constant=lambda _: (_ for _ in ()).throw(ValueError("Nonfinite JSON")),
     )
+
+
+def safeRead(path, limit=MAX_COMMAND):
+    return parseJson(boundedRead(path, limit)[1])
 
 
 def safeWrite(path, value):
@@ -156,7 +171,15 @@ class Interrupted(Exception):
 
 
 class Mailbox:
-    def __init__(self, driver, runId, digest, commands=Path("/commands"), results=Path("/results")):
+    def __init__(
+        self,
+        driver,
+        runId,
+        digest,
+        commands=Path("/commands"),
+        results=Path("/results"),
+        command_key=None,
+    ):
         self.driver, self.runId, self.digest = driver, runId, digest
         self.commands, self.results = commands, results
         for directory in (commands, results):
@@ -164,6 +187,10 @@ class Mailbox:
                 raise ValueError("Dedicated real mailbox directories required")
         if not re.fullmatch("[0-9a-f]{64}", digest):
             raise ValueError("Operator EMULATION_BINDING_DIGEST required")
+        # C15: fail closed before recovery or polling when the key is absent/unprotected.
+        self.key = load_command_key() if command_key is None else command_key
+        if type(self.key) is not bytes or not MIN_KEY_BYTES <= len(self.key) <= MAX_KEY_BYTES:
+            raise ValueError("C15 lab command key invalid")
         self.journal = results / ".journal.json"
         self.lock = os.open(
             str(results / ".executor.lock"), os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600
@@ -171,6 +198,14 @@ class Mailbox:
         self.seen = {}
         self.recovered = False
         self.control_generation = 0
+
+    def readCommand(self, path):
+        """Authenticated command: provisioned-writer owner, not group/world-writable, valid MAC."""
+        owner = os.lstat(str(self.commands)).st_uid
+        info, data = boundedRead(path)
+        if info.st_uid != owner or info.st_mode & 0o022:
+            raise ValueError("Command file not owned by the provisioned mailbox writer")
+        return validateEnvelope(verify_command(self.key, parseJson(data)), Path(path).name)
 
     def close(self):
         os.close(self.lock)
@@ -335,8 +370,7 @@ class Mailbox:
             fcntl.flock(self.lock, fcntl.LOCK_UN)
 
     def execute(self, state, command, hook):
-        execution = command["execution_id"]
-        record = state["records"].get(execution)
+        record = state["records"].get(command["execution_id"])
         try:
             validatePlan(command["plan"])
             if planHash(command["plan"]) != command["plan_hash"]:
@@ -346,143 +380,152 @@ class Mailbox:
             if record and command["fence"] < record["command"]["fence"]:
                 raise ValueError("Stale fence")
             if record and record.get("recovered_obsolete") and record["phase"] == "terminal":
-                if command["operation"] == "cancel":
-                    record.setdefault("obsolete_result", record["result"])
-                    return self.noMutation(
-                        state,
-                        command,
-                        "cancelled",
-                        "Obsolete execution absent; current run reconciled without mutation",
-                        obsolete=True,
-                    )
-                record["command"]["fence"] = command["fence"]
-                record["result"]["fence"] = command["fence"]
-                return self.finish(state, record, record["result"])
+                return self.replayObsolete(state, record, command)
             if command["run_id"] != self.runId or command["binding_digest"] != self.digest:
                 raise ValueError("Stale run or operator binding mismatch")
             if state["blocked"]:
                 raise ValueError("Lab uncertain; operator reconciliation required")
             if record:
-                record["command"]["fence"] = command["fence"]
-                if (
-                    command["operation"] == "cancel"
-                    and state["active"] != execution
-                    and record.get("restored_by")
-                ):
-                    return self.noMutation(
-                        state,
-                        command,
-                        "cancelled",
-                        "Policy already restored; current state reconciled",
-                    )
-                if command["operation"] == "cancel" and state["active"] == execution:
-                    # Late cancellation is compensation, never 'it did not run'.
-                    return self.compensate(
-                        state, record, "cancelled", "Late cancellation compensated"
-                    )
-                if (
-                    command["operation"] == "cancel"
-                    and record.get("restores")
-                    and record["result"]["status"] == "completed"
-                ):
-                    if state["active"] is not None:
-                        return self.finish(
-                            state,
-                            record,
-                            self.result(
-                                command,
-                                "uncertain",
-                                reason="Late restore cancellation conflicts with a subsequent policy",
-                            ),
-                        )
-                    return self.compensate(
-                        state,
-                        record,
-                        "cancelled",
-                        "Late restore cancellation reinstated before-image",
-                    )
-                if state["active"] == execution:
-                    try:
-                        self.driver.verify(record["prepared"])
-                    except Exception:
-                        return self.finish(
-                            state,
-                            record,
-                            self.result(
-                                command,
-                                "uncertain",
-                                reason="Recorded completion no longer matches actual state",
-                            ),
-                        )
-                record["result"]["fence"] = command["fence"]
-                return self.finish(state, record, record["result"])
+                return self.replayRecorded(state, record, command)
             if len(state["records"]) >= MAX_RECORDS:
                 raise ValueError("32-execution capacity reached; no automatic cleanup")
             if command["operation"] == "cancel":
                 return self.noMutation(state, command, "cancelled", "Cancelled before dispatch")
-            now = time.time()
-            if not now < utc(command["deadline"]) <= now + 300:
-                raise ValueError("Expired deadline or exceeds 300 seconds")
-            if not now < utc(command["dispatch_expires_at"]) <= now + 5:
-                raise ValueError("Expired or overlong dispatch authorization")
-            state["actions"] = [t for t in state["actions"] if now - t < 60]
-            if state["actions"] and now - state["actions"][-1] < HOLD_DOWN:
-                raise ValueError("Lab/selector 3-second hold-down")
-            if len(state["actions"]) >= RATE_LIMIT:
-                raise ValueError("Lab action rate exceeded")
-            plan = command["plan"]
-            active = state["records"].get(state["active"])
-            if plan["operation"] == "restore":
-                if not active or any(
-                    active["command"]["plan"][k] != plan[k]
-                    for k in ("source_host", "destination_host", "dscp")
-                ):
-                    raise ValueError("No matching active owned policy")
-                prepared = active["prepared"]
-                self.driver.verify(prepared)
-            else:
-                if active:
-                    raise ValueError("One active policy per lab; restore before another action")
-                driverPlan = {**plan, "weights": plan["weights"] or [1] * len(plan["paths"])}
-                prepared = self.driver.prepare(driverPlan)
-            restoreBefore = self.driver.capture() if plan["operation"] == "restore" else None
-            accepted = time.time()
-            if not accepted < utc(
-                command["dispatch_expires_at"]
-            ) <= accepted + 5 or accepted >= utc(command["deadline"]):
-                raise ValueError("Dispatch authorization expired during discovery/readback")
-            record = {
-                "command": command,
-                "phase": "prepared",
-                "prepared": prepared,
-                "restores": state["active"] if plan["operation"] == "restore" else None,
-                "restore_before": restoreBefore,
-                "dispatch_checked_at": accepted,
-            }
-            state["records"][execution] = record
-            state["actions"].append(now)
-            self.save(state)  # Durable before-image precedes the very first mutation.
+            record, prepared = self.prepareNew(state, command)
         except Exception as error:
-            result = self.result(command, "failed", reason=str(error)[:240])
-            if not record and len(state["records"]) < MAX_RECORDS + MAX_TOMBSTONES:
-                if (
-                    not state["blocked"]
-                    and command["run_id"] == self.runId
-                    and command["binding_digest"] == self.digest
-                ):
-                    return self.noMutation(state, command, "failed", str(error)[:240])
-                record = {"command": command, "phase": "terminal"}
-                state["records"][execution] = record
-                return self.finish(state, record, result)
-            self.publish(result)
-            return result
+            return self.rejectBeforeDispatch(state, command, error)
+        return self.apply(state, command, record, prepared, hook)
+
+    def replayObsolete(self, state, record, command):
+        if command["operation"] == "cancel":
+            record.setdefault("obsolete_result", record["result"])
+            return self.noMutation(
+                state,
+                command,
+                "cancelled",
+                "Obsolete execution absent; current run reconciled without mutation",
+                obsolete=True,
+            )
+        record["command"]["fence"] = command["fence"]
+        record["result"]["fence"] = command["fence"]
+        return self.finish(state, record, record["result"])
+
+    def replayRecorded(self, state, record, command):
+        execution = command["execution_id"]
+        record["command"]["fence"] = command["fence"]
+        if command["operation"] == "cancel" and state["active"] != execution and record.get("restored_by"):
+            return self.noMutation(
+                state, command, "cancelled", "Policy already restored; current state reconciled"
+            )
+        if command["operation"] == "cancel" and state["active"] == execution:
+            # Late cancellation is compensation, never 'it did not run'.
+            return self.compensate(state, record, "cancelled", "Late cancellation compensated")
+        if (
+            command["operation"] == "cancel"
+            and record.get("restores")
+            and record["result"]["status"] == "completed"
+        ):
+            if state["active"] is not None:
+                return self.finish(
+                    state,
+                    record,
+                    self.result(
+                        command,
+                        "uncertain",
+                        reason="Late restore cancellation conflicts with a subsequent policy",
+                    ),
+                )
+            return self.compensate(
+                state, record, "cancelled", "Late restore cancellation reinstated before-image"
+            )
+        if state["active"] == execution:
+            try:
+                self.driver.verify(record["prepared"])
+            except Exception:
+                return self.finish(
+                    state,
+                    record,
+                    self.result(
+                        command,
+                        "uncertain",
+                        reason="Recorded completion no longer matches actual state",
+                    ),
+                )
+        record["result"]["fence"] = command["fence"]
+        return self.finish(state, record, record["result"])
+
+    def prepareNew(self, state, command):
+        """Bounded admission and read-only discovery; the durable record precedes mutation."""
+        now = time.time()
+        if not now < utc(command["deadline"]) <= now + 300:
+            raise ValueError("Expired deadline or exceeds 300 seconds")
+        if not now < utc(command["dispatch_expires_at"]) <= now + 5:
+            raise ValueError("Expired or overlong dispatch authorization")
+        state["actions"] = [t for t in state["actions"] if now - t < 60]
+        if state["actions"] and now - state["actions"][-1] < HOLD_DOWN:
+            raise ValueError("Lab/selector 3-second hold-down")
+        if len(state["actions"]) >= RATE_LIMIT:
+            raise ValueError("Lab action rate exceeded")
+        plan = command["plan"]
+        active = state["records"].get(state["active"])
+        if plan["operation"] == "restore":
+            if not active or any(
+                active["command"]["plan"][k] != plan[k]
+                for k in ("source_host", "destination_host", "dscp")
+            ):
+                raise ValueError("No matching active owned policy")
+            prepared = active["prepared"]
+            self.driver.verify(prepared)
+        else:
+            if active:
+                raise ValueError("One active policy per lab; restore before another action")
+            driverPlan = {**plan, "weights": plan["weights"] or [1] * len(plan["paths"])}
+            prepared = self.driver.prepare(driverPlan)
+        restoreBefore = self.driver.capture() if plan["operation"] == "restore" else None
+        accepted = time.time()
+        if not accepted < utc(command["dispatch_expires_at"]) <= accepted + 5 or accepted >= utc(
+            command["deadline"]
+        ):
+            raise ValueError("Dispatch authorization expired during discovery/readback")
+        record = {
+            "command": command,
+            "phase": "prepared",
+            "prepared": prepared,
+            "restores": state["active"] if plan["operation"] == "restore" else None,
+            "restore_before": restoreBefore,
+            "dispatch_checked_at": accepted,
+        }
+        state["records"][command["execution_id"]] = record
+        state["actions"].append(now)
+        self.save(state)  # Durable before-image precedes the very first mutation.
+        return record, prepared
+
+    def rejectBeforeDispatch(self, state, command, error):
+        execution = command["execution_id"]
+        record = state["records"].get(execution)
+        result = self.result(command, "failed", reason=str(error)[:240])
+        if not record and len(state["records"]) < MAX_RECORDS + MAX_TOMBSTONES:
+            if (
+                not state["blocked"]
+                and command["run_id"] == self.runId
+                and command["binding_digest"] == self.digest
+            ):
+                return self.noMutation(state, command, "failed", str(error)[:240])
+            record = {"command": command, "phase": "terminal"}
+            state["records"][execution] = record
+            return self.finish(state, record, result)
+        self.publish(result)
+        return result
+
+    def apply(self, state, command, record, prepared, hook):
+        execution = command["execution_id"]
 
         def check():
             if hook:
                 hook()
             path = self.commands / (execution + ".json")
             if path.exists() or path.is_symlink():
-                latest = validateEnvelope(safeRead(path), path.name)
+                latest = self.readCommand(path)
                 if not self.sameIdentity(command, latest) or latest["fence"] < command["fence"]:
                     raise Interrupted("Mailbox identity/fence changed during action")
                 if latest["operation"] == "cancel":
@@ -561,7 +604,7 @@ class Mailbox:
                 fingerprint = (info.st_ino, info.st_mtime_ns, info.st_size)
                 if self.seen.get(path.name) == fingerprint and (self.results / path.name).exists():
                     continue
-                command = validateEnvelope(safeRead(path), path.name)
+                command = self.readCommand(path)
                 if cancel_only and command["operation"] != "cancel":
                     continue
                 self.handle(command)

@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import math
 from datetime import datetime
 from typing import Literal
 
 from pydantic import AwareDatetime, Field, model_validator
 
+from app.modules.autonomy.experimental.metrics import _count, measured_metrics  # noqa: F401 - re-export
 from app.modules.autonomy.experimental.simulation import (
     ActionProposal,
     Contract,
@@ -15,7 +15,6 @@ from app.modules.autonomy.experimental.simulation import (
     Nonnegative,
     frame_digest,
     fresh_frame,
-    number,
 )
 from app.modules.simulation.evaluator import digest
 from app.modules.simulation.schemas import Digest, Identifier
@@ -43,77 +42,6 @@ class VerificationPolicy(Contract):
                 or self.foreground_nodes[0][-1] != self.foreground_nodes[1][-1]):
             raise ValueError("verification_exact_paths_required")
         return self
-
-
-def _count(value):
-    if type(value) is not int or value < 0:
-        raise ValueError("raw_count_missing_or_invalid")
-    return value
-
-
-def measured_metrics(frame):
-    """Reconstruct frozen v4 service semantics; never use observation summaries.
-
-    Goodput uses actual sender lifetime (control included), receiver totals include
-    verified drain. RTT is real ICMP RTT, not evaluator residence latency.
-    """
-    frame = FrozenMeasuredFrame.model_validate(frame)
-    evidence = frame.raw["evidence"]
-    if evidence.get("measurement_complete") is not True or evidence.get("drain_status") != "verified_empty":
-        raise ValueError("measurement_or_drain_incomplete")
-    start, end = (number(evidence["post_control_interval"][key]) for key in ("start", "end"))
-    control = number(evidence["control_start_monotonic_seconds"])
-    drain_start, drain_end = (number(evidence[key]) for key in ("drain_begin", "drain_end"))
-    desired = number(evidence["desired_window_seconds"], positive=True)
-    measured = number(evidence["measured_window_seconds"], positive=True)
-    if not control <= start < end <= drain_start < drain_end:
-        raise ValueError("measurement_chronology_invalid")
-    if not 2 <= desired <= 10 or not desired <= measured <= desired + 2 or not math.isclose(measured, end - start, abs_tol=.01):
-        raise ValueError("measurement_interval_invalid")
-    drain_limit = number(evidence["environment_spec"]["drain_max_seconds"], positive=True)
-    if drain_end - drain_start > drain_limit:
-        raise ValueError("measurement_drain_exceeded_frozen_spec")
-    if not math.isclose((frame.observed_at - frame.window_started_at).total_seconds(), end - start, abs_tol=.01):
-        raise ValueError("measurement_clock_attachment_mismatch")
-    senders, receivers = evidence["udp_sent"], evidence["udp_received"]
-    if len(senders) != 2 or len(receivers) != 2:
-        raise ValueError("both_raw_flows_required")
-    metrics = []
-    for sender, receiver in zip(senders, receivers):
-        sent, received = _count(sender["packets"]), _count(receiver["packets"])
-        sent_bytes, received_bytes = _count(sender["bytes"]), _count(receiver["bytes"])
-        duration = number(sender["duration_seconds"], positive=True)
-        for worker in (sender, receiver):
-            began, ended = (number(worker[key]) for key in ("started_monotonic_seconds", "finished_monotonic_seconds"))
-            if (not began <= control <= start < end <= ended
-                    or not math.isclose(ended - began, number(worker["duration_seconds"], positive=True), abs_tol=.01)):
-                raise ValueError("worker_interval_invalid")
-        if (sender["finished_monotonic_seconds"] > drain_start
-                or receiver["finished_monotonic_seconds"] < drain_end
-                or received > sent or received_bytes > sent_bytes
-                or sent_bytes != sent * 1200 or received_bytes != received * 1200):
-            raise ValueError("raw_counter_or_drain_mismatch")
-        highest = receiver["highest_sequence"]
-        if (type(highest) is not int or (received == 0) != (highest == -1)
-                or highest < received - 1 or sent > 0 and highest >= sent):
-            raise ValueError("raw_sequence_count_mismatch")
-        metrics.append({"goodput_mbps": received_bytes * 8 / duration / 1e6,
-                        "udp_loss_pct": 100 * (sent - received) / sent if sent else None})
-    probe = evidence["ping"]
-    sent, received = _count(probe["sent"]), _count(probe["received"])
-    rtt = probe["rtt_avg_ms"]
-    if received > sent or number(probe["interval_seconds"]) < end - start:
-        raise ValueError("raw_probe_interval_or_count_invalid")
-    if (received == 0) != (rtt is None):
-        raise ValueError("raw_probe_rtt_inconsistent")
-    return {**metrics[0], "probe_loss_pct": 100 * (sent - received) / sent if sent else None,
-            "rtt_ms": number(rtt) if rtt is not None else None,
-            "probe_sent": sent, "probe_received": received,
-            "traffic_bytes": senders[0]["bytes"],
-            "service_outage": sent > 0 and received == 0,
-            "service_window_seconds": end - start,
-            "sender_lifetime_seconds": senders[0]["duration_seconds"],
-            "raw_evidence_sha256": digest(evidence)}
 
 
 def _route_checks(frame, policy, action_index):

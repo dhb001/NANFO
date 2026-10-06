@@ -249,7 +249,8 @@ was removed; no shared migration, privileged lab, training or commits.
 Migration **0027**, predecessor **0026**, is reserved for Autonomy provider frames,
 execution journals and exclusive lab-resource fences. This work owns new
 `autonomy/safety_provider.py`, `autonomy/provider_state.py`,
-`autonomy/execution*.py`, `intent/autonomous.py`, and `emulation/autonomous*.py`.
+`autonomy/execution*.py` and `emulation/autonomous*.py`. (The originally planned
+`intent/autonomous.py` wrapper was removed by ADR-028 on 2026-09-24; see below.)
 `autonomy/providers.py`, existing Intent service and frozen AI/experiment files
 remain owned by their respective workstreams. Parent owns deployment composition.
 
@@ -259,8 +260,9 @@ The latter returns an executor and recovery provider implementing existing
 `accept(db, ExecutionAuthorization)`, `verify(ExecutionReference)` and
 `cancel(ExecutionReference)` contracts. Acceptance enlists without committing or
 device I/O. Executor `run_one()` / `run()` processes durable accepted work.
-Intent's new public `AutonomousAcceptance` boundary delegates only this separate
-contract; it never creates manual approvals.
+The Autonomy worker calls the executor's `accept` directly. No Intent-side boundary
+is involved and no manual approvals are created. ADR-028 removed the unused
+`intent.autonomous.AutonomousAcceptance` wrapper, which nothing imported.
 
 ### Calibration/observer coordination
 
@@ -361,8 +363,12 @@ Implementation/test results and final composition details will be appended here.
   action-specific arrival/service/error/capacity profiles, route-to-egress chains,
   allowed old/new transitions, horizon/delay and threshold/drift policy. No fitted
   threshold or empirical extrema are converted to calibration.
-* Intent public boundary is `intent.autonomous.AutonomousAcceptance(executor)`;
-  no manual intent or approval rows are fabricated. Autonomy owns the execution
+* There is no Intent-side boundary. ADR-028 (2026-09-24) removed the unused
+  `intent.autonomous.AutonomousAcceptance(executor)` wrapper. Autonomous work enters only
+  through Autonomy's executor (`AutonomyWorker` → `providers.executor.accept`), and no
+  Intent module handles `ExecutionAuthorization`. The guard test is
+  `tests/unit/test_autonomous_execution.py::test_intent_exposes_no_autonomous_acceptance_path`.
+  No manual intent or approval rows are fabricated. Autonomy owns the execution
   journal; `intent_id` is an immutable logical correlation identity.
 
 ### Final provider installation v1 fields

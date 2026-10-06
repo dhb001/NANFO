@@ -9,8 +9,25 @@ import { useWorkspaceStore } from "@/shared/state/workspace-store";
 import { queryClient } from "@/app/queryClient";
 import { operatorProfile } from "@/test/profile";
 import { useUiStore } from "@/shared/state/ui-store";
+import { rememberFocus } from "@/shared/lib/focusRestore";
+import { useEffect, useState } from "react";
 
 vi.mock("@/features/realtime/RealtimesBridge", () => ({ RealtimeBridge: () => null }));
+
+/** A scope control like ScopePicker; its list renders a frame later, as a loading query would. */
+function ScopeSelect({ delayed = false }: { delayed?: boolean }) {
+  const networkId = useWorkspaceStore((state) => state.networkId);
+  const [ready, setReady] = useState(!delayed);
+  useEffect(() => {
+    if (ready) return;
+    const timer = window.setTimeout(() => setReady(true), 20);
+    return () => window.clearTimeout(timer);
+  }, [ready]);
+  return ready ? <select aria-label="Network scope" data-focus-key="scope-network" value={networkId ?? ""}
+    onChange={(event) => { rememberFocus("scope-network"); useWorkspaceStore.getState().setNetworkId(event.target.value); }}>
+    <option value="">None</option><option value="n-1">N1</option><option value="n-2">N2</option>
+  </select> : <p>Loading networks</p>;
+}
 
 function renderShell(path = "/ops/audit") {
   return render(<MemoryRouter initialEntries={[path]}><Routes>
@@ -18,6 +35,8 @@ function renderShell(path = "/ops/audit") {
       <Route path="audit" element={<div>Private audit content</div>} />
       <Route path="autonomy" element={<div>Scoped autonomy content</div>} />
       <Route path="overview" element={<input aria-label="Local draft" defaultValue="" />} />
+      <Route path="tenancy" element={<ScopeSelect />} />
+      <Route path="topology-analysis" element={<ScopeSelect delayed />} />
     </Route>
     <Route path="/login" element={<div>Login destination</div>} />
   </Routes></MemoryRouter>);
@@ -80,6 +99,28 @@ describe("authenticated shell", () => {
     await userEvent.type(screen.getByLabelText("Local draft"), "old-network-secret");
     act(() => useWorkspaceStore.getState().setNetworkId("new-network"));
     expect(screen.getByLabelText("Local draft")).toHaveValue("");
+  });
+
+  it.each([["tenancy", "renders at once"], ["topology-analysis", "renders after loading"]])(
+    "returns focus to the scope control after a switch remounts the workspace (%s: %s)", async (route) => {
+      renderShell(`/ops/${route}`);
+      const before = await screen.findByLabelText("Network scope");
+      before.focus();
+      await userEvent.selectOptions(before, "n-2");
+      const after = await screen.findByLabelText("Network scope");
+      expect(after).not.toBe(before);
+      await waitFor(() => expect(after).toHaveFocus());
+      expect(after).toHaveValue("n-2");
+    });
+
+  it("does not steal focus the operator moved elsewhere during the switch", async () => {
+    renderShell("/ops/topology-analysis");
+    const before = await screen.findByLabelText("Network scope");
+    await userEvent.selectOptions(before, "n-1");
+    screen.getByRole("button", { name: "Logout" }).focus();
+    await screen.findByLabelText("Network scope");
+    await act(() => new Promise((done) => setTimeout(done, 50)));
+    expect(screen.getByRole("button", { name: "Logout" })).toHaveFocus();
   });
 
   it("reports unconfirmed revocation when logout recovery cannot reach the backend", async () => {

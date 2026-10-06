@@ -1,0 +1,17 @@
+# Reviewed trivy exceptions for .github/workflows/packaging.yml (`--ignorefile`).
+#
+# The packaging gate fails on any fixed HIGH/CRITICAL vulnerability in a built image
+# or an upstream store image. The normal remedy is a digest bump (Dependabot opens
+# weekly docker PRs for deploy/). Add an entry here only after review, always with
+# an owner-readable statement and an expiry no more than 60 days out, e.g.:
+#
+#   vulnerabilities:
+#     - id: CVE-2026-00000
+#       paths: ["usr/lib/x86_64-linux-gnu/libexample.so.1"]
+#       statement: "Why it is unreachable here; which digest bump removes it."
+#       expired_at: 2026-11-30
+#
+# Frozen runtimes that ADR-028 section 1 forbids changing (the with-ai image's
+# torch 2.8.0+cpu) are built but not trivy-gated; their Python advisories are
+# reviewed in security/dependency-exceptions.v1.json instead.
+vulnerabilities: []

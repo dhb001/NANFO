@@ -11,6 +11,7 @@ from sqlalchemy.exc import IntegrityError
 from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.core.runtime_health import worker_iteration
+from app.modules.autonomy import governance
 from app.modules.autonomy.models import TimedOverride
 from app.modules.autonomy.repository import AutonomyRepository
 from app.modules.autonomy.schemas import Observation, OverrideListResponse, OverrideResponse
@@ -47,7 +48,7 @@ class OverrideService(AutonomyService):
         return OverrideListResponse(network_id=network_id, control_revision=control.revision if control else 0,
                                     overrides=[OverrideResponse.model_validate(row) for row in rows])
 
-    async def create(self, *, claims, request):
+    async def create(self, *, claims, request, correlation_id=None):
         network, _ = await self.scope(claims, request.network_id, write=True)
         workspace_id = network.workspace_id
         control = await self.repo.get(request.network_id)
@@ -102,6 +103,13 @@ class OverrideService(AutonomyService):
         control.updated_at = now
         await self.repo.invalidate_observing(control.network_id, "override_enrolled")
         self.repo.record(control, status="control_changed", reasons=["timed_override_enrolled"], actor_id=claims.user_id)
+        await governance.audit(self.db, self.redis, event_type="autonomy.override.created", actor_id=claims.user_id,
+            network_id=request.network_id, workspace_id=workspace_id, correlation_id=correlation_id,
+            resource_type="autonomy_override", resource_id=override_id, metadata={
+                "override_id": str(override_id), "execution_id": str(request.execution_id),
+                "intent_id": str(request.intent_id), "duration_seconds": request.duration_seconds,
+                "return_mode": request.return_mode, "prior_mode": row.prior_mode, "hold_revision": row.hold_revision,
+                "reason": request.reason[:256]})
         try:
             await self.db.commit()
         except IntegrityError as exc:
@@ -118,7 +126,7 @@ class OverrideService(AutonomyService):
             raise HTTPException(409, detail="Network ownership changed; reconciliation required.")
         return row
 
-    async def cancel(self, *, claims, override_id):
+    async def cancel(self, *, claims, override_id, correlation_id=None):
         row = await self.scoped_override(claims, override_id)
         # All mutators use control -> override lock order.
         await self.repo.get(row.network_id, lock=True)
@@ -130,10 +138,14 @@ class OverrideService(AutonomyService):
             row.cancelled_by_user_id = claims.user_id
             row.next_check_at = row.updated_at = datetime.now(UTC)
             row.claim_token, row.lease_expires_at = None, None
+            await governance.audit(self.db, self.redis, event_type="autonomy.override.cancel_requested",
+                actor_id=claims.user_id, network_id=row.network_id, workspace_id=row.workspace_id,
+                correlation_id=correlation_id, resource_type="autonomy_override", resource_id=row.override_id,
+                metadata={"override_id": str(row.override_id), "execution_id": str(row.execution_id)})
         await self.db.commit()
         return OverrideResponse.model_validate(row)
 
-    async def return_mode(self, *, override_id, claims=None, request=None):
+    async def return_mode(self, *, override_id, claims=None, request=None, correlation_id=None):
         row = (await self.scoped_override(claims, override_id) if claims else await self.repo.override(override_id))
         if row is None:
             raise HTTPException(404, detail="Override not found.")
@@ -158,6 +170,7 @@ class OverrideService(AutonomyService):
             reasons.append("return_actor_unauthorized")
         if mode != "monitor":
             try:
+                await self.get_providers()
                 reasons_ready, qualification = await readiness(self.providers, checkpoint,
                     production=get_settings().EXECUTION_MODE == "production", require_executor=mode == "autonomous")
                 reasons.extend(reasons_ready)
@@ -215,6 +228,13 @@ class OverrideService(AutonomyService):
             row.status, row.reasons, row.returned_at = "returned", [], now
             await self.repo.invalidate_observing(network_id, "override_mode_return")
             self.repo.record(control, status="control_changed", reasons=["override_mode_return"], actor_id=actor_id)
+        if request is not None:
+            # Operator-requested returns are audited; worker-driven returns record decisions only.
+            await governance.audit(self.db, self.redis, event_type="autonomy.override.return_requested",
+                actor_id=actor_id, network_id=network_id, workspace_id=workspace_id, correlation_id=correlation_id,
+                resource_type="autonomy_override", resource_id=override_id, metadata={
+                    "override_id": str(override_id), "return_mode": mode, "status": row.status,
+                    "reasons": list(row.reasons)[:32], "reason": request.reason[:256]})
         await self.db.commit()
         return OverrideResponse.model_validate(row)
 

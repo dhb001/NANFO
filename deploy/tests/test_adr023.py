@@ -23,17 +23,25 @@ def backend(monkeypatch):
     monkeypatch.syspath_prepend(str(ROOT / "backend"))
 
 
-def test_archive_volume_is_protected_persistent_and_opt_in_writer():
+def test_archive_volume_is_protected_persistent_supervised_and_operator_writable():
     config = yaml.safe_load((ROOT / "deploy/compose.yaml").read_text())
     services = config["services"]
     assert "telemetry_archive" in manage.VOLUMES
     assert "telemetry_archive:/volumes/telemetry_archive" in services["volume-init"]["volumes"]
     assert "telemetry_archive:/var/lib/nanfo/telemetry-archive:ro" in services["maintenance"]["volumes"]
-    retention = services["telemetry-retention"]
-    assert retention["profiles"] == ["retention"] and retention["restart"] == "no"
-    assert "telemetry-retention" not in manage.SERVICES
-    assert retention["command"] == ["python", "/opt/nanfo/deploy/telemetry_retention.py"]
-    assert retention["read_only"] and retention["user"] == "10001:10001"
+    # ADR-028: the retention loop is a core supervised service; the finite operator
+    # wrapper (dry-run/restore/reconcile/acceptance fixtures) stays opt-in.
+    operator = services["telemetry-retention-cli"]
+    assert operator["profiles"] == ["retention"] and operator["restart"] == "no"
+    assert "telemetry-retention-cli" not in manage.SERVICES
+    assert operator["command"] == ["python", "/opt/nanfo/deploy/telemetry_retention.py"]
+    assert operator["read_only"] and operator["user"] == "10001:10001"
+    supervised = services["telemetry-retention"]
+    assert "telemetry-retention" in manage.SERVICES and "profiles" not in supervised
+    assert supervised["restart"] == "unless-stopped" and supervised["read_only"]
+    writers = {name for name, svc in services.items()
+               if "telemetry_archive:/var/lib/nanfo/telemetry-archive" in svc.get("volumes", [])}
+    assert writers == {"telemetry-retention", "telemetry-retention-cli"}
 
 
 @pytest.mark.parametrize("overlays", [
@@ -51,7 +59,8 @@ def test_resolved_compose_contract_without_daemon(overlays):
     env.update(
         NANFO_PROJECT="nanfo-deploy-source-check", NANFO_STATE_DIR="/tmp/opencode/unprovisioned",
         NANFO_BACKEND_IMAGE="source-check:backend", NANFO_FRONTEND_IMAGE="source-check:frontend",
-        NANFO_NEO4J_IMAGE="source-check:neo4j", NANFO_FLEET_IMAGE="source-check:fleet",
+        NANFO_NEO4J_IMAGE="source-check:neo4j", NANFO_REDIS_IMAGE="source-check:redis",
+        NANFO_FLEET_IMAGE="source-check:fleet", NANFO_FLEET_EGRESS_SUBNET="10.231.9.0/24",
         NANFO_AI_IMAGE="source-check:ai", NANFO_BOOTSTRAP_EMAIL="test@example.com",
         NANFO_LIVE_MODEL_REGISTRY_SHA256="a" * 64,
         NANFO_AUTONOMOUS_PROVIDER_CONFIG_SHA256="b" * 64,
@@ -69,7 +78,9 @@ def test_resolved_compose_contract_without_daemon(overlays):
         assert all(api["environment"]["API_REALTIME_DISTRIBUTED"] == "true" for api in apis)
         assert apis[0]["volumes"] == apis[1]["volumes"]
         assert services["gateway"]["depends_on"]["api2"]["condition"] == "service_healthy"
-        assert services["gateway"]["configs"][0]["target"] == "/etc/nginx/nginx-upstream.conf"
+        # ADR-028: the upstream definition is baked into the gateway image, not bind-mounted.
+        assert services["gateway"]["environment"]["NANFO_GATEWAY_UPSTREAM"] == "distributed"
+        assert not services["gateway"].get("configs")
     if "fleet" in overlays:
         assert all(api["environment"]["TELEMETRY_FLEET_ENABLED"] == "true" for api in apis)
         assert all(api["environment"]["TELEMETRY_RUNTIME_ADAPTER_MODE"] == "stub" for api in apis)
@@ -77,8 +88,13 @@ def test_resolved_compose_contract_without_daemon(overlays):
         assert fleet["build"]["target"] == "with-fleet"
         assert fleet["profiles"] == ["fleet"]
         assert set(fleet["networks"]) == {"private", "fleet_egress"}
+        assert config["networks"]["fleet_egress"]["ipam"]["config"][0]["subnet"] == "10.231.9.0/24"
         assert not fleet.get("ports") and fleet["read_only"] and fleet["user"] == "10001:10001"
         assert fleet["healthcheck"]["test"][-1] == "/opt/nanfo/deploy/check_fleet_health.py"
+        # The merged scratch mounts keep the inherited /tmp and /run/nanfo exactly once.
+        tmpfs = sorted(entry.split(":", 1)[0] for entry in fleet["tmpfs"])
+        assert tmpfs == ["/run/nanfo", "/run/nanfo-snmp", "/tmp"]
+        assert fleet["environment"]["NANFO_SNMP_RUNTIME_DIR"] == "/run/nanfo-snmp"
         for mount in fleet["volumes"]:
             assert mount["read_only"]
             if mount["type"] == "bind":
@@ -194,7 +210,6 @@ def test_maintenance_refuses_any_unreleased_execution_including_verified(backend
 
 @pytest.mark.parametrize("fault", [None, "leader", "singleton", "local_consumer", "local_collector", "stale_subscription", "delegated_dependency"])
 def test_verifier_accepts_only_correct_follower_delegation(fault):
-    api = verify.API("http://127.0.0.1:8787")
     data = {"ready": True, "checks": {"postgres": "ok", "realtime_subscription": "ok", "api_consumers": "delegated"},
             "realtime": {"mode": "distributed", "role": "follower", "local_consumer_count": 0, "local_collector": False}}
     if fault == "leader":
@@ -209,12 +224,15 @@ def test_verifier_accepts_only_correct_follower_delegation(fault):
         data["checks"]["realtime_subscription"] = "unavailable"
     if fault == "delegated_dependency":
         data["checks"]["postgres"] = "delegated"
-    api.raw = Mock(return_value=(200, {}, json.dumps({"success": True, "data": data}).encode()))
+    # ADR-028: readiness is probed inside the API container; the gateway 404s /ready.
+    stack = Mock(config={"services": {"api": {}}})
+    stack.compose.return_value = json.dumps(
+        {"status": 200, "body": json.dumps({"success": True, "data": data})}).encode()
     if fault:
         with pytest.raises(verify.VerificationError):
-            api.ready()
+            verify.stack_ready(stack)
     else:
-        assert api.ready()
+        assert verify.stack_ready(stack)
 
 
 def test_new_deployment_inputs_participate_in_source_quiet_gate():

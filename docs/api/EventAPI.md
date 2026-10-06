@@ -67,6 +67,62 @@ Every domain event, regardless of producer or consumer, must carry this envelope
 - Failed messages (repeated processing failures) must be routed to a dead-letter queue for operator inspection.
 - Consumers must explicitly ACK events after successful processing.
 
+### 4.1 Failure classification, DLQ and retention (ADR-028 C14)
+
+- **Version gate.** An envelope whose `version` major is not `1` is dead-lettered
+  (`unsupported_version`); a missing `version` counts as `1`. The fields consumers
+  dereference are required per event type (`app/events/contracts.py`). Today these are
+  `network.device.*`: payload `device_id` and envelope `timestamp`, plus `changed_fields`
+  on updates. Their absence is dead-lettered as `invalid_payload`.
+- **Transient failures** leave the entry pending, and reclaim retries it after
+  `EVENT_RECLAIM_IDLE_MS`. Transient means a PostgreSQL/Redis/Neo4j outage, a timeout, an
+  OS error or an unclassified exception. Later entries of the same network or device wait
+  behind it.
+- **Deterministic failures** are dead-lettered on first delivery. They are
+  `ValueError`, `KeyError`, `TypeError`, validation errors and
+  `app.core.errors.DeterministicEventError`, which consumers raise for poison events.
+  An entry delivered more than `EVENT_MAX_DELIVERIES` (20) times is dead-lettered without
+  running its handlers.
+- Dead-letter entries keep the original fields and add `failed_stream`, `failed_group`,
+  `failed_entry_id`, `failure_reason`, `failed_handler`, `delivery_count` and `error_type`,
+  never exception messages. ACK happens only after success or a confirmed DLQ append.
+- Operator commands, run from `backend`:
+  - `python -m scripts.dead_letter {list,replay,purge}`: `list` shows bounded metadata
+    only, `replay` re-appends the original envelope with `replayed_from`/`replay_count`,
+    and `purge` archives before deleting;
+  - `python -m scripts.stream_retention schedule` runs archive-before-delete retention
+    continuously, including the DLQ.
+- Producers refuse new publications with 503 `DEPENDENCY_UNAVAILABLE` once Redis memory
+  reaches `EVENT_PUBLISH_MAX_MEMORY_RATIO` (0.90) of `maxmemory`.
+- Consumers use a stable name per instance (`EVENT_CONSUMER_NAME`, default
+  `<role>-<hostname>`). `EVENT_CONSUMER_CONCURRENCY` above 1 runs entries concurrently
+  while keeping per-network/per-device order within a page.
+
+Full recovery semantics and settings: `backend/app/events/README.md`.
+
+### 4.2 Stable identities and additive payload fields (ADR-028)
+
+State commits before publication; a publication retried later reuses the same event ID.
+No event names were added.
+
+- Intent validate/legacy events use `uuid5(intent_id, event_type)`. Execution outbox
+  events use `uuid5(execution_id, "intent-outbox:<sequence>")` and add `phase` and
+  `sequence`, so the accepted, cancelling and uncertain transitions that share
+  `intent.execution_started` are distinguishable.
+- Plugin lifecycle events use `uuid5(plugin_id, "<event_type>:<updated_at>")`. A deferred
+  republish carries `requested_by_user_id=null` and `delivery="deferred_republish"`.
+- Plugin and simulation event payloads, and intent `execution_provenance`, keep an opaque
+  or non-canonical `X-Request-ID` as `request_id`. `correlation_id` is the shared UUID
+  mapping (`app.core.correlation`).
+- A simulation that exhausts its claim attempts is announced with the existing
+  `simulation.cancelled`, carrying `state="failed"` and the reason.
+- Telemetry SLO alerts (`alert.generated` / `alert.resolved`) are platform-scoped:
+  `alert_scope="platform"`, no workspace or network, with an `evaluation_window`.
+
+Audit-only actions such as `auth.token.reuse_detected`, `network.device_groups.upserted`
+or `autonomy.mode.changed` are written to the audit log only. They are not bus events;
+the list is in `ADR028-ContractChanges.md`.
+
 ---
 
 ## 5. Event-to-WebSocket Channel Routing
@@ -121,3 +177,11 @@ continues to prevent stale updates from reviving deleted devices.
 These additive v1 payload fields do not rewrite older outbox envelopes or immutable
 audit evidence. Historical missing tenant scope must never be repaired by weakening
 tenant filters or silently changing stored history.
+
+**Ordering (ADR-028 C13).** Every inventory event payload also carries `sequence`, the
+per-network outbox sequence. It is allocated under the per-network lock, so sequence
+order is commit and publication order. Consumers order by `(network_id, sequence)` when
+`sequence` is present and fall back to the envelope timestamp for older events. The
+outbox publisher checks Redis memory admission before claiming rows. Published rows older
+than `NETWORK_OUTBOX_RETENTION_DAYS` (30; `0` disables) are purged in bounded batches;
+the newest row, which anchors reconcile's watermark, is always kept.

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useExitPresence } from "@/shared/ui/useExitPresence";
 import { useNavigate } from "react-router-dom";
 import { useUiStore } from "@/shared/state/ui-store";
@@ -39,6 +39,8 @@ export function CommandPalette() {
   const [activeIndex, setActiveIndex] = useState(0);
   const surfaceRef = useRef<HTMLDivElement>(null);
   const returnFocus = useRef<HTMLElement | null>(null);
+  const listboxId = useId();
+  const optionId = (entry: CommandEntry) => `${listboxId}-${entry.id}`;
 
   useEffect(() => {
     if (!open) return;
@@ -75,12 +77,9 @@ export function CommandPalette() {
 
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Tab") {
-        const controls = surfaceRef.current?.querySelectorAll<HTMLElement>("input, button");
-        if (!controls?.length) return;
-        const first = controls[0];
-        const last = controls[controls.length - 1];
-        if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
-        else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+        // Combobox pattern: options are not tab stops; focus stays on the search input.
+        event.preventDefault();
+        surfaceRef.current?.querySelector("input")?.focus();
         return;
       }
       if (event.key === "Escape") {
@@ -98,15 +97,19 @@ export function CommandPalette() {
         setActiveIndex((value) => Math.max(0, value - 1));
         return;
       }
+      if (event.key === "Home" || event.key === "End") {
+        event.preventDefault();
+        setActiveIndex(event.key === "Home" ? 0 : Math.max(0, filtered.length - 1));
+        return;
+      }
       if (event.key === "Enter") {
-        if (event.target instanceof HTMLButtonElement) return;
         const entry = filtered[activeIndex];
         if (!entry) {
           return;
         }
         event.preventDefault();
         setOpen(false);
-        navigate(entry.path);
+        void navigate(entry.path);
       }
     };
 
@@ -136,6 +139,11 @@ export function CommandPalette() {
           >
             <div className="command-search">
               <input
+                role="combobox"
+                aria-expanded={filtered.length > 0}
+                aria-controls={listboxId}
+                aria-autocomplete="list"
+                aria-activedescendant={filtered[activeIndex] ? optionId(filtered[activeIndex]) : undefined}
                 value={query}
                 onChange={(event) => { setQuery(event.target.value); setActiveIndex(0); }}
                 aria-label="Search commands"
@@ -143,19 +151,24 @@ export function CommandPalette() {
               />
             </div>
 
-            <div className="command-results">
-              {filtered.length === 0 ? (
-                <div style={{ padding: "0.8rem", color: "var(--ink-3)" }}>No commands match this filter.</div>
-              ) : (
-                filtered.map((entry, index) => {
+            {filtered.length === 0 ? (
+              <div role="status" style={{ padding: "0.8rem", color: "var(--ink-3)" }}>No commands match this filter.</div>
+            ) : null}
+            <div className="command-results" role="listbox" id={listboxId} aria-label="Commands">
+              {filtered.map((entry, index) => {
                   const active = index === activeIndex;
                   return (
-                    <button
+                    <div
                       key={entry.id}
+                      id={optionId(entry)}
+                      role="option"
+                      aria-selected={active}
                       onMouseEnter={() => setActiveIndex(index)}
+                      // Keep focus in the input when an option is clicked.
+                      onMouseDown={(event) => event.preventDefault()}
                       onClick={() => {
                         setOpen(false);
-                        navigate(entry.path);
+                        void navigate(entry.path);
                       }}
                       className="command-result"
                       data-active={active}
@@ -166,13 +179,12 @@ export function CommandPalette() {
                           {entry.group}
                         </span>
                       </span>
-                      <span className="command-hint">
+                      <span className="command-hint" aria-hidden="true">
                         {entry.hint}
                       </span>
-                    </button>
+                    </div>
                   );
-                })
-              )}
+                })}
             </div>
             <div className="command-footer"><span>↑ ↓ to explore &nbsp; · &nbsp; Enter to open</span><span>Esc to close</span></div>
           </div>

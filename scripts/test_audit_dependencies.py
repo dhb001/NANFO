@@ -8,7 +8,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from audit_dependencies import evaluate, inventory, main, unique_json_object
+from audit_dependencies import LANES, POLICY, evaluate, inventory, main, requirement_pins, unique_json_object
 
 
 def vulnerability(identity="CVE-2026-12345"):
@@ -73,7 +73,45 @@ class AuditPolicyTests(unittest.TestCase):
         self.assertEqual(ai["torch"], "2.8.0+cpu")
         self.assertIn("pytest", ai)
         self.assertIn("pypdf", inventory("backend"))
-        self.assertEqual(inventory("emulation")["eventlet"], "0.30.2")
+        # Frozen historical lab pins stay auditable in their own lane (ADR-028 section 1).
+        frozen = inventory("emulation-frozen")
+        self.assertEqual((frozen["eventlet"], frozen["ryu"]), ("0.30.2", "4.34"))
+        # The C23 successor lab lock: its runtime closure plus the hash-pinned build backend.
+        successor = inventory("emulation")
+        self.assertIn("os-ken", successor)
+        self.assertNotIn("ryu", successor)
+        self.assertEqual(successor["setuptools"],
+                         requirement_pins(POLICY.parents[1] / "emulation/requirements-build.txt", hashes=True)["setuptools"])
+
+    def test_compiled_requirement_locks_are_parsed_strictly(self):
+        digest = "--hash=sha256:" + "a" * 64
+        cases = {
+            f"# header\nexample-pkg==1.2.3 \\\n    {digest} \\\n    {digest}\n    # via -r x.in\n"
+            f"Other.Name[extra]==2.0 ; python_version >= '3.12' \\\n    {digest}\n": {"example-pkg": "1.2.3",
+                                                                                     "other-name": "2.0"},
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "requirements.txt"
+            for content, expected in cases.items():
+                path.write_text(content)
+                self.assertEqual(requirement_pins(path, hashes=True), expected)
+            path.write_text("plain==1.0\n")
+            self.assertEqual(requirement_pins(path, hashes=False), {"plain": "1.0"})
+            refused = {
+                "unhashed": "plain==1.0\n",
+                "range": f"loose>=1.0 \\\n    {digest}\n",
+                "include": "-r other.txt\n",
+                "index": f"pkg==1.0 --index-url https://example.invalid/simple {digest}\n",
+                "dangling": f"pkg==1.0 \\\n    {digest} \\\n",
+                "conflict": f"pkg==1.0 {digest}\nPKG==2.0 {digest}\n",
+                "comment-inside": f"pkg==1.0 \\\n# via x\n    {digest}\n",
+                "empty": "# nothing\n",
+            }
+            for name, content in refused.items():
+                with self.subTest(name=name):
+                    path.write_text(content)
+                    with self.assertRaises(ValueError):
+                        requirement_pins(path, hashes=True)
 
     def test_tool_failure_cannot_reuse_stale_clean_report(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -179,6 +217,40 @@ class AuditPolicyTests(unittest.TestCase):
         payload = '{"dependencies":[{"name":"example","version":"1.0","vulns":[{}],"vulns":[]}],"fixes":[]}'
         with self.assertRaisesRegex(ValueError, "Duplicate JSON key"):
             json.loads(payload, object_pairs_hook=unique_json_object)
+
+    def test_stale_exception_for_removed_package_fails_closed(self):
+        # A dead exception would silently re-accept advisories if the pin ever returned.
+        self.policy["exceptions"].append(dict(self.exception, package="ecdsa", version="0.19.2",
+                                              advisories=["PYSEC-2026-1325"]))
+        errors = self.check()["errors"]
+        self.assertIn("Stale exception: ecdsa==0.19.2 is not in the backend inventory", errors)
+        # The live, matching exception is still honoured.
+        self.assertEqual(self.check()["accepted_pairs"], 1)
+
+    def test_stale_coverage_gap_fails_closed(self):
+        self.policy["coverage_gaps"] = [dict(lane="backend", package="torch", version="2.8.0+cpu",
+                                             reason="not on PyPI", expires="2026-10-21", owner="reviewer",
+                                             rationale="Exact build unavailable", remediation="SBOM review")]
+        self.assertIn("Stale coverage gap: torch==2.8.0+cpu is not in the backend inventory",
+                      self.check()["errors"])
+
+    def test_repository_policy_matches_current_lock_inventories(self):
+        """Every reviewed entry names an exact pin that is still locked (no dead policy)."""
+        policy = json.loads(POLICY.read_text(), object_pairs_hook=unique_json_object)
+        inventories = {lane: inventory(lane) for lane in LANES}
+        for kind in ("exceptions", "coverage_gaps"):
+            for entry in policy[kind]:
+                with self.subTest(kind=kind, package=entry["package"]):
+                    self.assertEqual(inventories[entry["lane"]].get(entry["package"]), entry["version"])
+
+    def test_python_jose_and_ecdsa_are_gone_with_their_exception(self):
+        """ADR-028 C10: PyJWT replaced python-jose, so the ecdsa exception must not survive."""
+        backend = inventory("backend")
+        for package in ("python-jose", "ecdsa"):
+            self.assertNotIn(package, backend)
+        self.assertIn("pyjwt", backend)
+        policy = json.loads(POLICY.read_text())
+        self.assertFalse([e for e in policy["exceptions"] if e["package"] in ("ecdsa", "python-jose")])
 
 
 if __name__ == "__main__":

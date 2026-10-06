@@ -7,8 +7,9 @@ import { Badge } from "@/shared/ui/Badge";
 import { AsyncState } from "@/shared/ui/AsyncState";
 import { formatTimestamp } from "@/shared/lib/format";
 import { toErrorMessage } from "@/shared/lib/errors";
+import { useAuthStore } from "@/shared/state/auth-store";
 import { AUTONOMY_FRESH_MS, useAutonomy } from "./hooks";
-import { buildAutonomyUpdate } from "./logic";
+import { buildAutonomyUpdate, describeAutonomyError, describeConfidence } from "./logic";
 import type { AutonomyMode } from "./types";
 import { SafetyCertificate } from "./SafetyCertificate";
 import "./autonomy.css";
@@ -39,6 +40,7 @@ export function AutonomyPage() {
 function AutonomyPageContent() {
   const { authority } = useSessionScope();
   const { status: query, update, stop, enabled, canRead, canWrite, networkId, workspaceId, organizationId } = useAutonomy();
+  const userId = useAuthStore((state) => state.userId);
   const [mode, setMode] = useState<AutonomyMode>("monitor");
   const [hash, setHash] = useState("");
   const [expiry, setExpiry] = useState("");
@@ -75,13 +77,15 @@ function AutonomyPageContent() {
     try {
       const input = buildAutonomyUpdate(networkId, mode, hash, expiry, data.revision);
       saving.current = true;
-      await update.mutateAsync(input);
+      const result = await update.mutateAsync(input);
       if (attempt === stopAttempt.current) {
         setStopNotice(null);
-        setNotice("Configuration response received. Consult the confirmed mode below; this is not dispatch or verification.");
+        setNotice(result.pendingApproval
+          ? `Recorded as a pending autonomous request (two-person rule). The mode is unchanged until a different authorized user submits the identical request${result.pendingApprovalExpiresAt ? ` before ${formatTimestamp(result.pendingApprovalExpiresAt)}` : ""}.`
+          : "Configuration response received. Consult the confirmed mode below; this is not dispatch or verification.");
       }
     } catch (error) {
-      setNotice(`Mode change not confirmed. ${toErrorMessage(error)} No automatic retry or reapproval. Review refreshed status and explicitly apply any new change.`);
+      setNotice(`Mode change not confirmed. ${describeAutonomyError(error)} No automatic retry or reapproval. Review refreshed status and explicitly apply any new change.`);
     } finally {
       saving.current = false;
     }
@@ -99,7 +103,7 @@ function AutonomyPageContent() {
         ? `Backend confirmed the emergency latch. Cancellation: ${result.cancellation_status}. A latch is not proof of verified cancellation; consult refreshed status.`
         : "Stop response received, but latch unconfirmed. Refresh status or retry stop; do not assume execution stopped.");
     } catch (error) {
-      setStopNotice(`Stop failed: latch unconfirmed. ${toErrorMessage(error)} Refresh status or retry stop; do not assume execution stopped.`);
+      setStopNotice(`Stop failed: latch unconfirmed. ${describeAutonomyError(error)} Refresh status or retry stop; do not assume execution stopped.`);
     } finally {
       stopping.current = false;
     }
@@ -157,6 +161,9 @@ function AutonomyPageContent() {
             <div><dt>Checkpoint SHA-256</dt><dd className="mono">{data.checkpoint_sha256 ?? "No checkpoint selected"}</dd></div>
             <div><dt>Approval expiry</dt><dd>{data.approval_expires_at ? formatTimestamp(data.approval_expires_at) : "No approval"}</dd></div>
             <div><dt>Approved by</dt><dd>{data.approved_by_user_id ?? "No approving actor"}</dd></div>
+            <div><dt>Pending two-person approval</dt><dd>{data.pending_approval
+              ? `${data.pending_approval.mode} requested by ${data.pending_approval.requested_by_user_id === userId ? "you (a different user must confirm)" : data.pending_approval.requested_by_user_id} at revision ${data.pending_approval.expected_revision}; expires ${formatTimestamp(data.pending_approval.expires_at)}`
+              : "None"}</dd></div>
             <div><dt>Active execution</dt><dd className="mono">{data.active_execution_id ?? "None reported"}</dd></div>
             <div><dt>Last status read / control revision</dt><dd>{formatTimestamp(new Date(query.dataUpdatedAt).toISOString())} / {data.revision}</dd></div>
           </dl>
@@ -206,6 +213,8 @@ function AutonomyPageContent() {
           <p>{formatTimestamp(decision.created_at)} | mode {decision.mode} | revision {decision.control_revision}</p>
           <p>Execution: {decision.execution_id ?? "None reported"}. Verification: {decision.verification?.status ?? "Not reported"}.</p>
           <p>Safety assessment: {decision.safety ? `${decision.safety.admissible ? "conditionally admissible" : "not admissible"} (${decision.safety.model_version})` : "No assessment reported"}.</p>
+          <ConfidenceLine confidence={decision.confidence ?? decision.proposal?.confidence} />
+          {decision.repeat_count && decision.repeat_count > 1 ? <p>Stands for {decision.repeat_count} identical no-change cycles{decision.last_seen_at ? `; last seen ${formatTimestamp(decision.last_seen_at)}` : ""}.</p> : null}
           <SafetyCertificate safety={decision.safety} now={now} />
           {!decision.safety?.certificate ? <p>No structured certificate reported.</p> : null}
           {decision.reasons.length ? <ul>{decision.reasons.map((reason, index) => <li key={`${reason}:${index}`}><code>{reason}</code></li>)}</ul> : null}
@@ -220,4 +229,9 @@ function AutonomyPageContent() {
     </div>
     </div>
   </div>;
+}
+
+function ConfidenceLine({ confidence }: { confidence: Parameters<typeof describeConfidence>[0] }) {
+  const { text, calibrated } = describeConfidence(confidence);
+  return <p><Badge text={calibrated ? "calibrated" : confidence ? "uncalibrated" : "confidence unavailable"} tone={calibrated ? "info" : "warn"} /> {text}</p>;
 }

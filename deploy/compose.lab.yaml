@@ -1,18 +1,37 @@
-# Explicitly opt-in; never add the lab to the default lifecycle start command.
+# Explicitly opt-in (`manage.py lab start`); never part of the default lifecycle.
+# ADR-028 C23 successor lab: no privileged mode, only the namespace capabilities a
+# Mininet/OVS/FRR lab needs, no network, no new privileges, read-only root with
+# nosuid/nodev scratch. It is a new runtime: results require fresh qualification.
+# The frozen privileged EOL image is available only via compose.lab.frozen.yaml.
 services:
   lab:
-    image: ${NANFO_LAB_IMAGE:?Set an operator-verified lab image digest or sha256 image ID}
+    image: ${NANFO_LAB_IMAGE:?Set the operator-verified successor lab image digest or sha256 image ID}
     profiles: [lab]
-    privileged: true
     network_mode: none
+    cap_drop: [ALL]
+    cap_add: [NET_ADMIN, NET_RAW, SYS_ADMIN]
+    security_opt: [no-new-privileges:true]
+    read_only: true
+    # Root without DAC_OVERRIDE: it owns its output/result volumes (root:10001 0750)
+    # and reads 0640 command files through the nanfo group (volume_init.LAYOUT).
+    group_add: ["10001"]
     environment:
       EMULATION_CONTROL_ENABLED: ${EMULATION_CONTROL_ENABLED:-false}
       EMULATION_BINDING_DIGEST: ${EMULATION_BINDING_DIGEST:-}
+      # C15: verifies mailbox command MACs; root-owned 0400 copy (lab_secrets volume).
+      NANFO_LAB_COMMAND_KEY_FILE: /run/nanfo-lab-key/lab_command_key
     volumes:
       - lab_output:/output
       - lab_commands:/commands:ro
       - lab_results:/results
-    tmpfs: ["/run:exec,nosuid,nodev,size=64m", "/tmp:exec,nosuid,nodev,size=64m"]
+      - lab_secrets:/run/nanfo-lab-key:ro
+    tmpfs:
+      - /run:rw,exec,nosuid,nodev,size=64m,mode=0755
+      - /tmp:rw,exec,nosuid,nodev,size=64m,mode=1777
+      - /var/run/openvswitch:rw,nosuid,nodev,size=16m,mode=0750
+      - /var/lib/openvswitch:rw,nosuid,nodev,size=32m,mode=0750
+      - /etc/openvswitch:rw,nosuid,nodev,size=8m,mode=0750
+      - /var/log:rw,noexec,nosuid,nodev,size=32m,mode=0755
     pids_limit: 256
     mem_limit: 768m
     cpus: 2

@@ -2,12 +2,15 @@ import { act, render as rtlRender, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider, QueryObserver } from "@tanstack/react-query";
 import type { ReactElement } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { RealtimeBridge } from "@/features/realtime/RealtimesBridge";
+import { flushRealtimeFrames, RealtimeBridge } from "@/features/realtime/RealtimesBridge";
+import { RealtimeRetryControl } from "@/features/realtime/RealtimeRetryControl";
+import { fireEvent, screen } from "@testing-library/react";
 import { useAuthStore } from "@/shared/state/auth-store";
 import { useUiStore } from "@/shared/state/ui-store";
 import { useWorkspaceStore } from "@/shared/state/workspace-store";
 import { WebSocketErrorData, WebSocketEnvelope } from "@/shared/types/ws";
 import { operatorProfile } from "@/test/profile";
+import { ApiClientError } from "@/shared/lib/errors";
 import { useLiveStore } from "@/features/realtime/store";
 import * as simulationApi from "@/features/simulation/api";
 import type { SimulationDetail } from "@/shared/types/simulation";
@@ -22,6 +25,8 @@ function stableScope() {
 interface CapturedSocketOptions {
   path: string;
   enabled: boolean;
+  retryKey?: number | string;
+  onHalt?: (reason: "connection_limit" | "denied" | "client_error", error: WebSocketErrorData) => void;
   isCurrent: () => boolean;
   onFrame: (frame: WebSocketEnvelope<unknown>) => void;
   onUnauthorized?: () => void;
@@ -96,8 +101,8 @@ describe("RealtimeBridge", () => {
     expect(useAuthStore.getState().userId).toBe("00000000-0000-0000-0000-000000000123");
   });
 
-  it("clears auth session if websocket unauthorized refresh fails", async () => {
-    refreshMock.mockRejectedValueOnce(new Error("refresh failed"));
+  it("clears auth session if websocket unauthorized refresh is authoritatively rejected", async () => {
+    refreshMock.mockRejectedValueOnce(new ApiClientError("Refresh token revoked", "AUTH_TOKEN_MISSING_OR_INVALID", 401));
     render(<RealtimeBridge />);
 
     const topologySocket = getSocket("/ws/topology");
@@ -108,6 +113,18 @@ describe("RealtimeBridge", () => {
       expect(useAuthStore.getState().refreshToken).toBeNull();
       expect(useAuthStore.getState().userId).toBeNull();
     });
+  });
+
+  it("keeps the session reconnecting when the websocket-triggered refresh hits an outage", async () => {
+    refreshMock.mockRejectedValueOnce(new ApiClientError("A required service is temporarily unavailable.", "DEPENDENCY_UNAVAILABLE", 503, { retryAfterMs: 5_000 }));
+    render(<RealtimeBridge />);
+    getSocket("/ws/topology").onUnauthorized?.();
+    await waitFor(() => expect(useAuthStore.getState().recovery).toMatchObject({ reason: "refresh_unavailable", attempt: 1 }));
+    expect(useAuthStore.getState().accessToken).toBe("access-token-old");
+    expect(useAuthStore.getState().refreshToken).toBe("refresh-token-1");
+    // Ending the session cancels the scheduled retry.
+    act(() => useAuthStore.getState().clearSession());
+    expect(useAuthStore.getState().recovery).toBeNull();
   });
 
   it("shows throttled toast feedback for non-unauthorized websocket errors", () => {
@@ -137,12 +154,14 @@ describe("RealtimeBridge", () => {
     act(() => {
       telemetry.onFrame({ event: "telemetry.received", data: { metric: { ...metric, network_id: "other" } } });
       alerts.onFrame({ event: "alert.created", data: { alert: { event_id: "unscoped", payload: {} } } });
+      flushRealtimeFrames();
     });
     expect(useLiveStore.getState().telemetryKeysNewestFirst).toEqual([]);
     expect(useLiveStore.getState().alerts).toEqual([]);
     act(() => {
       telemetry.onFrame({ event: "telemetry.received", data: { metric } });
       alerts.onFrame({ event: "alert.created", data: { alert: { event_id: "scoped", payload: { workspace_id: workspaceId, network_id: networkId } } } });
+      flushRealtimeFrames();
     });
     expect(Object.values(useLiveStore.getState().telemetryByDeviceMetric)).toEqual([metric]);
     expect(useLiveStore.getState().alerts).toHaveLength(1);
@@ -158,7 +177,7 @@ describe("RealtimeBridge", () => {
     expect(capturedSockets.every((socket) => !socket.enabled)).toBe(true);
   });
 
-  it("rejects telemetry callbacks from old epochs, tokens and scopes and isolates malformed frames", () => {
+  it("rejects telemetry callbacks from old epochs and scopes, keeps them across token rotation, and isolates malformed frames", () => {
     const { unmount } = render(<RealtimeBridge />);
     const old = getSocket("/ws/telemetry");
     const metric = { event_id: "m", device_id: "d", metric: "cpu", workspace_id: useWorkspaceStore.getState().workspaceId, network_id: useWorkspaceStore.getState().networkId, value: 42, observed_at: "2026-09-19T00:00:00Z", source: "plugin", unit: "%", tags: {} };
@@ -167,32 +186,40 @@ describe("RealtimeBridge", () => {
       old.onFrame({ event: "telemetry.received", data: null });
       old.onFrame({ event: "telemetry.received", data: { metric: { ...metric, value: "bad" } } });
       old.onFrame(frame);
+      flushRealtimeFrames();
     });
     expect(useLiveStore.getState().telemetryKeysNewestFirst).toHaveLength(1);
     act(() => useLiveStore.getState().reset());
-    act(() => old.onFrame(frame));
+    act(() => { old.onFrame(frame); flushRealtimeFrames(); });
     expect(useLiveStore.getState().telemetryKeysNewestFirst).toEqual([]);
     const fresh = capturedSockets.filter((item) => item.path === "/ws/telemetry").at(-1)!;
     act(() => useAuthStore.setState({ accessToken: "rotated" }));
-    act(() => fresh.onFrame(frame));
-    expect(useLiveStore.getState().telemetryKeysNewestFirst).toEqual([]);
+    // Same session, scope and authority: a rotated credential keeps the live socket (no reconnect/remount).
+    act(() => { fresh.onFrame(frame); flushRealtimeFrames(); });
+    expect(useLiveStore.getState().telemetryKeysNewestFirst).toHaveLength(1);
     const rotated = capturedSockets.filter((item) => item.path === "/ws/telemetry").at(-1)!;
+    expect(rotated.isCurrent).toBe(fresh.isCurrent);
+    expect(rotated.isCurrent()).toBe(true);
     act(() => useWorkspaceStore.getState().setNetworkId("other"));
-    act(() => rotated.onFrame(frame));
+    act(() => { rotated.onFrame(frame); flushRealtimeFrames(); });
     expect(useLiveStore.getState().telemetryKeysNewestFirst).toEqual([]);
     unmount();
   });
 
-  it("coalesces subscribed and backpressure reconciliation and excludes other tokens/networks", () => {
+  it("coalesces subscribed and backpressure reconciliation and excludes other sessions/networks", () => {
     vi.useFakeTimers();
     const token = useAuthStore.getState().accessToken;
     const scope = useWorkspaceStore.getState();
-    const selected = ["topology", token, scope.networkId];
-    const other = ["topology", token, "other"];
+    // Scoped key layout [domain, sessionKey, authority, ...params] (ADR-028).
+    const selected = ["topology", stableScope(), authorityKey(), scope.networkId];
+    const other = ["topology", stableScope(), authorityKey(), "other"];
+    const otherSession = ["topology", "another-session", authorityKey(), scope.networkId];
+    // A legacy token-keyed entry never matches a scoped predicate.
+    const legacyTokenKeyed = ["topology", token, scope.networkId];
     const history = ["telemetry", "history", stableScope(), authorityKey(), { networkId: scope.networkId }];
     const otherHistory = ["telemetry", "history", stableScope(), authorityKey(), { networkId: "other" }];
     const intent = ["intent", stableScope(), authorityKey(), "i", scope.workspaceId];
-    for (const key of [selected, other, history, otherHistory, intent, ["alerts", token, {}]]) client.setQueryData(key, { data: { nodes: [] } });
+    for (const key of [selected, other, otherSession, legacyTokenKeyed, history, otherHistory, intent, ["alerts", stableScope(), authorityKey(), {}]]) client.setQueryData(key, { data: { nodes: [] } });
     const invalidation = vi.spyOn(client, "invalidateQueries");
     const { unmount } = render(<RealtimeBridge />);
     act(() => {
@@ -207,9 +234,11 @@ describe("RealtimeBridge", () => {
     expect(client.getQueryState(history)?.isInvalidated).toBe(true);
     expect(client.getQueryState(intent)?.isInvalidated).toBe(true);
     expect(client.getQueryState(other)?.isInvalidated).toBe(false);
+    expect(client.getQueryState(otherSession)?.isInvalidated).toBe(false);
+    expect(client.getQueryState(legacyTokenKeyed)?.isInvalidated).toBe(false);
     expect(client.getQueryState(otherHistory)?.isInvalidated).toBe(false);
     act(() => { getSocket("/ws/topology").onSubscribed?.(); useWorkspaceStore.getState().setNetworkId("other"); });
-    act(() => vi.advanceTimersByTime(1000));
+    act(() => { vi.advanceTimersByTime(1000); });
     expect(invalidation).toHaveBeenCalledTimes(1);
     unmount();
     vi.useRealTimers();
@@ -256,5 +285,109 @@ describe("RealtimeBridge", () => {
     await act(async () => { getSocket("/ws/digital-twin").onError?.({ code: "WS_BACKPRESSURE", message: "backlog" }); await vi.advanceTimersByTimeAsync(500); });
     expect(fetch).toHaveBeenCalledTimes(2);
     unmount(); fetch.mockRestore(); vi.useRealTimers();
+  });
+  it("halts at the connection cap and resumes only through the visible Retry realtime control (C1)", () => {
+    render(<><RealtimeBridge /><RealtimeRetryControl /></>);
+    expect(screen.queryByRole("button", { name: "Retry realtime" })).toBeNull();
+    const topology = getSocket("/ws/topology");
+    expect(topology.retryKey).toBe(0);
+    act(() => {
+      topology.onError?.({ code: "WS_CONNECTION_LIMIT", message: "Too many concurrent realtime connections." });
+      topology.onHalt?.("connection_limit", { code: "WS_CONNECTION_LIMIT", message: "Too many concurrent realtime connections." });
+    });
+    // The persistent control replaces a toast; nothing retries on its own.
+    expect(useUiStore.getState().toasts).toEqual([]);
+    expect(screen.getByRole("status")).toHaveTextContent(/Realtime paused for topology/);
+    fireEvent.click(screen.getByRole("button", { name: "Retry realtime" }));
+    expect(useLiveStore.getState().realtimeHalts).toEqual({});
+    expect(screen.queryByRole("button", { name: "Retry realtime" })).toBeNull();
+    const retried = capturedSockets.filter((item) => item.path === "/ws/topology").at(-1)!;
+    expect(retried.retryKey).toBe(1);
+  });
+
+  it("does not offer a retry control for terminal denials", () => {
+    render(<><RealtimeBridge /><RealtimeRetryControl /></>);
+    act(() => {
+      getSocket("/ws/telemetry").onError?.({ code: "WS_INVALID_FILTER", message: "Denied" });
+      getSocket("/ws/telemetry").onHalt?.("denied", { code: "WS_INVALID_FILTER", message: "Denied" });
+    });
+    expect(screen.queryByRole("button", { name: "Retry realtime" })).toBeNull();
+    expect(useUiStore.getState().toasts).toEqual([expect.objectContaining({ tone: "danger", title: "Realtime filter rejected" })]);
+  });
+
+  it("announces a transient outage once per quiet window instead of once per retry", () => {
+    vi.useFakeTimers();
+    render(<RealtimeBridge />);
+    const telemetry = getSocket("/ws/telemetry");
+    for (let attempt = 0; attempt < 10; attempt++) {
+      telemetry.onError?.({ code: "WS_UNAVAILABLE", message: "Realtime temporarily unavailable." });
+      vi.advanceTimersByTime(5_000);
+    }
+    expect(useUiStore.getState().toasts).toEqual([expect.objectContaining({ tone: "warn", title: "Realtime temporarily unavailable" })]);
+    vi.advanceTimersByTime(15_000);
+    telemetry.onError?.({ code: "WS_SUBSCRIBE_TIMEOUT", message: "No subscribe frame received in time." });
+    telemetry.onError?.({ code: "WS_UNAVAILABLE", message: "Realtime temporarily unavailable." });
+    expect(useUiStore.getState().toasts.map((toast) => toast.title)).toEqual([
+      "Realtime temporarily unavailable", "Realtime subscription timed out", "Realtime temporarily unavailable",
+    ]);
+    vi.useRealTimers();
+  });
+  it("applies a burst with one store update, patches the cached graph, and resyncs only on gaps (ADR-028)", () => {
+    vi.useFakeTimers();
+    const scope = useWorkspaceStore.getState();
+    const graphKey = ["topology", stableScope(), authorityKey(), scope.networkId];
+    const nodes = Array.from({ length: 50 }, (_, index) => ({ device_id: `d-${index}`, hostname: `h-${index}`, device_type: "router", status: "up", spatial_ref_id: null }));
+    client.setQueryData(graphKey, { data: { nodes, edges: [{ source_id: "d-0", target_id: "d-1", edge_type: "link", metadata: {} }] }, nextCursor: null, snapshot: { epoch: 0, revision: 0 } });
+    const invalidation = vi.spyOn(client, "invalidateQueries");
+    const { unmount } = render(<RealtimeBridge />);
+    const telemetry = getSocket("/ws/telemetry");
+    const topology = getSocket("/ws/topology");
+    const updates = vi.fn();
+    const unsubscribe = useLiveStore.subscribe(updates);
+    const metric = { event_id: "m", device_id: "d-0", metric: "cpu", workspace_id: scope.workspaceId, network_id: scope.networkId, value: 1, unit: "%", source: "plugin", tags: {} };
+    act(() => {
+      for (let index = 0; index < 3_000; index++) {
+        telemetry.onFrame({ event: "telemetry.received", data: { metric: { ...metric, device_id: `d-${index % 50}`, value: index, observed_at: new Date(Date.UTC(2026, 8, 20) + index).toISOString() } } });
+      }
+      for (let index = 0; index < 50; index++) {
+        topology.onFrame({ event: "network.device.updated", timestamp: new Date(Date.UTC(2026, 8, 20) + index).toISOString(), data: { delta_type: "update", node: { device_id: `d-${index}`, status: "down" } } });
+      }
+      expect(updates).not.toHaveBeenCalled();
+      flushRealtimeFrames();
+    });
+    // One store update for 3,050 frames.
+    expect(updates).toHaveBeenCalledTimes(1);
+    expect(Object.keys(useLiveStore.getState().telemetryByDeviceMetric)).toHaveLength(50);
+    expect(useLiveStore.getState().topologyRevision).toBe(50);
+    // Updates of known nodes patch the REST cache in place: no crawl, no invalidation.
+    const cached = client.getQueryData<{ data: { nodes: { status: string }[] } }>(graphKey)!;
+    expect(cached.data.nodes.every((node) => node.status === "down")).toBe(true);
+    act(() => { vi.advanceTimersByTime(1_000); });
+    expect(invalidation).not.toHaveBeenCalled();
+    // A removal (membership change) is a gap for inventory totals: one coalesced resync.
+    act(() => {
+      topology.onFrame({ event: "network.device.deleted", timestamp: "2026-09-21T00:00:00Z", data: { delta_type: "remove", node: { device_id: "d-1" } } });
+      topology.onFrame({ event: "network.device.updated", timestamp: "2026-09-21T00:00:01Z", data: { delta_type: "update", node: { device_id: "unknown", status: "down" } } });
+      flushRealtimeFrames();
+      vi.advanceTimersByTime(600);
+    });
+    expect(invalidation).toHaveBeenCalledTimes(1);
+    expect(client.getQueryData<{ data: { nodes: unknown[]; edges: unknown[] } }>(graphKey)!.data).toMatchObject({ edges: [] });
+    expect(client.getQueryState(graphKey)?.isInvalidated).toBe(true);
+    unsubscribe();
+    unmount();
+    vi.useRealTimers();
+  });
+
+  it("drops frames queued for a previous scope instead of applying them after a switch", () => {
+    const { unmount } = render(<RealtimeBridge />);
+    const scope = useWorkspaceStore.getState();
+    act(() => {
+      getSocket("/ws/telemetry").onFrame({ event: "telemetry.received", data: { metric: { event_id: "m", device_id: "d", metric: "cpu", workspace_id: scope.workspaceId, network_id: scope.networkId, value: 1, unit: "%", source: "plugin", observed_at: "2026-09-20T00:00:00Z", tags: {} } } });
+      useWorkspaceStore.getState().setNetworkId("00000000-0000-0000-0000-000000000999");
+      flushRealtimeFrames();
+    });
+    expect(useLiveStore.getState().telemetryKeysNewestFirst).toEqual([]);
+    unmount();
   });
 });

@@ -1,0 +1,19 @@
+# ADR-028 C23 successor lab: signed Debian 13 "trixie" from one dated snapshot
+# (snapshot.debian.org, 2026-09-20T00:00:00Z; trixie 13.7 + trixie-updates/security of
+# that day), same convention as deploy/fleet.sources. Exact Dockerfile pins therefore stay
+# installable after later point/security releases. Signatures are verified with the
+# Debian archive keyring; only Valid-Until is not enforced for this frozen snapshot.
+# Refresh = new timestamp + re-read every pinned version from that snapshot's indices.
+Types: deb
+URIs: https://snapshot.debian.org/archive/debian/20260920T000000Z/
+Suites: trixie trixie-updates
+Components: main
+Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg
+Check-Valid-Until: no
+
+Types: deb
+URIs: https://snapshot.debian.org/archive/debian-security/20260920T000000Z/
+Suites: trixie-security
+Components: main
+Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg
+Check-Valid-Until: no

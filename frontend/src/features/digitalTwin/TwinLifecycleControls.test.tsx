@@ -33,7 +33,9 @@ it("retires exactly the confirmed asset with an empty DELETE, clears selection o
   expect(fetchMock).not.toHaveBeenCalled();
   fireEvent.click(screen.getByText("Retire selected asset"));
   await screen.findByText("Selected asset retired.");
-  expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("/api/v1/networks/network/campus/model-assets/asset-old"), expect.objectContaining({ method: "DELETE", body: undefined, headers: { Authorization: "Bearer token" } }));
+  expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("/api/v1/networks/network/campus/model-assets/asset-old"), expect.objectContaining({ method: "DELETE", headers: { Authorization: "Bearer token" } }));
+  // Empty DELETE: no body at all (the shared client now omits the key instead of sending `body: undefined`).
+  expect(fetchMock.mock.calls[0]?.[1]?.body).toBeUndefined();
   expect(retired).toHaveBeenCalledWith("asset-old");
   expect(screen.getByLabelText("Persisted model asset")).toHaveValue("");
   expect(reload).toHaveBeenCalledOnce();
@@ -104,8 +106,36 @@ it("removes a noncustom final-member group by fresh reviewed replacement retaini
   await screen.findByText(/An empty group cannot be saved/);
   fireEvent.click(screen.getByText("Remove selected persisted group"));
   await screen.findByText("Selected group removed; other groups retained.");
-  expect(posts).toEqual([{ replace_existing: true, groups: [{ group_key: "other", name: "Other", group_type: "custom", description: null, selector: { site_prefix: "campus" }, device_ids: ["device"] }] }]);
+  // Every retained group is revision-pinned (C8): a concurrent edit makes the server refuse the removal.
+  expect(posts).toEqual([{ replace_existing: true, groups: [{ group_key: "other", name: "Other", group_type: "custom", description: null, selector: { site_prefix: "campus" }, device_ids: ["device"], expected_updated_at: "date" }] }]);
   expect(window.confirm).toHaveBeenLastCalledWith(expect.stringContaining("retains 1 groups: other"));
+});
+
+it("refuses to remove a group edited elsewhere and surfaces a 409 on retained groups", async () => {
+  const base = { device_group_id: "id", network_id: "network", created_at: "date", description: null, selector: {}, device_ids: ["device"] };
+  const target: DeviceGroupRecord = { ...base, group_key: "target", name: "Target", group_type: "custom", updated_at: "t1" };
+  const other: DeviceGroupRecord = { ...base, group_key: "other", name: "Other", group_type: "custom", updated_at: "o1" };
+  let listing = { items: [target, other], total: 2 };
+  const posts: unknown[] = [];
+  const fetchMock = vi.fn(async (url: string, options: RequestInit) => {
+    if (options.method === "POST") {
+      posts.push(JSON.parse(String(options.body)));
+      return new Response(JSON.stringify({ success: false, data: null, meta: {}, errors: { code: "DEVICE_GROUP_CONFLICT", message: "changed" } }), { status: 409 });
+    }
+    return envelope(url.includes("device-groups") ? listing : { items: [], page: 1, page_size: 20, total: 0 });
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><CustomGroupEditor token="token" networkId="network" canWrite /></QueryClientProvider>);
+  await screen.findByText("Target (target)");
+  fireEvent.change(screen.getByLabelText("Edit custom group"), { target: { value: "target" } });
+  listing = { items: [{ ...target, updated_at: "t2" }, other], total: 2 };
+  fireEvent.click(screen.getByText("Remove selected persisted group"));
+  await screen.findByText(/Group target changed on the server since it was loaded/);
+  expect(posts).toHaveLength(0);
+  listing = { items: [target, other], total: 2 };
+  fireEvent.click(screen.getByText("Remove selected persisted group"));
+  await screen.findByText(/DEVICE_GROUP_CONFLICT\). Nothing was changed/);
+  expect(posts).toEqual([{ replace_existing: true, groups: [expect.objectContaining({ group_key: "other", expected_updated_at: "o1" })] }]);
 });
 
 it("does not apply a late retirement result to a changed network", async () => {

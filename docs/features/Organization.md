@@ -89,7 +89,7 @@ organization/workspace. Optional token claims restrict, never expand, that scope
 - [ ] `POST /api/v1/networks` with a `workspace_id` that belongs to a soft-deleted workspace returns 404 with error code `WORKSPACE_NOT_FOUND`.
 - [ ] Organization creation emits `org.organization.created` and the Audit Log records the event.
 - [ ] Workspace deletion emits `org.workspace.deleted` and the Network module receives and processes the event.
-- [ ] A user not in the organization cannot access `GET /api/v1/organizations/{org_id}` — returns 403 Forbidden.
+- [ ] A user not in the organization cannot access `GET /api/v1/organizations/{org_id}` — returns the same 404 as an absent organization (ADR-028 C6; was 403). Internal membership checks that guard other resources still answer a uniform 403.
 - [ ] Org membership add validates `user_id` via Identity API before persisting.
 
 ## 8. Testing Requirements
@@ -123,3 +123,19 @@ organization/workspace. Optional token claims restrict, never expand, that scope
   failure rolls back the mutation; publication failure retains the durable audit.
 - Membership audit actor is actor_id and resource is affected user_id. Workspace
   resource is workspace_id. Old audit evidence is never updated on replay.
+
+## 10. ADR-028 contract changes (C6)
+
+- `OrgResponse.caller_role` (`Admin` | `Operator` | `Read-Only`) reports the caller's
+  current org role on list, get, create and update. The list gets it from one joined
+  query.
+- `GET /api/v1/organizations/{org_id}` returns the same 404 ("Organization not found.")
+  whether the organization is absent, deleted, or the caller is not a member. Internal
+  checks through `OrgService.require_membership` answer a uniform 403. The slug-conflict
+  message no longer echoes the slug.
+- Every org lock is taken only after a plain-read authorization check passes, and
+  authority is re-checked under the lock.
+- List `page` is 1..10000 (shared `PageNumber`).
+- Workspace deletion asks the Network owner's `has_active_networks` existence probe
+  instead of listing networks. The network module is imported lazily through a
+  `WorkspaceInventory` port, which removes the import cycle.

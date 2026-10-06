@@ -6,7 +6,10 @@ Existing routes remain **GET and POST `/api/v1/networks/{network_id}/campus/mode
 both HTTP200 with the canonical `{success,data:{items,total},meta,errors}` envelope.
 POST retains the bounded (8MiB decoded) base64 request and all existing fields.
 GET/POST responses continue returning actual `model_data_base64`, reconstructed
-from verified object bytes for new assets; it is never silently blanked. Additive fields:
+from verified object bytes for new assets; it is never silently blanked. (Superseded by
+ADR-028 C4 on 2026-09-24: GET now defaults to metadata pages without
+`model_data_base64`, `include_data=true` is bounded, and POST returns metadata only; see
+`docs/api/ADR028-ContractChanges.md`.) Additive fields:
 
 - `registration`: nullable `{version:1,translation:{x,y,z},rotation:{x,y,z},scale:{x,y,z},target_units:'m',target_up_axis:'y',source:string}`.
   Rotation is radians; coordinates are finite; scale is positive. Omission on an
@@ -29,6 +32,10 @@ The asset UUID never changes its network/hash/size identity. `replace_existing=t
 soft-replaces active records with a new UUID; false updates metadata on the latest
 record only for the same body, otherwise creates a new UUID. Soft-deleted and
 historically referenced object bodies are retained. No automatic garbage collection.
+(ADR-028 adds `python -m app.modules.network.asset_gc`, which the deployment's supervised
+`asset-gc` loop runs daily. It removes only published objects that *no* asset row,
+active, retired or inline, references, plus abandoned upload temporaries. Soft-deleted
+and referenced bodies are still retained.)
 
 ## Ownership and implementation plan
 

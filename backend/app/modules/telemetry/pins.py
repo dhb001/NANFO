@@ -54,11 +54,17 @@ class TelemetryEvidenceService:
         return coverage
 
     @staticmethod
-    def pin_in_transaction(connection, *, scope: EvidenceOwnerScope, reference: EvidenceReference):
-        """Public synchronous contract for an owner's ORM flush transaction."""
+    def pin_in_transaction(connection, *, scope: EvidenceOwnerScope, reference: EvidenceReference,
+                           skip_unknown_identity: bool = False) -> bool:
+        """Public synchronous contract for an owner's ORM flush transaction.
+
+        Returns ``False`` only when ``skip_unknown_identity`` skipped a UUID that
+        was never a telemetry identity.
+        """
         scope = EvidenceOwnerScope.model_validate(scope)
         reference = EvidenceReference.model_validate(reference)
-        return TelemetryPinRepository.pin_sync(connection, **scope.model_dump(), **reference.model_dump())
+        return TelemetryPinRepository.pin_sync(connection, **scope.model_dump(), **reference.model_dump(),
+                                               skip_unknown_identity=skip_unknown_identity)
 
     async def revoke_coverage(self) -> None:
         await self._repo.revoke(**self._scope.model_dump())

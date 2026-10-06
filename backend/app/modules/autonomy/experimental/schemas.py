@@ -6,9 +6,9 @@ from uuid import UUID
 
 from pydantic import AwareDatetime, ConfigDict, Field, model_validator
 
+from app.core.canonical import canonical_sha256 as canonical_hash
 from app.modules.autonomy.live_schemas import MeasuredFeatures, PassiveSnapshot, RuntimeResult
 from app.modules.autonomy.schemas import SHA256, Contract, Observation, Proposal, Qualification
-from scripts.frozen_model_diagnostic import canonical_hash
 
 
 def contract_digest(value):

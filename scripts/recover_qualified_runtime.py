@@ -26,7 +26,8 @@ ROOT = Path(__file__).resolve().parents[1]
 AI = ROOT / "ai-engine"
 TRAIN = AI / "artifacts/adr014-001"
 HOLDOUT = AI / "artifacts/adr014-holdout-001"
-ARCHIVE = ROOT / "emulation/output/adr015-prechange-v4-source.tar.gz"
+# Tracked byte-identical copy of the ignored emulation/output archive (same pin).
+ARCHIVE = ROOT / "emulation/frozen/adr015-prechange-v4-source.tar.gz"
 ARCHIVE_HASH = "444663dc3a7223044a9e8830ba5dd24cd3e1b041c60dc278e4bba56eb7252384"
 CHECKPOINT = TRAIN / "train-06/checkpoint.ptz"
 CHECKPOINT_HASH = "5b8818af655ec8efce5d3bc3def27db599f3e0df379a0ae263dcefb5f72a80a5"
@@ -49,6 +50,13 @@ def canonical(value):
 def require(condition, message):
     if not condition:
         raise ValueError(message)
+
+
+def scratch_root():
+    """Parent of private stage directories: NANFO_RESEARCH_SCRATCH, else the system temp dir."""
+    value = os.environ.get("NANFO_RESEARCH_SCRATCH") or tempfile.gettempdir()
+    require(Path(value).is_absolute() and Path(value).is_dir(), "NANFO_RESEARCH_SCRATCH must be an existing absolute directory")
+    return Path(value)
 
 
 def write(path, content):
@@ -200,7 +208,7 @@ def verify_dependencies(probe, files):
 
 def prepare(build=False):
     manifest, files, report = audit()
-    stage = Path(tempfile.mkdtemp(prefix="nanfo-adr024-runtime-", dir="/tmp/opencode"))
+    stage = Path(tempfile.mkdtemp(prefix="nanfo-adr024-runtime-", dir=scratch_root()))
     print("recovery_stage=" + str(stage), flush=True)
     write_json(stage / "audit.json", report)
     for name, content in files.items():
@@ -277,7 +285,7 @@ def boundaries(image):
     require(actual.model_dump() == manifest, "original checkpoint loader differs")
     history = json.loads((TRAIN / "validation-06/last-history.json").read_bytes())
     result = {"evidence_kind": "historical-replay-and-mutated-unit-copies-not-live", "cases": {}}
-    with tempfile.TemporaryDirectory(prefix="adr024-boundary-", dir="/tmp/opencode") as directory:
+    with tempfile.TemporaryDirectory(prefix="adr024-boundary-", dir=scratch_root()) as directory:
         path = Path(directory) / "history.json"
         for case in ("original", "rebuilt_image", "wrong_source", "wrong_spec"):
             copy = json.loads(json.dumps(history))

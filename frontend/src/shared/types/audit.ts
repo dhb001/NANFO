@@ -1,10 +1,14 @@
+/** `org` (default): one organization's events. `platform`: org-less events such as authentication; global Admin only (ADR-028 C7). */
+export type AuditScope = "org" | "platform";
+
 export interface AuditLogParams {
-  actorId?: string;
-  orgId?: string;
-  resourceType?: string;
-  search?: string;
-  page?: number;
-  pageSize?: number;
+  scope?: AuditScope | undefined;
+  actorId?: string | undefined;
+  orgId?: string | undefined;
+  resourceType?: string | undefined;
+  search?: string | undefined;
+  page?: number | undefined;
+  pageSize?: number | undefined;
 }
 
 export interface AuditLogEntry {
@@ -24,4 +28,5 @@ export interface AuditLogList {
   total: number;
   page: number;
   page_size: number;
+  scope?: AuditScope;
 }

@@ -1,4 +1,7 @@
-"""Unit tests for audit event consumer mapping and fail-open UUID handling."""
+"""Unit tests for audit event consumer mapping, projection and fail-open UUID handling.
+
+Writes are routed through Identity's public ``append_audit_log`` boundary (ADR-028).
+"""
 
 from __future__ import annotations
 
@@ -44,7 +47,7 @@ async def test_event_specific_attribution_ignores_unrelated_payload_ids(event_ty
     repo = MagicMock(append=AsyncMock())
     with (
         patch("app.events.consumers.audit_consumer.AsyncSessionLocal", return_value=_session_context_manager(db)),
-        patch("app.events.consumers.audit_consumer.AuditLogRepository", return_value=repo),
+        patch("app.events.consumers.audit_consumer.append_audit_log", repo.append),
     ):
         await handle_audit_event({"event_id": str(uuid.uuid4()), "event_type": event_type, "payload": payload})
     kwargs = repo.append.await_args.kwargs
@@ -60,7 +63,7 @@ async def test_requester_only_lifecycle_actor_is_retained(event_type):
     repo = MagicMock(append=AsyncMock())
     with (
         patch("app.events.consumers.audit_consumer.AsyncSessionLocal", return_value=_session_context_manager(AsyncMock())),
-        patch("app.events.consumers.audit_consumer.AuditLogRepository", return_value=repo),
+        patch("app.events.consumers.audit_consumer.append_audit_log", repo.append),
     ):
         await handle_audit_event({"event_id": str(uuid.uuid4()), "event_type": event_type,
                                   "payload": {"requested_by_user_id": str(actor)}})
@@ -100,7 +103,7 @@ async def test_audit_consumer_writes_telemetry_sustained_failure_event():
             "app.events.consumers.audit_consumer.AsyncSessionLocal",
             return_value=_session_context_manager(db),
         ),
-        patch("app.events.consumers.audit_consumer.AuditLogRepository", return_value=repo),
+        patch("app.events.consumers.audit_consumer.append_audit_log", repo.append),
     ):
         await handle_audit_event(event)
 
@@ -121,7 +124,7 @@ async def test_audit_consumer_writes_telemetry_sustained_failure_event():
 async def test_audit_consumer_ignores_unmapped_event_type():
     with (
         patch("app.events.consumers.audit_consumer.AsyncSessionLocal") as mock_session,
-        patch("app.events.consumers.audit_consumer.AuditLogRepository") as mock_repo,
+        patch("app.events.consumers.audit_consumer.append_audit_log") as mock_repo,
     ):
         await handle_audit_event({"event_type": "telemetry.collector.runtime_unknown", "payload": {}})
 
@@ -155,7 +158,7 @@ async def test_audit_consumer_handles_invalid_uuid_fields_fail_open():
             "app.events.consumers.audit_consumer.AsyncSessionLocal",
             return_value=_session_context_manager(db),
         ),
-        patch("app.events.consumers.audit_consumer.AuditLogRepository", return_value=repo),
+        patch("app.events.consumers.audit_consumer.append_audit_log", repo.append),
     ):
         await handle_audit_event(event)
 
@@ -202,7 +205,7 @@ async def test_audit_consumer_writes_simulation_branch_created_event():
             "app.events.consumers.audit_consumer.AsyncSessionLocal",
             return_value=_session_context_manager(db),
         ),
-        patch("app.events.consumers.audit_consumer.AuditLogRepository", return_value=repo),
+        patch("app.events.consumers.audit_consumer.append_audit_log", repo.append),
     ):
         await handle_audit_event(event)
 
@@ -249,7 +252,7 @@ async def test_audit_consumer_writes_intent_execution_started_event():
             "app.events.consumers.audit_consumer.AsyncSessionLocal",
             return_value=_session_context_manager(db),
         ),
-        patch("app.events.consumers.audit_consumer.AuditLogRepository", return_value=repo),
+        patch("app.events.consumers.audit_consumer.append_audit_log", repo.append),
     ):
         await handle_audit_event(event)
 
@@ -292,7 +295,7 @@ async def test_audit_consumer_writes_intent_execution_failed_with_rollback_metad
             "app.events.consumers.audit_consumer.AsyncSessionLocal",
             return_value=_session_context_manager(db),
         ),
-        patch("app.events.consumers.audit_consumer.AuditLogRepository", return_value=repo),
+        patch("app.events.consumers.audit_consumer.append_audit_log", repo.append),
     ):
         await handle_audit_event(event)
 
@@ -339,7 +342,7 @@ async def test_audit_consumer_writes_topology_reconcile_completed_event():
             "app.events.consumers.audit_consumer.AsyncSessionLocal",
             return_value=_session_context_manager(db),
         ),
-        patch("app.events.consumers.audit_consumer.AuditLogRepository", return_value=repo),
+        patch("app.events.consumers.audit_consumer.append_audit_log", repo.append),
     ):
         await handle_audit_event(event)
 
@@ -385,7 +388,7 @@ async def test_audit_consumer_writes_alert_acknowledged_event_with_actor_and_res
             "app.events.consumers.audit_consumer.AsyncSessionLocal",
             return_value=_session_context_manager(db),
         ),
-        patch("app.events.consumers.audit_consumer.AuditLogRepository", return_value=repo),
+        patch("app.events.consumers.audit_consumer.append_audit_log", repo.append),
     ):
         await handle_audit_event(event)
 
@@ -431,7 +434,7 @@ async def test_audit_consumer_writes_plugin_enabled_event():
             "app.events.consumers.audit_consumer.AsyncSessionLocal",
             return_value=_session_context_manager(db),
         ),
-        patch("app.events.consumers.audit_consumer.AuditLogRepository", return_value=repo),
+        patch("app.events.consumers.audit_consumer.append_audit_log", repo.append),
     ):
         await handle_audit_event(event)
 
@@ -477,7 +480,7 @@ async def test_audit_consumer_writes_report_generated_event():
             "app.events.consumers.audit_consumer.AsyncSessionLocal",
             return_value=_session_context_manager(db),
         ),
-        patch("app.events.consumers.audit_consumer.AuditLogRepository", return_value=repo),
+        patch("app.events.consumers.audit_consumer.append_audit_log", repo.append),
     ):
         await handle_audit_event(event)
 
@@ -524,7 +527,7 @@ async def test_audit_consumer_writes_org_workspace_and_org_lifecycle_events():
             "app.events.consumers.audit_consumer.AsyncSessionLocal",
             return_value=_session_context_manager(db),
         ),
-        patch("app.events.consumers.audit_consumer.AuditLogRepository", return_value=repo),
+        patch("app.events.consumers.audit_consumer.append_audit_log", repo.append),
     ):
         for event in events:
             event["event_id"] = str(uuid.uuid4())
@@ -567,8 +570,7 @@ async def test_audit_commit_failure_propagates_to_bus():
     db.commit.side_effect = SQLAlchemyError("commit failed")
     with (
         patch("app.events.consumers.audit_consumer.AsyncSessionLocal", return_value=_session_context_manager(db)),
-        patch("app.events.consumers.audit_consumer.AuditLogRepository") as repo,
+        patch("app.events.consumers.audit_consumer.append_audit_log", new_callable=AsyncMock),
         pytest.raises(SQLAlchemyError, match="commit failed"),
     ):
-        repo.return_value.append = AsyncMock()
         await handle_audit_event({"event_type": "intent.validated", "event_id": str(uuid.uuid4()), "payload": {}})

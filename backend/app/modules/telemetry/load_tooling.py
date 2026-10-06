@@ -17,7 +17,7 @@ from typing import Any, Literal
 import redis.asyncio as aioredis
 
 from app.core.logging import get_logger
-from app.modules.telemetry.service import TelemetryIngestionService
+from app.modules.telemetry.ingestion import TelemetryIngestionService
 
 logger = get_logger(__name__)
 

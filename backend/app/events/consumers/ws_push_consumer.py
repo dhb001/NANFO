@@ -62,7 +62,7 @@ def _get_alert_counter_client():
     try:
         return get_redis_client()
     except RuntimeError as exc:
-        logger.warning("ws_alert_counter_client_unavailable", error=str(exc))
+        logger.warning("ws_alert_counter_client_unavailable", error_type=type(exc).__name__)
         return None
 
 
@@ -122,7 +122,7 @@ async def _safe_increment_alert_counter(
             event_type=event_type,
             event_id=event_id,
             correlation_id=correlation_id,
-            error=str(exc),
+            error_type=type(exc).__name__,
         )
 
 
@@ -222,7 +222,7 @@ async def handle_ws_alert_event(event: dict) -> None:
             delta_type=delta_type,
             event_id=event_id,
             correlation_id=correlation_id,
-            error=str(exc),
+            error_type=type(exc).__name__,
         )
         raise
 

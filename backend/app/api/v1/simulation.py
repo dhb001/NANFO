@@ -21,6 +21,7 @@ from app.core.dependencies import (
     get_request_meta,
     require_permissions,
 )
+from app.core.pagination import PageNumber
 from app.core.responses import APIResponse, success_response
 from app.db.postgres import AsyncSession
 from app.modules.simulation.schemas import (
@@ -142,6 +143,9 @@ class SimulationDetailResponse(BaseModel):
     progress: dict[str, int] | None = None
     completed_at: str | None = None
     evidence_expires_at: str | None = None
+    # ADR-028 C18: {policy_floors:{max_loss_pct,max_latency_ms,min_throughput_mbps},
+    # limits_respect_policy:bool}; null for unconfigured runs.
+    execution_policy: dict[str, Any] | None = None
 
 
 class SimulationMetricsSnapshot(BaseModel):
@@ -252,7 +256,7 @@ async def list_simulations(
     db: Annotated[AsyncSession, Depends(get_db)],
     redis: Annotated[aioredis.Redis, Depends(get_redis)],
     network_id: uuid.UUID | None = None,
-    page: int = Query(1, ge=1),
+    page: PageNumber = 1,
     page_size: int = Query(20, ge=1, le=200),
 ):
     started = time.monotonic()

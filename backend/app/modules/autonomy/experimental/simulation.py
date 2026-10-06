@@ -226,7 +226,7 @@ def evaluate_actions(*, frame, assumptions, actions, policy_sha256, now):
         raise ValueError("exact_two_action_proposals_required")
     evidence = fresh_frame(frame, now=now, max_age=assumptions.max_observation_age_seconds)
     # Validate the actual frozen raw measurement, not its complete flag alone.
-    from .verification import measured_metrics
+    from .metrics import measured_metrics
 
     try:
         measured_metrics(frame)

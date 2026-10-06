@@ -23,6 +23,31 @@ deadline, explicit verification/rollback, cancellation actor and uncertainty.
 Read ADR-010, `backend/app/modules/intent/README.md`, and
 `docs/project/ManualExecution-Step5-Step6.md` for scope and verification limits.
 
+## ADR-028 contract changes (C3, C18)
+
+Contract index: `docs/api/ADR028-ContractChanges.md`. Module detail:
+`backend/app/modules/intent/README.md` ("ADR-028 contract changes").
+
+- **Idempotent validate (C3, BREAKING for duplicate keys).** `Idempotency-Key` is unique
+  per workspace. A replay of the same network and normalized intent returns the stored
+  intent with `meta.idempotent_replay=true`; any other reuse is 409
+  `IDEMPOTENCY_KEY_REUSED`. Execute and cancel use the intent's stored key; a different
+  key is 409 `INTENT_IDEMPOTENCY_CONFLICT`. A concurrent execute loses with 409
+  `INTENT_ALREADY_EXECUTING`.
+- **Simulation before execution (C18).** High-impact lab actions (`reroute_path`,
+  `isolate_vlan`) require a completed, passing simulation of the same network. Its limits
+  must respect the server policy floors, and its evidence and plan hash are bound into the
+  execution record. Otherwise 409 `SIMULATION_REQUIRED`, `SIMULATION_POLICY_VIOLATION` or
+  `SIMULATION_EVIDENCE_REJECTED`.
+- **Approval.** Manual lab execution must send the current `approval_binding` (else 409
+  `APPROVAL_BINDING_MISMATCH`). With `INTENT_REQUIRE_DISTINCT_APPROVER` (default true),
+  the requester cannot execute their own intent (409 `DISTINCT_APPROVER_REQUIRED`).
+- **Payloads.** Intent documents are bounded (64 KiB, depth 10, 128 keys per object, 1024
+  items per array, finite numbers), else 422. State commits before publication with
+  stable event IDs; outbox payloads add `phase` and `sequence`.
+- ADR-028 removed the unused `intent/autonomous.py` wrapper. Autonomous execution is owned
+  by the Autonomy module (`docs/project/CompletionProgram/AutonomousExecution.md`).
+
 ## Purpose
 Translate administrator or AI intent into validated, executable workflows.
 

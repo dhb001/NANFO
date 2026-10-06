@@ -11,6 +11,7 @@ from app.modules.autonomy.models import AutonomyControl, AutonomyDecision
 from app.modules.autonomy.providers import Providers
 from app.modules.autonomy.safety import SafetyShield, safety_input_digest
 from app.modules.autonomy.schemas import (
+    Confidence,
     Observation,
     OperationalSettings,
     Proposal,
@@ -42,7 +43,7 @@ class MemoryRepository:
     def __init__(self, control=None):
         self.control, self.rows = control, []
 
-    async def get(self, network_id, *, lock=False):
+    async def get(self, network_id, *, lock=False, fresh=False):
         return self.control if self.control and self.control.network_id == network_id else None
 
     async def ensure(self, network_id, workspace_id):
@@ -51,8 +52,43 @@ class MemoryRepository:
                 checkpoint_sha256=None, approval_expires_at=None, approved_by_user_id=None, revision=0)
         return self.control
 
-    async def history(self, network_id, limit=20):
+    async def history(self, network_id, limit=20, *, summary=False):
         return [row for row in reversed(self.rows) if row.network_id == network_id][:limit]
+
+    async def previous_decision(self, network_id, decision_id):
+        return next((row for row in reversed(self.rows) if row.network_id == network_id
+                     and row.decision_id != decision_id and row.status != "observing"), None)
+
+    async def discard(self, row):
+        self.rows.remove(row)
+
+    async def latch_stop(self, *, network_id, workspace_id, actor_id, lock_timeout_ms=None):
+        if self.control is None:
+            self.control = control_record(network_id=network_id, workspace_id=workspace_id, mode="monitor",
+                checkpoint_sha256=None, approval_expires_at=None, approved_by_user_id=None, revision=0,
+                claim_token=None, lease_expires_at=None)
+        control = self.control
+        if control.network_id != network_id or control.workspace_id != workspace_id:
+            return None
+        now = datetime.now(UTC)
+        control.emergency_stopped, control.stopped_at, control.stopped_by_user_id = True, now, actor_id
+        control.revision += 1
+        control.claim_token, control.lease_expires_at = None, None
+        control.next_cycle_at = control.updated_at = now
+        if control.active_execution_id:
+            control.cancellation_status = "requested"
+        return SimpleNamespace(**{key: getattr(control, key) for key in (
+            "network_id", "workspace_id", "mode", "revision", "checkpoint_sha256", "approved_by_user_id",
+            "active_execution_id", "active_intent_id", "active_decision_id", "cancellation_status")})
+
+    async def settle_stop_cancellation(self, *, network_id, execution_id, stop_revision, status, lock_timeout_ms=None):
+        control = self.control
+        if control is None or control.active_execution_id != execution_id or control.revision != stop_revision:
+            return False
+        control.cancellation_status = status
+        if status == "verified":
+            control.active_execution_id = control.active_intent_id = control.active_decision_id = None
+        return True
 
     async def operational(self, network_id):
         return OperationalSettings()
@@ -112,7 +148,7 @@ def qualified_providers(control):
     qualification = Qualification(qualified=True, checkpoint_sha256=HASH, observation_contract=observation.contract,
                                 manifest_sha256="b" * 64, evidence=["test:immutable_manifest"])
     proposal = Proposal(action_id="test-action", checkpoint_sha256=HASH, observation_contract=observation.contract,
-                        evidence=["test:inference"])
+                        evidence=["test:inference"], confidence=calibrated_confidence())
     safety = certified_assessment(observation, proposal)
     return Providers(
         SimpleNamespace(status=ready, observe=AsyncMock(return_value=observation)),
@@ -121,10 +157,14 @@ def qualified_providers(control):
         SimpleNamespace(status=ready, assess=AsyncMock(return_value=safety)),
         SimpleNamespace(status=ready, accept=AsyncMock(), verify=AsyncMock(side_effect=lambda reference:
             Verification(execution_id=reference.execution_id, status="pending", reasons=["test_pending"]))),
-        SimpleNamespace(cancel=AsyncMock()),
         SimpleNamespace(cancel=AsyncMock(side_effect=lambda reference: Verification(
             execution_id=reference.execution_id, status="pending", reasons=["test_recovery_pending"]))),
     )
+
+
+def calibrated_confidence(value=0.99):
+    """Test-only calibrated confidence; production policy probabilities are never calibrated."""
+    return Confidence(value=value, method="test_fixture_calibrated", calibrated=True, calibration_id="test-calibration")
 
 
 def certified_assessment(observation, proposal):

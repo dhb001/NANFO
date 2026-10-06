@@ -6,9 +6,6 @@ Topology analysis schemas for VS10 are included under this module ownership.
 
 from __future__ import annotations
 
-import base64
-import binascii
-import hashlib
 import uuid
 from datetime import datetime
 from ipaddress import ip_address, ip_network
@@ -17,8 +14,8 @@ from typing import Annotated
 
 from pydantic import AfterValidator, BaseModel, Field, StringConstraints, field_validator, model_serializer, model_validator
 
-from app.modules.network.registration import AssetRegistration
 from app.modules.network.asset_mapping import normalize_asset_device_mapping
+from app.modules.network.registration import AssetRegistration
 
 _ALLOWED_MODEL_MIME_TYPES = {
     "model/gltf-binary",
@@ -294,18 +291,10 @@ class UpsertCampusModelAssetRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_model_payload_integrity(self) -> UpsertCampusModelAssetRequest:
-        try:
-            decoded = base64.b64decode(self.model_data_base64, validate=True)
-        except (ValueError, binascii.Error):
-            raise ValueError("model_data_base64 must be valid base64")
-
-        if len(decoded) != self.model_size_bytes:
+        # O(1) structural check only. Decoding and hashing happen exactly once in the
+        # service, in a worker thread (ADR-028): never on the event loop here.
+        if len(self.model_data_base64) != 4 * ((self.model_size_bytes + 2) // 3):
             raise ValueError("model_size_bytes must match decoded model_data_base64 length")
-
-        digest = hashlib.sha256(decoded).hexdigest()
-        if digest != self.model_sha256:
-            raise ValueError("model_sha256 must match decoded model_data_base64 content")
-
         return self
 
 
@@ -357,6 +346,16 @@ class UpsertDeviceGroupInput(BaseModel):
     description: str | None = Field(default=None, max_length=400)
     selector: dict[str, str] = Field(default_factory=dict)
     device_ids: list[uuid.UUID] = Field(default_factory=list, max_length=5000)
+    #: C8 optimistic concurrency: the ``updated_at`` the client last read. When set,
+    #: a missing or changed active group fails with 409 ``DEVICE_GROUP_CONFLICT``.
+    expected_updated_at: datetime | None = None
+
+    @field_validator("expected_updated_at")
+    @classmethod
+    def validate_expected_updated_at(cls, value: datetime | None) -> datetime | None:
+        if value is not None and value.utcoffset() is None:
+            raise ValueError("expected_updated_at must include a UTC offset")
+        return value
 
     @field_validator("group_key")
     @classmethod

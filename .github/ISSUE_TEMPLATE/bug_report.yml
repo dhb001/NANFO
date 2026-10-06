@@ -1,0 +1,50 @@
+name: Bug report
+description: Something does not work as documented.
+labels: ["bug"]
+assignees: ["dhb001"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not report vulnerabilities here; follow [SECURITY.md](https://github.com/dhb001/NANFO/blob/main/SECURITY.md).
+        Never paste secrets, tokens, `.env` contents or private evidence.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      description: Add the matching `area:` label after creating the issue.
+      options: [backend, db, frontend, twin, ai, emulation, deploy, ci, evidence, docs]
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: What happened?
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Start the stack with ./scripts/dev-start.sh
+        2. ...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Commit or branch
+      placeholder: e.g. main @ 6604603
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or test output
+      description: Redact credentials before pasting.
+      render: text

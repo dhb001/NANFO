@@ -10,7 +10,6 @@ import pytest
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from httpx import ASGITransport, AsyncClient
-from jose import JWTError
 from pydantic import BaseModel, ValidationError, field_validator
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from structlog.contextvars import bind_contextvars, get_contextvars
@@ -18,6 +17,7 @@ from structlog.contextvars import bind_contextvars, get_contextvars
 from app.core.dependencies import RequestMeta, get_request_meta
 from app.core.logging import get_logger
 from app.core.request_context import RequestContextMiddleware
+from app.core.security import JWTError
 from app.main import (
     http_exception_handler,
     jwt_error_handler,
@@ -86,13 +86,21 @@ async def test_shared_response_and_log_metadata(context_app, caplog, request_id,
         assert meta["request_id"] == request_id
     else:
         uuid.UUID(meta["request_id"])
-    events = [json.loads(row.message) for row in caplog.records if row.name in (__name__, "app.main")]
+    events = [json.loads(row.message) for row in caplog.records
+              if row.name in (__name__, "app.main", "app.core.exception_handlers")]
     assert events
     for event in events:
         assert event["request_id"] == meta["request_id"]
         assert event["request_timestamp"] == meta["timestamp"]
     if outcome == "http":
         assert response.headers["retry-after"] == "60"
+    if outcome == "unhandled":
+        # ADR-028 C2: the redacted stack (types + frames) is logged with the request id.
+        [failure] = [event for event in events if event["event"] == "unhandled_exception"]
+        assert failure["exception"]["type"] == "RuntimeError"
+        frames = failure["exception"]["frames"]
+        assert frames[-1]["function"] == "probe" and frames[-1]["file"].endswith("test_request_context.py")
+        assert all(set(frame) == {"file", "line", "function"} for frame in frames)
     assert "sensitive" not in response.text
     assert "sensitive" not in caplog.text
     assert get_contextvars() == {}
@@ -136,7 +144,11 @@ async def test_validation_never_echoes_interpolated_secret(context_app, caplog):
     async with AsyncClient(transport=ASGITransport(app=context_app), base_url="http://test") as client:
         response = await client.post("/secret", json={"password": "private-password-027"})
     assert response.status_code == 422
-    assert response.json()["errors"] == {"code": "VALIDATION_ERROR", "message": "Request validation failed."}
+    assert response.json()["errors"] == {
+        "code": "VALIDATION_ERROR", "message": "Request validation failed.",
+        # ADR-028 C2: location and error type only; never input or ctx.
+        "details": [{"loc": ["body", "password"], "type": "value_error"}],
+    }
     assert response.json()["meta"]["timestamp"]
     assert "private-password-027" not in response.text + caplog.text
     assert get_contextvars() == {}
@@ -232,7 +244,10 @@ async def test_reviewed_domain_messages_from_actual_validators(model, data, expe
     )
     body = json.loads(response.body)
     assert response.status_code == 422
-    assert body["errors"] == {"code": "VALIDATION_ERROR", "message": f"Value error, {expected}"}
+    assert {key: body["errors"][key] for key in ("code", "message")} == {
+        "code": "VALIDATION_ERROR", "message": f"Value error, {expected}",
+    }
+    assert all(set(item) == {"loc", "type"} for item in body["errors"]["details"])
     assert "private-secret" not in response.body.decode() + caplog.text
 
 
@@ -313,3 +328,74 @@ async def test_non_http_scope_passes_through_without_request_metadata(scope_type
     await middleware(scope, None, None)
     assert calls == [scope]
     assert "state" not in scope
+
+
+async def test_validation_details_mask_client_controlled_keys():
+    """C2 details carry declared locations only; extra/dict keys may themselves be secrets."""
+    app = FastAPI()
+    app.add_exception_handler(RequestValidationError, request_validation_exception_handler)
+
+    class Strict(BaseModel):
+        model_config = {"extra": "forbid"}
+        name: str
+
+    @app.post("/strict")
+    async def strict(body: Strict):
+        return {}
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.post("/strict", json={"name": 1, "tok-private-secret": "value-private-secret"})
+    assert response.status_code == 422
+    details = response.json()["errors"]["details"]
+    assert {"loc": ["body", "name"], "type": "string_type"} in details
+    assert {"loc": ["body", "*"], "type": "extra_forbidden"} in details
+    assert "private-secret" not in response.text
+
+
+async def test_jwt_error_uses_the_canonical_401_code(context_app):
+    async with AsyncClient(transport=ASGITransport(app=context_app), base_url="http://test") as client:
+        response = await client.get("/probe/jwt")
+    assert response.status_code == 401
+    assert response.json()["errors"]["code"] == "AUTH_TOKEN_MISSING_OR_INVALID"
+    assert response.headers["www-authenticate"] == "Bearer"
+
+
+@pytest.mark.parametrize("path", ["/health", "/ready"])
+@pytest.mark.parametrize("headers", [
+    [("X-Request-ID", "req_first"), ("X-Request-ID", "req_second")],
+    [("X-Request-ID", "bad\x7fheader")],
+])
+async def test_probe_paths_tolerate_duplicate_or_invalid_request_ids(path, headers):
+    app = FastAPI()
+    app.add_middleware(RequestContextMiddleware, http_error_handler=http_exception_handler,
+                       error_handler=unhandled_exception_handler)
+
+    @app.get(path)
+    async def probe(meta: Annotated[RequestMeta, Depends(get_request_meta)]):
+        return {"request_id": meta.request_id}
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.get(path, headers=headers)
+    assert response.status_code == 200
+    uuid.UUID(response.json()["request_id"])
+    assert response.headers["x-request-id"] == response.json()["request_id"]
+    assert get_contextvars() == {}
+
+
+async def test_started_stream_failure_logs_redacted_stack_with_request_id(caplog):
+    async def stream(scope, receive, send):
+        await send({"type": "http.response.start", "status": 200, "headers": []})
+        raise RuntimeError("sensitive-stream-detail")
+
+    async def send(message):
+        return None
+
+    middleware = RequestContextMiddleware(stream, http_error_handler=http_exception_handler,
+                                          error_handler=unhandled_exception_handler)
+    with pytest.raises(RuntimeError):
+        await middleware({"type": "http", "path": "/stream", "headers": [(b"x-request-id", b"req_stream")]},
+                         None, send)
+    [event] = [json.loads(row.message) for row in caplog.records if row.name == "app.core.request_context"]
+    assert event["request_id"] == "req_stream" and event["exception"]["type"] == "RuntimeError"
+    assert event["exception"]["frames"][-1]["function"] == "stream"
+    assert "sensitive-stream-detail" not in caplog.text

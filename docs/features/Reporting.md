@@ -20,7 +20,10 @@ Provide evidence-driven decision support and audit-ready summaries.
 - `GET /api/v1/reports/{id}`
 - `GET /api/v1/reports?workspace_id=UUID` - owner-scoped paginated history.
 - `GET /api/v1/reports/{id}/download?workspace_id=UUID` - authenticated binary
-  CSV/PDF; errors use the canonical JSON envelope (ADR-019).
+  CSV/PDF; errors use the canonical JSON envelope (ADR-019). Since ADR-028 C5
+  (**BREAKING format**) the download sends `ETag: "sha256:<hex>"` (was `"<hex>"`), and a
+  matching `If-None-Match` returns 304. Generation beyond the per-organisation quota
+  (`REPORTS_MAX_BYTES_PER_ORG`, C26) returns 507 `REPORT_ORG_QUOTA_EXCEEDED`.
 
 ## Database
 - Report metadata and artifact references.

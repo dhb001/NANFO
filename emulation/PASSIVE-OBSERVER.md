@@ -62,8 +62,12 @@ The operator has to provide read-only log access without granting lab control.
 
 After the parent has separately admitted the measurement producer:
 
+ADR-028: the implementation lives in the backend
+(`app.modules.autonomy.experimental.passive_observer`); `emulation.passive_observer` is
+only a host-side compatibility shim and is not part of the stdlib lab package.
+
 ```sh
-PYTHONPATH=backend:. /path/to/backend/python -m emulation.passive_observer \
+PYTHONPATH=backend:. /path/to/backend/python -m app.modules.autonomy.experimental.passive_observer \
   --admission /protected/passive-admission.json \
   --sha256 <independently-provisioned-admission-byte-hash> \
   --duration-seconds 300
@@ -80,8 +84,14 @@ Capture a wall/monotonic anchor **after attachment**. Every admitted measurement
 post-control start must occur after that anchor. Server and bridge must share boot
 and actual Linux clock offsets. Distinct Docker time namespaces are admitted only
 after both kernel monotonic/boottime offsets exactly match; foreign offsets reject.
-Optional `NANFO_PASSIVE_PROC_SUDO=1` permits only fixed read-only proc identity/offset
-commands for a root-owned admitted server. Server start ticks, boot, namespace,
+Optional `NANFO_PASSIVE_PROC_SUDO=1` permits exactly one privileged read for a
+root-owned admitted server: the fixed-argument helper `backend/scripts/nanfo_proc_timens.py`
+installed root-owned as `/usr/local/libexec/nanfo-proc-timens` (`install -o root -g root
+-m 0755`). It takes no arguments, reads one integer PID from stdin and prints only that
+process's `ns/time` identity and `timens_offsets`. The exact sudoers entry (no wildcards;
+`""` forbids every argument) is:
+`nanfo-operator ALL=(root) NOPASSWD: /usr/local/libexec/nanfo-proc-timens ""`.
+`sudo cat`/`sudo readlink` are never used. Server start ticks, boot, namespace,
 wall/monotonic drift, admission digest/expiry and source inode/truncation are rechecked.
 
 `window_started_at` and `observed_at` are anchor conversions of the original

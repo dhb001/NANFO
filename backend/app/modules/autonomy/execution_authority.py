@@ -2,6 +2,7 @@
 
 from datetime import UTC, datetime
 
+from app.modules.autonomy.confidence import dispatch_confidence_reasons, uncalibrated_confidence_honoured
 from app.modules.autonomy.provider_state import ProviderStateRepository
 from app.modules.autonomy.repository import AutonomyRepository
 from app.modules.autonomy.safety import SafetyState
@@ -15,9 +16,12 @@ class ExecutionAuthority:
         self.execution_mode = execution_mode
         self.runtime_guard = None
 
-    async def check(self, db, authorization, *, accepted=False):
+    async def check(self, db, authorization, *, accepted=False, runtime_guard=True):
+        """Receiver-side authority; pass ``runtime_guard=False`` when this transaction already
+        holds the control row lock (the guard's evidence/model I/O ran in the first check,
+        before any lock, so STOP never queues behind it — ADR-028 fix 1)."""
         self.safety.installation.assert_reviewed_execution()
-        if self.runtime_guard is not None:
+        if self.runtime_guard is not None and runtime_guard:
             await self.runtime_guard(authorization)
         if self.execution_mode != "emulation":
             raise ValueError("production_autonomous_driver_unavailable")
@@ -87,6 +91,10 @@ class ExecutionAuthority:
         settings = await repo.operational(auth.network_id)
         if operational_safety_reasons(settings, safety):
             raise ValueError("receiver_operational_policy_denied")
+        # C17 at the receiver: the persisted proposal's confidence must still satisfy policy.
+        if dispatch_confidence_reasons(proposal.confidence, settings,
+                                       honour_uncalibrated=uncalibrated_confidence_honoured()):
+            raise ValueError("receiver_confidence_policy_denied")
         # Authority/profile reads may have waited; never dispatch on the old clock.
         final_now = datetime.now(UTC)
         if final_now >= auth.approval_expires_at or final_now.timestamp() >= auth.certificate_expires_at_unix_seconds:

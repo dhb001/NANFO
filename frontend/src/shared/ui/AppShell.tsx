@@ -5,11 +5,14 @@ import { Button } from "@/shared/ui/Button";
 import { BrandMark } from "@/shared/ui/BrandMark";
 import { useUiStore } from "@/shared/state/ui-store";
 import { RealtimeBridge } from "@/features/realtime/RealtimesBridge";
+import { RealtimeRetryControl } from "@/features/realtime/RealtimeRetryControl";
+import { SessionRecoveryBanner } from "@/features/auth/SessionRecoveryBanner";
 import { logoutSession } from "@/features/auth/session";
 import { canAccessRoute } from "@/features/auth/permissions";
 import { useWorkspaceStore } from "@/shared/state/workspace-store";
 import { AsyncState } from "@/shared/ui/AsyncState";
 import { ExecutionModeBanner } from "@/shared/ui/ExecutionModeBanner";
+import { useFocusRestoration } from "@/shared/lib/focusRestore";
 
 const navGroups = [
   { label: "Observe", items: [
@@ -45,6 +48,9 @@ export function AppShell() {
   const workspaceId = useWorkspaceStore((state) => state.workspaceId);
   const networkId = useWorkspaceStore((state) => state.networkId);
   const contextKey = JSON.stringify([generation, organizationId, workspaceId, networkId]);
+  // Scope changes remount the content; the control that changed scope gets its focus back.
+  const content = useRef<HTMLDivElement>(null);
+  useFocusRestoration(content, contextKey);
   const activeUser = useAuthStore((state) => state.userId);
   const commandPaletteOpen = useUiStore((state) => state.commandPaletteOpen);
   const setCommandPaletteOpen = useUiStore((state) => state.setCommandPaletteOpen);
@@ -93,12 +99,14 @@ export function AppShell() {
               } catch {
                 useUiStore.getState().pushToast({ title: "Signed out locally", tone: "warn", description: "Backend revocation could not be confirmed. Sign in again to continue." });
               }
-              navigate("/login", { replace: true });
+              void navigate("/login", { replace: true });
             }}>{endingSession ? "Signing Out..." : "Logout"}</Button>
           </div>
         </header>
         <ExecutionModeBanner />
-        <div key={contextKey} id="workspace-content" tabIndex={-1} className="workspace-content">
+        <SessionRecoveryBanner />
+        <RealtimeRetryControl />
+        <div key={contextKey} ref={content} id="workspace-content" tabIndex={-1} className="workspace-content">
           {currentPage?.description && canAccessRoute(profile, location.pathname) ? <header className="page-heading" key={location.pathname}><div><div className="eyebrow">{currentGroup?.label} / Network atlas</div><h1>{currentPage.label}</h1><p>{currentPage.description}</p></div><span className="page-index" aria-hidden="true">N / {currentPage.key}</span></header> : null}
           {canAccessRoute(profile, location.pathname) ? <Outlet /> : <AsyncState title="Permission denied" description="Your current backend profile does not permit this route." />}
         </div>

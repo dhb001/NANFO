@@ -4,7 +4,7 @@
 Enable safe what-if experimentation by cloning live state into isolated simulation branches and running deterministic physics-driven scenarios.
 
 ## 2. Requirements
-- Support simulation lifecycle states: Draft -> Queued -> Running -> Paused -> Completed -> Cancelled.
+- Support simulation lifecycle states: Draft -> Queued -> Running -> Paused -> Completed -> Cancelled. ADR-028 adds the terminal state `failed`: a run whose claim attempts are exhausted ends with `failure_reason=attempts_exhausted`, announced by `simulation.cancelled`.
 - Run synchronized tick pipeline across physics, network, wireless, users, and AI layers.
 - Persist scenario metadata, run outputs, and baseline deltas.
 - Expose branch compare views for decision support.
@@ -61,6 +61,16 @@ Supplied action-bound simulation evidence is retained and revalidated before act
 dispatch; stale or mismatched evidence blocks without replacing manual approval.
 Exact request/output schemas and model assumptions:
 `backend/app/modules/simulation/README.md` and `MATH.md`.
+
+ADR-028 (C18, C20; README "ADR-028 changes"):
+- Detail adds `execution_policy: {policy_floors, limits_respect_policy}`. Only runs whose
+  limits respect the server floors (`SIMULATION_POLICY_*`) count as execution evidence;
+  evidence expires 300 s after completion.
+- Starting or resuming a modeled run beyond `SIMULATION_MAX_ACTIVE_PER_WORKSPACE` (8)
+  queued/running runs returns 429 `SIMULATION_QUOTA_EXCEEDED` (`Retry-After`). Workers
+  claim the least-recently-active workspace first.
+- Same-state pause/resume requests are no-ops.
+- History `page` is 1..10000.
 
 - [ ] Same seed + same inputs produce identical metric outputs.
 - [ ] Pause/resume preserves simulation state integrity.

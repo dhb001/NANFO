@@ -6,6 +6,8 @@ import json
 import os
 import pickle
 import platform
+import re
+import stat
 import tempfile
 import zipfile
 from pathlib import Path
@@ -220,11 +222,23 @@ def saveCheckpoint(
     return manifest
 
 
-def readBundle(path: Path):
-    with path.open("rb") as source:
+def readCheckpoint(path: Path):
+    """The only checkpoint read: bounded, regular file, final symlink refused."""
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
+    with os.fdopen(fd, "rb") as source:
+        if not stat.S_ISREG(os.fstat(source.fileno()).st_mode):
+            raise ValueError("checkpoint must be a regular file")
         content = source.read(MAX_CHECKPOINT + 1)
     if len(content) > MAX_CHECKPOINT:
         raise ValueError("checkpoint exceeds bound")
+    return content
+
+
+def readBundle(path: Path):
+    return bundleManifest(readCheckpoint(path))
+
+
+def bundleManifest(content: bytes):
     with zipfile.ZipFile(io.BytesIO(content)) as bundle:
         entries = bundle.infolist()
         if (
@@ -280,9 +294,41 @@ def readBundle(path: Path):
     return manifest, tensors
 
 
-def loadCheckpoint(path: Path, *, resume=False, requireMeasured=True):
+def loadCheckpointIdentity(path: Path, *, expectedSha256=None, resume=False, requireMeasured=True):
+    """Load the exact bytes whose SHA-256 is returned, after an optional external pin.
+
+    The pin is checked before any archive or tensor parsing; weights are restored with
+    torch.load(weights_only=True) from those same in-memory bytes, never a second read.
+    """
+    if expectedSha256 is not None and (
+        type(expectedSha256) is not str or not re.fullmatch(r"[a-f0-9]{64}", expectedSha256)
+    ):
+        raise ValueError("invalid checkpoint pin")
+    content = readCheckpoint(path)
+    digest = hashlib.sha256(content).hexdigest()
+    if expectedSha256 is not None and digest != expectedSha256:
+        raise ValueError("checkpoint differs from its pinned SHA-256")
+    agent, manifest = restoreCheckpoint(content, resume=resume, requireMeasured=requireMeasured)
+    return (
+        agent,
+        manifest,
+        {
+            "checkpoint_sha256": digest,
+            "manifest": json.loads(manifest.model_dump_json()),
+        },
+    )
+
+
+def loadCheckpoint(path: Path, *, resume=False, requireMeasured=True, expectedSha256=None):
+    agent, manifest, _ = loadCheckpointIdentity(
+        path, expectedSha256=expectedSha256, resume=resume, requireMeasured=requireMeasured
+    )
+    return agent, manifest
+
+
+def restoreCheckpoint(content: bytes, *, resume=False, requireMeasured=True):
     try:
-        manifest, tensors = readBundle(path)
+        manifest, tensors = bundleManifest(content)
     except (zipfile.BadZipFile, EOFError, KeyError) as exc:
         raise ValueError("invalid checkpoint archive") from exc
     if requireMeasured and (
@@ -384,10 +430,10 @@ def loadCheckpoint(path: Path, *, resume=False, requireMeasured=True):
     return agent, manifest
 
 
-def inspectCheckpoint(path: Path):
-    # Inspection also validates tensor shapes/finite values without enabling fixture inference.
-    _, manifest = loadCheckpoint(path, requireMeasured=False)
-    return {
-        "checkpoint_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
-        "manifest": json.loads(manifest.model_dump_json()),
-    }
+def inspectCheckpoint(path: Path, *, expectedSha256=None):
+    # Inspection also validates tensor shapes/finite values without enabling fixture inference;
+    # the reported hash identifies exactly the bytes that were validated.
+    _, _, identity = loadCheckpointIdentity(
+        path, expectedSha256=expectedSha256, requireMeasured=False
+    )
+    return identity

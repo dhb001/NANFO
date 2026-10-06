@@ -6,6 +6,9 @@ Implements:
 - GET /api/v1/topology/device/{device_id}/neighbors
 - GET /api/v1/topology/impact/{device_id}
 - POST /api/v1/topology/reconcile
+
+PostgreSQL authorization transactions end before any Neo4j or Redis I/O, so no
+organization/network lock or snapshot is held while the graph is queried (ADR-028).
 """
 
 import time
@@ -108,6 +111,12 @@ class TopologyReconcileResult(BaseModel):
     missing_workspace_nodes: int
     workspace_backfilled_nodes: int
     warning: str | None = None
+    # Additive ADR-028 reconcile accounting.
+    active_devices: int = 0
+    upserted_nodes: int = 0
+    tombstoned_nodes: int = 0
+    skipped_newer_nodes: int = 0
+    watermark_sequence: int = 0
 
 
 class TopologyReconcileAPIResponse(BaseModel):
@@ -115,6 +124,11 @@ class TopologyReconcileAPIResponse(BaseModel):
     data: TopologyReconcileResult | None
     meta: ResponseMeta
     errors: ErrorDetail | None
+
+
+async def _release_database(db: AsyncSession) -> None:
+    """End the read-only authorization transaction before graph I/O."""
+    await db.rollback()
 
 
 async def _resolve_network_scope(
@@ -150,6 +164,23 @@ async def _resolve_device_scope(
     )
 
 
+async def _reconcile_scope(
+    *,
+    network_id: uuid.UUID,
+    claims: TokenClaims,
+    db: AsyncSession,
+    redis: aioredis.Redis,
+) -> tuple[uuid.UUID, uuid.UUID, int]:
+    """Authorize (write) and read the projection watermark; locks released on return."""
+    scope = await NetworkService(db=db, redis=redis).reconcile_scope(
+        network_id=network_id,
+        actor_user_id=claims.user_id,
+        requested_workspace_id=get_claim_workspace_scope(claims=claims),
+        claim_org_id=get_claim_org_scope(claims=claims),
+    )
+    return scope.network_id, scope.workspace_id, scope.watermark
+
+
 @router.get("/graph", response_model=TopologyGraphAPIResponse, status_code=status.HTTP_200_OK)
 async def get_topology_graph(
     network_id: uuid.UUID,
@@ -157,9 +188,9 @@ async def get_topology_graph(
     meta: Annotated[RequestMeta, Depends(get_request_meta)],
     db: Annotated[AsyncSession, Depends(get_db)],
     redis: Annotated[aioredis.Redis, Depends(get_redis)],
-    depth: int = 2,
+    depth: int = Query(default=2, ge=1, le=6),
     limit: int = Query(default=100, ge=1, le=500),
-    cursor: str | None = None,
+    cursor: str | None = Query(default=None, max_length=128),
 ):
     """Return device nodes and edges for the given network from Neo4j.
 
@@ -175,6 +206,7 @@ async def get_topology_graph(
         db=db,
         redis=redis,
     )
+    await _release_database(db)
 
     driver = get_neo4j_driver()
     svc = TopologyQueryService(driver=driver)
@@ -206,7 +238,7 @@ async def get_topology_node_with_neighbours(
     meta: Annotated[RequestMeta, Depends(get_request_meta)],
     db: Annotated[AsyncSession, Depends(get_db)],
     redis: Annotated[aioredis.Redis, Depends(get_redis)],
-    depth: int = Query(default=1, ge=1),
+    depth: int = Query(default=1, ge=1, le=6),
 ):
     started = time.monotonic()
     network_id, workspace_id = await _resolve_device_scope(
@@ -215,6 +247,7 @@ async def get_topology_node_with_neighbours(
         db=db,
         redis=redis,
     )
+    await _release_database(db)
 
     driver = get_neo4j_driver()
     svc = TopologyQueryService(driver=driver)
@@ -257,6 +290,7 @@ async def get_topology_device_neighbours(
         db=db,
         redis=redis,
     )
+    await _release_database(db)
 
     driver = get_neo4j_driver()
     svc = TopologyQueryService(driver=driver)
@@ -300,6 +334,7 @@ async def get_topology_impact(
         db=db,
         redis=redis,
     )
+    await _release_database(db)
 
     driver = get_neo4j_driver()
     svc = TopologyQueryService(driver=driver)
@@ -335,12 +370,12 @@ async def reconcile_topology(
     redis: Annotated[aioredis.Redis, Depends(get_redis)],
 ):
     started = time.monotonic()
-    network_id, workspace_id = await _resolve_network_scope(
+    # Authorization + watermark run under locks that are released before returning.
+    network_id, workspace_id, watermark = await _reconcile_scope(
         network_id=req.network_id,
         claims=claims,
         db=db,
         redis=redis,
-        require_write=True,
     )
 
     driver = get_neo4j_driver()
@@ -348,6 +383,7 @@ async def reconcile_topology(
     result = await svc.reconcile_network(
         network_id=network_id,
         workspace_id=workspace_id,
+        watermark=watermark,
         db=db,
         redis=redis,
         actor_id=claims.user_id,

@@ -17,11 +17,26 @@ from app.modules.autonomy.model_diagnostic_schemas import (
     ModelDiagnosticsResponse,
     RegisteredModelStatus,
 )
+from app.core.canonical import canonical_sha256 as canonical_hash
+from app.modules.autonomy.model_diagnostic_registry import CONFIG_KEYS, diagnostic_lock_key, load_registry, select_model
 from app.modules.autonomy.service import authorize
-from scripts.frozen_model_diagnostic import CONFIG_KEYS, canonical_hash, load_registry, select_model
 
 RUNNER = Path(__file__).resolve().parents[3] / "scripts" / "frozen_model_diagnostic.py"
-LOCK = "nanfo:autonomy:model-diagnostics:inference"
+LOCK_TIMEOUT_SECONDS = 40
+#: C26 tenant fairness: concurrent diagnostics per organisation (one slot lock each).
+DEFAULT_MAX_PER_ORG = 2
+_ORG_SLOT_PREFIX = "nanfo:autonomy:model-diagnostics:org:"
+
+
+def max_per_org() -> int:
+    from app.core.config import get_settings
+
+    value = getattr(get_settings(), "AUTONOMY_MODEL_DIAGNOSTICS_MAX_PER_ORG", DEFAULT_MAX_PER_ORG)
+    return value if type(value) is int and 1 <= value <= 16 else DEFAULT_MAX_PER_ORG
+
+
+def busy(code, message):
+    return HTTPException(429, detail={"code": code, "message": message}, headers={"Retry-After": "5"})
 
 
 async def frozen_inference(network_id, model, reference, registry_hash):
@@ -84,6 +99,20 @@ class ModelDiagnosticsService:
             org_id=get_claim_org_scope(claims=claims))
         return network.workspace_id
 
+    async def org_scope(self, workspace_id):
+        """Tenant for the fairness limit, answered by the Organization service."""
+        from app.modules.autonomy.governance import workspace_org_id
+
+        return await workspace_org_id(self.db, self.redis, workspace_id)
+
+    async def org_slot(self, tenant):
+        for slot in range(max_per_org()):
+            lock = self.redis.lock(f"{_ORG_SLOT_PREFIX}{tenant}:slot:{slot}", timeout=LOCK_TIMEOUT_SECONDS,
+                                   blocking=False, thread_local=False)
+            if await lock.acquire():
+                return lock
+        return None
+
     async def get(self, claims, network_id, limit=20):
         workspace_id = await self.scope(claims, network_id)
         status = None
@@ -107,6 +136,7 @@ class ModelDiagnosticsService:
 
     async def diagnose(self, claims, request):
         workspace_id = await self.scope(claims, request.network_id, write=True)
+        org_id = await self.org_scope(workspace_id)
         await self.db.commit()
         try:
             registry, pin, _ = await asyncio.to_thread(load_registry)
@@ -116,15 +146,22 @@ class ModelDiagnosticsService:
         history = model.histories.get(request.history_reference) if model else None
         if history is None or request.network_id not in history.network_ids:
             raise HTTPException(404, detail="Registered model history unavailable for this network.")
-        lock = self.redis.lock(LOCK, timeout=40, blocking=False, thread_local=False)
-        acquired = False
+        # C26: admission is per network, bounded per organisation — never global.
+        lock = self.redis.lock(diagnostic_lock_key(request.network_id), timeout=LOCK_TIMEOUT_SECONDS,
+                               blocking=False, thread_local=False)
+        held = []
         try:
-            acquired = await lock.acquire()
-            if not acquired:
-                raise HTTPException(429, detail="Model diagnostic already running.")
+            if not await lock.acquire():
+                raise busy("MODEL_DIAGNOSTIC_BUSY", "A model diagnostic is already running for this network.")
+            held.append(lock)
+            slot = await self.org_slot(org_id or f"workspace:{workspace_id}")
+            if slot is None:
+                raise busy("MODEL_DIAGNOSTIC_ORG_LIMIT", "The organization's concurrent model diagnostic limit is reached.")
+            held.append(slot)
             result = await frozen_inference(request.network_id, model, request.history_reference, pin)
-            if not await lock.owned():
-                raise ValueError("diagnostic_lease_lost")
+            for owned in held:
+                if not await owned.owned():
+                    raise ValueError("diagnostic_lease_lost")
             self.db.expire_all()
             current_workspace = await self.scope(claims, request.network_id, write=True)
             if workspace_id != current_workspace:
@@ -140,8 +177,8 @@ class ModelDiagnosticsService:
             await self.db.rollback()
             raise HTTPException(503, detail="Frozen model diagnostic unavailable or validation failed.") from exc
         finally:
-            if acquired:
+            for owned in reversed(held):
                 try:
-                    await lock.release()
+                    await owned.release()
                 except RedisError:
                     pass  # Lease expires; never release another owner's lock.

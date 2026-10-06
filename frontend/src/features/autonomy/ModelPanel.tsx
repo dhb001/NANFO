@@ -14,13 +14,13 @@ export function ModelPanel({ now }: { now: number }) {
   const [notice, setNotice] = useState<string | null>(null);
   const saving = useRef(false);
   const query = useQuery({ queryKey: ["autonomy-operator", ...session.identity, "model"],
-    queryFn: ({ signal }) => { session.assertCurrent(); return getModelDiagnostics(session.token!, session.networkId!, session.workspaceId!, signal); },
+    queryFn: ({ signal }) => { session.assertCurrent(); return getModelDiagnostics(session.token, session.networkId!, session.workspaceId!, signal); },
     enabled: session.enabled, retry: false, gcTime: 0, refetchOnWindowFocus: false });
   const fresh = query.isSuccess && !query.isFetching && now - query.dataUpdatedAt < AUTONOMY_FRESH_MS;
   const mutation = useMutation({ mutationFn: () => {
     session.assertCurrent(true);
     if (!fresh || query.data?.status !== "operator_registered" || !query.data.model?.history_references.includes(history)) throw new Error("Refresh registry and select an approved history reference.");
-    return diagnoseModel(session.token!, session.networkId!, session.workspaceId!, history);
+    return diagnoseModel(session.token, session.networkId!, session.workspaceId!, history);
   }, retry: false, onSettled: session.reconcile });
   async function run() {
     if (saving.current) return;

@@ -4,6 +4,8 @@ Scope:
 - Intent payload normalization and validation reason generation
 - C5-safe workspace/network boundary checks
 - Baseline explainability and confidence shaping for validated/rejected intents
+- ADR-028: workspace-unique idempotent validation (replay or 409), commit-before-publish
+  with deterministic event IDs, and a deferred-event sweep for the execution worker
 """
 
 from __future__ import annotations
@@ -14,16 +16,21 @@ from typing import Any
 
 import redis.asyncio as aioredis
 from fastapi import HTTPException, status
+from pydantic import ValidationError
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.canonical import canonical_json_bytes, canonical_sha256
 from app.core.config import get_settings
+from app.core.correlation import normalize_audit_correlation
 from app.core.logging import get_logger
 from app.events.publisher import publish_event
 from app.modules.intent.hypervisor import HypervisorExecutionService
+from app.modules.intent.models import Intent, IntentExecution, IntentOutbox
 from app.modules.intent.repository import IntentRepository
+from app.modules.intent.schemas import ApprovalBinding, SimulationActionBinding
 from app.modules.network.service import NetworkService
 from app.modules.organization.service import WorkspaceService as OrgWorkspaceService
-from app.modules.intent.models import Intent, IntentExecution, IntentOutbox
 from app.modules.telemetry.references import evidence_item, install_owner_guard, page_position, reference_page
 
 
@@ -94,12 +101,30 @@ _HIGH_IMPACT_ACTIONS = {
     "reroute_path",
 }
 
+_EXECUTION_STATUSES = {"execution_started", "execution_completed", "execution_failed"}
+_DEFERRED = "deferred"
+_QUEUE_UNAVAILABLE = "event_queue_unavailable"
+_STARTED_SUMMARY = "Execution requested; no controller is installed and no dispatch occurred."
+MAX_IDEMPOTENCY_KEY_LENGTH = 120
+# Deferred rows younger than this are left to the request that is publishing them.
+DEFERRED_EVENT_GRACE_SECONDS = 30
 
-def _coerce_correlation_uuid(value: Any) -> uuid.UUID:
-    try:
-        return uuid.UUID(str(value))
-    except (TypeError, ValueError, AttributeError):
-        return uuid.uuid4()
+
+def is_high_impact(intent) -> bool:
+    """High-impact actions need blast-radius review and, in the lab, simulation (C18)."""
+    payload = intent.intent_payload if isinstance(getattr(intent, "intent_payload", None), dict) else {}
+    action = _coerce_non_empty_text(payload.get("action")) or _coerce_non_empty_text(getattr(intent, "intent_kind", ""))
+    return action in _HIGH_IMPACT_ACTIONS
+
+
+def require_distinct_approver() -> bool:
+    """Four-eyes rule for manual lab approval; read with a default until the platform declares it."""
+    return bool(getattr(get_settings(), "INTENT_REQUIRE_DISTINCT_APPROVER", True))
+
+
+def request_fingerprint(*, network_id, intent: dict[str, Any]) -> str:
+    """Identity of a validate submission: same network + same normalized intent."""
+    return canonical_sha256({"version": 1, "network_id": str(network_id) if network_id else None, "intent": intent})
 
 
 def _coerce_non_empty_text(value: Any) -> str:
@@ -145,6 +170,171 @@ def _confidence_band(score: float) -> str:
     return "below_60"
 
 
+def _as_dict(value: Any) -> dict[str, Any]:
+    return dict(value) if isinstance(value, dict) else {}
+
+
+def approval_binding_of(intent) -> dict[str, Any] | None:
+    """The approved lab identity: the durable execution's, else the validate-time one."""
+    provenance = _as_dict(getattr(intent, "execution_provenance", None))
+    candidate = None
+    if provenance.get("execution_id"):
+        candidate = {key: provenance.get(key) for key in ("plan_hash", "binding_digest", "run_id")}
+    if candidate is None or not all(candidate.values()):
+        candidate = _as_dict(getattr(intent, "validation_result", None)).get("approval_binding")
+    try:
+        return ApprovalBinding.model_validate(candidate).model_dump(mode="json") if candidate else None
+    except ValidationError:
+        return None
+
+
+def simulation_action_binding_of(intent) -> dict[str, Any] | None:
+    candidate = _as_dict(getattr(intent, "validation_result", None)).get("simulation_action_binding")
+    try:
+        return SimulationActionBinding.model_validate(candidate).model_dump(mode="json") if candidate else None
+    except ValidationError:
+        return None
+
+
+def _event_id(intent_id: uuid.UUID, event_type: str) -> str:
+    """Stable ID per intent lifecycle event: republication is deduplicated (EventAPI §4)."""
+    return str(uuid.uuid5(intent_id, event_type))
+
+
+def _confidence_payload(intent) -> dict[str, Any]:
+    score = float(intent.confidence_score or 0.0)
+    return {"score": score, "band": str(intent.confidence_band or _confidence_band(score)),
+            "approval_required": bool(intent.approval_required)}
+
+
+def validated_event(intent, org_id) -> tuple[str, str, dict[str, Any], str]:
+    """``intent.validated`` rebuilt from the committed row (request path and sweep agree)."""
+    validation = _as_dict(intent.validation_result)
+    status_value = "validated" if validation.get("is_valid") else "rejected"
+    explainability = {key: value for key, value in _as_dict(intent.explainability).items()
+                      if key not in {"execution_posture", "execution_summary", "failure_reason", "model_confidence"}}
+    payload = {
+        "org_id": str(org_id),
+        "intent_id": str(intent.intent_id),
+        "workspace_id": str(intent.workspace_id),
+        "network_id": str(intent.network_id) if intent.network_id is not None else None,
+        "intent_kind": str(intent.intent_kind),
+        "status": status_value,
+        "validation_result": validation,
+        "execution_provenance": {
+            "pipeline_stage": "intent_validated",
+            "status": status_value,
+            "policy_reference": validation.get("policy_reference", "ADR-008"),
+            "requested_by_user_id": str(intent.requested_by_user_id),
+            "validated_at": validation.get("validated_at"),
+        },
+        "explainability": explainability,
+        "confidence": {"score": 0.0, "band": "below_60", "approval_required": True},
+        "requested_by_user_id": str(intent.requested_by_user_id),
+    }
+    return "intent.validated", _event_id(intent.intent_id, "intent.validated"), payload, str(intent.correlation_id)
+
+
+def legacy_execution_events(intent, org_id) -> list[tuple[str, str, dict[str, Any], str]]:
+    """Started + terminal events of the fail-closed (no controller) execution path."""
+    terminal = _as_dict(intent.execution_provenance)
+    explainability = _as_dict(intent.explainability)
+    correlation = str(terminal.get("correlation_id") or intent.correlation_id)
+    started_provenance = {key: value for key, value in terminal.items()
+                          if key not in {"execution_failed_at", "failure_reason", "verification"}}
+    started_provenance.update(pipeline_stage="execution_started", status="execution_started")
+    started_explainability = {key: value for key, value in explainability.items() if key != "failure_reason"}
+    started_explainability["execution_summary"] = _STARTED_SUMMARY
+    base = {
+        "org_id": str(org_id),
+        "intent_id": str(intent.intent_id),
+        "workspace_id": str(intent.workspace_id),
+        "network_id": str(intent.network_id) if intent.network_id is not None else None,
+        "intent_kind": str(intent.intent_kind),
+        "validation_result": _as_dict(intent.validation_result),
+        "confidence": _confidence_payload(intent),
+        "requested_by_user_id": str(terminal.get("requested_by_user_id") or intent.requested_by_user_id),
+    }
+    terminal_type = f"intent.{intent.status}"
+    return [
+        ("intent.execution_started", _event_id(intent.intent_id, "intent.execution_started"),
+         {**base, "status": "execution_started", "execution_provenance": started_provenance,
+          "explainability": started_explainability}, correlation),
+        (terminal_type, _event_id(intent.intent_id, terminal_type),
+         {**base, "status": str(intent.status), "execution_provenance": terminal, "explainability": explainability},
+         correlation),
+    ]
+
+
+def intent_event_sequence(intent, org_id) -> list[tuple[str, str, dict[str, Any], str]]:
+    events = [validated_event(intent, org_id)]
+    provenance = _as_dict(intent.execution_provenance)
+    if intent.status in _EXECUTION_STATUSES and provenance.get("executor") == "unavailable":
+        events.extend(legacy_execution_events(intent, org_id))
+    return events
+
+
+async def publish_intent_events(redis, events) -> str | None:
+    """Publish in order; stop at the first failure so no event overtakes a predecessor."""
+    stream_entry_id = None
+    for event_type, event_id, payload, correlation_id in events:
+        stream_entry_id = await publish_event(redis=redis, event_type=event_type, source="intent",
+                                              payload=payload, correlation_id=correlation_id, event_id=event_id)
+    return stream_entry_id
+
+
+async def republish_deferred_intents(*, db: AsyncSession, redis, limit: int = 20,
+                                     grace_seconds: float = DEFERRED_EVENT_GRACE_SECONDS) -> int:
+    """Sweep committed intents whose events were never confirmed (queue_status=deferred).
+
+    Run by the intent execution worker. Rows are locked ``SKIP LOCKED`` and aged past
+    the in-flight grace period. Deterministic event IDs make republication of an
+    already delivered event a consumer-side duplicate, never a new event.
+    """
+    published = 0
+    workspaces = OrgWorkspaceService(db=db, redis=redis)
+    for intent in await IntentRepository(db).claim_deferred(limit=limit, older_than_seconds=grace_seconds):
+        try:
+            org_id = (await workspaces.get_active_workspace(intent.workspace_id)).org_id
+        except HTTPException:
+            # Keep it deferred but out of the sweep; operators can inspect it.
+            intent.warning = "event_workspace_unavailable"
+            continue
+        try:
+            stream_entry_id = await publish_intent_events(redis, intent_event_sequence(intent, org_id))
+        except Exception as exc:  # noqa: BLE001 - stays deferred for the next sweep
+            logger.warning("intent_deferred_event_republish_failed", intent_id=str(intent.intent_id),
+                           error_type=type(exc).__name__)
+            break
+        intent.queue_status = "validated" if intent.status in {"validated", "rejected"} else "queued"
+        intent.stream_entry_id, intent.warning = stream_entry_id, None
+        published += 1
+    await db.commit()
+    return published
+
+
+def validation_response(intent, *, idempotent_replay: bool) -> dict[str, Any]:
+    return {
+        "intent_id": str(intent.intent_id),
+        "workspace_id": str(intent.workspace_id),
+        "network_id": str(intent.network_id) if intent.network_id is not None else None,
+        "status": str(intent.status),
+        "intent_kind": str(intent.intent_kind),
+        "validation": _as_dict(intent.validation_result),
+        "explainability": _as_dict(intent.explainability),
+        "confidence": {"score": 0.0, "band": "below_60", "approval_required": True},
+        "idempotency_key": intent.idempotency_key,
+        "correlation_id": str(intent.correlation_id),
+        "requested_at": intent.requested_at.isoformat(),
+        "queue_status": str(intent.queue_status),
+        "stream_entry_id": intent.stream_entry_id,
+        "warning": intent.warning,
+        "idempotent_replay": idempotent_replay,
+        "approval_binding": approval_binding_of(intent),
+        "simulation_action_binding": simulation_action_binding_of(intent),
+    }
+
+
 class IntentValidationService:
     """Validate intent payloads and persist baseline lifecycle state."""
 
@@ -154,6 +344,22 @@ class IntentValidationService:
         self._repo = IntentRepository(db)
         self._network_svc = NetworkService(db, redis)
         self._workspace_svc = OrgWorkspaceService(db=db, redis=redis)
+
+    async def _replay(self, existing, *, request_sha256: str, network_id, normalized_intent) -> dict[str, Any]:
+        """C3: the same key replays only the same network + normalized intent."""
+        stored = _as_dict(existing.validation_result).get("request_sha256")
+        if stored is not None:
+            same = stored == request_sha256
+        else:  # validated before ADR-028: compare the persisted request itself
+            same = (existing.network_id == network_id and isinstance(existing.intent_payload, dict)
+                    and canonical_json_bytes(existing.intent_payload) == canonical_json_bytes(normalized_intent))
+        if not same:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail={
+                "code": "IDEMPOTENCY_KEY_REUSED",
+                "message": "Idempotency-Key already identifies a different intent submission in this workspace; "
+                           "generate a fresh key for each new submission.",
+            })
+        return validation_response(existing, idempotent_replay=True)
 
     async def validate_intent(
         self,
@@ -170,7 +376,23 @@ class IntentValidationService:
         now = datetime.now(UTC)
         normalized_intent = _extract_unil_intent(intent_payload)
         normalized_idempotency_key = _coerce_non_empty_text(idempotency_key) or None
-        normalized_correlation_id = _coerce_correlation_uuid(correlation_id)
+        if normalized_idempotency_key is not None and len(normalized_idempotency_key) > MAX_IDEMPOTENCY_KEY_LENGTH:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail={
+                "code": "IDEMPOTENCY_KEY_INVALID",
+                "message": f"Idempotency-Key must be at most {MAX_IDEMPOTENCY_KEY_LENGTH} characters.",
+            })
+        request_sha256 = request_fingerprint(network_id=network_id, intent=normalized_intent)
+        if normalized_idempotency_key:
+            existing = await self._repo.get_by_idempotency_key(
+                workspace_id=workspace_id, idempotency_key=normalized_idempotency_key,
+            )
+            if existing is not None:
+                return await self._replay(existing, request_sha256=request_sha256, network_id=network_id,
+                                          normalized_intent=normalized_intent)
+        # ADR-028 C20: shared mapping; an opaque client id is kept in provenance.
+        normalized_correlation_id, correlation_meta = normalize_audit_correlation(correlation_id, None)
+        intent_id = uuid.uuid4()
+        requested_network_id = network_id
         reasons: list[dict[str, str]] = []
 
         action = _coerce_non_empty_text(normalized_intent.get("action"))
@@ -241,21 +463,37 @@ class IntentValidationService:
             elif network.workspace_id != workspace_id:
                 raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions.")
 
+        high_impact = action in _HIGH_IMPACT_ACTIONS
         required_checks = ["simulation_before_deployment"]
-        if action in _HIGH_IMPACT_ACTIONS:
+        if high_impact:
             required_checks.append("blast_radius_assessment")
 
-        lab_validation = get_settings().EXECUTION_MODE == "emulation" and get_settings().EMULATION_CONTROL_ENABLED
+        settings = get_settings()
+        lab_validation = settings.EXECUTION_MODE == "emulation" and settings.EMULATION_CONTROL_ENABLED
+        approval_binding = simulation_action_binding = None
         if lab_validation and not reasons:
+            from app.modules.intent.lab import digest as lab_digest
             from app.modules.intent.lab import prepare_plan
+            from app.modules.simulation.modeled import current_network_state_hash
 
             try:
-                await prepare_plan(settings=get_settings(), db=self._db, redis=self._redis,
+                plan, binding, snapshot = await prepare_plan(settings=settings, db=self._db, redis=self._redis,
                     workspace_id=workspace_id, network_id=network_id, actor_id=requested_by_user_id,
                     payload=normalized_intent)
+                plan_hash = lab_digest(plan.model_dump(mode="json"))
+                # ADR-028 contract 3: the identity an approver must echo on execute.
+                approval_binding = {"plan_hash": plan_hash, "binding_digest": lab_digest(binding.model_dump(mode="json")),
+                                    "run_id": str(snapshot.run_id)}
+                # C18: stable topology/configuration digest for scenario_config.action_binding.
+                simulation_action_binding = {"intent_id": str(intent_id), "plan_sha256": plan_hash,
+                    "network_state_sha256": current_network_state_hash(binding=binding, snapshot=snapshot)}
             except (ValueError, OSError, ImportError):
                 reasons.append(_build_reason("LAB_PLAN_INVALID", "Lab plan, capabilities, binding or fresh observation invalid."))
             required_checks = ["explicit_manual_lab_approval", "current_authority_before_dispatch", "actual_lab_readback"]
+            if high_impact:
+                required_checks.append("simulation_before_deployment")
+            if require_distinct_approver():
+                required_checks.append("distinct_approver")
 
         is_valid = len(reasons) == 0
         status_value = "validated" if is_valid else "rejected"
@@ -277,6 +515,7 @@ class IntentValidationService:
             "validated_at": now.isoformat(),
             "validation_kind": "baseline_schema_only",
             "model_evidence": "unavailable",
+            "request_sha256": request_sha256,
         }
         explainability = {
             "summary": (
@@ -295,95 +534,66 @@ class IntentValidationService:
             "policy_reference": "ADR-008",
             "requested_by_user_id": requested_by_user_id,
             "validated_at": now.isoformat(),
+            **correlation_meta,
         }
         if lab_validation:
             validation_result.update(validation_kind="manual_lab_plan", policy_reference="ADR-010",
-                                     capability_match="trusted_lab_plan" if is_valid else "failed")
+                                     capability_match="trusted_lab_plan" if is_valid else "failed",
+                                     simulation_required=high_impact)
+            if is_valid and approval_binding is not None:
+                validation_result.update(approval_binding=approval_binding,
+                                         simulation_action_binding=simulation_action_binding)
 
-        intent = await self._repo.create(
-            intent_id=uuid.uuid4(),
-            workspace_id=workspace_id,
-            network_id=network_id,
-            intent_kind=(action or "unknown"),
-            intent_payload=normalized_intent,
-            status=status_value,
-            validation_result=validation_result,
-            execution_provenance=execution_provenance,
-            explainability=explainability,
-            confidence_score=confidence_score,
-            confidence_band=confidence_band,
-            approval_required=approval_required,
-            idempotency_key=normalized_idempotency_key,
-            correlation_id=normalized_correlation_id,
-            queue_status="validated",
-            stream_entry_id=None,
-            warning=None,
-            requested_by_user_id=requested_by_user_id,
-            requested_at=now,
-        )
-
-        queue_status = "validated"
-        stream_entry_id = None
-        warning = None
-        event_payload = {
-            "org_id": str(workspace.org_id),
-            "intent_id": str(intent.intent_id),
-            "workspace_id": str(intent.workspace_id),
-            "network_id": str(intent.network_id) if intent.network_id is not None else None,
-            "intent_kind": str(intent.intent_kind),
-            "status": status_value,
-            "validation_result": validation_result,
-            "execution_provenance": execution_provenance,
-            "explainability": explainability,
-            "confidence": {
-                "score": confidence_score,
-                "band": confidence_band,
-                "approval_required": approval_required,
-            },
-            "requested_by_user_id": requested_by_user_id,
-        }
-
+        # ADR-028: commit first with a pessimistic "deferred" publication state; the
+        # event is published afterwards and only its success is recorded.
         try:
-            stream_entry_id = await publish_event(
-                redis=self._redis,
-                event_type="intent.validated",
-                source="intent",
-                payload=event_payload,
-                correlation_id=str(normalized_correlation_id),
+            intent = await self._repo.create(
+                intent_id=intent_id,
+                workspace_id=workspace_id,
+                network_id=network_id,
+                intent_kind=(action or "unknown"),
+                intent_payload=normalized_intent,
+                status=status_value,
+                validation_result=validation_result,
+                execution_provenance=execution_provenance,
+                explainability=explainability,
+                confidence_score=confidence_score,
+                confidence_band=confidence_band,
+                approval_required=approval_required,
+                idempotency_key=normalized_idempotency_key,
+                correlation_id=normalized_correlation_id,
+                queue_status=_DEFERRED,
+                stream_entry_id=None,
+                warning=_QUEUE_UNAVAILABLE,
+                requested_by_user_id=requested_by_user_id,
+                requested_at=now,
             )
-        except Exception:  # noqa: BLE001
-            queue_status = "deferred"
-            warning = "event_queue_unavailable"
+            await self._db.commit()
+        except IntegrityError:
+            # Concurrent submission with the same key won the unique index.
+            await self._db.rollback()
+            existing = (await self._repo.get_by_idempotency_key(
+                workspace_id=workspace_id, idempotency_key=normalized_idempotency_key,
+            ) if normalized_idempotency_key else None)
+            if existing is None:
+                raise
+            return await self._replay(existing, request_sha256=request_sha256, network_id=requested_network_id,
+                                      normalized_intent=normalized_intent)
 
-        await self._repo.update_status(
-            intent,
-            status=status_value,
-            queue_status=queue_status,
-            stream_entry_id=stream_entry_id,
-            warning=warning,
-        )
+        await self._publish_committed(intent, [validated_event(intent, workspace.org_id)], success="validated")
+        return validation_response(intent, idempotent_replay=False)
+
+    async def _publish_committed(self, intent, events, *, success: str) -> bool:
+        try:
+            stream_entry_id = await publish_intent_events(self._redis, events)
+        except Exception as exc:  # noqa: BLE001 - committed row stays deferred for the sweep
+            logger.warning("intent_event_publish_deferred", intent_id=str(intent.intent_id),
+                           error_type=type(exc).__name__)
+            return False
+        await self._repo.update_status(intent, status=intent.status, queue_status=success,
+                                       stream_entry_id=stream_entry_id, warning=None)
         await self._db.commit()
-
-        return {
-            "intent_id": str(intent.intent_id),
-            "workspace_id": str(intent.workspace_id),
-            "network_id": str(intent.network_id) if intent.network_id is not None else None,
-            "status": str(intent.status),
-            "intent_kind": str(intent.intent_kind),
-            "validation": validation_result,
-            "explainability": explainability,
-            "confidence": {
-                "score": confidence_score,
-                "band": confidence_band,
-                "approval_required": approval_required,
-            },
-            "idempotency_key": intent.idempotency_key,
-            "correlation_id": str(intent.correlation_id),
-            "requested_at": intent.requested_at.isoformat(),
-            "queue_status": str(intent.queue_status),
-            "stream_entry_id": intent.stream_entry_id,
-            "warning": intent.warning,
-        }
+        return True
 
 
 class IntentExecutionService:
@@ -425,24 +635,27 @@ class IntentExecutionService:
         manual_approval: bool = False,
         cancel: bool = False,
         simulation_id: uuid.UUID | None = None,
+        approval_binding: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         settings = get_settings()
         if simulation_id is not None and not cancel and (settings.EXECUTION_MODE != "emulation"
                                                         or not settings.EMULATION_CONTROL_ENABLED):
             raise HTTPException(409, detail={"code": "SIMULATION_EVIDENCE_REJECTED",
                 "message": "Referenced simulation requires a current prepared plan; model evidence cannot authorize production."})
+        supplied_key = _coerce_non_empty_text(idempotency_key) or None
+        normalized_correlation_id, correlation_meta = normalize_audit_correlation(correlation_id, None)
         if cancel or (settings.EXECUTION_MODE == "emulation" and settings.EMULATION_CONTROL_ENABLED):
             from app.modules.intent.execution import accept_execution
 
             intent, replay = await accept_execution(db=self._db, redis=self._redis, workspace_id=workspace_id,
-                intent_id=intent_id, idempotency_key=_coerce_non_empty_text(idempotency_key) or None,
-                correlation_id=_coerce_correlation_uuid(correlation_id), actor_id=requested_by_user_id,
+                intent_id=intent_id, idempotency_key=supplied_key,
+                correlation_id=normalized_correlation_id, actor_id=requested_by_user_id,
                 permissions=requested_permissions, manual_approval=manual_approval, cancel=cancel,
-                simulation_id=simulation_id)
+                simulation_id=simulation_id, approval_binding=approval_binding)
             return await self._serialize_with_fresh_timestamps(intent, idempotent_replay=replay,
                 confidence_override={"score": 0.0, "band": "below_60", "approval_required": True})
-        normalized_idempotency_key = _coerce_non_empty_text(idempotency_key) or None
-        normalized_correlation_id = _coerce_correlation_uuid(correlation_id)
+        from app.modules.intent.execution import resolve_execution_key
+
         now = datetime.now(UTC)
 
         if "execute:rollback" not in _coerce_permissions_for_execute(requested_permissions):
@@ -456,73 +669,29 @@ class IntentExecutionService:
 
         workspace = await self._workspace_svc.get_active_workspace(workspace_id, user_id=requested_by_user_id, require_write=True)
 
-        existing_by_key = None
-
-        if normalized_idempotency_key:
-            existing_by_key = await self._repo.get_by_idempotency_key(
-                workspace_id=workspace_id,
-                idempotency_key=normalized_idempotency_key,
-            )
-            if existing_by_key is not None:
-                if existing_by_key.intent_id != intent_id:
-                    raise HTTPException(
-                        status_code=status.HTTP_409_CONFLICT,
-                        detail={
-                            "code": "INTENT_IDEMPOTENCY_CONFLICT",
-                            "message": "idempotency_key is already bound to a different intent.",
-                        },
-                    )
-                if existing_by_key.status in {
-                    "execution_started",
-                    "execution_completed",
-                    "execution_failed",
-                }:
-                    return await self._serialize_with_fresh_timestamps(
-                        existing_by_key,
-                        idempotent_replay=True,
-                        confidence_override={
-                            "score": float(existing_by_key.confidence_score or 0.0),
-                            "band": str(
-                                existing_by_key.confidence_band
-                                or _confidence_band(float(existing_by_key.confidence_score or 0.0))
-                            ),
-                            "approval_required": bool(existing_by_key.approval_required),
-                        },
-                    )
-
-        intent = existing_by_key if existing_by_key is not None else await self._repo.get_by_id(intent_id)
-        if intent is None:
+        # ADR-028 C3: lock the intent row; concurrent executes serialize here.
+        intent = await self._repo.get_by_id(intent_id, lock=True)
+        if intent is None or intent.workspace_id != workspace_id:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail={"code": "INTENT_NOT_FOUND", "message": "Intent not found."},
             )
-        if intent.workspace_id != workspace_id:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail={"code": "INTENT_NOT_FOUND", "message": "Intent not found."},
-            )
+        stored_key = _coerce_non_empty_text(intent.idempotency_key) or None
+        key = await resolve_execution_key(self._repo, workspace_id=workspace_id, intent=intent, supplied=supplied_key)
 
-        if intent.status == "execution_started":
-            if normalized_idempotency_key and intent.idempotency_key == normalized_idempotency_key:
+        if intent.status in _EXECUTION_STATUSES:
+            if stored_key is not None and key == stored_key:
                 return await self._serialize_with_fresh_timestamps(
-                    intent,
-                    idempotent_replay=True,
-                    confidence_override={
-                        "score": float(intent.confidence_score or 0.0),
-                        "band": str(
-                            intent.confidence_band
-                            or _confidence_band(float(intent.confidence_score or 0.0))
-                        ),
-                        "approval_required": bool(intent.approval_required),
+                    intent, idempotent_replay=True, confidence_override=_confidence_payload(intent),
+                )
+            if intent.status == "execution_started":
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail={
+                        "code": "INTENT_ALREADY_EXECUTING",
+                        "message": "Intent execution has already been started.",
                     },
                 )
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail={
-                    "code": "INTENT_ALREADY_EXECUTING",
-                    "message": "Intent execution has already been started.",
-                },
-            )
 
         if intent.status != "validated":
             raise HTTPException(
@@ -530,6 +699,16 @@ class IntentExecutionService:
                 detail={
                     "code": "INTENT_NOT_EXECUTABLE",
                     "message": "Intent must be in validated state before execution.",
+                },
+            )
+        validated_event_pending = intent.queue_status == _DEFERRED
+        # Compare-and-set: only one transaction can move validated -> execution_started.
+        if not await self._repo.claim_for_execution(intent_id=intent_id, workspace_id=workspace_id):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "code": "INTENT_ALREADY_EXECUTING",
+                    "message": "Intent execution has already been started.",
                 },
             )
 
@@ -545,6 +724,7 @@ class IntentExecutionService:
                 "execution_started_at": now.isoformat(),
                 "requested_by_user_id": requested_by_user_id,
                 "correlation_id": str(normalized_correlation_id),
+                **correlation_meta,
             }
         )
 
@@ -554,69 +734,13 @@ class IntentExecutionService:
         explainability_started.update(
             {
                 "execution_posture": "simulation_required_before_hypervisor",
-                "execution_summary": "Execution requested; no controller is installed and no dispatch occurred.",
+                "execution_summary": _STARTED_SUMMARY,
             }
         )
 
         confidence_score = 0.0
         confidence_band = _confidence_band(confidence_score)
         approval_required = True
-
-        update_kwargs: dict[str, Any] = {
-            "status": "execution_started",
-            "execution_provenance": execution_provenance_started,
-            "explainability": explainability_started,
-            "confidence_score": confidence_score,
-            "confidence_band": confidence_band,
-            "approval_required": approval_required,
-            "queue_status": "queued",
-            "warning": None,
-        }
-        if normalized_idempotency_key is not None:
-            update_kwargs["idempotency_key"] = normalized_idempotency_key
-
-        await self._repo.update_status(intent, **update_kwargs)
-
-        stream_entry_id = None
-        queue_status = "queued"
-        warning = None
-        event_payload = {
-            "org_id": str(workspace.org_id),
-            "intent_id": str(intent.intent_id),
-            "workspace_id": str(intent.workspace_id),
-            "network_id": str(intent.network_id) if intent.network_id is not None else None,
-            "intent_kind": str(intent.intent_kind),
-            "status": "execution_started",
-            "validation_result": (
-                dict(intent.validation_result)
-                if isinstance(intent.validation_result, dict)
-                else {}
-            ),
-            "execution_provenance": execution_provenance_started,
-            "explainability": explainability_started,
-            "confidence": {
-                "score": confidence_score,
-                "band": confidence_band,
-                "approval_required": approval_required,
-            },
-            "requested_by_user_id": requested_by_user_id,
-        }
-
-        try:
-            stream_entry_id = await publish_event(
-                redis=self._redis,
-                event_type="intent.execution_started",
-                source="intent",
-                payload=event_payload,
-                correlation_id=str(normalized_correlation_id),
-            )
-        except Exception:  # noqa: BLE001
-            queue_status = "deferred"
-            warning = "event_queue_unavailable"
-
-        terminal_status = "execution_failed"
-        terminal_event_type = f"intent.{terminal_status}"
-        terminal_time = datetime.now(UTC)
 
         hypervisor_outcome = HypervisorExecutionService().execute(
             intent_id=intent.intent_id,
@@ -630,15 +754,12 @@ class IntentExecutionService:
             requested_by_user_id=requested_by_user_id,
         )
 
+        terminal_status = hypervisor_outcome.terminal_status
+        terminal_time = datetime.now(UTC)
         terminal_execution_provenance = dict(execution_provenance_started)
         terminal_execution_provenance.pop("rollback", None)
         terminal_execution_provenance.pop("execution_completed_at", None)
         terminal_execution_provenance.pop("completion_mode", None)
-        terminal_explainability = dict(explainability_started)
-
-        terminal_status = hypervisor_outcome.terminal_status
-        terminal_event_type = f"intent.{terminal_status}"
-
         terminal_execution_provenance.update(
             {
                 "pipeline_stage": "execution_failed",
@@ -648,6 +769,7 @@ class IntentExecutionService:
                 "verification": hypervisor_outcome.verification,
             }
         )
+        terminal_explainability = dict(explainability_started)
         terminal_explainability.update(
             {
                 "execution_summary": hypervisor_outcome.execution_summary,
@@ -655,70 +777,47 @@ class IntentExecutionService:
             }
         )
 
-        if queue_status == "deferred" and warning:
-            terminal_execution_provenance["event_publication"] = {
-                "status": "deferred",
-                "warning": warning,
-            }
-
-        await self._repo.update_status(
-            intent,
-            status=terminal_status,
-            execution_provenance=terminal_execution_provenance,
-            explainability=terminal_explainability,
-            queue_status=queue_status,
-            warning=warning,
-        )
-
-        terminal_payload = {
-            "org_id": str(workspace.org_id),
-            "intent_id": str(intent.intent_id),
-            "workspace_id": str(intent.workspace_id),
-            "network_id": str(intent.network_id) if intent.network_id is not None else None,
-            "intent_kind": str(intent.intent_kind),
+        update_kwargs: dict[str, Any] = {
             "status": terminal_status,
-            "validation_result": (
-                dict(intent.validation_result)
-                if isinstance(intent.validation_result, dict)
-                else {}
-            ),
             "execution_provenance": terminal_execution_provenance,
             "explainability": terminal_explainability,
-            "confidence": {
-                "score": confidence_score,
-                "band": confidence_band,
-                "approval_required": approval_required,
-            },
-            "requested_by_user_id": requested_by_user_id,
+            "confidence_score": confidence_score,
+            "confidence_band": confidence_band,
+            "approval_required": approval_required,
+            # ADR-028: committed before any publication; success is recorded after.
+            "queue_status": _DEFERRED,
+            "stream_entry_id": None,
+            "warning": _QUEUE_UNAVAILABLE,
         }
-
+        if stored_key is None and key is not None:
+            update_kwargs["idempotency_key"] = key
+        await self._repo.update_status(intent, **update_kwargs)
         try:
-            terminal_stream_entry_id = await publish_event(
-                redis=self._redis,
-                event_type=terminal_event_type,
-                source="intent",
-                payload=terminal_payload,
-                correlation_id=str(normalized_correlation_id),
-            )
-            stream_entry_id = terminal_stream_entry_id
-        except Exception as exc:  # noqa: BLE001
+            await self._db.commit()
+        except IntegrityError as exc:
+            await self._db.rollback()
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail={
+                "code": "INTENT_IDEMPOTENCY_CONFLICT",
+                "message": "idempotency_key is already bound to a different intent.",
+            }) from exc
+
+        events = legacy_execution_events(intent, workspace.org_id)
+        if validated_event_pending:
+            events.insert(0, validated_event(intent, workspace.org_id))
+        try:
+            stream_entry_id = await publish_intent_events(self._redis, events)
+        except Exception as exc:  # noqa: BLE001 - committed row stays deferred for the sweep
             logger.warning(
                 "intent_terminal_event_publish_failed",
                 intent_id=str(intent.intent_id),
-                event_type=terminal_event_type,
                 status=terminal_status,
                 correlation_id=str(normalized_correlation_id),
-                error=str(exc),
+                error_type=type(exc).__name__,
             )
-
-        await self._repo.update_status(
-            intent,
-            status=terminal_status,
-            queue_status=queue_status,
-            stream_entry_id=stream_entry_id,
-            warning=warning,
-        )
-        await self._db.commit()
+        else:
+            await self._repo.update_status(intent, status=terminal_status, queue_status="queued",
+                                           stream_entry_id=stream_entry_id, warning=None)
+            await self._db.commit()
 
         return await self._serialize_with_fresh_timestamps(
             intent,
@@ -796,6 +895,7 @@ def _serialize_intent(
         "requested_by_user_id": str(intent.requested_by_user_id),
         "requested_at": intent.requested_at.isoformat(),
         "updated_at": intent.updated_at.isoformat(),
+        "approval_binding": approval_binding_of(intent),
     }
     if base["validation_result"].get("validation_kind") != "manual_lab_plan":
         base["validation_result"].update(
@@ -829,6 +929,7 @@ def _serialize_intent(
             else {}
         )
         base["created_at"] = intent.created_at.isoformat()
+        base["simulation_action_binding"] = simulation_action_binding_of(intent)
         return base
 
     base["idempotent_replay"] = idempotent_replay

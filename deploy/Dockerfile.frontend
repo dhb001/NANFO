@@ -1,14 +1,25 @@
 FROM node:22.22.0-alpine3.23@sha256:e4bf2a82ad0a4037d28035ae71529873c069b13eb0455466ae0bc13363826e34 AS build
 WORKDIR /build
 COPY frontend/package.json frontend/package-lock.json ./
-RUN npm ci --no-audit --no-fund
+# Dependency lifecycle scripts never run; platform binaries come from locked optional packages.
+RUN npm ci --ignore-scripts --no-audit --no-fund
 COPY frontend/ ./
-RUN npm run lint && npm run typecheck && npm run build
+# C16: the gateway build is same-origin (API "" and ws(s) from window.location). Any
+# VITE_* value in the build environment is refused rather than baked into bundles
+# (awk's ENVIRON: no shell pipe whose failure could be masked).
+RUN awk 'BEGIN { for (name in ENVIRON) if (name ~ /^VITE_/) { print "VITE_* must be unset for the production gateway build (C16)" > "/dev/stderr"; exit 1 } }' \
+    && npm run lint && npm run typecheck && npm run build \
+    && find dist -name '*.map' -delete
 
 FROM nginx:1.28.2-alpine3.23@sha256:5b4900b042ccfa8b0a73df622c3a60f2322faeb2be800cbee5aa7b44d241649e
 COPY deploy/nginx.conf /etc/nginx/nginx.conf
 COPY deploy/nginx-upstream.conf /etc/nginx/nginx-upstream.conf
+COPY deploy/nginx-security-headers.conf /etc/nginx/nginx-security-headers.conf
+COPY deploy/nginx-proxy.conf /etc/nginx/nginx-proxy.conf
+COPY deploy/nginx-upstream-single.conf /etc/nginx/nanfo/upstream-single.conf
+COPY deploy/nginx-distributed-upstream.conf /etc/nginx/nanfo/upstream-distributed.conf
+COPY deploy/gateway-entrypoint.sh /usr/local/bin/nanfo-gateway-entrypoint.sh
 COPY --from=build /build/dist /usr/share/nginx/html
 USER 10001:10001
 EXPOSE 8080
-ENTRYPOINT ["nginx", "-g", "daemon off;"]
+ENTRYPOINT ["sh", "/usr/local/bin/nanfo-gateway-entrypoint.sh"]

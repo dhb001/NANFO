@@ -30,6 +30,53 @@ IMAGE_PATTERN = r"sha256:[0-9a-f]{64}"
 ID_PATTERN = r"[0-9a-f]{64}"
 LOG_LIMIT = 1024 * 1024
 DISK_LIMIT = 1024 * 1024 * 1024
+# ADR-028 C23: the successor lab profile of emulation/compose.yaml. The successor runner
+# refuses a wider capability bounding set or a missing NoNewPrivs flag.
+SUCCESSOR_LAB_SECURITY = (
+    "--cap-drop",
+    "ALL",
+    "--cap-add",
+    "NET_ADMIN",
+    "--cap-add",
+    "NET_RAW",
+    "--cap-add",
+    "SYS_ADMIN",
+    "--security-opt",
+    "no-new-privileges:true",
+    "--read-only",
+    "--tmpfs",
+    "/run:rw,exec,nosuid,nodev,size=64m,mode=0755",
+    "--tmpfs",
+    "/tmp:rw,exec,nosuid,nodev,size=64m,mode=1777",
+    "--tmpfs",
+    "/var/run/openvswitch:rw,nosuid,nodev,size=16m,mode=0750",
+    "--tmpfs",
+    "/var/lib/openvswitch:rw,nosuid,nodev,size=32m,mode=0750",
+    "--tmpfs",
+    "/etc/openvswitch:rw,nosuid,nodev,size=8m,mode=0750",
+    "--tmpfs",
+    "/var/log:rw,noexec,nosuid,nodev,size=32m,mode=0755",
+)
+# FRR experiment modes: ospfd's compiled capability set and its crash-log directory.
+SUCCESSOR_FRR_SECURITY = (
+    "--cap-add",
+    "NET_BIND_SERVICE",
+    "--tmpfs",
+    "/var/tmp:rw,noexec,nosuid,nodev,size=16m",
+)
+# Historical reproduction of recorded EOL images only, by explicit NANFO_LAB_FROZEN=1.
+FROZEN_LAB_SECURITY = (
+    "--privileged",
+    "--tmpfs",
+    "/run:exec,size=64m",
+    "--tmpfs",
+    "/tmp:exec,size=64m",
+)
+LAB_PROFILES = ("successor", "frozen")
+SUCCESSOR_LIMITATION = (
+    "Unprivileged successor lab (cap-drop ALL + NET_ADMIN/NET_RAW/SYS_ADMIN, no-new-privileges); "
+    "its results require fresh qualification."
+)
 
 
 @dataclass(frozen=True)
@@ -114,10 +161,48 @@ def seeds(split, first, count):
     ]
 
 
-def plan(image):
+def labProfile(environ=None):
+    """C23: successor by default; the privileged frozen lab only with NANFO_LAB_FROZEN=1."""
+    value = (os.environ if environ is None else environ).get("NANFO_LAB_FROZEN", "")
+    if value not in ("", "0", "1"):
+        raise ValueError("NANFO_LAB_FROZEN must be 1 (frozen reproduction) or unset")
+    return "frozen" if value == "1" else "successor"
+
+
+def requireImageProfile(profile, labels):
+    """A labelled successor image never runs privileged; recorded images never unprivileged."""
+    labels = labels or {}
+    if type(labels) is not dict:
+        raise ValueError("invalid lab image labels")
+    successor = (
+        labels.get("org.nanfo.lab.profile") == "successor"
+        and labels.get("org.nanfo.lab.frozen") == "false"
+    )
+    if profile == "successor" and not successor:
+        raise ValueError(
+            "successor launch requires an image labelled org.nanfo.lab.profile=successor; "
+            "reproduce recorded images only with NANFO_LAB_FROZEN=1"
+        )
+    if profile == "frozen" and "org.nanfo.lab.profile" in labels:
+        raise ValueError("NANFO_LAB_FROZEN=1 never runs a labelled successor image privileged")
+
+
+def labSecurity(profile, mode, group):
+    if profile == "frozen":
+        return list(FROZEN_LAB_SECURITY)
+    if profile != "successor":
+        raise ValueError("unknown lab profile")
+    frr = SUCCESSOR_FRR_SECURITY if mode in ("matched", "ospf") else ()
+    # Container root has no DAC_OVERRIDE; it writes lab output through this group only.
+    return [*SUCCESSOR_LAB_SECURITY, *frr, "--group-add", str(group)]
+
+
+def plan(image, profile="successor"):
     if not re.fullmatch(IMAGE_PATTERN, image):
         raise ValueError("image must be an already-local immutable sha256 image ID")
-    return {
+    if profile not in LAB_PROFILES:
+        raise ValueError("unknown lab profile")
+    frozen = {
         "version": 1,
         "config": asdict(CONFIG),
         "ppo_config": PPOConfig(seed=CONFIG.model_seed, rollout=CONFIG.rollout).model_dump(),
@@ -145,6 +230,14 @@ def plan(image):
             "Privileged disposable Mininet container; no host network/PID/credential mounts.",
         ],
     }
+    if profile == "frozen":
+        # Byte-compatible with every pre-C23 plan, which carries no lab_profile field.
+        return frozen
+    return {
+        **frozen,
+        "lab_profile": "successor",
+        "limitations": [*frozen["limitations"][:-1], SUCCESSOR_LIMITATION],
+    }
 
 
 def loadPlan(output):
@@ -153,7 +246,7 @@ def loadPlan(output):
         raise ValueError("invalid campaign identity")
     if value.get("output") != str(output):
         raise ValueError("campaign output identity differs")
-    expected = plan(value["image_id"])
+    expected = plan(value["image_id"], value.get("lab_profile", "frozen"))
     if any(value.get(key) != item for key, item in expected.items()):
         raise ValueError("campaign plan differs from frozen configuration")
     return value
@@ -419,6 +512,31 @@ class Supervisor:
     def startLab(self, stage, mode="sdn"):
         self.exclusiveLab()
         self.check()
+        profile = self.frozen.get("lab_profile", "frozen")
+        if labProfile() != profile:
+            raise ValueError(
+                "lab profile differs from the plan: frozen reproduction plans require "
+                "NANFO_LAB_FROZEN=1, successor plans forbid it"
+            )
+        labels = parseJson(
+            self.command(
+                [
+                    "docker",
+                    "image",
+                    "inspect",
+                    "--format",
+                    "{{json .Config.Labels}}",
+                    self.frozen["image_id"],
+                ],
+                10,
+            )
+        )
+        requireImageProfile(profile, labels)
+        labOutput = self.output / "lab-output"
+        if profile == "successor":
+            # The 0700 campaign directory still hides it from every other host user.
+            os.chmod(labOutput, 0o2770)
+        security = labSecurity(profile, mode, os.stat(labOutput).st_gid)
         name = "nanfo-training-" + self.frozen["campaign_id"]
         cidfile = f"{stage}.cid"
         owner = {
@@ -444,7 +562,7 @@ class Supervisor:
                 f"{LABEL}={owner['campaign_id']}",
                 "--network",
                 "none",
-                "--privileged",
+                *security,
                 "--cpus",
                 "2",
                 "--memory",
@@ -453,12 +571,8 @@ class Supervisor:
                 "768m",
                 "--pids-limit",
                 "256",
-                "--tmpfs",
-                "/run:exec,size=64m",
-                "--tmpfs",
-                "/tmp:exec,size=64m",
                 "--mount",
-                f"type=bind,src={self.output / 'lab-output'},dst=/output",
+                f"type=bind,src={labOutput},dst=/output",
                 "--log-driver",
                 "json-file",
                 "--log-opt",
@@ -839,7 +953,7 @@ def main(argv=None):
     try:
         output = outputPath(args.output, existing=args.command != "run")
         if args.command == "run":
-            frozen = plan(args.image_id)
+            frozen = plan(args.image_id, labProfile())
             if output.exists():
                 raise ValueError("existing output refused; automatic resume is disabled")
             if args.dry_run:

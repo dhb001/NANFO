@@ -1,4 +1,8 @@
-"""Fresh deployment only: provision separate roles, migrate as owner, seed Identity."""
+"""Fresh deployment only: provision separate roles, migrate as owner, seed Identity.
+
+Role passwords are sent as client-computed SCRAM-SHA-256 verifiers; plaintext never
+appears in SQL text (server logs, pg_stat_statements) or process arguments.
+"""
 
 import asyncio
 import os
@@ -7,8 +11,33 @@ from pathlib import Path
 
 import psycopg2
 from psycopg2 import sql
+from psycopg2.extensions import encrypt_password
 
 from deploy.entrypoint import read_secret
+from deploy.schema_contract import require_consistent_schema
+
+
+# ADR-028 retention/purge paths run as the runtime role and DELETE only from these
+# tables (network/report/simulation/intent outboxes, expired reports, alert observation
+# retention, coalesced autonomy decisions). The schema-wide DML grant below covers them;
+# initialization proves it, and proves audit_logs stays append-only (no UPDATE/DELETE/
+# TRUNCATE) for the runtime role.
+PURGE_TABLES = (
+    "network_outbox",
+    "report_outbox",
+    "reports",
+    "simulation_outbox",
+    "intent_outbox",
+    "alert_observations",
+    "autonomy_decisions",
+)
+
+
+def scram_verifier(connection, role, password):
+    verifier = encrypt_password(password, role, connection, "scram-sha-256")
+    if not isinstance(verifier, str) or not verifier.startswith("SCRAM-SHA-256$") or password in verifier:
+        raise ValueError("SCRAM verifier unavailable")
+    return verifier
 
 
 async def seed_actor():
@@ -31,6 +60,8 @@ async def seed_actor():
 
 
 def main():
+    # Refuse before any role/database mutation if the image's contract lags its head.
+    require_consistent_schema()
     owner_password = read_secret(Path("/run/secrets/postgres_owner_password"))
     connection = psycopg2.connect(
         host="postgres",
@@ -51,7 +82,7 @@ def main():
             cursor.execute(
                 sql.SQL(
                     "CREATE ROLE {} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION PASSWORD {}"
-                ).format(sql.Identifier(role), sql.Literal(password))
+                ).format(sql.Identifier(role), sql.Literal(scram_verifier(connection, role, password)))
             )
         cursor.execute("ALTER DATABASE nanfo OWNER TO nanfo_owner")
         cursor.execute("REVOKE ALL ON DATABASE nanfo FROM PUBLIC")
@@ -139,6 +170,21 @@ def main():
             )
             if cursor.fetchone()[0] is not True:
                 raise ValueError("ADR022/023 runtime table privileges unavailable")
+        cursor.execute(
+            "SELECT bool_and(has_table_privilege('nanfo_runtime', purge_table, 'SELECT') "
+            "AND has_table_privilege('nanfo_runtime', purge_table, 'DELETE')) "
+            "FROM unnest(%s::text[]) AS purge_table",
+            (list(PURGE_TABLES),),
+        )
+        if cursor.fetchone()[0] is not True:
+            raise ValueError("Runtime retention/purge DELETE privileges unavailable")
+        cursor.execute(
+            "SELECT has_table_privilege('nanfo_runtime', 'audit_logs', 'UPDATE') "
+            "OR has_table_privilege('nanfo_runtime', 'audit_logs', 'DELETE') "
+            "OR has_table_privilege('nanfo_runtime', 'audit_logs', 'TRUNCATE')"
+        )
+        if cursor.fetchone()[0] is not False:
+            raise ValueError("Audit log must stay append-only for the runtime role")
     connection.close()
     asyncio.run(seed_actor())
     print(f"Fresh deployment migrated to {CURRENT_SCHEMA}; dedicated operator created")

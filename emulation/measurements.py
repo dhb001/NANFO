@@ -2,11 +2,10 @@
 
 import json
 import math
-import os
 import re
-import tempfile
 from datetime import datetime, timezone
-from pathlib import Path
+
+from emulation.lab_contracts import atomic_publish
 
 MAX_BYTES = 1024 * 1024
 
@@ -16,26 +15,11 @@ def utcNow():
 
 
 def atomicJson(path, value):
-    path = Path(path)
+    """Publish 0640 with the parent directory's (reader) group; never world-readable."""
     data = json.dumps(value, allow_nan=False, separators=(",", ":")).encode("utf-8")
     if len(data) > MAX_BYTES:
         raise ValueError("JSON exceeds 1 MiB publication limit")
-    fd, temporary = tempfile.mkstemp(prefix=".publish-", dir=str(path.parent))
-    try:
-        with os.fdopen(fd, "wb") as stream:
-            stream.write(data)
-            stream.flush()
-            os.fsync(stream.fileno())
-            os.fchmod(stream.fileno(), 0o644)
-        os.replace(temporary, path)
-        directory = os.open(str(path.parent), os.O_RDONLY | os.O_DIRECTORY)
-        try:
-            os.fsync(directory)
-        finally:
-            os.close(directory)
-    finally:
-        if os.path.exists(temporary):
-            os.unlink(temporary)
+    atomic_publish(path, data)
 
 
 def readJson(path):

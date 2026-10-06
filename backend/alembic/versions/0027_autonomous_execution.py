@@ -56,6 +56,14 @@ def upgrade():
 
 
 def downgrade():
+    # Execution journals, immutable measured frames and seeded provider history (ADR-028).
+    if op.get_context().as_sql:
+        raise RuntimeError("Downgrade below 0027 must run online (not --sql): it must first verify that "
+                           "no autonomous journal or measured frame would be dropped")
+    if op.get_bind().scalar(sa.text("SELECT EXISTS (SELECT 1 FROM autonomous_executions) "
+                                    "OR EXISTS (SELECT 1 FROM autonomous_observations) "
+                                    "OR EXISTS (SELECT 1 FROM autonomous_provider_state)")):
+        raise RuntimeError("Downgrade below 0027 refused: autonomous execution journals or measured frames exist")
     op.drop_table("autonomous_provider_state")
     op.drop_table("autonomous_observations")
     op.drop_table("autonomous_executions")

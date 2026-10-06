@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import stat
 import sys
+import uuid
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -261,39 +263,64 @@ async def test_real_ingestion_contract_with_fake_redis(binding):
 def owner_doubles(binding):
     identity = SimpleNamespace(get_profile=AsyncMock(return_value=SimpleNamespace(
         permissions=["read:telemetry", "read:topology", "write:config"])))
-    network = SimpleNamespace(assert_network_workspace_access=AsyncMock(), assert_device_workspace_access=AsyncMock(
-        return_value=(binding.network_id, binding.workspace_id)))
     device = SimpleNamespace(device_id=binding.device_id, network_id=binding.network_id, status="active", ip_address=str(binding.target))
-    devices = SimpleNamespace(list_devices=AsyncMock(return_value=SimpleNamespace(items=[device], total=1)))
-    return identity, network, devices, device
+    # ADR-028: one owner read of the bound device (no inventory paging, no DeviceService).
+    network = SimpleNamespace(assert_network_workspace_access=AsyncMock(), assert_device_workspace_access=AsyncMock(
+        return_value=(binding.network_id, binding.workspace_id)), get_device_for_owner=AsyncMock(return_value=device))
+    return identity, network, device
 
 
 async def test_owner_contract_enforces_org_membership_write_and_address(binding):
-    identity, network, devices, _ = owner_doubles(binding)
-    await validate_owner_scope(binding, publish=True, identity=identity, network=network, devices=devices)
+    identity, network, _ = owner_doubles(binding)
+    await validate_owner_scope(binding, publish=True, identity=identity, network=network)
     assert network.assert_network_workspace_access.call_args.kwargs == {
         "network_id": binding.network_id, "requested_workspace_id": binding.workspace_id,
         "actor_user_id": str(binding.actor_user_id), "claim_org_id": binding.org_id, "require_write": True,
     }
+    network.get_device_for_owner.assert_awaited_once_with(
+        device_id=binding.device_id, network_id=binding.network_id, actor_user_id=str(binding.actor_user_id),
+        requested_workspace_id=binding.workspace_id, claim_org_id=binding.org_id,
+    )
 
 
-@pytest.mark.parametrize("case", ["permissions", "cross_network", "wrong_address", "inactive", "membership", "missing"])
+@pytest.mark.parametrize("case", ["permissions", "cross_network", "wrong_address", "inactive", "membership", "missing",
+                                  "other_device", "other_network", "invalid_address"])
 async def test_owner_rejects_invalid_bindings(binding, case):
-    identity, network, devices, device = owner_doubles(binding)
+    from fastapi import HTTPException
+
+    identity, network, device = owner_doubles(binding)
     if case == "permissions":
         identity.get_profile.return_value.permissions = ["read:telemetry", "read:topology"]
     elif case == "cross_network":
         network.assert_device_workspace_access.return_value = (binding.org_id, binding.workspace_id)
     elif case == "wrong_address":
         device.ip_address = "192.0.2.11"
+    elif case == "invalid_address":
+        device.ip_address = "not-an-address"
     elif case == "inactive":
         device.status = "inactive"
     elif case == "membership":
         network.assert_network_workspace_access.side_effect = SNMPError("denied")
-    else:
-        devices.list_devices.return_value.items = []
-    with pytest.raises(SNMPError):
-        await validate_owner_scope(binding, publish=True, identity=identity, network=network, devices=devices)
+    elif case == "other_device":
+        device.device_id = uuid.uuid4()
+    elif case == "other_network":
+        device.network_id = uuid.uuid4()
+    else:  # absent, deleted or foreign device: the owner read answers 404
+        network.get_device_for_owner.side_effect = HTTPException(status_code=404, detail="Device not found.")
+    with pytest.raises(SNMPError) as raised:
+        await validate_owner_scope(binding, publish=True, identity=identity, network=network)
+    if case == "missing":
+        assert raised.value.args[0] == "device_missing_or_inventory_limit"
+
+
+async def test_owner_read_authorization_denial_is_not_reported_as_a_missing_device(binding):
+    from fastapi import HTTPException
+
+    identity, network, _ = owner_doubles(binding)
+    network.get_device_for_owner.side_effect = HTTPException(status_code=403, detail="Insufficient permissions.")
+    with pytest.raises(HTTPException) as raised:  # the boundary classifies it as owner_authorization_denied
+        await validate_owner_scope(binding, publish=False, identity=identity, network=network)
+    assert raised.value.status_code == 403
 
 
 @pytest.mark.parametrize("mode", [0o644, 0o640, 0o666, 0o400])
@@ -481,3 +508,235 @@ async def test_cli_dry_run_has_no_transport_or_owner_io(binding, tmp_path, monke
     assert json.loads(output)["scope_checked"] is False
     assert "fixture-auth-only" not in output
     get.assert_not_awaited()
+
+
+# ------------------------------------------------ ADR-028 per-batch owner authorization
+
+
+class FakeClock:
+    def __init__(self):
+        self.value = 100.0
+
+    def __call__(self):
+        return self.value
+
+
+def boundary_with_doubles(binding, tmp_path, monkeypatch, *, active=True, ttl=10.0):
+    from contextlib import asynccontextmanager
+
+    from app.modules.telemetry import snmp_ownership
+
+    path = protected(tmp_path / "binding.json", binding.model_dump(mode="json"))
+    full = AsyncMock()
+    monkeypatch.setattr(snmp_ownership, "validate_owner_scope", full)
+    exists = AsyncMock(return_value=active)
+    monkeypatch.setattr(snmp_ownership.IdentityDirectoryService, "user_exists", exists)
+    sessions = []
+
+    @asynccontextmanager
+    async def session():
+        sessions.append(True)
+        yield object()
+
+    clock = FakeClock()
+    boundary = snmp_ownership.SNMPOwnerBoundary(binding_path=path, session_factory=session, redis=None,
+                                                authority_ttl_seconds=ttl, clock=clock)
+    return boundary, full, exists, clock, path
+
+
+async def test_owner_boundary_full_check_once_per_batch_then_cheap_revocation(binding, tmp_path, monkeypatch):
+    """Regression: every sample re-ran permissions, membership and up to 32x200 device pages."""
+    boundary, full, exists, _, _ = boundary_with_doubles(binding, tmp_path, monkeypatch)
+    await boundary.authorize(binding, True)
+    for _ in range(3):
+        await boundary.authorize(binding, False)  # per interface GET
+    for _ in range(112):
+        await boundary.authorize(binding, True)  # per published sample
+    assert full.await_count == 1 and boundary.full_checks == 1
+    assert exists.await_count == 115
+    assert all(call.args[-1] == binding.actor_user_id for call in exists.await_args_list)
+    boundary.invalidate()  # next batch
+    await boundary.authorize(binding, True)
+    assert full.await_count == 2
+
+
+async def test_owner_boundary_read_cache_never_grants_write(binding, tmp_path, monkeypatch):
+    boundary, full, _, _, _ = boundary_with_doubles(binding, tmp_path, monkeypatch)
+    await boundary.authorize(binding, False)
+    await boundary.authorize(binding, True)
+    assert [call.kwargs["publish"] for call in full.await_args_list] == [False, True]
+
+
+async def test_owner_boundary_ttl_expiry_and_binding_revision(binding, tmp_path, monkeypatch):
+    boundary, full, _, clock, path = boundary_with_doubles(binding, tmp_path, monkeypatch, ttl=10.0)
+    await boundary.authorize(binding, True)
+    clock.value += 9.9
+    await boundary.authorize(binding, True)
+    assert full.await_count == 1
+    clock.value += 0.2
+    await boundary.authorize(binding, True)
+    assert full.await_count == 2
+    changed = binding.model_dump(mode="json")
+    changed["port"] = 1161
+    protected(path, changed)
+    with pytest.raises(SNMPError, match="binding_changed"):
+        await boundary.authorize(binding, True)  # version check on every call
+    protected(path, binding.model_dump(mode="json"))
+    await boundary.authorize(binding, True)
+    assert full.await_count == 3  # the revision change dropped the cached authority
+
+
+async def test_owner_boundary_deactivated_actor_is_observed_on_next_call(binding, tmp_path, monkeypatch):
+    boundary, full, exists, _, _ = boundary_with_doubles(binding, tmp_path, monkeypatch)
+    await boundary.authorize(binding, True)
+    exists.return_value = False
+    with pytest.raises(SNMPError, match="collector_actor_revoked"):
+        await boundary.authorize(binding, True)
+    exists.return_value = True
+    await boundary.authorize(binding, True)
+    assert full.await_count == 2  # revocation invalidated the batch authority
+
+
+async def test_owner_boundary_unavailable_is_logged_with_code_and_counted(binding, tmp_path, monkeypatch):
+    from sqlalchemy.exc import OperationalError
+
+    from app.modules.telemetry import snmp_ownership
+    from app.modules.telemetry.diagnostics import FailureCounter
+
+    boundary, full, _, _, _ = boundary_with_doubles(binding, tmp_path, monkeypatch)
+    boundary._failures = FailureCounter()
+    logged = []
+    monkeypatch.setattr(snmp_ownership.logger, "warning", lambda event, **fields: logged.append((event, fields)))
+    full.side_effect = OperationalError("SELECT 1", {}, Exception("postgresql://nanfo:hunter2@db"))
+    with pytest.raises(SNMPError, match="owner_authorization_failed_or_unavailable") as raised:
+        await boundary.authorize(binding, True)
+    assert raised.value.__suppress_context__
+    assert logged == [("telemetry_owner_authorization_failed", {
+        "error_code": "owner_authorization_unavailable", "error_type": "OperationalError",
+        "device_id": str(binding.device_id), "publish": True, "cached": False})]
+    from fastapi import HTTPException
+
+    full.side_effect = HTTPException(403, "Insufficient permissions.")
+    with pytest.raises(SNMPError):
+        await boundary.authorize(binding, True)
+    assert boundary._failures.snapshot() == {"owner_authorization_denied": 1, "owner_authorization_unavailable": 1}
+    assert "hunter2" not in repr(logged)
+
+
+# ------------------------------------------------ ADR-028 SNMPv3 credential file lifecycle
+
+
+@pytest.fixture
+def runtime_base(tmp_path, monkeypatch):
+    base = tmp_path / "runtime"
+    base.mkdir(mode=0o700)
+    monkeypatch.setenv("NANFO_SNMP_RUNTIME_DIR", str(base))
+    return base
+
+
+async def test_secret_file_is_private_memory_scoped_and_unlinked_after_command(
+        binding, tmp_path, monkeypatch, runtime_base):
+    from app.modules.telemetry import snmp_transport
+
+    transport = NetSNMPTransport(credentials_path=protected(tmp_path / "secret.json", credentials()))
+    monkeypatch.setattr(transport, "check_available", lambda: None)
+    seen = {}
+
+    async def execute(args, env, cwd, timeout):
+        directory = Path(cwd)
+        config = directory / "snmp.conf"
+        seen["directory"], seen["config"] = directory, config
+        assert directory.parent == runtime_base  # never the shared default temp dir
+        assert stat.S_IMODE(runtime_base.stat().st_mode) == 0o700
+        assert stat.S_IMODE(directory.stat().st_mode) == 0o700
+        assert stat.S_IMODE(config.lstat().st_mode) == 0o600 and not config.is_symlink()
+        assert config.stat().st_uid == os.geteuid()
+        return FIRST
+
+    removed = []
+    real_rmtree = snmp_transport.shutil.rmtree
+
+    def rmtree(path, **kwargs):
+        # The secret must already be gone when directory cleanup starts.
+        removed.append((Path(path), (Path(path) / "snmp.conf").exists()))
+        real_rmtree(path, **kwargs)
+
+    monkeypatch.setattr(transport, "_execute", execute)
+    monkeypatch.setattr(snmp_transport.shutil, "rmtree", rmtree)
+    assert (await transport.get(binding, binding.interfaces[0])).rx == 1_000_000_000
+    assert removed == [(seen["directory"], False)]
+    assert not seen["directory"].exists() and list(runtime_base.iterdir()) == []
+
+
+@pytest.mark.parametrize("failure", ["error", "cancel"])
+async def test_secret_file_removed_when_command_fails_or_is_cancelled(
+        binding, tmp_path, monkeypatch, runtime_base, failure):
+    transport = NetSNMPTransport(credentials_path=protected(tmp_path / "secret.json", credentials()))
+    monkeypatch.setattr(transport, "check_available", lambda: None)
+    started = asyncio.Event()
+
+    async def execute(args, env, cwd, timeout):
+        started.set()
+        if failure == "error":
+            raise SNMPError("snmp_request_failed")
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(transport, "_execute", execute)
+    task = asyncio.create_task(transport.get(binding, binding.interfaces[0]))
+    await started.wait()
+    if failure == "cancel":
+        task.cancel()
+    with pytest.raises((SNMPError, asyncio.CancelledError)):
+        await task
+    assert list(runtime_base.iterdir()) == []
+
+
+@pytest.mark.parametrize("problem", ["shared", "symlink", "missing", "relative"])
+def test_runtime_base_must_be_private(tmp_path, monkeypatch, problem):
+    from app.modules.telemetry.snmp_transport import private_runtime_base
+
+    base = tmp_path / "runtime"
+    if problem == "shared":
+        base.mkdir(mode=0o700)
+        base.chmod(0o755)
+    elif problem == "symlink":
+        real = tmp_path / "real"
+        real.mkdir(mode=0o700)
+        base.symlink_to(real, target_is_directory=True)
+    elif problem == "relative":
+        base = Path("relative-runtime")
+    monkeypatch.setenv("NANFO_SNMP_RUNTIME_DIR", str(base))
+    with pytest.raises(SNMPError, match="snmp_runtime_dir_unsafe"):
+        private_runtime_base()
+
+
+def test_runtime_base_prefers_memory_backed_dirs_and_fails_closed(tmp_path, monkeypatch):
+    from app.modules.telemetry import snmp_transport
+
+    monkeypatch.delenv("NANFO_SNMP_RUNTIME_DIR", raising=False)
+    xdg = tmp_path / "xdg"
+    xdg.mkdir(mode=0o700)
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(xdg))
+    assert snmp_transport.private_runtime_base() == xdg
+    monkeypatch.delenv("XDG_RUNTIME_DIR")
+    monkeypatch.setattr(snmp_transport, "_SHARED_MEMORY_DIR", tmp_path / "no-shm")
+    with pytest.raises(SNMPError, match="snmp_runtime_dir_unavailable"):
+        snmp_transport.private_runtime_base()  # never falls back to the default temp dir
+
+
+def test_protected_revision_is_exact_even_when_timestamps_do_not_change(binding, tmp_path):
+    from app.modules.telemetry.snmp_config import ProtectedRevision
+
+    path = protected(tmp_path / "binding.json", binding.model_dump(mode="json"))
+    revision = ProtectedRevision(path, SNMPBinding)
+    assert revision.matches(binding) and revision.matches(binding)
+    before = path.stat()
+    changed = binding.model_dump(mode="json")
+    changed["sys_name"] = changed["sys_name"][:-1] + ("x" if changed["sys_name"][-1] != "x" else "y")
+    path.write_text(json.dumps(changed))  # same size, different identity
+    os.utime(path, ns=(before.st_atime_ns, before.st_mtime_ns))  # coarse clock: same mtime
+    assert path.stat().st_size == before.st_size
+    assert not revision.matches(binding)
+    path.chmod(0o644)
+    with pytest.raises(SNMPError):
+        revision.matches(binding)  # security checks run on every call, not only on change

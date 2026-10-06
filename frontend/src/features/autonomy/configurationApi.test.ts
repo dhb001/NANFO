@@ -18,6 +18,9 @@ describe("ADR018 versioned configuration API", () => {
     { ...input, operational: { ...data.operational, max_observation_age_seconds: 31 } },
     { ...input, operational: { ...data.operational, min_route_hold_seconds: 2 } },
     { ...input, operational: { ...data.operational, decision_interval_seconds: 1.5 } },
+    { ...input, operational: { ...data.operational, min_confidence: 0.9 } },
+    { ...input, operational: { ...data.operational, allow_uncalibrated_confidence: "yes" as unknown as boolean } },
+    { ...input, operational: Object.fromEntries(Object.entries(data.operational).filter(([key]) => key !== "min_confidence")) as unknown as typeof data.operational },
     { ...input, training: { reward_weights: { goodput: NaN } } },
     { ...input, training: { reward_weights: { "unsupported/path": 1 } } },
     { ...input, production_dispatch: false },
@@ -25,7 +28,8 @@ describe("ADR018 versioned configuration API", () => {
     const fetch = vi.fn(); vi.stubGlobal("fetch", fetch);
     await expect(putConfiguration("token", data.workspace_id, request)).rejects.toThrow(); expect(fetch).not.toHaveBeenCalled();
   });
-  it.each([{ workspace_id: "other" }, { effective_training: { reward_weights: {} } }, { safety_merge: "disabled" }, { history: [null] }])("fails closed on incompatible response %#", async (patch) => {
+  it.each([{ workspace_id: "other" }, { effective_training: { reward_weights: {} } }, { safety_merge: "disabled" }, { history: [null] },
+    { allow_uncalibrated_confidence_honoured: undefined }, { operational: { ...data.operational, min_confidence: 0.5 } }])("fails closed on incompatible response %#", async (patch) => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json(envelope({ ...data, ...patch }))));
     await expect(getConfiguration("token", data.network_id, data.workspace_id)).rejects.toThrow();
   });

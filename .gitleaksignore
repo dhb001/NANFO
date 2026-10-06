@@ -1,0 +1,44 @@
+# Reviewed gitleaks findings (exact fingerprints: <commit>:<path>:<rule>:<line>).
+# Each entry was inspected on 2026-09-24 and is not a credential. Fingerprints are bound
+# to historical commits, so they can never suppress a finding in a new commit.
+# The 71 expired receiver tokens are handled in .gitleaks.toml, not here (ADR-028 §5).
+# Add entries only after review; prefer fixing the source of a new finding.
+
+# HMAC-SHA256 external_fingerprints of secret files in deployment backup manifests (deploy/backup_restore.py
+# external_fingerprints); keyed digests, never the secret values.
+3f9f1f1fd247cd1af6d66cf38d94155ee32a91e1:nanfo-experimental-campaign-014/source/deploy/state/adr023-private-evidence/nanfo-deploy-verify-b_fzalg0/backup/manifest.json:generic-api-key:1
+3f9f1f1fd247cd1af6d66cf38d94155ee32a91e1:nanfo-experimental-campaign-014/source/deploy/state/adr023-private-evidence/nanfo-deploy-verify-d_iukq6u/backup/manifest.json:generic-api-key:1
+3f9f1f1fd247cd1af6d66cf38d94155ee32a91e1:nanfo-experimental-campaign-014/source/deploy/state/adr023-private-evidence/nanfo-deploy-verify-e5vhtnkm/backup/manifest.json:generic-api-key:1
+3f9f1f1fd247cd1af6d66cf38d94155ee32a91e1:nanfo-experimental-campaign-014/source/deploy/state/adr023-private-evidence/nanfo-deploy-verify-fnh8dvek/backup/manifest.json:generic-api-key:1
+3f9f1f1fd247cd1af6d66cf38d94155ee32a91e1:nanfo-experimental-campaign-014/source/deploy/state/adr023-private-evidence/nanfo-deploy-verify-tmi4p8hn/backup/manifest.json:generic-api-key:1
+3f9f1f1fd247cd1af6d66cf38d94155ee32a91e1:nanfo-experimental-campaign-014/source/deploy/state/adr023-private-evidence/nanfo-deploy-verify-ui7t5pi2/backup/manifest.json:generic-api-key:1
+75b514f795c93d68a1f8d9b18263dec44a253c7b:docs/project/ReviewClosureEvidence/accepted/deployment/backup-manifest.json:generic-api-key:1
+75b514f795c93d68a1f8d9b18263dec44a253c7b:docs/project/ReviewClosureEvidence/refresh-c8rorfzd/deployment/backup-manifest.json:generic-api-key:1
+
+# SHA-256 digests of backup.key files (relocation verified_sha256 maps); digests, never key material.
+3f9f1f1fd247cd1af6d66cf38d94155ee32a91e1:nanfo-experimental-campaign-014/source/deploy/state/adr023-private-evidence/relocation-nanfo-deploy-verify-b_fzalg0.json:generic-api-key:21
+3f9f1f1fd247cd1af6d66cf38d94155ee32a91e1:nanfo-experimental-campaign-014/source/deploy/state/adr023-private-evidence/relocation-nanfo-deploy-verify-e5vhtnkm.json:generic-api-key:21
+3f9f1f1fd247cd1af6d66cf38d94155ee32a91e1:nanfo-experimental-campaign-014/source/deploy/state/adr023-private-evidence/relocation-nanfo-deploy-verify-fnh8dvek.json:generic-api-key:21
+3f9f1f1fd247cd1af6d66cf38d94155ee32a91e1:nanfo-experimental-campaign-014/source/deploy/state/adr023-private-evidence/relocation.json:generic-api-key:21
+3f9f1f1fd247cd1af6d66cf38d94155ee32a91e1:nanfo-experimental-campaign-014/source/deploy/state/adr023-private-evidence/relocation.json:generic-api-key:43
+3f9f1f1fd247cd1af6d66cf38d94155ee32a91e1:nanfo-experimental-campaign-014/source/deploy/state/adr023-private-evidence/relocation.json:generic-api-key:65
+
+# Synthetic scanner-fixture literal (POSTGRES_PASSWORD=abcdef123456) in a negative test; never a credential.
+3f9f1f1fd247cd1af6d66cf38d94155ee32a91e1:nanfo-experimental-campaign-014/source/scripts/test_preserve_qualification_evidence.py:generic-api-key:45
+3f9f1f1fd247cd1af6d66cf38d94155ee32a91e1:scripts/test_preserve_qualification_evidence.py:generic-api-key:45
+
+# Source code false positive: a keyword-argument list in deploy/backup_restore.py, no literal value.
+3f9f1f1fd247cd1af6d66cf38d94155ee32a91e1:nanfo-experimental-campaign-014/source/deploy/backup_restore.py:generic-api-key:1232
+ef069559b6163b2add007d05c6326941fc7791c9:deploy/backup_restore.py:generic-api-key:1101
+
+# Commit e55a4f5 (wave-2 snapshot), reviewed 2026-09-24. The earlier wording of the comment
+# above matched the generic rule; synthetic JWT literals in log/report redaction tests
+# (payloads sub=secret and sub=1234567890, signatures are plain words); synthetic
+# production-shaped store passwords and a previous-signing-key literal passed only to
+# in-process Settings/PyJWT objects in unit tests.
+e55a4f5dc73f0dfb22c4a167ff21f16802e8cff7:.gitleaksignore:generic-api-key:30
+e55a4f5dc73f0dfb22c4a167ff21f16802e8cff7:backend/scripts/test_review_fullstack.py:jwt:245
+e55a4f5dc73f0dfb22c4a167ff21f16802e8cff7:backend/tests/unit/test_logging_redaction.py:jwt:19
+e55a4f5dc73f0dfb22c4a167ff21f16802e8cff7:backend/tests/unit/test_settings_followups.py:generic-api-key:217
+e55a4f5dc73f0dfb22c4a167ff21f16802e8cff7:backend/tests/unit/test_settings_followups.py:generic-api-key:218
+e55a4f5dc73f0dfb22c4a167ff21f16802e8cff7:backend/tests/unit/test_security_pyjwt.py:generic-api-key:33

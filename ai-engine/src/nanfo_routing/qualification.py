@@ -7,7 +7,7 @@ import time
 from contextlib import contextmanager
 from pathlib import Path
 
-from .artifacts import atomicWrite, inspectCheckpoint, loadCheckpoint
+from .artifacts import atomicWrite, loadCheckpointIdentity
 from .contracts import CONTRACT_HASH, Observation, jsonBytes, parseJson
 from .env import encode
 from .ppo import PPOConfig
@@ -144,21 +144,26 @@ def collectionAdmission(args):
     plan, planHash = readPlan(args.plan)
     if not args.parent_approved or not args.lab_released:
         raise ValueError("measurements require explicit parent approval and released lab")
+    checkpoint = None
     if args.command == "train":
         if not args.calibration:
             raise ValueError("training requires completed train-only action-effect evidence")
         actionEffectChecks(args.calibration, plan)
     elif args.policy == "ppo":
-        _, manifest = loadCheckpoint(args.checkpoint)
+        # One pinned read: this identity is admitted, ledgered and then the one evaluated.
+        _, manifest, checkpoint = loadCheckpointIdentity(
+            args.checkpoint, expectedSha256=getattr(args, "checkpoint_sha256", None)
+        )
         if args.model_seed != manifest.config.seed:
             raise ValueError("evaluation model seed must identify its frozen pilot")
+        args.checkpoint_sha256 = checkpoint["checkpoint_sha256"]
     if args.command == "evaluate" and args.split == "test":
         if not args.selection:
             raise ValueError("test requires frozen evidence-validated selection")
         selected = validateSelection(args.selection)
         if selected["plan_sha256"] != planHash:
             raise ValueError("selection plan differs")
-        if args.policy == "ppo" and inspectCheckpoint(args.checkpoint) != selected["checkpoint"]:
+        if args.policy == "ppo" and checkpoint != selected["checkpoint"]:
             raise ValueError("test must use the frozen selected checkpoint")
     lockPath = args.plan.with_suffix(".collection.lock")
     ledgerPath = args.plan.with_suffix(".collection.json")
@@ -195,7 +200,7 @@ def collectionAdmission(args):
             "episodes": args.episodes,
         }
         if plan["version"] == 4 and args.command == "evaluate" and args.policy == "ppo":
-            identity["checkpoint_sha256"] = inspectCheckpoint(args.checkpoint)["checkpoint_sha256"]
+            identity["checkpoint_sha256"] = checkpoint["checkpoint_sha256"]
         if any(row["identity"] == identity for row in ledger["attempts"]):
             raise ValueError("collection attempt already consumed; failed attempts cannot replay")
         if split != "test" and any(
@@ -261,8 +266,7 @@ def qualify(checkpoint, training, validation, planPath, calibration):
 
         return expandedQualify(checkpoint, training, validation, planPath, calibration)
     controls, actionEffects = actionEffectChecks(calibration, plan)
-    agent, manifest = loadCheckpoint(checkpoint)
-    identity = inspectCheckpoint(checkpoint)
+    agent, manifest, identity = loadCheckpointIdentity(checkpoint)
     if manifest.training_distribution != {
         "mode": "matched",
         "window_seconds": plan["window_seconds"],

@@ -33,3 +33,43 @@ inspection, not a claim of a completed APT signature/build acceptance gate.
 Release admission still requires SHA-256/AES SNMPv3 integration and image package
 inventory from the source-matched campaign. No daemon, MIB download or credentials
 are included in the image.
+
+## Collector runtime and egress restriction (ADR-028)
+
+`compose.fleet.yaml` gives the collector a private memory-backed SNMP runtime base,
+`NANFO_SNMP_RUNTIME_DIR=/run/nanfo-snmp` (tmpfs `noexec,nosuid,nodev`, UID/GID 10001,
+mode 0700). `snmp_transport.py` refuses any base that is not owner-only, writes each
+per-request USM `snmp.conf` (0600) in a fresh 0700 directory there and unlinks it after
+the child exits, so SNMPv3 secrets never reach the shared `/tmp` or persistent storage.
+The inherited `/tmp` and `/run/nanfo` scratch mounts are restated verbatim in the
+overlay, so the merged mount list is the same whichever tmpfs merge rule Compose applies.
+
+The `fleet_egress` bridge is the only non-internal network of the package. Its subnet
+is pinned by the required `NANFO_FLEET_EGRESS_SUBNET` (an unused private /24 in
+`deployment.env`), because an unpinned bridge may be recreated on a different subnet
+and silently escape host firewall rules. Restrict it to SNMP requests to the managed
+devices with host rules in Docker's `DOCKER-USER` chain (evaluated before Docker's own
+forwarding rules, never flushed by Docker):
+
+```sh
+SUBNET=10.231.9.0/24     # NANFO_FLEET_EGRESS_SUBNET
+DEVICES=10.20.0.0/16     # managed SNMP agents only; repeat the first rule per prefix
+iptables -I DOCKER-USER 1 -s "$SUBNET" -d "$DEVICES" -p udp --dport 161 -j RETURN
+iptables -I DOCKER-USER 2 -s "$SUBNET" -j DROP      # every other destination/port
+iptables -I INPUT 1 -s "$SUBNET" -j DROP            # host services via the bridge gateway
+```
+
+Replies from the agents are accepted by Docker's established-connection rule; the
+collector reaches PostgreSQL/Redis over the separate internal `private` bridge, whose
+addresses these rules do not match. If the manifest names devices by DNS name, also
+allow UDP/TCP 53 to the resolver only (`-d <resolver> -p udp --dport 53 -j RETURN`
+before the DROP). Add matching `ip6tables` rules if the daemon enables IPv6 on bridges.
+Persist the rules (for example `netfilter-persistent`, or a oneshot unit ordered
+`After=docker.service`) and re-check them after host upgrades. Verify from the collector
+that polling works while another destination times out:
+
+```sh
+docker compose --project-name nanfo-deploy-instance1 --env-file /srv/nanfo/instance1/deployment.env \
+  -f deploy/compose.yaml -f deploy/compose.fleet.yaml --profile fleet exec fleet-worker \
+  python -c "import socket; socket.create_connection(('192.0.2.1', 443), timeout=3)"   # must time out
+```

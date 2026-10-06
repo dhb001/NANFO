@@ -52,10 +52,11 @@ async def sessions():
         scripts = ScriptDirectory.from_config(config)
         with sync.begin() as connection:
             connection.execute(text(f'SET LOCAL search_path TO "{schema}"'))
-            with EnvironmentContext(config, scripts, fn=lambda rev, _: scripts._upgrade_revs("0025", rev)) as context:
+            # Head, not a pinned revision: the ORM maps the ADR-028 tenancy columns (0030).
+            with EnvironmentContext(config, scripts, fn=lambda rev, _: scripts._upgrade_revs("head", rev)) as context:
                 context.configure(connection=connection)
                 context.run_migrations()
-            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "0025"
+            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == scripts.get_current_head()
         engine = create_async_engine(url.set(drivername="postgresql+asyncpg"),
             connect_args={"server_settings": {"search_path": schema}})
         yield async_sessionmaker(engine, expire_on_commit=False)
@@ -301,8 +302,10 @@ async def test_list_scope_before_limit_and_strict_read_history(sessions):
         result = await service.list_alerts(status_filter=None, severity_filter=None, source_filter=None,
             correlation_id_filter=None, search_filter=None, limit=1, actor_user_id=str(ACTOR),
             requested_workspace_id=WORKSPACE, claim_org_id=ORG)
-        assert result.total == 1 and result.items[0].alert_id == incident.alert_id
-        assert result.status_counts == {"active": 1, "acknowledged": 0, "resolved": 0}
+        # ADR-028: counts describe every authorized match, items stay bounded by limit.
+        assert len(result.items) == 1 and result.items[0].alert_id == incident.alert_id
+        assert result.total == 3
+        assert result.status_counts == {"active": 3, "acknowledged": 0, "resolved": 0}
         scope = dict(alert_id=incident.alert_id, actor_user_id=str(ACTOR), requested_workspace_id=WORKSPACE, claim_org_id=ORG)
         assert (await service.get_history(**scope)).total == 1
         with pytest.raises(HTTPException) as denied:
@@ -539,3 +542,48 @@ async def test_concurrent_legacy_generations_have_receipts_for_single_incident(s
     receipts = await rows(sessions, AlertConsumedEvent)
     assert {row.event_id for row in receipts} == set(ids)
     assert {row.alert_id for row in receipts} == {incidents[0].alert_id}
+
+
+async def test_observation_retention_keeps_open_windows_and_incident_evidence(sessions):
+    from datetime import UTC, datetime
+
+    from sqlalchemy import insert as core_insert
+
+    now = datetime.now(UTC)
+    old, young = now - timedelta(days=40), now - timedelta(days=1)
+    open_alert, resolved_alert, evidence = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    observations = {
+        "open-old": ("open", old, uuid.uuid4()),              # unresolved incident: open window
+        "resolved-old": ("resolved", old, uuid.uuid4()),
+        "resolved-evidence": ("resolved", old, evidence),      # generating sample named by history
+        "window-before": ("window", old, uuid.uuid4()),
+        "window-inside": ("window", now - timedelta(days=34), uuid.uuid4()),  # current phase run
+        "idle-young": ("idle", young, uuid.uuid4()),           # inside retention
+        "idle-old": ("idle", old, uuid.uuid4()),  # (receipts always have a detector row: FK, 0030)
+    }
+    async with sessions() as db:
+        # Core inserts: fixture rows only, no measured evidence pins involved.
+        for alert_id, status in ((open_alert, "active"), (resolved_alert, "resolved")):
+            await db.execute(core_insert(AlertRecord).values(
+                alert_id=alert_id, alert_key=f"measured:{alert_id}", source="telemetry", status=status,
+                correlation_id=uuid.uuid4(), payload={}, created_at=old, updated_at=old))
+        await db.execute(core_insert(AlertHistory).values(
+            event_id=uuid.uuid4(), alert_id=resolved_alert, event_type="alert.generated", correlation_id=uuid.uuid4(),
+            occurred_at=old, payload={"observation_event_id": str(evidence)}))
+        for key, values in {"open": {"incident_id": open_alert}, "resolved": {"incident_id": resolved_alert},
+                            "window": {"phase": "breach", "phase_since": now - timedelta(days=35)},
+                            "idle": {}}.items():
+            await db.execute(core_insert(AlertDetectorState).values(
+                detector_key=key, identity={}, rule={}, sample_count=0, **values))
+        for detector_key, observed_at, event_id in observations.values():
+            await db.execute(core_insert(AlertObservation).values(
+                event_id=event_id, detector_key=detector_key, observed_at=observed_at))
+        await db.commit()
+    deleted = []
+    for _ in range(3):
+        async with sessions() as db:
+            deleted.append(await AlertRepository(db).purge_observations(retention_days=30, batch_size=2))
+    assert deleted == [2, 1, 0]  # bounded batches until a short one
+    removed = {"resolved-old", "window-before", "idle-old"}
+    assert {row.event_id for row in await rows(sessions, AlertObservation)} == {
+        event_id for name, (_, _, event_id) in observations.items() if name not in removed}

@@ -3,7 +3,7 @@ import { ResourceForm } from "@/features/organizations/ResourceForm";
 import type { CreateDeviceInput, Device, Network, UpdateNetworkInput } from "@/shared/types/network";
 
 export function NetworkForm({ network, disabled, onSave, onRefresh }: {
-  network?: Network; disabled?: boolean; onSave: (input: UpdateNetworkInput & { name: string }) => Promise<void>; onRefresh: () => Promise<unknown>;
+  network?: Network | undefined; disabled?: boolean | undefined; onSave: (input: UpdateNetworkInput & { name: string }) => Promise<void>; onRefresh: () => Promise<unknown>;
 }) {
   const [name, setName] = useState(network?.name ?? "");
   const [description, setDescription] = useState(network?.description ?? "");
@@ -25,7 +25,7 @@ const deviceFields = [
 ] as const;
 
 export function DeviceForm({ device, disabled, onSave, onRefresh }: {
-  device?: Device; disabled?: boolean; onSave: (input: CreateDeviceInput) => Promise<void>; onRefresh: () => Promise<unknown>;
+  device?: Device | undefined; disabled?: boolean | undefined; onSave: (input: CreateDeviceInput) => Promise<void>; onRefresh: () => Promise<unknown>;
 }) {
   const [draft, setDraft] = useState(() => Object.fromEntries(deviceFields.map(([key]) => [key, device?.[key] ?? ""])) as Record<typeof deviceFields[number][0], string>);
   return <ResourceForm label={device ? "Edit device" : "Create device"} submitLabel={device ? "Save device" : "Add Device"} disabled={disabled} onRefresh={onRefresh} onSubmit={async () => {

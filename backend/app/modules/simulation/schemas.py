@@ -16,6 +16,14 @@ class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
 
+class PolicyFloors(StrictModel):
+    """Server policy floors a simulation's limits must respect to be execution evidence (C18)."""
+
+    max_loss_pct: Annotated[float, Field(ge=0, le=100, allow_inf_nan=False)]
+    max_latency_ms: Annotated[float, Field(ge=0, le=1e9, allow_inf_nan=False)]
+    min_throughput_mbps: Annotated[float, Field(ge=0, le=1e6, allow_inf_nan=False)]
+
+
 class SimulationEvidence(StrictModel):
     simulation_id: str
     intent_id: str
@@ -31,6 +39,8 @@ class SimulationEvidence(StrictModel):
     source: Literal["operator_configured_model"]
     validation_scope: Literal["configured_model_admission_only"]
     physical_safety_authorized: Literal[False]
+    # ADR-028 C18: absent only on evidence accepted before policy floors existed.
+    policy_floors: PolicyFloors | None = None
 
     @field_validator("simulation_id", "intent_id", "workspace_id", "network_id")
     @classmethod

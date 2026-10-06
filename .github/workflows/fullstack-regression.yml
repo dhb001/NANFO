@@ -10,25 +10,29 @@ permissions:
   contents: read
 
 concurrency:
-  group: fullstack-${{ github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  # ADR-028 C22: same-origin production build served by the real deploy/nginx.conf.
   production-browser:
+    name: production-browser
     runs-on: ubuntu-24.04
-    timeout-minutes: 35
+    timeout-minutes: 40
     env:
       POETRY_VIRTUALENVS_IN_PROJECT: 'true'
-      NEO4J_IMAGE: neo4j:5.26.12-community-bullseye@sha256:9f75e8df4325a24f00fdd7a8c0bcce650a58375049b1058e496e8b43d6c36b37
-      REDIS_IMAGE: redis:7.4.5-bookworm@sha256:90e7a336d044f1abc9e9dbc05d65566850896d11453bbd1dd0fb7e5059f0e8fb
+      # Production pins (deploy/Dockerfile.neo4j base, deploy/Dockerfile.redis base).
+      NEO4J_IMAGE: neo4j:5.26.31-community-trixie@sha256:ab3aafb0020e6fed65bb2b59f7db1fabd7ee0568c4da46f3cc3b8fad77801d61
+      REDIS_IMAGE: redis:7.4.11-bookworm@sha256:c6eabf748fc7a61dbb5a705c78bcf3d6377b1127a97d0ce965c11c44ba46896f
+      POSTGRES_MAJOR: '17'
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: '3.12.14'
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+          python-version-file: backend/.python-version
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '22.22.0'
           cache: npm
@@ -39,31 +43,55 @@ jobs:
           poetry -C backend check --lock
           poetry -C backend sync --with dev --no-root --no-interaction
           npm ci --prefix frontend --no-audit --no-fund
-      - name: Browser and full-stack harness contracts
+      - name: Provision runner-only prerequisites (PostgreSQL 17 from PGDG, host nginx, pinned store images)
         run: |
-          poetry -C backend run pytest scripts/test_review_fullstack.py --no-cov -q
-          frontend/node_modules/.bin/tsc -p frontend/tests/fullstack/tsconfig.json --noEmit
-          frontend/node_modules/.bin/playwright install --with-deps chromium
-      - name: Provision runner-only prerequisites
-        run: |
+          set -euo pipefail
           sudo apt-get update
-          sudo apt-get install --no-install-recommends -y postgresql
-          pg_config --bindir >> "$GITHUB_PATH"
+          sudo apt-get install --no-install-recommends -y postgresql-common nginx
+          # Only binaries are needed; the lane runs its own UID-private initdb cluster.
+          echo 'create_main_cluster = false' | sudo tee -a /etc/postgresql-common/createcluster.conf > /dev/null
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+          sudo apt-get install --no-install-recommends -y "postgresql-${POSTGRES_MAJOR}"
+          bindir="/usr/lib/postgresql/${POSTGRES_MAJOR}/bin"
+          "$bindir/postgres" --version | grep -E "\(PostgreSQL\) ${POSTGRES_MAJOR}\."
+          echo "$bindir" >> "$GITHUB_PATH"
+          # The packaged service is not used; the lane starts its own nginx on a loopback port.
+          sudo systemctl stop nginx || true
+          test -f /etc/nginx/mime.types
           mkdir -p /tmp/opencode
           docker pull "$NEO4J_IMAGE"
           docker pull "$REDIS_IMAGE"
           printf 'R09_NEO4J_IMAGE_ID=%s\n' "$(docker image inspect --format '{{.Id}}' "$NEO4J_IMAGE")" >> "$GITHUB_ENV"
           printf 'R09_REDIS_IMAGE_ID=%s\n' "$(docker image inspect --format '{{.Id}}' "$REDIS_IMAGE")" >> "$GITHUB_ENV"
-      - name: Real authenticated HTTP, stores, workers and production assets (zero skips)
+      - name: Browser and full-stack harness contracts (real nginx config test, zero skips)
+        run: |
+          set -euo pipefail
+          test "$(postgres --version | grep -oE '[0-9]+' | head -1)" = "$POSTGRES_MAJOR"
+          poetry -C backend run pytest scripts/test_review_fullstack.py --no-cov -q --junitxml=harness-results.xml
+          python .github/scripts/ci_gates.py junit backend/harness-results.xml --zero-skips \
+            --require test_rendered_production_gateway_passes_the_real_nginx_config_test
+          frontend/node_modules/.bin/tsc -p frontend/tests/fullstack/tsconfig.json --noEmit
+          frontend/node_modules/.bin/playwright install --with-deps chromium
+      - name: Real authenticated HTTP, stores, workers and production gateway (zero skips)
         working-directory: backend
         run: >-
           poetry run python -m scripts.review_fullstack
           --neo4j-image-id "$R09_NEO4J_IMAGE_ID"
           --redis-image-id "$R09_REDIS_IMAGE_ID"
           --report "$RUNNER_TEMP/r09-fullstack.json" --timeout 900
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+          --failure-artifacts "$RUNNER_TEMP/r09-failure-artifacts"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
           name: fullstack-sanitized-result
           path: ${{ runner.temp }}/r09-fullstack.json
           retention-days: 7
+      # Traces/screenshots of failing browser cases only; they hold this run's ephemeral
+      # (already destroyed) credentials, hence the short retention.
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: failure()
+        with:
+          name: fullstack-failure-traces
+          path: ${{ runner.temp }}/r09-failure-artifacts
+          if-no-files-found: ignore
+          retention-days: 3

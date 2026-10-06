@@ -115,17 +115,34 @@ async def test_mutation_and_event_share_commit_without_redis(mock_db, operation,
 
 async def test_enqueue_snapshots_payload_and_rejects_undocumented_event(mock_db):
     repo = NetworkOutboxRepository(mock_db)
+    mock_db.scalar.return_value = 41
     payload = {"nested": {"value": 1}}
     row = await repo.enqueue(network_id=NETWORK, event_type="network.device.updated",
                              payload=payload, correlation_id=CORRELATION)
     payload["nested"]["value"] = 2
-    assert json.loads(row.envelope["payload"]) == {"nested": {"value": 1}}
+    # C13: the durable per-network outbox sequence is part of the wire payload.
+    assert json.loads(row.envelope["payload"]) == {"nested": {"value": 1}, "sequence": 41}
+    assert row.sequence == 41
+    allocation = str(mock_db.scalar.call_args.args[0].compile(dialect=postgresql.dialect()))
+    assert "nextval(pg_get_serial_sequence(" in allocation
     assert row.envelope["event_id"] == str(row.event_id)
     assert datetime.fromisoformat(row.envelope["timestamp"]).tzinfo is not None
     mock_db.commit.assert_not_awaited()
     with pytest.raises(ValueError, match="Undocumented"):
         await repo.enqueue(network_id=NETWORK, event_type="network.group.created",
                            payload={}, correlation_id=CORRELATION)
+
+
+async def test_payload_sequence_is_authoritative_and_watermark_is_committed_max(mock_db):
+    repo = NetworkOutboxRepository(mock_db)
+    mock_db.scalar.return_value = 7
+    row = await repo.enqueue(network_id=NETWORK, event_type="network.device.deleted",
+                             payload={"device_id": str(DEVICE), "sequence": 1}, correlation_id=CORRELATION)
+    assert json.loads(row.envelope["payload"])["sequence"] == 7
+    mock_db.scalar.return_value = None
+    assert await repo.watermark() == 0
+    statement = str(mock_db.scalar.call_args.args[0].compile(dialect=postgresql.dialect()))
+    assert "max(network_outbox.sequence)" in statement
 
 
 async def test_claim_uses_skip_locked_expiry_and_per_network_predecessor(mock_db):
@@ -272,3 +289,101 @@ def test_migration_generates_postgresql_ddl_without_connection():
     assert "envelope JSONB NOT NULL" in sql
     assert "WHERE published_at IS NULL" in sql
     assert "DROP TABLE network_outbox" in sql
+
+
+# ---------------------------------------------------------------- retention (F18)
+
+
+async def test_purge_statement_is_bounded_published_only_and_keeps_the_newest_row(mock_db):
+    from datetime import timedelta
+
+    mock_db.scalar = AsyncMock(return_value=7)
+    assert await NetworkOutboxRepository(mock_db).purge_published(older_than=timedelta(days=30), limit=500) == 7
+    compiled = mock_db.scalar.await_args.args[0].compile(dialect=postgresql.dialect())
+    sql = " ".join(str(compiled).split())
+    assert sql.startswith("WITH purged AS (DELETE FROM network_outbox WHERE network_outbox.event_id IN (SELECT")
+    assert "network_outbox.published_at IS NOT NULL" in sql
+    assert "network_outbox.published_at < now() -" in sql
+    assert "network_outbox.sequence < (SELECT max(network_outbox.sequence)" in sql
+    assert "ORDER BY network_outbox.sequence LIMIT" in sql and "FOR UPDATE SKIP LOCKED" in sql
+    assert compiled.params["param_1"] == 500 and timedelta(days=30) in compiled.params.values()
+    for bad in ({"older_than": timedelta(0), "limit": 1}, {"older_than": timedelta(days=1), "limit": 0},
+                {"older_than": timedelta(days=1), "limit": True}):
+        with pytest.raises(ValueError):
+            await NetworkOutboxRepository(mock_db).purge_published(**bad)
+
+
+def retention_publisher(sessions, clock, **kwargs):
+    return NetworkOutboxPublisher(sessions=sessions, redis=AsyncMock(), clock=lambda: clock[0], **kwargs)
+
+
+async def test_drain_applies_one_retention_batch_per_interval(sessions, mock_db):
+    clock = [1000.0]
+    publisher = retention_publisher(sessions, clock, retention_days=30, retention_batch=100)
+    with (
+        patch.object(NetworkOutboxRepository, "purge_published", AsyncMock(return_value=3)) as purge,
+        patch.object(publisher, "publish_one", AsyncMock(return_value=False)),
+    ):
+        await publisher.drain()
+        await publisher.drain()
+        assert purge.await_count == 1
+        from datetime import timedelta
+        assert purge.await_args.kwargs == {"older_than": timedelta(days=30), "limit": 100}
+        clock[0] += 60
+        await publisher.drain()
+        assert purge.await_count == 2
+    mock_db.commit.assert_awaited()
+
+
+async def test_full_retention_batch_continues_on_the_next_iteration(sessions):
+    clock = [0.0]
+    publisher = retention_publisher(sessions, clock, retention_days=7, retention_batch=2)
+    with patch.object(NetworkOutboxRepository, "purge_published", AsyncMock(side_effect=[2, 2, 1, 0])) as purge:
+        assert [await publisher.purge_published() for _ in range(4)] == [2, 2, 1, 0]
+        # Backlog drained in bounded batches; after a partial batch the interval applies.
+        assert purge.await_count == 3
+
+
+async def test_retention_failure_never_stops_publication(sessions, mock_db):
+    publisher = retention_publisher(sessions, [0.0], retention_days=30)
+    with (
+        patch.object(NetworkOutboxRepository, "purge_published", AsyncMock(side_effect=RuntimeError("db"))),
+        patch.object(publisher, "publish_one", AsyncMock(side_effect=[True, False])) as publish,
+    ):
+        assert await publisher.drain(limit=5) == 1
+    assert publish.await_count == 2
+    mock_db.rollback.assert_awaited()
+
+
+@pytest.mark.parametrize("setting,expected", [(None, 30), (45, 45), (0, None), (-1, None), (True, None),
+                                              ("30", None), (10**6, None)])
+def test_retention_days_setting(sessions, setting, expected):
+    from app.modules.network import outbox
+
+    settings = SimpleNamespace() if setting is None else SimpleNamespace(NETWORK_OUTBOX_RETENTION_DAYS=setting)
+    with patch("app.core.config.get_settings", return_value=settings):
+        assert outbox.configured_retention_days() == expected
+        assert NetworkOutboxPublisher(sessions=sessions, redis=None)._retention_days == expected
+
+
+async def test_disabled_retention_never_deletes(sessions):
+    publisher = retention_publisher(sessions, [0.0], retention_days=None)
+    with patch.object(NetworkOutboxRepository, "purge_published", AsyncMock()) as purge:
+        assert await publisher.purge_published() == 0
+    purge.assert_not_awaited()
+    with pytest.raises(ValueError):
+        retention_publisher(sessions, [0.0], retention_days=0)
+
+
+async def test_redis_memory_pressure_leaves_rows_unclaimed(sessions):
+    from app.core.errors import DependencyUnavailableError
+
+    publisher = retention_publisher(sessions, [0.0], retention_days=None)
+    with (
+        patch("app.modules.network.outbox.admit_publication",
+              AsyncMock(side_effect=DependencyUnavailableError("redis"))),
+        patch.object(NetworkOutboxRepository, "claim", AsyncMock()) as claimed,
+        pytest.raises(DependencyUnavailableError),
+    ):
+        await publisher.drain()
+    claimed.assert_not_awaited()

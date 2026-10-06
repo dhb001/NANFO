@@ -45,6 +45,26 @@ All endpoints must follow `docs/api/API_STANDARD.md`.
 - `GET /api/v1/telemetry/device/{id}`
 - `GET /api/v1/telemetry/health`
 
+### ADR-028 changes (C12)
+- `GET /api/v1/telemetry/health` is read-only: it never evaluates SLOs or publishes
+  alerts. The collector-side evaluator writes Redis-persisted windows, and health adds a
+  read-only `slo` object (status, reasons, window, trend, thresholds, `stale`). It also
+  adds `total_records_estimated`: `total_records` is a planner estimate or a bounded count
+  cached for at least 60 s, never a full count per request. SLO alerts are
+  platform-scoped (`alert_scope: "platform"`, no tenant) and carry an `evaluation_window`;
+  runbook: `docs/project/TelemetryRuntimeAdapterRunbook.md`.
+- History, aggregation and device history use `page` 1..10000. Totals are counted over at
+  most 10,001 rows and add `total_capped`: true means "at least `total`". Prefer cursor
+  mode; internal callers still get exact totals.
+- Ingestion rejects naive timestamps and timestamps more than 5 minutes in the future.
+- The synthetic adapters are named `DemoSNMPTelemetryAdapter` / `DemoGRPCTelemetryAdapter`.
+- The fleet scheduler keeps a next-due time per target. The fleet manifest limit is
+  512 KiB.
+- SNMPv3 secrets live in a private memory-backed directory (`NANFO_SNMP_RUNTIME_DIR`,
+  `$XDG_RUNTIME_DIR` or `/dev/shm`) and are deleted after each command.
+- Retention archives whole batches as segments; `scripts/telemetry_retention.py apply
+  --loop` runs continuously. Contract index: `docs/api/ADR028-ContractChanges.md`.
+
 ## 4. Streaming Channels
 
 Each channel serves a distinct event domain. Clients must subscribe exclusively to the channels required for their function (per `docs/api/API_STANDARD.md` §4).

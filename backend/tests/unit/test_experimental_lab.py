@@ -87,12 +87,16 @@ async def test_authority_uses_current_public_scope_contract(monkeypatch):
         await CurrentAuthority(sessions, "redis").check(c.policy)
 
 
-async def test_protected_installation_factory_is_real_pluggable_and_hash_pinned(tmp_path):
+async def test_protected_installation_factory_is_real_pluggable_and_hash_pinned(tmp_path, monkeypatch):
     import hashlib
     import json
     from pathlib import Path
+    from types import SimpleNamespace
+    from app.modules.autonomy.experimental import settings as experimental_settings
     from app.modules.autonomy.experimental.settings import load_installation
     import tests.experimental_lab_support as support
+    monkeypatch.setattr(experimental_settings, "get_settings",
+                        lambda: SimpleNamespace(NANFO_EXPERIMENTAL_LAB_ENABLED=True))
     c = case()
     source = Path(support.__file__)
     source_hash = hashlib.sha256(source.read_bytes()).hexdigest()
@@ -231,3 +235,31 @@ async def test_review_stop_during_last_outer_authority_is_rechecked():
     ctl.authority = SimpleNamespace(check=authority)
     with pytest.raises(ValueError, match="stop_latched"):
         await ctl.checkpoint()
+
+
+
+def test_experimental_wiring_is_disabled_unless_the_setting_is_true(tmp_path, monkeypatch):
+    """ADR-028: NANFO_EXPERIMENTAL_LAB_ENABLED (default False) gates the installation loader."""
+    from types import SimpleNamespace
+    from app.core.config import Settings
+    from app.modules.autonomy.experimental import settings as experimental_settings
+    from app.modules.autonomy.experimental.settings import experimental_lab_enabled, load_installation
+    assert Settings.model_fields["NANFO_EXPERIMENTAL_LAB_ENABLED"].default is False
+    for value in (False, None, "true", 1):
+        with pytest.raises(ValueError, match="experimental_lab_disabled"):
+            load_installation(str(tmp_path / "installation.json"), "a" * 64,
+                              settings=SimpleNamespace(NANFO_EXPERIMENTAL_LAB_ENABLED=value))
+    monkeypatch.setattr(experimental_settings, "get_settings",
+                        lambda: SimpleNamespace(NANFO_EXPERIMENTAL_LAB_ENABLED=False))
+    assert experimental_lab_enabled() is False
+    with pytest.raises(ValueError, match="experimental_lab_disabled"):
+        load_installation(str(tmp_path / "installation.json"), "a" * 64)
+    enabled = SimpleNamespace(NANFO_EXPERIMENTAL_LAB_ENABLED=True)
+    with pytest.raises(ValueError, match="experimental_protected_configuration_required"):
+        load_installation("relative.json", "a" * 64, settings=enabled)
+    # Safety operations on an already owned run never depend on the enable switch.
+    for operation in ("status", "stop", "recover"):
+        with pytest.raises(ValueError, match="experimental_protected_configuration_required"):
+            load_installation("relative.json", "a" * 64, operation=operation)
+    with pytest.raises(ValueError, match="experimental_lab_disabled"):
+        load_installation("relative.json", "a" * 64, operation="run")

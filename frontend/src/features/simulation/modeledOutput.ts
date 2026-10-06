@@ -20,11 +20,15 @@ export function modelHistorySeries(detail: SimulationDetail | undefined, metric:
   if (!output || !Array.isArray(output.trace)) return [];
   const groups = new Map<string, ChartSeries>();
   const config = detail?.scenario_config;
-  for (const row of output.trace.slice(0, 1000)) {
-    if (!row || typeof row !== "object" || typeof row.elapsed_ms !== "number" || !Number.isFinite(row.elapsed_ms)) continue;
+  // Trace rows are untyped model output: read each field defensively.
+  for (const entry of (output.trace as unknown[]).slice(0, 1000)) {
+    if (!entry || typeof entry !== "object") continue;
+    const row = entry as { elapsed_ms?: unknown; flows?: unknown };
+    const elapsed = row.elapsed_ms;
+    if (typeof elapsed !== "number" || !Number.isFinite(elapsed)) continue;
     const flows = row.flows;
     if (!flows || typeof flows !== "object" || Array.isArray(flows)) continue;
-    for (const [flowId, raw] of Object.entries(flows).slice(0, 64)) {
+    for (const [flowId, raw] of Object.entries(flows as Record<string, unknown>).slice(0, 64)) {
       const id = JSON.stringify([label, detail?.simulation_id, flowId, metric]);
       let series = groups.get(id);
       if (!series) {
@@ -32,7 +36,7 @@ export function modelHistorySeries(detail: SimulationDetail | undefined, metric:
         groups.set(id, series);
       }
       const value = raw && typeof raw === "object" ? (raw as Record<string, unknown>)[metric] : null;
-      series.points.push({ time: row.elapsed_ms, value: typeof value === "number" && Number.isFinite(value) ? value : null });
+      series.points.push({ time: elapsed, value: typeof value === "number" && Number.isFinite(value) ? value : null });
     }
   }
   return [...groups.values()];

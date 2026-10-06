@@ -1,4 +1,15 @@
-"""Atomic bounded retention primitives. No trimming or consumer-state mutation."""
+"""Atomic bounded retention primitives. No trimming or consumer-state mutation.
+
+State checks (ADR-028): the set of consumer groups must equal the policy allowlist
+and every group's delivery state must be known. Only consumers that *hold pending
+entries* are bounded (<= 64 per group, from the XPENDING summary); idle consumers
+without pending work never block retention. DELETE re-derives eligibility from the
+current state instead of requiring byte-identical state: concurrent ACKs, new
+consumers and appends are harmless, while a group-set change, a cursor moved
+backwards, a pending entry inside the batch, or a changed entry refuses the batch
+(the caller re-plans a bounded number of times). Group-less streams (the dead-letter
+stream) are eligible by age only; their group-freedom is verified by the caller.
+"""
 
 # IDs are uint64 pairs: Lua doubles must not be used to compare them.
 COMMON = r"""
@@ -17,6 +28,7 @@ local function map(values)
     return result
 end
 local function state(key, expected)
+    if #expected == 0 then return {} end
     local info = map(redis.call('XINFO', 'STREAM', key))
     if not info.groups or info.groups < 1 or info.groups > 64 then
         error('retention_group_count')
@@ -31,7 +43,6 @@ local function state(key, expected)
         if type(g['entries-read']) ~= 'number' or g['entries-read'] < 0
             or type(g.lag) ~= 'number' or g.lag < 0
             or type(g.pending) ~= 'number' or g.pending < 0
-            or type(g.consumers) ~= 'number' or g.consumers < 0 or g.consumers > 64
             or type(g['last-delivered-id']) ~= 'string' then
             error('retention_unknown_state')
         end
@@ -39,9 +50,11 @@ local function state(key, expected)
         if p[1] ~= g.pending then error('retention_unknown_pending') end
         local first = p[2] or ''
         if g.pending > 0 and first == '' then error('retention_unknown_pending') end
-        -- Lag is checked, but not included: concurrent appends must not stall GC.
-        result[i] = {g.name, g['last-delivered-id'], g['entries-read'],
-                     g.pending, first, g.consumers}
+        local holders = p[4] or {}
+        if type(holders) ~= 'table' then error('retention_unknown_pending') end
+        if #holders > 64 then error('retention_pending_consumers') end
+        -- Lag and idle consumers are not included: appends and churn must not stall GC.
+        result[i] = {g.name, g['last-delivered-id'], g['entries-read'], g.pending, first, #holders}
     end
     return result
 end
@@ -75,12 +88,19 @@ for i = 1, count do
     selected[#selected+1] = entry
     cursor = '(' .. entry[1]
 end
-return {cmsgpack.pack(groups), selected, groups}
+local packed = '[]'
+if #groups > 0 then packed = cjson.encode(groups) end
+return {packed, selected, groups}
 """
 
 DELETE = COMMON + r"""
 local groups = state(KEYS[1], cjson.decode(ARGV[1]))
-if cmsgpack.pack(groups) ~= ARGV[2] then error('retention_state_changed') end
+local planned = cjson.decode(ARGV[2])
+if #planned ~= #groups then error('retention_state_changed') end
+for i, g in ipairs(groups) do
+    if planned[i][1] ~= g[1] then error('retention_state_changed') end
+    if less(g[2], planned[i][2]) then error('retention_cursor_moved_backwards') end
+end
 local count = tonumber(ARGV[4])
 if not count or count < 1 or count > 100 then error('retention_invalid_count') end
 local ids = {}
@@ -138,3 +158,9 @@ for _, entry in ipairs(missing) do
 end
 return #missing
 """
+
+# Non-retryable refusals are configuration/state problems an operator must fix.
+RETRYABLE_REFUSALS = frozenset({
+    "retention_boundary_changed", "retention_entry_changed", "retention_cursor_moved_backwards",
+    "retention_state_changed",
+})

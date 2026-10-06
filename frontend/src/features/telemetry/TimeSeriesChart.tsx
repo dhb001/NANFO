@@ -3,8 +3,8 @@ import { useId, useState } from "react";
 export interface ChartPoint {
   time: number;
   value: number | null;
-  unavailable?: string;
-  samples?: number;
+  unavailable?: string | undefined;
+  samples?: number | undefined;
 }
 
 export interface ChartSeries {
@@ -12,7 +12,7 @@ export interface ChartSeries {
   label: string;
   unit: string;
   points: ChartPoint[];
-  interval?: number;
+  interval?: number | undefined;
 }
 
 // This feature-owned chart is also used for modeled simulation histories.

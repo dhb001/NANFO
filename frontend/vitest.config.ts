@@ -14,6 +14,9 @@ export default defineConfig({
     environment: "jsdom",
     setupFiles: "./src/test/setup.ts",
     css: true,
-    exclude: ["tests/e2e/**", "tests/live/**", "tests/fullstack/**", "node_modules/**", "dist/**"],
+    // Unit tests run against the production same-origin defaults, whatever a local .env says.
+    env: { VITE_API_BASE_URL: "", VITE_WS_BASE_URL: "" },
+    // tests/fullstack/*.test.ts are unit tests of the lane's helpers; its *.spec.ts need the owned runner.
+    exclude: ["tests/e2e/**", "tests/live/**", "tests/fullstack/**/*.spec.ts", "node_modules/**", "dist/**"],
   },
 });

@@ -82,6 +82,18 @@ Authoritative exact exception inventory:
 `security/dependency-exceptions.v1.json`. Every entry has owner, exact version/IDs,
 reachability rationale, remediation and **2026-10-21 expiry** (fails on that date).
 
+> **Update 2026-09-24 (ADR-028):**
+> - The JWT library was replaced by PyJWT; python-jose and ecdsa left the lock, so the
+>   ecdsa exception below was removed.
+> - The emulation audit is split into `emulation`, the hash-pinned successor lock (os-ken
+>   instead of Ryu, 0 advisories), and `emulation-frozen`, which now holds the eight
+>   frozen-lab exceptions.
+> - The remaining expiries are staggered from 2026-10-29 to 2026-11-26; the `ai` coverage
+>   gap expires 2026-12-03.
+> - An exception that no longer matches a lock now fails the audit.
+>
+> The entries below are the 21 September record.
+
 - **ecdsa0.19.2:** PYSEC-2026-1325 (CVE-2024-23342); upstream declines a side-channel
   fix. python-jose requires it; default HS256 plus cryptography backend avoids the
   vulnerable pure-Python signing path. EC signing/configuration changes require

@@ -1,5 +1,6 @@
 import { readFileSync, statSync } from "node:fs";
 import { expect, type Page, type APIRequestContext, type Response } from "@playwright/test";
+import { loopbackOrigin, resolveOrigins } from "./origins";
 
 export function required(name: string): string {
   const value = process.env[name];
@@ -8,12 +9,7 @@ export function required(name: string): string {
 }
 
 export function loopback(name: string): string {
-  const value = required(name);
-  const url = new URL(value);
-  if (url.protocol !== "http:" || url.hostname !== "127.0.0.1" || !url.port || url.pathname !== "/" || url.username || url.password || url.search || url.hash) {
-    throw new Error(`R09 requires a bare owned loopback origin for ${name}`);
-  }
-  return url.origin;
+  return loopbackOrigin(name, process.env[name]);
 }
 
 interface Identity { email: string; password: string; user_id: string }
@@ -23,7 +19,9 @@ const fixturePath = required("R09_FIXTURE");
 const info = statSync(fixturePath);
 if ((info.mode & 0o077) !== 0 || info.uid !== process.getuid?.()) throw new Error("R09 fixture must be UID-private");
 export const fixture: Fixture = JSON.parse(readFileSync(fixturePath, "utf8"));
-export const apiOrigin = loopback("R09_API_URL");
+// Same-origin through the gateway by default (C22); R09_API_URL selects the cross-origin lane.
+export const origins = resolveOrigins(process.env);
+export const apiOrigin = origins.api;
 
 export async function login(page: Page, identity: keyof Fixture["users"] = "owner") {
   await page.goto("/login");

@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 from pathlib import Path
 import shutil
 import stat
@@ -78,11 +79,16 @@ def test_generates_private_independent_secrets_and_waits(setup_tree):
     assert result.returncode == 0, result.stderr
     target = setup_tree[0] / "backend/.env"
     assert stat.S_IMODE(target.stat().st_mode) == 0o600
-    values = dict(line.split("=", 1) for line in target.read_text().splitlines() if "=" in line and not line.startswith("#"))
+    active = [line for line in target.read_text().splitlines() if "=" in line and not line.startswith("#")]
+    values = dict(line.split("=", 1) for line in active)
     assert len({values[name] for name in NAMES}) == 4
     for name in NAMES:
         assert len(values[name]) == 64
         assert values[name] not in result.stdout + result.stderr
+    # Settings fail closed to production: the generated dev env opts in explicitly, once.
+    assert [line for line in active if line.startswith("APP_ENV=")] == ["APP_ENV=development"]
+    assert len(set(values["JWT_SECRET_KEY"])) >= 10
+    assert values["REDIS_USERNAME"] == "nanfo"
     assert starts(calls) == [["compose", "--env-file", ".env", "-f", "docker-compose.yml",
                              "up", "-d", "--wait", "--wait-timeout", "42"]]
     assert "are healthy" in result.stdout
@@ -163,7 +169,191 @@ def test_sample_cannot_render_and_all_dev_ports_are_loopback(setup_tree):
     assert all(port["host_ip"] == "127.0.0.1" for service in services.values() for port in service["ports"])
 
 
+def test_existing_env_is_restricted_to_owner_only_without_rewriting(setup_tree):
+    target = write_env(setup_tree[0], "custom@special/#%:credential-with-32-chars")
+    target.chmod(0o644)
+    before, original = target.stat(), target.read_bytes()
+    result, calls = run_setup(setup_tree)
+    assert result.returncode == 0, result.stderr
+    assert stat.S_IMODE(target.stat().st_mode) == 0o600
+    assert "Restricted existing backend/.env to mode 0600" in result.stdout
+    assert target.read_bytes() == original
+    assert (target.stat().st_ino, target.stat().st_mtime_ns) == (before.st_ino, before.st_mtime_ns)
+    assert len(starts(calls)) == 1
+
+
+def test_env_symlink_is_refused_and_its_target_is_never_modified(setup_tree):
+    root = setup_tree[0]
+    real = write_env(root, "custom@special/#%:credential-with-32-chars").rename(root / "real.env")
+    real.chmod(0o644)
+    (root / "backend/.env").symlink_to(real)
+    result, calls = run_setup(setup_tree)
+    assert result.returncode != 0 and not starts(calls)
+    assert "not a symlink" in result.stdout + result.stderr
+    assert stat.S_IMODE(real.stat().st_mode) == 0o644
+
+
+@pytest.mark.parametrize("secret,edit,message", [
+    ("ab" * 20, None, "JWT_SECRET_KEY"),
+    ("valid-custom-credential-with-quote'-over-32", None, "REDIS_PASSWORD must not contain"),
+    ("valid custom credential with spaces over 32", None, "REDIS_PASSWORD must not contain"),
+    ("custom@special/#%:credential-with-32-chars", ("REDIS_USERNAME=nanfo", "REDIS_USERNAME=default"),
+     "REDIS_USERNAME must be"),
+])
+def test_weak_jwt_and_unsafe_redis_acl_inputs_are_refused_before_start(setup_tree, secret, edit, message):
+    target = write_env(setup_tree[0], secret)
+    if edit:
+        target.write_text(target.read_text().replace(*edit))
+    original = target.read_bytes()
+    result, calls = run_setup(setup_tree)
+    assert result.returncode != 0 and not starts(calls)
+    assert message in result.stdout + result.stderr
+    assert secret not in result.stdout + result.stderr
+    assert target.read_bytes() == original
+
+
+FIXTURE_SECRETS = {name: f"{name.lower()}-fixture-credential-0123456789" for name in NAMES}
+
+
+def rendered_dev_config(tree):
+    root, env = tree
+    command = [shutil.which("docker"), "compose", "--env-file", "/dev/null",
+               "-f", str(root / "backend/docker-compose.yml"), "config", "--format", "json"]
+    result = subprocess.run(command, env={**env, **FIXTURE_SECRETS}, capture_output=True, text=True,
+                            timeout=15, check=True)
+    return json.loads(result.stdout)
+
+
+def test_dev_stores_use_the_exact_production_images_and_digests(setup_tree):
+    yaml = pytest.importorskip("yaml")
+    services = rendered_dev_config(setup_tree)["services"]
+    production = yaml.safe_load((ROOT / "deploy/compose.yaml").read_text())["services"]
+
+    def base(dockerfile):
+        return next(line.split()[1] for line in (ROOT / "deploy" / dockerfile).read_text().splitlines()
+                    if line.startswith("FROM "))
+
+    assert services["postgres"]["image"] == production["postgres"]["image"]
+    assert services["redis"]["image"] == base("Dockerfile.redis")
+    assert services["neo4j"]["image"] == base("Dockerfile.neo4j")
+    assert all(re.fullmatch(r"[a-z0-9./-]+:[\w.-]+@sha256:[0-9a-f]{64}", service["image"])
+               for service in services.values())
+
+
+def test_dev_neo4j_has_no_plugins_or_unrestricted_procedures(setup_tree):
+    config = rendered_dev_config(setup_tree)
+    assert set(config["services"]["neo4j"]["environment"]) == {"NEO4J_AUTH"}
+    text = json.dumps(config).lower()
+    assert "apoc" not in text and "unrestricted" not in text and "neo4j_plugins" not in text
+
+
+def test_healthchecks_authenticate_and_no_secret_reaches_argv(setup_tree):
+    services = rendered_dev_config(setup_tree)["services"]
+    for name, service in services.items():
+        exposed = json.dumps([service["healthcheck"]["test"], service.get("command"), service.get("entrypoint")])
+        for secret in FIXTURE_SECRETS.values():
+            assert secret not in exposed, name
+    redis = services["redis"]["healthcheck"]["test"][1]
+    assert "REDISCLI_AUTH=" in redis and '--user "$$REDIS_USERNAME"' in redis and " -a " not in redis
+    postgres = services["postgres"]["healthcheck"]["test"][1]
+    assert postgres.startswith("pg_isready") and '-U "$$POSTGRES_USER"' in postgres and '-d "$$POSTGRES_DB"' in postgres
+    neo4j = services["neo4j"]["healthcheck"]["test"][1]
+    assert "cypher-shell" in neo4j and "NEO4J_USERNAME=" in neo4j and "NEO4J_PASSWORD=" in neo4j
+    assert "NEO4J_AUTH" in neo4j and "wget" not in neo4j
+
+
+def test_redis_entrypoint_renders_the_production_acl_and_rejects_unsafe_input(setup_tree, tmp_path):
+    services = rendered_dev_config(setup_tree)["services"]
+    # `docker compose config` keeps `$$` escaped; the container receives single `$`.
+    conf = tmp_path / "redis.conf"
+    script = services["redis"]["command"][0].replace("$$", "$").replace("/tmp/redis.conf", str(conf))
+    stubs = tmp_path / "redis-stubs"
+    stubs.mkdir()
+    for name, body in (("chown", "exit 0"), ("docker-entrypoint.sh", 'echo "EXEC $*"')):
+        (stubs / name).write_text(f"#!/bin/sh\n{body}\n")
+        (stubs / name).chmod(0o755)
+    env = {"PATH": f"{stubs}:{os.environ['PATH']}", "REDIS_PASSWORD": FIXTURE_SECRETS["REDIS_PASSWORD"],
+           "REDIS_USERNAME": "nanfo"}
+    result = subprocess.run(["sh", "-euc", script], env=env, capture_output=True, text=True, timeout=10)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == f"EXEC redis-server {conf}"
+    assert stat.S_IMODE(conf.stat().st_mode) == 0o600
+    rules = "~* &* +@all -@dangerous +info +client|setname +client|id"
+    lines = conf.read_text().splitlines()
+    assert f"user default on >{FIXTURE_SECRETS['REDIS_PASSWORD']} {rules}" in lines
+    assert f"user nanfo on >{FIXTURE_SECRETS['REDIS_PASSWORD']} {rules}" in lines
+    assert {"maxmemory-policy noeviction", "protected-mode yes", "appendonly yes"} <= set(lines)
+    for override in ({"REDIS_PASSWORD": "has space"}, {"REDIS_PASSWORD": 'quo"te'}, {"REDIS_PASSWORD": ""},
+                     {"REDIS_USERNAME": "default"}, {"REDIS_USERNAME": "bad user"}):
+        rejected = subprocess.run(["sh", "-euc", script], env={**env, **override}, capture_output=True, timeout=10)
+        assert rejected.returncode == 64, override
+
+
+def make_dry_run(target):
+    if shutil.which("make") is None:
+        pytest.skip("make is required to render Makefile recipes")
+    result = subprocess.run(["make", "-n", target], cwd=ROOT / "backend", capture_output=True, text=True, check=True)
+    return [line for line in result.stdout.splitlines() if line.strip()]
+
+
 @pytest.mark.parametrize("target,operation", [("migrate", "upgrade head"), ("migrate-down", "downgrade -1")])
 def test_make_uses_actual_alembic_config(target, operation):
-    result = subprocess.run(["make", "-n", target], cwd=ROOT / "backend", capture_output=True, text=True, check=True)
-    assert f"alembic -c alembic/alembic.ini {operation}" in result.stdout
+    assert make_dry_run(target) == [f"poetry run alembic -c alembic/alembic.ini {operation}"]
+
+
+PYTHON_TARGETS = ("migrate", "migrate-down", "dev", "test", "test-unit", "test-integration", "lint", "check")
+
+
+@pytest.mark.parametrize("target", PYTHON_TARGETS)
+def test_make_python_targets_use_the_locked_poetry_environment(target):
+    lines = make_dry_run(target)
+    assert lines and all(line.startswith("poetry run ") for line in lines)
+
+
+def test_make_dev_server_binds_loopback_only():
+    [line] = make_dry_run("dev")
+    assert "--host 127.0.0.1" in line and "0.0.0.0" not in line
+
+
+def workflow(name):
+    yaml = pytest.importorskip("yaml")
+    return yaml.safe_load((ROOT / ".github/workflows" / name).read_text())
+
+
+def backend_job_commands():
+    return [step.get("run", "") for step in workflow("quality.yml")["jobs"]["backend"]["steps"]]
+
+
+def test_make_lint_and_check_match_the_ci_backend_job():
+    ci = backend_job_commands()
+    assert make_dry_run("lint") == ["poetry run ruff check app tests scripts"]
+    assert any(" ".join(command.split()) == "poetry run ruff check app tests scripts" for command in ci)
+    ruff, pytest_line = make_dry_run("check")
+    assert ruff == "poetry run ruff check app tests scripts"
+    assert pytest_line.startswith("poetry run pytest tests/unit tests/integration ")
+    assert '-m "not private_artifacts"' in pytest_line
+    portable = [command for command in ci if "pytest tests/unit tests/integration" in command]
+    assert portable and all('-m "not private_artifacts"' in command and "--deselect" not in command
+                            for command in portable)
+
+
+def test_python_version_pin_is_the_single_source_for_every_ci_interpreter():
+    pinned = (ROOT / "backend/.python-version").read_text().strip()
+    assert pinned == "3.12.14"
+    steps = [
+        ((path.name, job_id), step)
+        for path in sorted((ROOT / ".github/workflows").glob("*.yml"))
+        for job_id, job in workflow(path.name)["jobs"].items()
+        for step in job.get("steps", [])
+        if "setup-python" in step.get("uses", "")
+    ]
+    assert steps
+    # No literal versions that could drift from the pin files. The AI engine job reads
+    # its own lock's pin (ai-engine/.python-version); it currently equals the backend's.
+    ai_pin = "ai-engine/.python-version"
+    for key, step in steps:
+        expected = ai_pin if key == ("quality.yml", "ai") else "backend/.python-version"
+        assert step["with"] == {"python-version-file": expected}, key
+    assert (ROOT / ai_pin).read_text().strip() == pinned
+    # The production image interpreter matches the pin too.
+    assert f"FROM python:{pinned}-" in (ROOT / "deploy/Dockerfile.backend").read_text()

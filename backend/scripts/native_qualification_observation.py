@@ -6,9 +6,9 @@ identity/freshness checks. Never attach this clock to an independent v4 IPC fram
 """
 
 from app.modules.autonomy.causal_frames import CausalConfig
+from app.modules.autonomy.experimental.native_qualification_clock import causal_clock_binding, observation_datetime
 from app.modules.autonomy.schemas import Observation, contract_digest
 from emulation.native_qualification_causal import validate_ns_capture
-from emulation.native_qualification_clock import causal_clock_binding, observation_datetime
 
 
 def passive_causal_observation(config, raw_capture, *, collected_at):

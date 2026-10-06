@@ -1,5 +1,6 @@
 """Opaque correlation acceptance retains provenance and existing report contracts."""
 
+import json
 import uuid
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -11,10 +12,11 @@ from httpx import ASGITransport, AsyncClient
 from app.core.dependencies import get_db, get_redis
 from app.main import app
 from app.modules.report.artifacts import digest, render
+from app.modules.organization.service import WorkspaceService
 from app.modules.report.repository import ReportRepository
 from app.modules.report.service import ReportService
 from tests.auth_support import create_authorized_workspace
-from tests.report_support import request, snapshot
+from tests.report_support import authorized_workspace, request, snapshot, stub_org_admission
 
 
 @pytest.fixture
@@ -23,9 +25,9 @@ def report_service(mock_db, monkeypatch, tmp_path):
         REPORTS_STORAGE_PATH=str(tmp_path), REPORTS_MAX_BYTES=100000, REPORTS_MIN_FREE_BYTES=0,
     ))
     svc = ReportService(db=mock_db, redis=None)
-    svc.authorize_generation = AsyncMock()
+    svc.authorize_generation = AsyncMock(return_value=authorized_workspace())
     svc._repo.get_by_idempotency_key = AsyncMock(return_value=None)
-    return svc
+    return stub_org_admission(svc)
 
 
 def arguments(request_id, output_format="csv"):
@@ -50,13 +52,16 @@ async def test_report_generation_correlation_and_replay(report_service, mock_db,
                 uuid.uuid5(uuid.NAMESPACE_URL, f"nanfo:audit-correlation:{request_id}"))
     assert record.correlation_id == result["correlation_id"] == expected
     assert event.envelope["correlation_id"] == str(expected)
-    assert record.snapshot["metadata"]["source"] == "preserved"
+    # ADR-028 (intentional change): request provenance stays outside the frozen,
+    # hashed snapshot, so snapshot_sha256 and artifact bytes never depend on it.
+    assert record.snapshot == original
+    assert record.snapshot_sha256 == digest(original) == result["snapshot_sha256"]
     assert "request_id" not in original["metadata"]
+    payload = json.loads(event.envelope["payload"])
     if request_id.startswith("req_"):
-        assert record.snapshot["metadata"]["request_id"] == request_id
+        assert payload["request_id"] == request_id
     else:
-        assert record.snapshot == original
-    assert record.snapshot_sha256 == digest(record.snapshot)
+        assert "request_id" not in payload
     artifact = render(record.snapshot, output_format, 100000)
     assert artifact and (artifact.startswith(b"%PDF") if output_format == "pdf" else b"12.5" in artifact)
     assert result["status"] == "requested"
@@ -66,6 +71,19 @@ async def test_report_generation_correlation_and_replay(report_service, mock_db,
     assert replay["idempotent_replay"] and replay["correlation_id"] == expected
     sources.assert_awaited_once()
     mock_db.commit.assert_awaited_once()
+
+
+async def test_same_sources_yield_same_snapshot_hash_and_bytes_for_any_request_id(report_service, mock_db, monkeypatch):
+    # Regression: the request id was written into the snapshot, changing its hash and the PDF.
+    records = []
+    for request_id in ("req_a/1", "req_b/2", str(uuid.UUID(int=99))):
+        req, args = arguments(request_id, "pdf")
+        monkeypatch.setattr("app.modules.report.service.ReportSources.snapshot", AsyncMock(return_value=snapshot(req)))
+        mock_db.add.reset_mock()
+        await report_service.generate_report(**{**args, "idempotency_key": None})
+        records.append(mock_db.add.call_args_list[0].args[0])
+    assert len({record.snapshot_sha256 for record in records}) == 1
+    assert len({render(record.snapshot, "pdf", 100000) for record in records}) == 1
 
 
 async def test_invalid_report_id_precedes_authority_sources_and_mutation(report_service, mock_db):
@@ -86,6 +104,10 @@ async def test_report_http_opaque_header_with_current_authority(
     req = request(workspace_id=str(create_authorized_workspace()))
     monkeypatch.setattr(ReportRepository, "get_by_idempotency_key", AsyncMock(return_value=None))
     monkeypatch.setattr("app.modules.report.service.ReportSources.snapshot", AsyncMock(return_value=snapshot(req)))
+    # C26 admission over the mock DB: the owner lists the org's workspaces; nothing stored yet.
+    monkeypatch.setattr(WorkspaceService, "list_accessible_workspace_ids", AsyncMock(return_value=[req.workspace_id]))
+    monkeypatch.setattr(ReportRepository, "lock_org_storage", AsyncMock())
+    monkeypatch.setattr(ReportRepository, "storage_usage", AsyncMock(return_value=0))
     app.dependency_overrides[get_db] = lambda: mock_db
     app.dependency_overrides[get_redis] = lambda: tenant_auth.redis
     try:
@@ -96,8 +118,9 @@ async def test_report_http_opaque_header_with_current_authority(
         assert response.status_code == 202
         assert response.json()["meta"]["request_id"] == "req_report_http/27"
         assert response.json()["meta"]["timestamp"]
-        row = mock_db.add.call_args_list[0].args[0]
-        assert row.snapshot["metadata"]["request_id"] == "req_report_http/27"
+        row, event = [call.args[0] for call in mock_db.add.call_args_list]
+        assert "request_id" not in json.dumps(row.snapshot)
+        assert json.loads(event.envelope["payload"])["request_id"] == "req_report_http/27"
         assert response.json()["data"]["correlation_id"] == str(row.correlation_id)
         mock_db.commit.assert_awaited_once()
     finally:

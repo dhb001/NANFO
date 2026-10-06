@@ -25,6 +25,7 @@ from app.modules.telemetry.emulation import (
     StrictSchema,
     UTCTime,
     read_bounded_file,
+    reject_duplicate_keys,
     validate_json,
 )
 
@@ -266,7 +267,13 @@ class Mailbox:
     def write(self, command: LabCommand, *, can_publish=lambda: True) -> None:
         if not isinstance(command, LabCommand):
             raise TypeError("pending plan is not a dispatch authorization")
-        data = command.model_dump_json().encode()
+        # Lab-only contract, imported on use so importing the API never loads the emulation package.
+        from emulation.lab_contracts import canonical as canonical_envelope
+        from emulation.lab_contracts import load_command_key, sign_command, verify_command
+
+        # ADR-028 C15: HMAC-SHA256 over the canonical envelope; no protected key, no publication.
+        key = load_command_key()
+        data = canonical_envelope(sign_command(key, command.model_dump(mode="json")))
         if len(data) > self.max_bytes:
             raise ValueError("command too large")
         directory = self.open_directory(self.commands)
@@ -293,7 +300,9 @@ class Mailbox:
                 info = os.stat(name, dir_fd=directory, follow_symlinks=False)
                 if not stat.S_ISREG(info.st_mode):
                     raise ValueError("command must be a regular file")
-                existing = validate_json(LabCommand, read_bounded_file(self.commands / name, self.max_bytes))
+                raw = read_bounded_file(self.commands / name, self.max_bytes)
+                envelope = verify_command(key, json.loads(raw, object_pairs_hook=reject_duplicate_keys))
+                existing = validate_json(LabCommand, canonical_envelope(envelope))
                 previous, proposed = existing.model_dump(mode="json"), command.model_dump(mode="json")
                 previous.pop("operation")
                 proposed.pop("operation")

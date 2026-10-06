@@ -12,6 +12,7 @@ import { QueryState } from "@/shared/ui/QueryState";
 import { Button } from "@/shared/ui/Button";
 import { Pagination } from "@/shared/ui/Pagination";
 import type { Organization, Workspace } from "@/shared/types/organization";
+import { rememberFocus } from "@/shared/lib/focusRestore";
 
 export function TenancyPage() {
   const generation = useAuthStore((s) => s.generation);
@@ -52,7 +53,7 @@ function TenancyContent() {
         <small>3–63 lowercase letters, digits or hyphens; begin and end with a letter or digit.</small>
       </ResourceForm>
       <QueryState query={orgs} hasData={(d) => d.items.length > 0} emptyTitle="No organizations" emptyDescription="Create an organization to establish tenant scope.">{(data) => <label className="context-field">Active Organization
-        <select value={orgId ?? ""} onChange={(e) => { setSelected(data.items.find((org) => org.org_id === e.target.value) ?? null); select(e.target.value); }}>
+        <select data-focus-key="tenancy-organization" value={orgId ?? ""} onChange={(e) => { setSelected(data.items.find((org) => org.org_id === e.target.value) ?? null); rememberFocus("tenancy-organization"); select(e.target.value); }}>
           <option value="" disabled>Select an organization</option>
           {orgId && !data.items.some((org) => org.org_id === orgId) ? <option value={orgId}>{active?.name ?? orgId} (selected, off-page)</option> : null}
           {data.items.map((org) => <option key={org.org_id} value={org.org_id}>{org.name} ({org.slug})</option>)}
@@ -75,7 +76,7 @@ function OrganizationDetails({ organization, onDeleted, onSaved }: {
   const [memberId, setMemberId] = useState("");
   const [role, setRole] = useState("Operator");
   const members = useOrgMembers(token, orgId, page);
-  const authority = useOrgAuthority(token, orgId, members.data);
+  const authority = useOrgAuthority(token, orgId);
   const update = useUpdateOrganization(token, orgId);
   const remove = useDeleteOrganization(token, orgId);
   const addMember = useAddOrgMember(token, orgId);
@@ -129,7 +130,7 @@ function WorkspaceAdministration({ canAdmin }: { canAdmin: boolean }) {
     <p role="status">Selected workspace: {workspaceId ?? "None"}</p>
     <WorkspaceForm disabled={!canAdmin} onRefresh={() => workspaces.refetch()} onSave={async (input) => { const created = await create.mutateAsync(input); select(created.workspace_id); }} />
     <QueryState query={workspaces} hasData={(d) => d.items.length > 0} emptyTitle="No workspaces" emptyDescription="Create a workspace to unlock inventory.">{(data) => <div style={{ display: "grid", gap: "0.5rem" }}>{data.items.map((workspace) => <div key={workspace.workspace_id}>
-      <button className="network-choice" aria-pressed={workspace.workspace_id === workspaceId} onClick={() => select(workspace.workspace_id)}><strong>{workspace.name}</strong><small>{workspace.workspace_id}</small></button>
+      <button className="network-choice" data-focus-key={`tenancy-workspace:${workspace.workspace_id}`} aria-pressed={workspace.workspace_id === workspaceId} onClick={() => { rememberFocus(`tenancy-workspace:${workspace.workspace_id}`); select(workspace.workspace_id); }}><strong>{workspace.name}</strong><small>{workspace.workspace_id}</small></button>
       <Button permission="write:config" tone="ghost" disabled={!canAdmin} onClick={() => setEditing(workspace)}>Edit {workspace.name}</Button>
       <DeleteResource name={workspace.name} disabled={!canAdmin} onRefresh={() => workspaces.refetch()} detail="Network inventory in this workspace will no longer be accessible through this scope." onDelete={async () => {
         await remove.mutateAsync(workspace.workspace_id); setAutoSelect(false);

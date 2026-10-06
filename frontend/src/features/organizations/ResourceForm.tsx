@@ -5,7 +5,7 @@ import { Button } from "@/shared/ui/Button";
 
 /** Shared only by the tenancy and inventory editors owned by this workstream. */
 export function ResourceForm({ label, submitLabel, disabled, onSubmit, onRefresh, children }: {
-  label: string; submitLabel: string; disabled?: boolean; children: ReactNode;
+  label: string; submitLabel: string; disabled?: boolean | undefined; children: ReactNode;
   onSubmit: () => Promise<void>; onRefresh: () => Promise<unknown>;
 }) {
   const [pending, setPending] = useState(false);
@@ -42,7 +42,7 @@ export function ResourceForm({ label, submitLabel, disabled, onSubmit, onRefresh
 }
 
 export function DeleteResource({ name, disabled, onDelete, onRefresh, detail }: {
-  name: string; disabled?: boolean; onDelete: () => Promise<void>; onRefresh: () => Promise<unknown>; detail?: string;
+  name: string; disabled?: boolean | undefined; onDelete: () => Promise<void>; onRefresh: () => Promise<unknown>; detail?: string;
 }) {
   const [confirm, setConfirm] = useState(false);
   return confirm ? <ResourceForm label={`Delete ${name}`} submitLabel="Confirm deletion" disabled={disabled} onSubmit={async () => { await onDelete(); setConfirm(false); }} onRefresh={onRefresh}>

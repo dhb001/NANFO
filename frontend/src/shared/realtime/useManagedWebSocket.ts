@@ -1,27 +1,51 @@
 import { useEffect, useRef } from "react";
 import { nextBackoffMs } from "@/shared/lib/backoff";
-import { WS_BASE_URL } from "@/shared/lib/env";
-import { SocketUpgradeRecovery, WebSocketErrorData } from "@/shared/types/ws";
+import { webSocketBaseUrl } from "@/shared/lib/env";
+import type { RealtimeHaltReason, SocketUpgradeRecovery, WebSocketErrorData } from "@/shared/types/ws";
+
+// ADR-028 C1 transport: the credential travels as a subprotocol, never in the URL.
+export const WS_PROTOCOL = "nanfo.v1";
+export const WS_BEARER_PREFIX = "nanfo.bearer.";
+
+const CLOSE_ABNORMAL = 1006;
+const CLOSE_POLICY = 1008;
+const CLOSE_TOO_BIG = 1009;
+const SUBSCRIBE_ACK_TIMEOUT_MS = 10_000;
+export const RECONNECT_BACKOFF = { baseMs: 500, capMs: 30_000 } as const;
+
+// Retrying cannot fix these denials.
+const TERMINAL_CODES = new Set(["WS_INVALID_FILTER", "WS_UNKNOWN_CHANNEL", "WS_FORBIDDEN"]);
+// Dependency outage / missed subscribe / slow consumer: the server closes (1013) and we retry.
+const TRANSIENT_CODES = new Set(["WS_UNAVAILABLE", "WS_SUBSCRIBE_TIMEOUT", "WS_BACKPRESSURE"]);
+
+type SocketStatus = "connecting" | "open" | "closed";
 
 interface ManagedSocketOptions<TFrame> {
   path: string;
+  /** Current access token. Rotation never reconnects a healthy socket; it only revives an expired one. */
   token: string | null;
   channel: string;
   filters?: Record<string, unknown>;
   enabled: boolean;
   contextKey?: string;
+  /** Changing this value restarts a halted socket (for example the visible "Retry realtime" control). */
+  retryKey?: number | string;
   isCurrent?: () => boolean;
   onFrame: (frame: TFrame) => void;
   onUnauthorized?: () => void;
   onUpgradeFailure?: (token: string) => Promise<SocketUpgradeRecovery>;
   onError?: (error: WebSocketErrorData) => void;
   onSubscribed?: () => void;
-  onStatusChange?: (status: "connecting" | "open" | "closed") => void;
+  onStatusChange?: (status: SocketStatus) => void;
+  onHalt?: (reason: RealtimeHaltReason, error: WebSocketErrorData) => void;
 }
 
-function buildSocketUrl(path: string, token: string): string {
-  const normalizedBase = WS_BASE_URL.endsWith("/") ? WS_BASE_URL.slice(0, -1) : WS_BASE_URL;
-  return `${normalizedBase}${path}?token=${encodeURIComponent(token)}`;
+export function socketUrl(path: string): string {
+  return `${webSocketBaseUrl()}${path}`;
+}
+
+export function socketProtocols(token: string): string[] {
+  return [WS_PROTOCOL, `${WS_BEARER_PREFIX}${token}`];
 }
 
 function toWebSocketError(frame: Record<string, unknown>): WebSocketErrorData | null {
@@ -43,8 +67,16 @@ function toWebSocketError(frame: Record<string, unknown>): WebSocketErrorData | 
   };
 }
 
+function matchesFilters(received: unknown, expected: Record<string, unknown>): boolean {
+  if (!received || typeof received !== "object") return false;
+  const filters = received as Record<string, unknown>;
+  return Object.keys(filters).length === Object.keys(expected).length &&
+    Object.entries(expected).every(([key, value]) => filters[key] === value);
+}
+
 export function useManagedWebSocket<TFrame>(options: ManagedSocketOptions<TFrame>) {
-  const reconnectRef = useRef<number | null>(null);
+  const tokenRef = useRef(options.token);
+  const resumeRef = useRef<(() => void) | null>(null);
   const onFrameRef = useRef(options.onFrame);
   const onUnauthorizedRef = useRef(options.onUnauthorized);
   const onUpgradeFailureRef = useRef(options.onUpgradeFailure);
@@ -55,9 +87,11 @@ export function useManagedWebSocket<TFrame>(options: ManagedSocketOptions<TFrame
   const onErrorRef = useRef(options.onError);
   const onSubscribedRef = useRef(options.onSubscribed);
   const onStatusChangeRef = useRef(options.onStatusChange);
+  const onHaltRef = useRef(options.onHalt);
   const filtersRef = useRef<Record<string, unknown>>(options.filters ?? {});
 
   const filtersKey = JSON.stringify(options.filters ?? {});
+  const hasToken = Boolean(options.token);
 
   useEffect(() => {
     onFrameRef.current = options.onFrame;
@@ -66,120 +100,169 @@ export function useManagedWebSocket<TFrame>(options: ManagedSocketOptions<TFrame
     onErrorRef.current = options.onError;
     onSubscribedRef.current = options.onSubscribed;
     onStatusChangeRef.current = options.onStatusChange;
+    onHaltRef.current = options.onHalt;
     filtersRef.current = options.filters ?? {};
-  }, [options.filters, options.onError, options.onFrame, options.onUnauthorized, options.onUpgradeFailure, options.onStatusChange, options.onSubscribed]);
+  }, [options.filters, options.onError, options.onFrame, options.onUnauthorized, options.onUpgradeFailure, options.onStatusChange, options.onSubscribed, options.onHalt]);
+
+  // Declared before the connection effect so a fresh credential is visible to it.
+  useEffect(() => {
+    tokenRef.current = options.token;
+    resumeRef.current?.();
+  }, [options.token]);
 
   useEffect(() => {
-    if (!options.enabled || !options.token) {
+    if (!options.enabled || !hasToken) {
       return;
     }
 
-    const token = options.token;
-    let closed = false;
+    let stopped = false;
     const isCurrent = options.isCurrent;
     let socket: WebSocket | null = null;
     let attempt = 0;
     let acknowledgmentTimeout: number | undefined;
+    let reconnectTimer: number | undefined;
+    // Credential rejected by the server; the next distinct token resumes the channel.
+    let parkedOnToken: string | null = null;
 
-    const clearReconnect = () => {
-      if (reconnectRef.current !== null) {
-        window.clearTimeout(reconnectRef.current);
-        reconnectRef.current = null;
+    const setStatus = (status: SocketStatus) => onStatusChangeRef.current?.(status);
+    const schedule = (delayMs: number) => {
+      window.clearTimeout(reconnectTimer);
+      reconnectTimer = window.setTimeout(connect, delayMs);
+    };
+    const retryLater = () => {
+      attempt += 1;
+      schedule(nextBackoffMs(attempt, RECONNECT_BACKOFF));
+    };
+    const halt = (reason: RealtimeHaltReason, error: WebSocketErrorData) => {
+      stopped = true;
+      window.clearTimeout(reconnectTimer);
+      setStatus("closed");
+      onHaltRef.current?.(reason, error);
+    };
+    const unauthorized = (connectionToken: string) => {
+      const current = tokenRef.current;
+      if (current && current !== connectionToken) {
+        // Already rotated (for example by a REST 401): reconnect with the fresh credential.
+        schedule(0);
+        return;
+      }
+      parkedOnToken = connectionToken;
+      if (!unauthorizedAttemptedRef.current) {
+        unauthorizedAttemptedRef.current = true;
+        onUnauthorizedRef.current?.();
       }
     };
 
-    const connect = () => {
-      if (closed || isCurrent?.() === false) {
+    function connect() {
+      reconnectTimer = undefined;
+      const token = tokenRef.current;
+      if (stopped || !token || isCurrent?.() === false) {
         return;
       }
-
-      onStatusChangeRef.current?.("connecting");
-      const connection = new WebSocket(buildSocketUrl(options.path, token));
+      parkedOnToken = null;
+      setStatus("connecting");
+      let connection: WebSocket;
+      try {
+        connection = new WebSocket(socketUrl(options.path), socketProtocols(token));
+      } catch {
+        // For example a credential that is not a valid subprotocol token: retrying cannot help.
+        const error = { code: "WS_CLIENT_ERROR", message: "This browser could not open the realtime connection." };
+        onErrorRef.current?.(error);
+        halt("client_error", error);
+        return;
+      }
       socket = connection;
       let opened = false;
       let subscribed = false;
-      const isActive = () => !closed && socket === connection && isCurrent?.() !== false;
+      let lastErrorCode: string | null = null;
+      const isActive = () => !stopped && socket === connection && isCurrent?.() !== false;
+      // Detach first so this connection's own close event is ignored.
+      const detach = () => {
+        socket = null;
+        window.clearTimeout(acknowledgmentTimeout);
+        setStatus("closed");
+        connection.close();
+      };
 
-      socket.onopen = () => {
+      connection.onopen = () => {
         if (!isActive()) return;
         opened = true;
-        const frame = {
-          action: "subscribe",
-          channel: options.channel,
-          filters: filtersRef.current,
-        };
-        socket?.send(JSON.stringify(frame));
+        connection.send(JSON.stringify({ action: "subscribe", channel: options.channel, filters: filtersRef.current }));
         acknowledgmentTimeout = window.setTimeout(() => {
           if (isActive() && !subscribed) connection.close();
-        }, 10_000);
+        }, SUBSCRIBE_ACK_TIMEOUT_MS);
       };
 
-      socket.onmessage = (event) => {
+      connection.onmessage = (event: MessageEvent) => {
         if (!isActive()) return;
+        let parsed: Record<string, unknown>;
         try {
-          const parsed = JSON.parse(String(event.data)) as Record<string, unknown>;
-          if (!parsed || typeof parsed !== "object" || typeof parsed.event !== "string") return;
-          const wsError = toWebSocketError(parsed);
-          if (wsError) {
-            onErrorRef.current?.(wsError);
-          }
-
-          if (wsError?.code === "WS_UNAUTHORIZED") {
-            if (!unauthorizedAttemptedRef.current) {
-              unauthorizedAttemptedRef.current = true;
-              onUnauthorizedRef.current?.();
-            }
-            closed = true;
-            onStatusChangeRef.current?.("closed");
-            socket?.close();
-            return;
-          }
-
-          if (wsError) {
-            if (["WS_INVALID_FILTER", "WS_FORBIDDEN", "WS_UNKNOWN_CHANNEL"].includes(wsError.code)) {
-              closed = true;
-              onStatusChangeRef.current?.("closed");
-              socket?.close();
-            }
-            return;
-          }
-
-          if (parsed.event === "subscribed") {
-            const filters = parsed.filters;
-            if (subscribed || !opened || parsed.channel !== options.channel || !filters || typeof filters !== "object" ||
-                Object.keys(filters).length !== Object.keys(filtersRef.current).length ||
-                !Object.entries(filtersRef.current).every(([key, value]) => (filters as Record<string, unknown>)[key] === value)) return;
-            subscribed = true;
-            window.clearTimeout(acknowledgmentTimeout);
-            upgradeRecoveryAttemptedRef.current = false;
-            unauthorizedAttemptedRef.current = false;
-            upgradeProbeRetryRef.current = { failures: 0, after: 0 };
-            attempt = 0;
-            onStatusChangeRef.current?.("open");
-            onSubscribedRef.current?.();
-            return;
-          }
-          if (subscribed) onFrameRef.current(parsed as TFrame);
+          parsed = JSON.parse(String(event.data)) as Record<string, unknown>;
         } catch {
+          return; // Fail open: a malformed frame never stops valid ones.
+        }
+        if (!parsed || typeof parsed !== "object" || typeof parsed.event !== "string") return;
+        const wsError = toWebSocketError(parsed);
+        if (wsError) {
+          lastErrorCode = wsError.code;
+          onErrorRef.current?.(wsError);
+          if (wsError.code === "WS_UNAUTHORIZED") {
+            detach();
+            unauthorized(token);
+          } else if (wsError.code === "WS_CONNECTION_LIMIT") {
+            detach();
+            halt("connection_limit", wsError);
+          } else if (TERMINAL_CODES.has(wsError.code)) {
+            detach();
+            halt("denied", wsError);
+          }
+          // Transient codes: the server closes with 1013 and onclose retries.
           return;
+        }
+
+        if (parsed.event === "subscribed") {
+          if (subscribed || !opened || parsed.channel !== options.channel || !matchesFilters(parsed.filters, filtersRef.current)) return;
+          subscribed = true;
+          window.clearTimeout(acknowledgmentTimeout);
+          upgradeRecoveryAttemptedRef.current = false;
+          unauthorizedAttemptedRef.current = false;
+          upgradeProbeRetryRef.current = { failures: 0, after: 0 };
+          attempt = 0;
+          setStatus("open");
+          onSubscribedRef.current?.();
+          return;
+        }
+        if (!subscribed) return;
+        try {
+          onFrameRef.current(parsed as TFrame);
+        } catch {
+          // A consumer failure on one frame must not stop the channel.
         }
       };
 
-      socket.onclose = async (event) => {
+      connection.onclose = async (event: CloseEvent) => {
         if (!isActive()) return;
+        socket = null;
         window.clearTimeout(acknowledgmentTimeout);
-        onStatusChangeRef.current?.("closed");
-        if (event.code === 1008 || event.reason.toUpperCase().includes("WS_UNAUTHORIZED")) {
-          if (!unauthorizedAttemptedRef.current) {
-            unauthorizedAttemptedRef.current = true;
-            onUnauthorizedRef.current?.();
-          }
-          closed = true;
+        setStatus("closed");
+        if (lastErrorCode !== null && TRANSIENT_CODES.has(lastErrorCode)) {
+          retryLater();
           return;
         }
-        socket = null;
-        if (!opened && event.code === 1006 && !upgradeRecoveryAttemptedRef.current &&
+        if (event.code === CLOSE_TOO_BIG) {
+          const error = { code: "WS_MESSAGE_TOO_BIG", message: "The realtime server rejected an oversized client frame." };
+          onErrorRef.current?.(error);
+          halt("client_error", error);
+          return;
+        }
+        if (event.code === CLOSE_POLICY) {
+          // A policy close without a recognised frame is treated as credential expiry.
+          unauthorized(token);
+          return;
+        }
+        if (!opened && event.code === CLOSE_ABNORMAL && !upgradeRecoveryAttemptedRef.current &&
             Date.now() >= upgradeProbeRetryRef.current.after && onUpgradeFailureRef.current) {
+          // Browsers report a refused upgrade (HTTP 403) and a transport outage identically.
           upgradeRecoveryAttemptedRef.current = true;
           let result: SocketUpgradeRecovery = "inconclusive";
           try {
@@ -187,35 +270,41 @@ export function useManagedWebSocket<TFrame>(options: ManagedSocketOptions<TFrame
           } catch {
             // A failed auth probe is not proof of expiry. Keep transport backoff.
           }
-          if (closed || isCurrent?.() === false) return;
+          if (stopped || isCurrent?.() === false) return;
           if (result === "inconclusive") {
             const failures = Math.min(upgradeProbeRetryRef.current.failures + 1, 5);
             upgradeProbeRetryRef.current = { failures, after: Date.now() + Math.min(5_000 * 2 ** (failures - 1), 60_000) };
             upgradeRecoveryAttemptedRef.current = false;
           }
         }
-        attempt += 1;
-        const waitMs = nextBackoffMs(attempt);
-        reconnectRef.current = window.setTimeout(connect, waitMs);
+        // 1011 / 1013 / network loss: capped, fully jittered reconnect.
+        retryLater();
       };
-    };
+    }
 
+    resumeRef.current = () => {
+      if (!stopped && parkedOnToken !== null && tokenRef.current && tokenRef.current !== parkedOnToken) schedule(0);
+    };
     connect();
 
     return () => {
-      closed = true;
-      clearReconnect();
+      stopped = true;
+      resumeRef.current = null;
+      window.clearTimeout(reconnectTimer);
       window.clearTimeout(acknowledgmentTimeout);
-      onStatusChangeRef.current?.("closed");
-      socket?.close();
+      setStatus("closed");
+      const open = socket;
+      socket = null;
+      open?.close();
     };
   }, [
     options.channel,
     options.enabled,
     filtersKey,
     options.path,
-    options.token,
+    hasToken,
     options.contextKey,
     options.isCurrent,
+    options.retryKey,
   ]);
 }

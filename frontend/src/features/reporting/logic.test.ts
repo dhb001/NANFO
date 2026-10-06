@@ -48,16 +48,21 @@ describe("reporting logic", () => {
     expect(isReportTerminal("requested")).toBe(false);
   });
 
-  it("maps status and queue tones", () => {
+  it("maps status and queue tones from explicit backend value sets; unknown values are neutral (ADR-028)", () => {
     expect(mapReportStatusTone("generated")).toBe("ok");
     expect(mapReportStatusTone("failed")).toBe("danger");
     expect(mapReportStatusTone("requested")).toBe("info");
-    expect(mapReportStatusTone("mystery")).toBe("warn");
+    expect(mapReportStatusTone("running")).toBe("info");
+    expect(mapReportStatusTone("mystery")).toBe("neutral");
+    expect(mapReportStatusTone("Generated")).toBe("neutral");
 
     expect(mapQueueTone("queued")).toBe("ok");
-    expect(mapQueueTone("replayed")).toBe("ok");
-    expect(mapQueueTone("deferred")).toBe("warn");
-    expect(mapQueueTone("pending")).toBe("info");
+    expect(mapQueueTone("outbox_pending")).toBe("info");
+    expect(mapQueueTone("pending")).toBe("neutral");
+    // Values reports never emit are not guessed.
+    expect(mapQueueTone("replayed")).toBe("neutral");
+    expect(mapQueueTone("deferred")).toBe("neutral");
+    expect(mapQueueTone(null)).toBe("neutral");
   });
 
   it("extracts error messages from report payload", () => {

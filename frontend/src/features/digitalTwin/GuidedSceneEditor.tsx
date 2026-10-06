@@ -36,20 +36,20 @@ export function GuidedSceneEditor({ text, disabled, token, networkId, onBegin, o
 }
 
 function ObjectForm({ object, scene, disabled, token, networkId, onBegin, onStage }: {
-  object?: SpatialObject; scene: SpatialScene; disabled: boolean; token: string | null; networkId: string | null;
+  object?: SpatialObject | undefined; scene: SpatialScene; disabled: boolean; token: string | null; networkId: string | null;
   onBegin: () => void; onStage: (scene: SpatialScene, id: string) => void;
 }) {
   const [kind, setKind] = useState<string>(object?.geometry?.kind ?? (object?.geometry === null ? "null" : "omitted"));
   const [deviceId, setDeviceId] = useState(object?.device_id ?? "");
   const [message, setMessage] = useState("");
   function field(label: string, name: string, value: string | number | null | undefined, numeric = false) {
-    return <label style={{ display: "grid" }} key={name}>{label}<input name={name} defaultValue={value ?? ""} type={numeric ? "number" : "text"} step={numeric ? "any" : undefined} /></label>;
+    return <label className="twin-block-grid" key={name}>{label}<input name={name} defaultValue={value ?? ""} type={numeric ? "number" : "text"} step={numeric ? "any" : undefined} /></label>;
   }
   return <form onChange={onBegin} onSubmit={(event) => {
     event.preventDefault();
     if (disabled) return;
     const data = new FormData(event.currentTarget);
-    const str = (key: string) => String(data.get(key) ?? "");
+    const str = (key: string) => { const value = data.get(key); return typeof value === "string" ? value : ""; };
     const num = (key: string) => str(key).trim() === "" ? NaN : Number(str(key));
     const vector = (key: string) => ({ x: num(`${key}.x`), y: num(`${key}.y`), z: num(`${key}.z`) });
     const geometry = kind === "omitted" ? {} : { geometry: kind === "null" ? null : {

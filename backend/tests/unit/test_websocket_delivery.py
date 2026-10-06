@@ -10,7 +10,7 @@ import pytest
 from app.modules.identity.sessions import SessionRepository
 from app.websocket import manager as managers
 from app.websocket.delivery import DeliveryLimits
-from tests.unit.test_websocket_auth_revalidation import MANAGERS, push, subscribe
+from tests.unit.test_websocket_auth_revalidation import DENIALS, MANAGERS, elapse, push, subscribe
 from tests.ws_auth_support import ws_identity as ws_identity  # noqa: PLC0414
 
 
@@ -116,12 +116,16 @@ async def test_queued_messages_revalidate_after_revocation(ws_identity, channel,
         manager._connection_auth[ws].token_exp = 1
     else:
         state.redis.get = AsyncMock(side_effect=RuntimeError("unavailable"))
+    elapse(manager)  # beyond the <= 15 s authorization cache (C1)
     ws.release.set()
     await until(lambda: ws not in manager._deliveries)
     # Only the already-authorized in-flight transport may complete. No queued data.
     assert [frame["event"] for frame in ws.frames] == ["test.delta", "error"]
-    assert ws.frames[-1]["data"]["code"] == "WS_UNAUTHORIZED"
-    ws.close.assert_awaited_once_with(code=1008)
+    [close] = ws.close.await_args_list
+    if revocation == "redis":
+        assert (ws.frames[-1]["data"]["code"], close.kwargs["code"]) in DENIALS
+    else:
+        assert ws.frames[-1]["data"]["code"] == "WS_UNAUTHORIZED" and close.kwargs == {"code": 1008}
     assert not delivery.pending and delivery.pending_bytes == 0
     await push(manager, state, channel, state.workspace_id)
     assert len(ws.frames) == 2
@@ -201,6 +205,7 @@ async def test_alert_queue_uses_updated_workspace_membership(ws_identity):
     for workspace in (state.workspace_id, None, state.other_workspace_id):
         await push(manager, state, "alerts", workspace)
     del state.memberships[uuid.UUID(state.org_id)]
+    elapse(manager)
     ws.release.set()
     await until(lambda: manager._deliveries[ws].task is None)
     assert len(ws.frames) == 2
@@ -309,6 +314,7 @@ async def test_overflow_after_revocation_prefers_unauthorized(ws_identity):
     await ws.started.wait()
     await push(manager, ws_identity, "telemetry", ws_identity.workspace_id)
     ws_identity.permissions = []
+    elapse(manager)
     await push(manager, ws_identity, "telemetry", ws_identity.workspace_id)
     await until(lambda: ws not in manager._deliveries)
     assert [frame["data"]["code"] for frame in ws.frames] == ["WS_UNAUTHORIZED"]
@@ -325,8 +331,9 @@ async def test_auth_timeout_fails_closed_and_unsubscribes(ws_identity, monkeypat
     await subscribe(manager, ws, ws_identity, "telemetry")
     await push(manager, ws_identity, "telemetry", ws_identity.workspace_id)
     await until(lambda: ws not in manager._deliveries)
-    assert [frame["data"]["code"] for frame in ws.frames] == ["WS_UNAUTHORIZED"]
-    ws.close.assert_awaited_once_with(code=1008)
+    # A hung authorization dependency never grants delivery; C1 asks clients to retry.
+    assert [frame["data"]["code"] for frame in ws.frames] == ["WS_UNAVAILABLE"]
+    ws.close.assert_awaited_once_with(code=1013)
 
 
 async def test_external_writer_cancellation_cleans_up_instead_of_restarting(ws_identity):

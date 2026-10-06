@@ -275,3 +275,48 @@ async def test_spatial_and_inventory_locks_complete_without_deadlock(sessions, m
         assert event.envelope["event_type"] == "network.device.updated"
         assert json.loads(event.envelope["payload"])["changed_fields"] == {"spatial_ref_id": "after"}
         assert event.published_at is None
+
+
+async def test_payload_carries_the_committed_outbox_sequence_in_network_order(sessions):
+    """C13: consumers order by (network_id, sequence); payload value equals the row identity."""
+    rows = [await enqueue(sessions), await enqueue(sessions, uuid.UUID(int=9)), await enqueue(sessions)]
+    async with sessions() as db:
+        stored = {row.event_id: row for row in (await db.scalars(select(NetworkOutbox))).all()}
+        watermark = await NetworkOutboxRepository(db).watermark()
+    sequences = [json.loads(stored[row.event_id].envelope["payload"])["sequence"] for row in rows]
+    assert sequences == [stored[row.event_id].sequence for row in rows]
+    assert sequences == sorted(sequences) and len(set(sequences)) == 3
+    assert watermark == max(sequences)
+    later = await enqueue(sessions)
+    assert later.sequence > watermark
+
+
+async def test_retention_deletes_only_old_published_rows_and_keeps_the_watermark_anchor(sessions, fake_redis):
+    """Persistence F18: bounded batch deletes; unpublished rows and the newest row survive."""
+    rows = [await enqueue(sessions) for _ in range(5)]
+    async with sessions() as db:
+        await db.execute(update(NetworkOutbox).where(
+            NetworkOutbox.event_id.in_([rows[0].event_id, rows[1].event_id, rows[4].event_id]),
+        ).values(published_at=func.now() - timedelta(days=40)))
+        await db.execute(update(NetworkOutbox).where(NetworkOutbox.event_id == rows[3].event_id)
+                         .values(published_at=func.now() - timedelta(days=1)))
+        # rows[2] stays unpublished even though it is old.
+        await db.execute(update(NetworkOutbox).where(NetworkOutbox.event_id == rows[2].event_id)
+                         .values(created_at=func.now() - timedelta(days=90)))
+        await db.commit()
+        watermark = await NetworkOutboxRepository(db).watermark()
+    clock = [100.0]
+    publisher = NetworkOutboxPublisher(sessions=sessions, redis=fake_redis, retention_days=30,
+                                       retention_batch=1, clock=lambda: clock[0])
+    assert await publisher.purge_published() == 1
+    assert await publisher.purge_published() == 1  # a full batch schedules the next one immediately
+    assert await publisher.purge_published() == 0  # rows[4] is old but anchors the watermark
+    assert await publisher.purge_published() == 0  # rate limited until the next interval
+    async with sessions() as db:
+        remaining = set((await db.scalars(select(NetworkOutbox.event_id))).all())
+        assert remaining == {rows[2].event_id, rows[3].event_id, rows[4].event_id}
+        assert await NetworkOutboxRepository(db).watermark() == watermark
+    # The regular loop keeps publishing the pending row after retention ran.
+    assert await publisher.drain(limit=5) == 1
+    async with sessions() as db:
+        assert (await db.get(NetworkOutbox, rows[2].event_id)).published_at is not None
