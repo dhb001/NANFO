@@ -32,7 +32,7 @@ services:
       retries: 20
 
   neo4j:
-    image: neo4j:5.26.31-community-trixie@sha256:ab3aafb0020e6fed65bb2b59f7db1fabd7ee0568c4da46f3cc3b8fad77801d61
+    image: neo4j:5.26.31-community-trixie@sha256:c7d25c0eeebfe125718d58b72ed5d663c85d0479047733845eb2237c67ce8069
     container_name: nanfo_neo4j
     restart: unless-stopped
     environment:
