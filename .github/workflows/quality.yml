@@ -69,7 +69,7 @@ jobs:
       - name: Full portable deployment, emulation, root-script and CI-gate regressions (zero skips)
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: poetry run python ../scripts/run_portable_tests.py --junitxml=portable-results.xml
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: backend-quality-results
@@ -113,7 +113,7 @@ jobs:
         run: >-
           python ../.github/scripts/ci_gates.py junit proxy-results.xml --zero-skips
           --require test_real_nginx_two_login_clients_and_untrusted_spoof
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: gateway-proxy-boundary-results
@@ -152,7 +152,7 @@ jobs:
       - name: Require executed gateway header cases with zero skips
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: python ../.github/scripts/ci_gates.py junit gateway-results.xml --zero-skips --min-cases 13
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: gateway-headers-results
@@ -217,7 +217,7 @@ jobs:
         run: >-
           python ../.github/scripts/ci_gates.py junit quality-results.xml
           --budget ../.github/ci-skip-budget.json --lane ai --min-cases 440
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: ai-quality-results
@@ -240,7 +240,7 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version-file: backend/.python-version
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '22.22.0'
           cache: npm
@@ -279,7 +279,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '22.22.0'
           cache: npm
@@ -306,7 +306,7 @@ jobs:
       - name: Chromium contract and CSP regressions
         if: ${{ !cancelled() && steps.browser.outcome == 'success' }}
         run: npm run test:e2e -- --project=chromium --retries=0 --workers=2
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: failure()
         with:
           name: frontend-browser-failure-results
