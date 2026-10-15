@@ -10,7 +10,7 @@ x-required-credentials:
 
 services:
   postgres:
-    image: postgres:17.11-bookworm@sha256:639ab7ceb90e13123085b741fb31ef493fba25463002f6da665352e7b534b652
+    image: postgres:17.11-bookworm@sha256:3645570cccdfa447589da9f57dd740faa29b30938e861289a5574b6ca6b03826
     container_name: nanfo_postgres
     restart: unless-stopped
     environment:
@@ -32,7 +32,7 @@ services:
       retries: 20
 
   neo4j:
-    image: neo4j:5.26.31-community-trixie@sha256:ab3aafb0020e6fed65bb2b59f7db1fabd7ee0568c4da46f3cc3b8fad77801d61
+    image: neo4j:5.26.31-community-trixie@sha256:c7d25c0eeebfe125718d58b72ed5d663c85d0479047733845eb2237c67ce8069
     container_name: nanfo_neo4j
     restart: unless-stopped
     environment:
