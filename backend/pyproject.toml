@@ -8,7 +8,7 @@ packages = [{include = "app"}]
 
 [tool.poetry.dependencies]
 python = "^3.12"
-fastapi = ">=0.135.4,<0.144.0"
+fastapi = ">=0.135.4,<0.162.0"
 uvicorn = {extras = ["standard"], version = ">=0.32,<0.55"}
 pydantic = "^2.9.0"
 pydantic-settings = "^2.6.0"
@@ -24,7 +24,7 @@ structlog = ">=24.4,<27.0"
 httpx = "^0.28.0"
 psycopg2-binary = "^2.9.10"
 email-validator = "^2.0.0"
-reportlab = "5.0.1"
+reportlab = "5.1.0"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^9.1.1"
@@ -32,8 +32,8 @@ pytest-asyncio = "^1.4.0"
 pytest-cov = ">=6,<8"
 fakeredis = {extras = ["aioredis", "lua"], version = "^2.26.0"}
 anyio = {extras = ["trio"], version = "^4.6.0"}
-pypdf = "6.20.0"
-ruff = "0.17.0"
+pypdf = "6.21.2"
+ruff = "0.17.2"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
