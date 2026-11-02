@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type JSX } from "react";
 import { Navigate } from "react-router-dom";
 import { getProfile } from "@/features/auth/api";
 import { refreshSession } from "@/features/auth/session";

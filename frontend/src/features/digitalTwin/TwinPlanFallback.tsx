@@ -6,7 +6,7 @@ import { drawPlan, layoutPlan, pickPlanPoint } from "./twinPlan2d";
 const DEFAULT_SIZE = { width: 800, height: 560 };
 const MAX_ALERT_BUTTONS = 20;
 
-function useCanvasSize(canvas: RefObject<HTMLCanvasElement>) {
+function useCanvasSize(canvas: RefObject<HTMLCanvasElement | null>) {
   const [size, setSize] = useState(DEFAULT_SIZE);
   useEffect(() => {
     const element = canvas.current;

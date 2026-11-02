@@ -57,9 +57,13 @@ export const CONTINUITY_LIMITS = {
   // transport, session recovery/duplicate-tab handling, burst batching, contract/status
   // maps, intent C3 identities, autonomy C17/C25). Measured 432,466 B; the previous
   // 420,000 B cap kept the same ~4% headroom over its baseline. Per-chunk caps are unchanged.
-  totalJsGzipBytesMax: 450000,
+  // Rebaselined 2026-11-02 (dependency-consistency repair): the React 19 line
+  // (react/react-dom 19.3.1), @react-three/fiber 9 and Vite 8 upgrade grows the bundle
+  // versus the React 18 baseline. Measured total 484,492 B and react chunk 65,697 B;
+  // caps keep the same ~4% headroom over the new baseline. Three/twin caps unchanged.
+  totalJsGzipBytesMax: 504000,
   largestChunkGzipBytesMax: 260000,
-  largestNonThreeChunkGzipBytesMax: 60000,
+  largestNonThreeChunkGzipBytesMax: 68500,
   threeChunkGzipBytesMax: 260000,
   twinPageChunkGzipBytesMax: 7000,
 } as const;

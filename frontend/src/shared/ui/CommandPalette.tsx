@@ -123,7 +123,7 @@ export function CommandPalette() {
           className="command-palette-backdrop"
           data-open={open}
           aria-hidden={!open || undefined}
-          {...(!open ? { inert: "" } : {})}
+          {...(!open ? { inert: true } : {})}
           role="dialog"
           aria-modal="true"
           aria-label="Command palette"

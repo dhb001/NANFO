@@ -56,10 +56,25 @@ export default defineConfig(({ command, mode }) => {
       },
       rollupOptions: {
         output: {
-          manualChunks: {
-            react: ["react", "react-dom", "react-router-dom"],
-            three: ["three", "@react-three/fiber", "three/examples/jsm/loaders/GLTFLoader.js"],
-            query: ["@tanstack/react-query"],
+          // Function form: Vite 8 types manualChunks as a function only, so the
+          // previous object form no longer typechecks. Chunk names are unchanged
+          // ("react", "three", "query"), preserving the bundle-continuity checks
+          // that key off the "three-" chunk prefix.
+          manualChunks(id: string) {
+            if (
+              id.includes("node_modules/react-dom/") ||
+              id.includes("node_modules/react-router-dom/") ||
+              id.includes("node_modules/react/")
+            ) {
+              return "react";
+            }
+            if (id.includes("node_modules/three/") || id.includes("node_modules/@react-three/fiber/")) {
+              return "three";
+            }
+            if (id.includes("node_modules/@tanstack/react-query/")) {
+              return "query";
+            }
+            return undefined;
           },
         },
       },

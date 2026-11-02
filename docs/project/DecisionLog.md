@@ -2684,6 +2684,48 @@ Related:
 
 
 
+## 2026-11-02
+### Frontend dependency consistency repair (Oct-15 merge breakage)
+Reason:
+- The 2026-10-15 merge wave left `frontend/package.json` with duplicate keys
+  (`eslint-plugin-react-hooks` twice, `eslint-plugin-react-refresh` twice) and
+  mismatched major lines: react 19 with react-dom 18, `@eslint/js` 10 with
+  eslint 9, `@vitejs/plugin-react` 6 (needs Vite 8) with Vite 6, TypeScript 7
+  with typescript-eslint 8 (caps at <6.1), and `@react-three/fiber` 8 (peer
+  react <19) with react 19. `npm ci` failed with ERESOLVE, so no frontend
+  gate had run since 2026-10-15.
+- The duplicates came from merge 86e786c (main into the react-hooks-7.1.1
+  branch), carried onto main by PR #111; that merge also silently lost the
+  intended hooks 7.1.1 bump (last duplicate wins, so 5.1.0 stayed effective).
+- The react-dom/eslint/TS/Vite mismatches came from merge a07d766 (main into
+  the frontend multi-update branch), which took react 19 from one side and
+  react-dom 18 from the other.
+Impact:
+- `frontend/package.json`: react-dom ^19.3.1, @types/react-dom ^19.3.0,
+  @react-three/fiber ^9.0.0, Vite ^8.0.0, TypeScript ^5.9.0; duplicates removed;
+  lockfile regenerated. eslint kept at 9 with @eslint/js 9.39.5 and hooks 5.2.0:
+  eslint 10 + hooks 7 would impose 22 new compiler-era lint rules on existing
+  code, so that migration stays separate future work (pending Dependabot
+  branches eslint-10.12.0 / react-hooks-7.1.1).
+- React 19 type fallout fixed in code: `JSX` namespace import (SessionGate),
+  `RefObject<... | null>` (TwinPlanFallback), `inert` boolean (CommandPalette).
+- `vite.config.ts`: manualChunks converted to function form (Vite 8 types it
+  as a function only); chunk names unchanged, so continuity checks still key
+  off the `three-` prefix.
+- Bundle caps rebaselined to the React 19 line (measured total 484,492 B,
+  react chunk 65,697 B; caps 504,000 B / 68,500 B, same ~4% headroom as the
+  ADR-028 rebaseline).
+- Verified locally: clean `npm ci`, typecheck (4 tsconfigs), lint
+  (--max-warnings=0), unit tests (131 files, 909 tests), production build,
+  bundle-continuity checks (5/5). E2E (Playwright browsers) left to CI.
+- Backend CI failures on main (bcrypt 5 truncation, SQLAlchemy rendering
+  strings, FastAPI router internals, image-digest drift) are upstream
+  library-drift issues, not merge-resolution breakage; tracked separately.
+Related:
+- `frontend/package.json`
+- `frontend/vite.config.ts`
+- `frontend/src/scripts/perf/check-bundle-continuity.ts`
+
 ## Template
 ## YYYY-MM-DD
 ### Decision Title
