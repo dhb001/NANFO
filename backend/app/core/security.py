@@ -63,7 +63,7 @@ _REQUIRED_REGISTERED_CLAIMS: tuple[str, ...] = ("exp", "iat", "sub", "jti", "iss
 
 # bcrypt rounds (cost factor) — 12 is the OWASP minimum recommendation
 _BCRYPT_ROUNDS: int = 12
-# bcrypt ignores every byte after the 72nd; bcrypt 4.x truncates silently.
+# bcrypt ignores every byte after the 72nd; bcrypt 5.x refuses over-long input outright.
 BCRYPT_MAX_PASSWORD_BYTES: int = 72
 
 __all__ = [
@@ -119,8 +119,8 @@ def hash_password(plain: str) -> str:
 def verify_password(plain: str, hashed: str) -> bool:
     """Return True if plaintext matches the bcrypt hash.
 
-    An over-long (or non-encodable) secret never authenticates: bcrypt 4.x would
-    otherwise accept any secret sharing the stored password's 72-byte prefix.
+    An over-long (or non-encodable) secret never authenticates: older bcrypt versions
+    truncated silently and would accept any secret sharing the stored password's 72-byte prefix.
     One full-cost comparison is still performed so response time does not
     reveal the length policy.
     """

@@ -6,7 +6,7 @@ import tomllib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-PINNED = "3.12.14"
+PINNED = "3.12.15"
 
 
 def test_python_version_file_pins_exact_patch_release():

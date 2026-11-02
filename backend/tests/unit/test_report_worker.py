@@ -307,7 +307,7 @@ async def test_published_outbox_purge_is_one_bounded_batch_of_published_rows_onl
     # Unpublished rows (the pending delivery queue) are never candidates.
     assert "report_outbox.published_at IS NOT NULL AND report_outbox.published_at < now() - %(now_1)s" in sql
     assert ("report_outbox.created_at < now() - %(now_1)s" in sql) is created_at
-    assert "LIMIT %(param_1)s FOR UPDATE SKIP LOCKED" in sql and "RETURNING report_outbox.event_id" in sql
+    assert "LIMIT %(param_1)s::INTEGER FOR UPDATE SKIP LOCKED" in sql and "RETURNING report_outbox.event_id" in sql
     assert compiled.params["now_1"].days == 30 and compiled.params["param_1"] == 200
 
 

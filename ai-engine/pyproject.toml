@@ -2,7 +2,7 @@
 name = "nanfo-routing"
 version = "0.1.0"
 description = "Operator-only ADR011 measured routing experiment"
-requires-python = "==3.12.14"
+requires-python = "==3.12.15"
 dependencies = [
   "torch==2.8.0+cpu",
   "gymnasium==1.2.0",

@@ -116,7 +116,17 @@ async def test_configured_telemetry_failure_and_unconfigured_emulation_degrade(
 async def test_health_remains_liveness_and_ready_is_mounted():
     from app.main import app
 
-    assert any(route.path == "/ready" for route in app.routes)
+    def _iter_paths(routes):
+        for route in routes:
+            path = getattr(route, "path", None)
+            if path is not None:
+                yield path
+            for nested in (getattr(route, "routes", None),
+                           getattr(getattr(route, "original_router", None), "routes", None)):
+                if nested:
+                    yield from _iter_paths(nested)
+
+    assert "/ready" in _iter_paths(app.routes)
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://test"
     ) as client:

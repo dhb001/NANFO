@@ -339,7 +339,7 @@ def test_make_lint_and_check_match_the_ci_backend_job():
 
 def test_python_version_pin_is_the_single_source_for_every_ci_interpreter():
     pinned = (ROOT / "backend/.python-version").read_text().strip()
-    assert pinned == "3.12.14"
+    assert pinned == "3.12.15"
     steps = [
         ((path.name, job_id), step)
         for path in sorted((ROOT / ".github/workflows").glob("*.yml"))

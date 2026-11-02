@@ -2726,6 +2726,60 @@ Related:
 - `frontend/vite.config.ts`
 - `frontend/src/scripts/perf/check-bundle-continuity.ts`
 
+### Backend library-drift repair (Oct-13 Dependabot wave)
+Reason:
+- The 2026-10-13 backend-minor-patch Dependabot group bumped ruff
+  0.15.6 to 0.17.0, SQLAlchemy to the 2.1 line, bcrypt to 5.0.0, and
+  FastAPI to 0.143.0, and the Oct-14 image bump moved the dev redis
+  digest and the production python image without moving the pin files.
+  CI's backend job failed on exactly 14 tests plus the ruff gate.
+- None of the failures is a behaviour regression in app code: ruff
+  0.17's expanded default rules flag 1,060 issues in untouched code
+  (0.15.6 passes clean); SQLAlchemy 2.1 renders casts on bound
+  parameters (`::INTEGER`, `::TIMESTAMP WITH TIME ZONE`, `::VARCHAR`)
+  with identical semantics; bcrypt 5 refuses over-long input where
+  bcrypt 4 truncated it, which the app's guard already handled;
+  FastAPI 0.143 nests included routers behind `_IncludedRouter`;
+  the inactive-WS denial arrives correctly but needs more loop
+  turns than the test granted, because inactive revalidation
+  discards the session family first.
+Impact:
+- `backend/pyproject.toml` + `poetry.lock`: ruff reverted to the
+  documented 0.15.6 pin. Adopting ruff 0.17's new rule set (including
+  semantic fixes like BLE/B023/ASYNC) stays separate future work,
+  like the eslint-10 migration.
+- SQL-substring expectations updated to the SQLAlchemy 2.1 rendering
+  in the alert-retention, alert-tenancy, report-quota, report-service,
+  and report-worker tests; no query changed.
+- `test_security_pyjwt.py` now expects bcrypt 5 to raise on raw
+  over-long `checkpw` (bcrypt 4 accepted it); `verify_password`
+  behaviour unchanged, two stale bcrypt-4 comments updated.
+- `test_websocket_auth_revalidation.py` drains the background
+  delivery task before asserting the denial; production code
+  untouched.
+- `test_readiness.py` flattens `_IncludedRouter.original_router`
+  routes when checking that `/ready` is mounted.
+- Python pin moved 3.12.14 to 3.12.15 in both `.python-version`
+  files, the ai-engine pyproject/lock/test pins, and the backend
+  Makefile note, matching the production image Dependabot already
+  moved; `deploy/Dockerfile.redis` aligned to the newer dev digest
+  (`4fa24486...263eecebaac85`).
+- Verified: ruff gate clean, all 14 CI-failing tests pass locally
+  (241 passed across the affected files), ai-engine pin tests pass
+  except the interpreter test, which needs exactly 3.12.15 and so
+  only runs green in CI. The remaining local full-suite failures
+  (~56) are this VM's limits, not drift: the suite runs as root
+  (permission/protection tests cannot behave as designed),
+  raw-socket/pcap measurement is blocked, and `/tmp/opencode` is
+  absent. CI's backend job lists no failures beyond the 14 fixed
+  here.
+Related:
+- `backend/pyproject.toml`, `backend/poetry.lock`
+- `backend/tests/unit/test_security_pyjwt.py`
+- `backend/tests/unit/test_websocket_auth_revalidation.py`
+- `backend/tests/integration/test_readiness.py`
+- `deploy/Dockerfile.redis`
+
 ## Template
 ## YYYY-MM-DD
 ### Decision Title

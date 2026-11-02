@@ -1,6 +1,6 @@
 .PHONY: up down migrate migrate-down dev test test-unit test-integration lint check
 
-# Python tooling always runs inside the locked Poetry environment (Python 3.12.14,
+# Python tooling always runs inside the locked Poetry environment (Python 3.12.15,
 # see .python-version) so local results match CI. Paths below mirror
 # .github/workflows/quality.yml exactly.
 POETRY_RUN := poetry run

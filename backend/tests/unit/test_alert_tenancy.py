@@ -105,7 +105,7 @@ def test_created_range_filters_are_start_inclusive_end_exclusive():
     clauses = _filters(status=None, severity=None, source=None, correlation_id=None, search=None,
                        created_from=NOW, created_before=later)
     assert [sql(clause) for clause in clauses] == [
-        "alerts.created_at >= %(created_at_1)s", "alerts.created_at < %(created_at_1)s"]
+        "alerts.created_at >= %(created_at_1)s::TIMESTAMP WITH TIME ZONE", "alerts.created_at < %(created_at_1)s::TIMESTAMP WITH TIME ZONE"]
 
 
 async def test_list_query_serves_workspace_rows_from_the_tenancy_index_branch():

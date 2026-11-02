@@ -4,6 +4,7 @@ ADR-028 C1: the full decision is cached per connection for <= WS_AUTH_CACHE_SECO
 (15 s) and never past token exp; ``elapse`` moves a manager's clock past that window.
 """
 
+import asyncio
 import json
 import uuid
 from unittest.mock import AsyncMock
@@ -39,6 +40,21 @@ async def subscribe(manager, ws, state, channel):
         await manager.subscribe(ws, allowed_workspace_ids={state.workspace_id, state.other_workspace_id}, **kwargs)
     else:
         await manager.subscribe(state.network_id, ws, workspace_id=state.workspace_id, **kwargs)
+
+
+async def _await_send(ws, timeout=5.0):
+    """Background delivery runs on its own task; give it turns to finish.
+
+    Inactive revalidation discards the session family first, so its denial
+    needs more loop turns than the single sleep(0) push() grants. The denial
+    itself is asserted strictly below; this only waits for it to arrive.
+    """
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    while ws.send_text.await_args is None:
+        if loop.time() >= deadline:
+            raise AssertionError("denial frame was never sent")
+        await asyncio.sleep(0)
 
 
 async def push(manager, state, channel, workspace_id):
@@ -94,6 +110,7 @@ async def test_revocation_before_push_never_leaks(ws_identity, channel, revocati
         state.redis.get = AsyncMock(side_effect=ConnectionError("unavailable"))
     elapse(manager)
     await push(manager, state, channel, state.workspace_id)
+    await _await_send(ws)
     code = json.loads(ws.send_text.await_args.args[0])["data"]["code"]
     [close] = ws.close.await_args_list
     if revocation == "redis":

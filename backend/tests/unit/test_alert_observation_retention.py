@@ -31,16 +31,16 @@ async def test_purge_deletes_one_bounded_batch_and_protects_incident_windows_and
     sql = " ".join(str(compiled).split())
     assert sql.startswith("DELETE FROM alert_observations WHERE alert_observations.event_id IN (SELECT")
     assert "alert_observations.observed_at < now() - %(now_1)s" in sql
-    assert "LIMIT %(param_1)s FOR UPDATE SKIP LOCKED" in sql and "ORDER BY" not in sql
+    assert "LIMIT %(param_1)s::INTEGER FOR UPDATE SKIP LOCKED" in sql and "ORDER BY" not in sql
     # Open incident window: an unresolved incident, or the detector's current phase run.
     assert ("NOT (EXISTS (SELECT 1 FROM alert_detector_states AS alert_detector_states_1 LEFT OUTER JOIN alerts "
             "AS alerts_1 ON alerts_1.alert_id = alert_detector_states_1.incident_id") in sql
     assert "alert_detector_states_1.detector_key = alert_observations.detector_key" in sql
-    assert "alerts_1.alert_id IS NOT NULL AND alerts_1.status != %(status_1)s" in sql
+    assert "alerts_1.alert_id IS NOT NULL AND alerts_1.status != %(status_1)s::VARCHAR" in sql
     assert ("alert_detector_states_1.phase IS NOT NULL AND alert_detector_states_1.phase_since IS NOT NULL AND "
             "alert_observations.observed_at >= alert_detector_states_1.phase_since") in sql
     # Generating/resolving samples named by incident history are evidence, kept.
-    assert ("NOT (EXISTS (SELECT 1 FROM alert_history WHERE (alert_history.payload ->> %(payload_1)s) = "
+    assert ("NOT (EXISTS (SELECT 1 FROM alert_history WHERE (alert_history.payload ->> %(payload_1)s::TEXT) = "
             "CAST(alert_observations.event_id AS VARCHAR)))") in sql
     assert "RETURNING alert_observations.event_id" in sql
     assert compiled.params["status_1"] == "resolved" and compiled.params["param_1"] == 500

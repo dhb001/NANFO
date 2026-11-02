@@ -220,7 +220,8 @@ def test_over_long_secret_never_verifies_as_its_prefix(monkeypatch):
     prefix = "p" * BCRYPT_MAX_PASSWORD_BYTES
     stored = hash_password(prefix)
     assert verify_password(prefix, stored)
-    # bcrypt 4.x itself would accept this (it truncates at 72 bytes).
-    assert bcrypt.checkpw((prefix + "suffix").encode(), stored.encode())
+    # bcrypt 5.x refuses over-long input outright instead of truncating (bcrypt 4.x accepted this).
+    with pytest.raises(ValueError):
+        bcrypt.checkpw((prefix + "suffix").encode(), stored.encode())
     assert not verify_password(prefix + "suffix", stored)
     assert not verify_password("\ud800", stored)

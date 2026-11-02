@@ -146,8 +146,8 @@ async def test_storage_usage_counts_recorded_sizes_and_reserves_in_flight_jobs()
     assert await ReportRepository(db).storage_usage(ORG_WORKSPACES, in_flight_reserve_bytes=MAX_BYTES) == 1234
     compiled = db.statements[0].compile(dialect=postgresql.dialect())
     sql = " ".join(str(compiled).split())
-    assert "coalesce(sum(CASE WHEN (reports.status = %(status_1)s) THEN CASE WHEN (jsonb_typeof(reports.receipt" in sql
-    assert "CAST(reports.receipt ->> %(receipt_2)s AS NUMERIC)" in sql  # only numeric JSON sizes are cast
+    assert "coalesce(sum(CASE WHEN (reports.status = %(status_1)s::VARCHAR) THEN CASE WHEN (jsonb_typeof(reports.receipt" in sql
+    assert "CAST(reports.receipt ->> %(receipt_2)s::TEXT AS NUMERIC)" in sql  # only numeric JSON sizes are cast
     assert "reports.status IN (__[POSTCOMPILE_status_2])" in sql
     assert "reports.workspace_id = ANY (%(workspace_ids_1)s::UUID[])" in sql
     assert compiled.params["jsonb_typeof_1"] == "number" and compiled.params["receipt_2"] == "size_bytes"

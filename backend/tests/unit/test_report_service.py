@@ -220,7 +220,7 @@ async def test_history_projects_summary_columns_and_never_loads_snapshots():
     assert "snapshot_summary" in select_list and "page_rows.snapshot," not in select_list
     assert "jsonb_each" in text and "jsonb_array_length" in text
     assert "reports.snapshot," not in text  # only the summary expression reads it
-    assert "LIMIT %(param_1)s OFFSET %(param_2)s" in text
+    assert "LIMIT %(param_1)s::INTEGER OFFSET %(param_2)s::INTEGER" in text
     assert text.rstrip().endswith("ORDER BY page_rows.requested_at DESC, page_rows.report_id DESC")
 
 
