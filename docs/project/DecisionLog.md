@@ -2780,6 +2780,36 @@ Related:
 - `backend/tests/integration/test_readiness.py`
 - `deploy/Dockerfile.redis`
 
+## 2026-11-03
+### Image digest alignment to Dependabot digests (neo4j, postgres, redis)
+Reason:
+- After the 2026-11-02 backend repair, main CI still failed two deploy
+  tests. `deploy/Dockerfile.neo4j` still pinned the pre-Dependabot neo4j
+  digest (ab3aafb0), while `backend/docker-compose.yml` had moved to the
+  Dependabot #134 digest (c7d25c0); the dev-setup test requires dev and
+  production images to match exactly. `deploy/tests/test_adr028_runtime.py`
+  still expected the pre-Dependabot postgres digest (639ab7c) while both
+  compose files had moved to the Dependabot #135 digest (3645570c), and
+  still expected the pre-repair redis digest (c6eabf7) in
+  `deploy/Dockerfile.redis`, which the 2026-11-02 repair had already moved
+  to 4fa2448 (that assertion was masked until now because the postgres
+  assertion above it failed first).
+Impact:
+- `deploy/Dockerfile.neo4j`: FROM digest ab3aafb0 -> c7d25c0 (dev digest).
+- `deploy/tests/test_adr028_runtime.py`: postgres expectation 639ab7c ->
+  3645570c, redis expectation c6eabf7 -> 4fa2448, neo4j expectation
+  ab3aafb0 -> c7d25c0. No image version changes, only digest alignment.
+- Rule for future Dependabot image bumps: the hardcoded digests in
+  `deploy/tests/test_adr028_runtime.py` must move with the compose files,
+  or this test fails again the same way.
+- The bundle-continuity unit fixtures in
+  `frontend/src/scripts/perf/check-bundle-continuity.test.ts` were likewise
+  stale after the 2026-11-02 cap rebaseline (504,000 B total / 68,500 B
+  react chunk): the "exceeds threshold" fixture used 64,000 B and the
+  "fails above it" fixture used 450,001 B, both now below the caps. The
+  fixtures now sit just above the caps (69,000 B / 504,001 B); the caps
+  themselves are unchanged.
+
 ## Template
 ## YYYY-MM-DD
 ### Decision Title

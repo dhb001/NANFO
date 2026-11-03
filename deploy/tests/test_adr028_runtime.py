@@ -503,11 +503,11 @@ def test_redis_entrypoint_is_baked_and_no_runtime_file_comes_from_the_checkout()
 
 def test_store_images_are_current_pinned_multi_arch_indexes():
     postgres = compose()["services"]["postgres"]["image"]
-    assert postgres == "postgres:17.11-bookworm@sha256:639ab7ceb90e13123085b741fb31ef493fba25463002f6da665352e7b534b652"
-    assert "FROM redis:7.4.11-bookworm@sha256:c6eabf748fc7a61dbb5a705c78bcf3d6377b1127a97d0ce965c11c44ba46896f" in (
+    assert postgres == "postgres:17.11-bookworm@sha256:3645570cccdfa447589da9f57dd740faa29b30938e861289a5574b6ca6b03826"
+    assert "FROM redis:7.4.11-bookworm@sha256:4fa24486b8bcca8eec45ee0eb166edc674795e53a2b53d1a9ef263eecebaac85" in (
         DEPLOY / "Dockerfile.redis").read_text()
     neo4j = (DEPLOY / "Dockerfile.neo4j").read_text()
-    assert "FROM neo4j:5.26.31-community-trixie@sha256:ab3aafb0020e6fed65bb2b59f7db1fabd7ee0568c4da46f3cc3b8fad77801d61" in neo4j
+    assert "FROM neo4j:5.26.31-community-trixie@sha256:c7d25c0eeebfe125718d58b72ed5d663c85d0479047733845eb2237c67ce8069" in neo4j
     assert "bullseye" not in neo4j.split("FROM", 1)[1].splitlines()[0]
     major, minor, patch = (int(part) for part in re.search(r"redis:(\d+)\.(\d+)\.(\d+)", (DEPLOY / "Dockerfile.redis").read_text()).groups())
     assert (major, minor) == (7, 4) and patch >= 6  # CVE-2025-49844

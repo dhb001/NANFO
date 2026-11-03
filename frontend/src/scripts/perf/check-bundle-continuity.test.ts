@@ -33,7 +33,7 @@ describe("VS19 bundle continuity checks", () => {
       largestChunkGzipBytes: 254576,
       largestChunkFile: "three-CnQjXUib.js",
       largestNonThreeChunkRawBytes: 190001,
-      largestNonThreeChunkGzipBytes: 64000,
+      largestNonThreeChunkGzipBytes: 69000,
       largestNonThreeChunkFile: "react-BacFe3xE.js",
       threeChunkRawBytes: 925193,
       threeChunkGzipBytes: 254576,
@@ -53,7 +53,7 @@ describe("VS19 bundle continuity checks", () => {
       twinPageChunkRawBytes: 1_200, twinPageChunkGzipBytes: 660,
     };
     expect(evaluateContinuityChecks(base).total_js_gzip_bounded).toBe(true);
-    expect(evaluateContinuityChecks({ ...base, totalJsGzipBytes: 450_001 }).total_js_gzip_bounded).toBe(false);
+    expect(evaluateContinuityChecks({ ...base, totalJsGzipBytes: 504_001 }).total_js_gzip_bounded).toBe(false);
   });
 
   it("emits deterministic snapshot structure", () => {
