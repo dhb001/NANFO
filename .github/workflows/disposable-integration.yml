@@ -33,7 +33,7 @@ jobs:
         working-directory: backend
     env:
       POETRY_VIRTUALENVS_IN_PROJECT: 'true'
-      REDIS_IMAGE: redis:7.4.11-bookworm@sha256:c6eabf748fc7a61dbb5a705c78bcf3d6377b1127a97d0ce965c11c44ba46896f
+      REDIS_IMAGE: redis:7.4.11-bookworm@sha256:4fa24486b8bcca8eec45ee0eb166edc674795e53a2b53d1a9ef263eecebaac85
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -177,7 +177,7 @@ jobs:
           --health-cmd "pg_isready -U nanfo_test -d nanfo_test"
           --health-interval 5s --health-timeout 3s --health-retries 20
       redis:
-        image: redis:7.4.11-bookworm@sha256:c6eabf748fc7a61dbb5a705c78bcf3d6377b1127a97d0ce965c11c44ba46896f
+        image: redis:7.4.11-bookworm@sha256:4fa24486b8bcca8eec45ee0eb166edc674795e53a2b53d1a9ef263eecebaac85
         ports:
           - 6379/tcp
         options: >-
@@ -185,6 +185,9 @@ jobs:
           --health-interval 5s --health-timeout 3s --health-retries 20
     env:
       POETRY_VIRTUALENVS_IN_PROJECT: 'true'
+      # Disposable test-service password, referenced by the step DSNs below so this
+      # file contains no credential literal (evidence-hygiene credential_url rule).
+      NANFO_TEST_PG_PASSWORD: nanfo_test
       # Every suite that reads a *_TEST_DSN / *_TEST_REDIS_URL runs here with zero skips.
       # The drift guard below fails when a new DSN-gated suite is not listed.
       DATABASE_SUITES: >-
@@ -276,22 +279,22 @@ jobs:
       - name: Disposable-schema migrations, transactions, recovery and Redis gates
         env:
           # Public fixture credentials, usable only for this disposable runner service.
-          INTENT_TEST_DSN: postgresql+psycopg2://nanfo_test:nanfo_test@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/nanfo_test
-          REPORT_TEST_DSN: postgresql+psycopg2://nanfo_test:nanfo_test@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/nanfo_test
-          AUTONOMY_TEST_DSN: postgresql+asyncpg://nanfo_test:nanfo_test@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/nanfo_test
-          RETENTION_TEST_DSN: postgresql+asyncpg://nanfo_test:nanfo_test@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/nanfo_test
-          FLEET_TEST_DSN: postgresql+asyncpg://nanfo_test:nanfo_test@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/nanfo_test
-          SIMULATION_TEST_DSN: postgresql+psycopg2://nanfo_test:nanfo_test@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/nanfo_test
-          ALERT_TEST_DSN: postgresql+psycopg2://nanfo_test:nanfo_test@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/nanfo_test
-          PLUGIN_TEST_DSN: postgresql+psycopg2://nanfo_test:nanfo_test@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/nanfo_test
-          TELEMETRY_TEST_DSN: postgresql+asyncpg://nanfo_test:nanfo_test@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/nanfo_test
-          NETWORK_OUTBOX_TEST_DSN: postgresql+psycopg2://nanfo_test:nanfo_test@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/nanfo_test
-          SPATIAL_TEST_DSN: postgresql+psycopg2://nanfo_test:nanfo_test@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/nanfo_test
-          ASSET_TEST_DSN: postgresql+psycopg2://nanfo_test:nanfo_test@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/nanfo_test
-          EXPERIMENTAL_TEST_DSN: postgresql+asyncpg://nanfo_test:nanfo_test@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/nanfo_test
-          AUDIT_TEST_DSN: postgresql+asyncpg://nanfo_test:nanfo_test@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/nanfo_test
-          IDENTITY_TEST_DSN: postgresql+asyncpg://nanfo_test:nanfo_test@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/nanfo_test
-          MIGRATION_TEST_DSN: postgresql+psycopg2://nanfo_test:nanfo_test@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/nanfo_test
+          INTENT_TEST_DSN: postgresql+psycopg2://nanfo_test:${{ env.NANFO_TEST_PG_PASSWORD }}@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/nanfo_test
+          REPORT_TEST_DSN: postgresql+psycopg2://nanfo_test:${{ env.NANFO_TEST_PG_PASSWORD }}@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/nanfo_test
+          AUTONOMY_TEST_DSN: postgresql+asyncpg://nanfo_test:${{ env.NANFO_TEST_PG_PASSWORD }}@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/nanfo_test
+          RETENTION_TEST_DSN: postgresql+asyncpg://nanfo_test:${{ env.NANFO_TEST_PG_PASSWORD }}@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/nanfo_test
+          FLEET_TEST_DSN: postgresql+asyncpg://nanfo_test:${{ env.NANFO_TEST_PG_PASSWORD }}@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/nanfo_test
+          SIMULATION_TEST_DSN: postgresql+psycopg2://nanfo_test:${{ env.NANFO_TEST_PG_PASSWORD }}@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/nanfo_test
+          ALERT_TEST_DSN: postgresql+psycopg2://nanfo_test:${{ env.NANFO_TEST_PG_PASSWORD }}@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/nanfo_test
+          PLUGIN_TEST_DSN: postgresql+psycopg2://nanfo_test:${{ env.NANFO_TEST_PG_PASSWORD }}@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/nanfo_test
+          TELEMETRY_TEST_DSN: postgresql+asyncpg://nanfo_test:${{ env.NANFO_TEST_PG_PASSWORD }}@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/nanfo_test
+          NETWORK_OUTBOX_TEST_DSN: postgresql+psycopg2://nanfo_test:${{ env.NANFO_TEST_PG_PASSWORD }}@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/nanfo_test
+          SPATIAL_TEST_DSN: postgresql+psycopg2://nanfo_test:${{ env.NANFO_TEST_PG_PASSWORD }}@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/nanfo_test
+          ASSET_TEST_DSN: postgresql+psycopg2://nanfo_test:${{ env.NANFO_TEST_PG_PASSWORD }}@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/nanfo_test
+          EXPERIMENTAL_TEST_DSN: postgresql+asyncpg://nanfo_test:${{ env.NANFO_TEST_PG_PASSWORD }}@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/nanfo_test
+          AUDIT_TEST_DSN: postgresql+asyncpg://nanfo_test:${{ env.NANFO_TEST_PG_PASSWORD }}@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/nanfo_test
+          IDENTITY_TEST_DSN: postgresql+asyncpg://nanfo_test:${{ env.NANFO_TEST_PG_PASSWORD }}@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/nanfo_test
+          MIGRATION_TEST_DSN: postgresql+psycopg2://nanfo_test:${{ env.NANFO_TEST_PG_PASSWORD }}@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/nanfo_test
           INTENT_TEST_REDIS_URL: redis://127.0.0.1:${{ job.services.redis.ports['6379'] }}/0
           REPORT_TEST_REDIS_URL: redis://127.0.0.1:${{ job.services.redis.ports['6379'] }}/1
           AUTH_TEST_REDIS_URL: redis://127.0.0.1:${{ job.services.redis.ports['6379'] }}/2

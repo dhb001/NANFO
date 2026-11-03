@@ -22,8 +22,8 @@ jobs:
     env:
       POETRY_VIRTUALENVS_IN_PROJECT: 'true'
       # Production pins (deploy/Dockerfile.neo4j base, deploy/Dockerfile.redis base).
-      NEO4J_IMAGE: neo4j:5.26.31-community-trixie@sha256:ab3aafb0020e6fed65bb2b59f7db1fabd7ee0568c4da46f3cc3b8fad77801d61
-      REDIS_IMAGE: redis:7.4.11-bookworm@sha256:c6eabf748fc7a61dbb5a705c78bcf3d6377b1127a97d0ce965c11c44ba46896f
+      NEO4J_IMAGE: neo4j:5.26.31-community-trixie@sha256:c7d25c0eeebfe125718d58b72ed5d663c85d0479047733845eb2237c67ce8069
+      REDIS_IMAGE: redis:7.4.11-bookworm@sha256:4fa24486b8bcca8eec45ee0eb166edc674795e53a2b53d1a9ef263eecebaac85
       POSTGRES_MAJOR: '17'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

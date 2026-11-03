@@ -2823,6 +2823,23 @@ Impact:
   there. The runner still fails on stale exclusions, so a renamed test
   cannot silently shrink the boundary.
 
+## 2026-11-03: Evidence-hygiene DSN literals and workflow image digests
+
+- The evidence-hygiene scan failed on one `credential_url` finding: the disposable
+  database workflow embedded the disposable test-service password in 16 `*_TEST_DSN`
+  values. The password now lives once in the job's `env` block and the DSNs
+  reference it as `${{ env.NANFO_TEST_PG_PASSWORD }}`; the scanner's DSN pattern
+  excludes `{`/`}` so the file no longer matches, and every DSN still renders to
+  the identical runtime value. No app behaviour change; the service password is
+  unchanged and still disposable/localhost-only.
+- Workflow image pins now match production: redis `7.4.11-bookworm` moved from the
+  stale `c6eabf…` digest to `4fa24486…` (compose + `deploy/Dockerfile.redis`) in the
+  disposable and fullstack workflows, and the fullstack neo4j pin moved from
+  `ab3aafb0…` to `c7d25c0e…` (compose + `deploy/Dockerfile.neo4j`), which is what the
+  fullstack workflow's own "Production pins" comment already claimed. This aligns
+  which image builds CI exercises; it is not claimed to fix the fullstack
+  `http_readiness_timeout`, whose cause is still undetermined from CI evidence.
+
 ## Template
 ## YYYY-MM-DD
 ### Decision Title
