@@ -32,7 +32,7 @@ services:
       retries: 20
 
   neo4j:
-    image: neo4j:5.26.31-community-trixie@sha256:c7d25c0eeebfe125718d58b72ed5d663c85d0479047733845eb2237c67ce8069
+    image: neo4j:5.26.32-community-trixie@sha256:249a1ec6e3c52d82101a5ed33d6ed2b5ed5b0017b21a28c0bfebc335e87fb177
     container_name: nanfo_neo4j
     restart: unless-stopped
     environment:
@@ -54,7 +54,7 @@ services:
       start_period: 20s
 
   redis:
-    image: redis:7.4.11-bookworm@sha256:4fa24486b8bcca8eec45ee0eb166edc674795e53a2b53d1a9ef263eecebaac85
+    image: redis:7.4.12-bookworm@sha256:b6b6e3dc0c0952737748e55d5d885272840c7e42ba41ab1d5489f693419882f5
     container_name: nanfo_redis
     restart: unless-stopped
     environment:
