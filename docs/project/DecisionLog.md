@@ -2856,6 +2856,17 @@ Impact:
   old parent digest were not touched, so `frozen.py` and the model-diagnostic
   registry still pin the file they actually read.
 
+## 2026-11-03: Minimatch override clears the npm audit gate
+
+- The dependency-security npm job failed on 13 moderate findings, all rooted in
+  minimatch <11.0.1 (globparts amplification) through the eslint 9 toolchain;
+  npm reports no non-major fix. `frontend/package.json` now carries an
+  `overrides` entry pinning minimatch to `^11.0.1`; the lockfile collapses to a
+  single minimatch 11.0.4, `npm ci` passes, lint passes with zero warnings, and
+  the unit suite passes (908/909 in the loaded full run; the one AuditPage
+  timeout passes alone and is load flakiness, not the override). The eslint-10
+  migration remains the long-term fix and is still deferred.
+
 ## Template
 ## YYYY-MM-DD
 ### Decision Title
