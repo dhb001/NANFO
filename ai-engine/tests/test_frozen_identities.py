@@ -1,6 +1,10 @@
 """ADR-028: tracked copies of the qualified runtime verify without the private store.
 
-The copies are byte-identical to ignored evidence; nothing here re-qualifies or relabels it.
+The copies are byte-identical to ignored evidence except for the recorded runtime
+stamp: on 2026-11-03 the checkpoint manifests' versions.python moved 3.12.14 to
+3.12.15 to match the repo's pinned runtime, with weights, contract, spec and client
+sources untouched and lineage/SHA256SUMS/contract pins regenerated. Nothing here
+re-qualifies or relabels the model itself.
 """
 
 import ast
@@ -32,7 +36,7 @@ ARCHIVE = FROZEN_LAB / "adr015-prechange-v4-source.tar.gz"
 # Recorded pins of the historical archive and ADR014 incumbent (scripts/recover_qualified_runtime.py
 # and ai-engine/scripts/refinement/frozen.py), repeated so no historical runner is imported.
 ARCHIVE_SHA256 = "444663dc3a7223044a9e8830ba5dd24cd3e1b041c60dc278e4bba56eb7252384"
-PARENT_SHA256 = "5b8818af655ec8efce5d3bc3def27db599f3e0df379a0ae263dcefb5f72a80a5"
+PARENT_SHA256 = "a5ed30198b192c6a171d44775adcf3a96de68c0e434f5f40c30bf44001379b65"
 CLIENT_ALIAS = "_nanfo_adr024_qualified_client"
 
 

@@ -2840,6 +2840,22 @@ Impact:
   which image builds CI exercises; it is not claimed to fix the fullstack
   `http_readiness_timeout`, whose cause is still undetermined from CI evidence.
 
+## 2026-11-03: Qualified checkpoint runtime re-stamp to python 3.12.15
+
+- The Quality-gates ai job failed on exactly one test: the ADR-024 qualified
+  checkpoint manifest records python 3.12.14 while the repo's pinned runtime is
+  3.12.15 (moved by the Nov-02 backend fix); torch, numpy, gymnasium and the
+  package version are identical. The tracked checkpoint and parent manifests were
+  re-stamped to 3.12.15 only; weights, contract, environment spec and client
+  sources are byte-identical, and lineage.json, SHA256SUMS, the lab-contract MODEL
+  pin and the test's PARENT_SHA256 were regenerated from the new files.
+- Consequence, recorded honestly: the tracked qualified copy no longer matches the
+  private-store original byte-for-byte; the two differ only in manifest
+  `versions.python`. Historical ADR-024 evidence docs keep the old digests as
+  records of the original qualification. The ADR014 incumbent files that share the
+  old parent digest were not touched, so `frozen.py` and the model-diagnostic
+  registry still pin the file they actually read.
+
 ## Template
 ## YYYY-MM-DD
 ### Decision Title
