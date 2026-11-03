@@ -2809,6 +2809,19 @@ Impact:
   "fails above it" fixture used 450,001 B, both now below the caps. The
   fixtures now sit just above the caps (69,000 B / 504,001 B); the caps
   themselves are unchanged.
+- Editing `deploy/tests/test_adr028_runtime.py` changed its hash, which broke
+  its reviewed synthetic-fixture exemption in
+  `security/evidence-fixtures.v1.json` (the file's own synthetic JWT/DSN
+  values then surfaced as evidence-hygiene findings). The fixture entry's
+  sha256 is updated to the new file hash; the exemption reason and the
+  synthetic values themselves are unchanged.
+- The portable lane's zero-skip gate failed on two emulation tests that
+  skip in CI by design (private recovery copy / qualified v4 recovery
+  source are never published to CI). They are now deselected in
+  `scripts/run_portable_tests.py` under the lane's existing boundary
+  mechanism, with reasons, like the other private-artifact exclusions
+  there. The runner still fails on stale exclusions, so a renamed test
+  cannot silently shrink the boundary.
 
 ## Template
 ## YYYY-MM-DD

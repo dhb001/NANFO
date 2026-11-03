@@ -28,6 +28,8 @@ EXCLUSIONS = {
     "scripts/test_recover_qualified_runtime.py::RecoveryTests::test_registry_template_does_not_fabricate_installation": "Ignored exact historical artifacts required",
     "scripts/test_recover_qualified_runtime.py::RecoveryTests::test_actual_frozen_validator_rejects_distinct_image_source_and_spec": "Frozen AI interpreter and ignored artifacts required",
     "scripts/test_verify_adr024_campaign.py::IndependentVerifierTests::test_completed_raw_reconstruction_and_tampered_report_rejection": "Private raw completed campaign required",
+    "emulation/tests/test_experimental_runtime_loader.py::TrackedArchiveEquivalenceTests::test_private_recovery_copy_equals_the_tracked_archive_members": "Private recovery copy required",
+    "emulation/tests/test_lab_contracts.py::DriftTests::test_qualified_v4_recovery_source_matches_contract": "Qualified v4 recovery source required",
 }
 PROBLEM_TAGS = ("skipped", "failure", "error")
 
