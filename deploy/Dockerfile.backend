@@ -1,11 +1,11 @@
-FROM python:3.12.15-slim-bookworm@sha256:34386ef0cb081344d7ec1c103ba398e6e9f64e9ab3a1509accc92a4e24a07258 AS dependencies
+FROM python:3.12.16-slim-bookworm@sha256:e697c81897302a4c4333bade000d98038fbb21eb064f8ee1fd42d02ebcd9d337 AS dependencies
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1 POETRY_VIRTUALENVS_IN_PROJECT=true
 RUN pip install --no-cache-dir poetry==2.4.1
 WORKDIR /opt/nanfo/backend
 COPY backend/pyproject.toml backend/poetry.lock backend/README.md ./
 RUN poetry check --lock && poetry install --only main --no-root --no-interaction && .venv/bin/python -m pip check
 
-FROM python:3.12.15-slim-bookworm@sha256:34386ef0cb081344d7ec1c103ba398e6e9f64e9ab3a1509accc92a4e24a07258 AS runtime
+FROM python:3.12.16-slim-bookworm@sha256:e697c81897302a4c4333bade000d98038fbb21eb064f8ee1fd42d02ebcd9d337 AS runtime
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 \
     PYTHONPATH=/opt/nanfo/backend:/opt/nanfo \
     PATH=/opt/nanfo/backend/.venv/bin:$PATH HOME=/tmp \
@@ -23,7 +23,7 @@ USER 10001:10001
 ENTRYPOINT ["python", "/opt/nanfo/deploy/entrypoint.py"]
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1", "--no-access-log", "--proxy-headers"]
 
-FROM python:3.12.15-slim-bookworm@sha256:34386ef0cb081344d7ec1c103ba398e6e9f64e9ab3a1509accc92a4e24a07258 AS ai-dependencies
+FROM python:3.12.16-slim-bookworm@sha256:e697c81897302a4c4333bade000d98038fbb21eb064f8ee1fd42d02ebcd9d337 AS ai-dependencies
 RUN pip install --no-cache-dir uv==0.8.22
 WORKDIR /opt/nanfo/ai-engine
 COPY ai-engine/pyproject.toml ai-engine/uv.lock ./
