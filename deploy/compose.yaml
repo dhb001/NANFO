@@ -123,7 +123,7 @@ services:
       - init_secrets:/run/secrets:ro
 
   postgres:
-    image: postgres:17.11-bookworm@sha256:3645570cccdfa447589da9f57dd740faa29b30938e861289a5574b6ca6b03826
+    image: postgres:17.11-bookworm@sha256:839fbb5a4942a7758dd93e18b42ea5649807491a0545b5eeeb8f0b8bb11857a5
     # Connection budget (deploy/README.md "Capacity Limits"): API/api2 and every
     # worker pool 5 + 5 overflow, retention/probes/maintenance, 3 superuser slots.
     command: [postgres, -c, max_connections=200]
