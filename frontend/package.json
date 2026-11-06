@@ -2,6 +2,8 @@
   "name": "nanfo-frontend",
   "private": true,
   "version": "0.1.0",
+  "license": "MIT",
+  "author": "Dhruvin Hitesh Bhudia <dhruvinbhudiael11@gmail.com>",
   "type": "module",
   "engines": {
     "node": ">=22.12"

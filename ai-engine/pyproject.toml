@@ -2,6 +2,8 @@
 name = "nanfo-routing"
 version = "0.1.0"
 description = "Operator-only ADR011 measured routing experiment"
+license = { text = "MIT" }
+authors = [{ name = "Dhruvin Hitesh Bhudia", email = "dhruvinbhudiael11@gmail.com" }]
 requires-python = "==3.12.15"
 dependencies = [
   "torch==2.8.0+cpu",

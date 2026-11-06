@@ -2,7 +2,8 @@
 name = "nanfo-backend"
 version = "0.1.0"
 description = "NANFO — Network AI & Neural Fabric Orchestrator. Backend API service."
-authors = ["NANFO Team"]
+authors = ["Dhruvin Hitesh Bhudia <dhruvinbhudiael11@gmail.com>"]
+license = "MIT"
 readme = "README.md"
 packages = [{include = "app"}]
 

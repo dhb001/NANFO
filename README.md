@@ -1,5 +1,7 @@
 # NANFO
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 NANFO (Network AI & Neural Fabric Orchestrator) is a modular-monolith platform for network operations that combines:
 
 - Explainable intent validation and execution workflows
@@ -439,3 +441,7 @@ is developed on a branch and reaches `main` through a reviewed pull request; see
 [CONTRIBUTING.md](CONTRIBUTING.md#issues-milestones-and-branches). Milestones M1–M14
 (closed) and the issues labelled `retrospective` record the work completed before this
 workflow was adopted.
+
+## License
+
+NANFO is licensed under the MIT License. See [LICENSE](LICENSE).
