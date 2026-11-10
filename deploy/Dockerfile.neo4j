@@ -1,6 +1,6 @@
 # Latest 5.26 LTS patch on a supported Debian base: Neo4j stopped publishing the
 # bullseye/ubi9 variants after 5.26.24; trixie keeps the su-exec/tini/uid-7474 layout.
-FROM neo4j:5.26.31-community-trixie@sha256:c7d25c0eeebfe125718d58b72ed5d663c85d0479047733845eb2237c67ce8069
+FROM neo4j:5.26.32-community-trixie@sha256:42ef3ebfd671ebd01fdebb6dcbe80cf7b45eef2aa3d346ef4132f7ef31e67d2f
 RUN cp -a /var/lib/neo4j/conf /opt/neo4j-conf
 COPY deploy/neo4j-entrypoint.sh /startup/nanfo-entrypoint.sh
 ENTRYPOINT ["sh", "/startup/nanfo-entrypoint.sh"]
